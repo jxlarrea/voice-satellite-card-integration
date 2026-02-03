@@ -8,7 +8,7 @@
  * - Intent processing  
  * - Text-to-speech response
  * 
- * @version 1.1.0
+ * @version 1.2.0
  * 
  * Features:
  * - AudioWorklet for efficient audio processing (falls back to ScriptProcessor)
@@ -130,7 +130,7 @@ class VoiceSatelliteCard extends HTMLElement {
     this._config = {
       pipeline_id: config.pipeline_id || '',
       bar_position: config.bar_position || 'bottom',
-      bar_height: config.bar_height !== undefined ? config.bar_height : 4,
+      bar_height: config.bar_height !== undefined ? config.bar_height : 16,
       bar_gradient: config.bar_gradient || '#FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC',
       start_listening_on_load: config.start_listening_on_load !== false,
       chime_on_wake_word: config.chime_on_wake_word !== false,
@@ -146,14 +146,28 @@ class VoiceSatelliteCard extends HTMLElement {
       noise_suppression: config.noise_suppression !== false,
       auto_gain_control: config.auto_gain_control !== false,
       echo_cancellation: config.echo_cancellation !== false,
-      // Transcription options
+      // Transcription bubble options (user speech)
       show_transcription: config.show_transcription !== false,
-      transcription_font_size: config.transcription_font_size !== undefined ? config.transcription_font_size : 30,
+      transcription_font_size: config.transcription_font_size !== undefined ? config.transcription_font_size : 20,
       transcription_font_family: config.transcription_font_family || 'inherit',
       transcription_font_color: config.transcription_font_color || '#444444',
-      transcription_background: config.transcription_background || 'rgba(255, 255, 255, 0.85)',
+      transcription_font_bold: config.transcription_font_bold !== false,
+      transcription_font_italic: config.transcription_font_italic || false,
+      transcription_background: config.transcription_background || '#ffffff',
       transcription_padding: config.transcription_padding !== undefined ? config.transcription_padding : 16,
-      transcription_rounded: config.transcription_rounded !== false
+      transcription_rounded: config.transcription_rounded !== false,
+      transcription_border_color: config.transcription_border_color || 'rgba(0, 180, 255, 0.5)',
+      // Response bubble options (assistant speech)
+      show_response: config.show_response !== false,
+      response_font_size: config.response_font_size !== undefined ? config.response_font_size : 20,
+      response_font_family: config.response_font_family || 'inherit',
+      response_font_color: config.response_font_color || '#444444',
+      response_font_bold: config.response_font_bold !== false,
+      response_font_italic: config.response_font_italic || false,
+      response_background: config.response_background || '#ffffff',
+      response_padding: config.response_padding !== undefined ? config.response_padding : 16,
+      response_rounded: config.response_rounded !== false,
+      response_border_color: config.response_border_color || 'rgba(100, 200, 150, 0.5)'
     };
     
     this._render();
@@ -478,8 +492,9 @@ class VoiceSatelliteCard extends HTMLElement {
         if (eventData.wake_word_output) {
           console.log('[VoiceSatellite] Wake word detected!');
           
-          // Force hide transcription from previous run
+          // Force hide transcription and response from previous run
           this._hideTranscription();
+          this._hideResponse();
           
           // Force state update
           this._state = State.WAKE_WORD_DETECTED;
@@ -523,7 +538,9 @@ class VoiceSatelliteCard extends HTMLElement {
         if (eventData.intent_output && eventData.intent_output.response) {
           var response = eventData.intent_output.response;
           if (response.speech && response.speech.plain) {
-            console.log('[VoiceSatellite] Response:', response.speech.plain.speech);
+            var responseText = response.speech.plain.speech;
+            console.log('[VoiceSatellite] Response:', responseText);
+            this._showResponse(responseText);
           }
         }
         break;
@@ -815,9 +832,10 @@ class VoiceSatelliteCard extends HTMLElement {
       }
       this._state = state;
       
-      // Hide transcription when going back to listening
+      // Hide transcription and response when going back to listening
       if (state === State.LISTENING) {
         this._hideTranscription();
+        this._hideResponse();
       }
       
       // Use requestAnimationFrame for smoother UI updates
@@ -832,17 +850,104 @@ class VoiceSatelliteCard extends HTMLElement {
     if (!this._config.show_transcription) return;
     
     var el = this._globalUI ? this._globalUI.querySelector('.vs-transcription') : null;
-    if (el) {
-      // Force hide first, then show with new text
-      el.classList.remove('visible');
-      el.offsetHeight; // Force repaint
-      el.textContent = text;
-      el.classList.add('visible');
+    var responseEl = this._globalUI ? this._globalUI.querySelector('.vs-response') : null;
+    if (!el) return;
+    
+    var pos = this._config.bar_position;
+    var barHeight = this._config.bar_height;
+    
+    // Calculate position - transcription appears ABOVE response (further from bar)
+    var baseOffset = barHeight + 12;
+    var responseHeight = 0;
+    
+    if (responseEl) {
+      responseEl.offsetHeight; // Force layout
+      if (responseEl.classList.contains('visible') || responseEl.textContent) {
+        responseHeight = responseEl.offsetHeight + 12; // 12px gap
+      }
     }
+    
+    var transcriptionOffset = baseOffset + responseHeight;
+    
+    // Set position
+    if (pos === 'top') {
+      el.style.top = transcriptionOffset + 'px';
+      el.style.bottom = '';
+    } else {
+      el.style.bottom = transcriptionOffset + 'px';
+      el.style.top = '';
+    }
+    
+    // Force hide first, then show with new text
+    el.classList.remove('visible');
+    el.offsetHeight; // Force repaint
+    el.textContent = text;
+    el.classList.add('visible');
   }
 
   _hideTranscription() {
     var el = this._globalUI ? this._globalUI.querySelector('.vs-transcription') : null;
+    if (el) {
+      el.classList.remove('visible');
+    }
+  }
+
+  _showResponse(text) {
+    if (!this._config.show_response) return;
+    
+    var el = this._globalUI ? this._globalUI.querySelector('.vs-response') : null;
+    var transcriptionEl = this._globalUI ? this._globalUI.querySelector('.vs-transcription') : null;
+    if (!el) return;
+    
+    var pos = this._config.bar_position;
+    var barHeight = this._config.bar_height;
+    
+    // Reset to default width first
+    el.style.width = '';
+    el.style.maxWidth = '85%';
+    el.classList.remove('visible');
+    el.textContent = text;
+    
+    // Force layout calculation
+    el.offsetHeight;
+    
+    // Check if content overflows and needs more width
+    var viewportHeight = window.innerHeight;
+    var viewportWidth = window.innerWidth;
+    var maxAllowedHeight = viewportHeight * 0.5; // Max 50% of viewport height
+    
+    // If too tall, progressively increase width
+    if (el.scrollHeight > maxAllowedHeight) {
+      var widthPercents = [90, 92, 94, 96];
+      for (var i = 0; i < widthPercents.length; i++) {
+        var newWidth = Math.floor(viewportWidth * widthPercents[i] / 100);
+        el.style.width = newWidth + 'px';
+        el.style.maxWidth = newWidth + 'px';
+        el.offsetHeight; // Force recalc
+        if (el.scrollHeight <= maxAllowedHeight) break;
+      }
+    }
+    
+    el.classList.add('visible');
+    
+    // Reposition transcription bubble above response
+    if (transcriptionEl && transcriptionEl.classList.contains('visible')) {
+      var baseOffset = barHeight + 12;
+      var responseHeight = el.offsetHeight + 12; // 12px gap
+      var transcriptionOffset = baseOffset + responseHeight;
+      
+      if (pos === 'top') {
+        transcriptionEl.style.top = transcriptionOffset + 'px';
+        transcriptionEl.style.bottom = '';
+      } else {
+        transcriptionEl.style.bottom = transcriptionOffset + 'px';
+        transcriptionEl.style.top = '';
+      }
+    }
+  }
+
+  _hideResponse() {
+    var el = this._globalUI ? this._globalUI.querySelector('.vs-response') : null;
     if (el) {
       el.classList.remove('visible');
     }
@@ -906,16 +1011,15 @@ class VoiceSatelliteCard extends HTMLElement {
       bar.classList.remove('listening', 'processing', 'speaking');
       bar.classList.add('visible');
       
+      // Clear inline opacity so CSS animations can control it
+      bar.style.opacity = '';
+      
       // Add correct animation class based on state
       if (this._state === State.INTENT) {
-        bar.style.opacity = '1';
         bar.classList.add('processing');
       } else if (this._state === State.TTS) {
-        // Clear inline opacity so CSS pulse animation can control it
-        bar.style.opacity = '';
         bar.classList.add('speaking');
       } else {
-        bar.style.opacity = '1';
         bar.classList.add('listening');
       }
     }
@@ -995,23 +1099,49 @@ class VoiceSatelliteCard extends HTMLElement {
           'position: fixed;' +
           'left: 50%;' +
           'transform: translateX(-50%);' +
-          (pos === 'top' ? 'top: ' + (height + 12) + 'px;' : 'bottom: ' + (height + 12) + 'px;') +
           'background: ' + this._config.transcription_background + ';' +
           'color: ' + this._config.transcription_font_color + ';' +
           'padding: ' + this._config.transcription_padding + 'px ' + (this._config.transcription_padding * 2) + 'px;' +
           'border-radius: ' + (this._config.transcription_rounded ? '20px' : '0') + ';' +
           'font-size: ' + this._config.transcription_font_size + 'px;' +
           'font-family: ' + this._config.transcription_font_family + ';' +
-          'font-weight: 500;' +
+          'font-weight: ' + (this._config.transcription_font_bold ? '700' : '400') + ';' +
+          'font-style: ' + (this._config.transcription_font_italic ? 'italic' : 'normal') + ';' +
           'max-width: 80%;' +
+          'text-align: center;' +
+          'opacity: 0;' +
+          'transition: opacity 0.3s ease;' +
+          'z-index: 10002;' +
+          'pointer-events: none;' +
+          'border: 2px solid ' + this._config.transcription_border_color + ';' +
+        '}' +
+        '#voice-satellite-ui .vs-transcription.visible {' +
+          'opacity: 1;' +
+        '}' +
+        '#voice-satellite-ui .vs-response {' +
+          'position: fixed;' +
+          'left: 50%;' +
+          'transform: translateX(-50%);' +
+          (pos === 'top' ? 'top: ' + (height + 12) + 'px;' : 'bottom: ' + (height + 12) + 'px;') +
+          'background: ' + this._config.response_background + ';' +
+          'color: ' + this._config.response_font_color + ';' +
+          'padding: ' + this._config.response_padding + 'px ' + (this._config.response_padding * 2) + 'px;' +
+          'border-radius: ' + (this._config.response_rounded ? '20px' : '0') + ';' +
+          'font-size: ' + this._config.response_font_size + 'px;' +
+          'font-family: ' + this._config.response_font_family + ';' +
+          'font-weight: ' + (this._config.response_font_bold ? '700' : '400') + ';' +
+          'font-style: ' + (this._config.response_font_italic ? 'italic' : 'normal') + ';' +
+          'max-width: 85%;' +
+          'max-height: 70vh;' +
+          'overflow-y: auto;' +
           'text-align: center;' +
           'opacity: 0;' +
           'transition: opacity 0.3s ease;' +
           'z-index: 10001;' +
           'pointer-events: none;' +
-          'box-shadow: 0 2px 6px rgba(0,0,0,0.15);' +
+          'border: 2px solid ' + this._config.response_border_color + ';' +
         '}' +
-        '#voice-satellite-ui .vs-transcription.visible {' +
+        '#voice-satellite-ui .vs-response.visible {' +
           'opacity: 1;' +
         '}' +
         '#voice-satellite-ui .vs-rainbow-bar {' +
@@ -1047,6 +1177,7 @@ class VoiceSatelliteCard extends HTMLElement {
       '</style>' +
       '<button class="vs-start-btn"><svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg></button>' +
       '<div class="vs-transcription"></div>' +
+      '<div class="vs-response"></div>' +
       '<div class="vs-rainbow-bar"></div>';
     
     document.body.appendChild(container);
@@ -1165,10 +1296,10 @@ class VoiceSatelliteCardEditor extends HTMLElement {
         '<label for="auto_gain_control">Auto Gain Control</label>' +
       '</div>' +
       
-      '<div class="section">Appearance</div>' +
+      '<div class="section">Appearance - Bar</div>' +
       '<div class="row">' +
         '<label>Bar Height (px)</label>' +
-        '<input type="number" id="bar_height" value="' + (this._config.bar_height || 4) + '" min="2" max="20">' +
+        '<input type="number" id="bar_height" value="' + (this._config.bar_height || 16) + '" min="2" max="40">' +
       '</div>' +
       '<div class="row">' +
         '<label>Bar Position</label>' +
@@ -1182,13 +1313,15 @@ class VoiceSatelliteCardEditor extends HTMLElement {
         '<input type="text" id="bar_gradient" value="' + (this._config.bar_gradient || '#FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC') + '">' +
         '<div class="help">Comma-separated list of colors (e.g., #FF0000, #00FF00, #0000FF)</div>' +
       '</div>' +
+      
+      '<div class="section">Transcription Bubble (User Speech)</div>' +
       '<div class="row checkbox-row">' +
         '<input type="checkbox" id="show_transcription"' + (this._config.show_transcription !== false ? ' checked' : '') + '>' +
-        '<label for="show_transcription">Show transcription bubble</label>' +
+        '<label for="show_transcription">Show transcription bubble (user speech)</label>' +
       '</div>' +
       '<div class="row">' +
         '<label>Transcription Font Size (px)</label>' +
-        '<input type="number" id="transcription_font_size" value="' + (this._config.transcription_font_size || 30) + '" min="10" max="60">' +
+        '<input type="number" id="transcription_font_size" value="' + (this._config.transcription_font_size || 20) + '" min="10" max="60">' +
       '</div>' +
       '<div class="row">' +
         '<label>Transcription Font Family</label>' +
@@ -1199,9 +1332,21 @@ class VoiceSatelliteCardEditor extends HTMLElement {
         '<label>Transcription Font Color</label>' +
         '<input type="text" id="transcription_font_color" value="' + (this._config.transcription_font_color || '#444444') + '" placeholder="#444444">' +
       '</div>' +
+      '<div class="row checkbox-row">' +
+        '<input type="checkbox" id="transcription_font_bold"' + (this._config.transcription_font_bold !== false ? ' checked' : '') + '>' +
+        '<label for="transcription_font_bold">Bold</label>' +
+      '</div>' +
+      '<div class="row checkbox-row">' +
+        '<input type="checkbox" id="transcription_font_italic"' + (this._config.transcription_font_italic ? ' checked' : '') + '>' +
+        '<label for="transcription_font_italic">Italic</label>' +
+      '</div>' +
       '<div class="row">' +
         '<label>Transcription Background Color</label>' +
-        '<input type="text" id="transcription_background" value="' + (this._config.transcription_background || 'rgba(255, 255, 255, 0.85)') + '" placeholder="rgba(255, 255, 255, 0.85)">' +
+        '<input type="text" id="transcription_background" value="' + (this._config.transcription_background || '#ffffff') + '" placeholder="#ffffff">' +
+      '</div>' +
+      '<div class="row">' +
+        '<label>Transcription Border Color</label>' +
+        '<input type="text" id="transcription_border_color" value="' + (this._config.transcription_border_color || 'rgba(0, 180, 255, 0.5)') + '" placeholder="rgba(0, 180, 255, 0.5)">' +
       '</div>' +
       '<div class="row">' +
         '<label>Transcription Padding (px)</label>' +
@@ -1212,6 +1357,48 @@ class VoiceSatelliteCardEditor extends HTMLElement {
         '<label for="transcription_rounded">Rounded corners on transcription bubble</label>' +
       '</div>' +
       
+      '<div class="section">Response Bubble (Assistant Speech)</div>' +
+      '<div class="row checkbox-row">' +
+        '<input type="checkbox" id="show_response"' + (this._config.show_response !== false ? ' checked' : '') + '>' +
+        '<label for="show_response">Show response bubble (assistant speech)</label>' +
+      '</div>' +
+      '<div class="row">' +
+        '<label>Response Font Size (px)</label>' +
+        '<input type="number" id="response_font_size" value="' + (this._config.response_font_size || 20) + '" min="10" max="60">' +
+      '</div>' +
+      '<div class="row">' +
+        '<label>Response Font Family</label>' +
+        '<input type="text" id="response_font_family" value="' + (this._config.response_font_family || 'inherit') + '" placeholder="inherit">' +
+      '</div>' +
+      '<div class="row">' +
+        '<label>Response Font Color</label>' +
+        '<input type="text" id="response_font_color" value="' + (this._config.response_font_color || '#444444') + '" placeholder="#444444">' +
+      '</div>' +
+      '<div class="row checkbox-row">' +
+        '<input type="checkbox" id="response_font_bold"' + (this._config.response_font_bold !== false ? ' checked' : '') + '>' +
+        '<label for="response_font_bold">Bold</label>' +
+      '</div>' +
+      '<div class="row checkbox-row">' +
+        '<input type="checkbox" id="response_font_italic"' + (this._config.response_font_italic ? ' checked' : '') + '>' +
+        '<label for="response_font_italic">Italic</label>' +
+      '</div>' +
+      '<div class="row">' +
+        '<label>Response Background Color</label>' +
+        '<input type="text" id="response_background" value="' + (this._config.response_background || '#ffffff') + '" placeholder="#ffffff">' +
+      '</div>' +
+      '<div class="row">' +
+        '<label>Response Padding (px)</label>' +
+        '<input type="number" id="response_padding" value="' + (this._config.response_padding !== undefined ? this._config.response_padding : 16) + '" min="0" max="32">' +
+      '</div>' +
+      '<div class="row">' +
+        '<label>Response Border Color</label>' +
+        '<input type="text" id="response_border_color" value="' + (this._config.response_border_color || 'rgba(100, 200, 150, 0.5)') + '" placeholder="rgba(100, 200, 150, 0.5)">' +
+      '</div>' +
+      '<div class="row checkbox-row">' +
+        '<input type="checkbox" id="response_rounded"' + (this._config.response_rounded !== false ? ' checked' : '') + '>' +
+        '<label for="response_rounded">Rounded corners on response bubble</label>' +
+      '</div>' +
+      
       '</div>';
     
     // Set up fields
@@ -1219,7 +1406,11 @@ class VoiceSatelliteCardEditor extends HTMLElement {
                   'wake_word_switch', 'chime_on_wake_word', 'chime_on_request_sent', 'debug',
                   'noise_suppression', 'echo_cancellation', 'auto_gain_control',
                   'show_transcription', 'transcription_font_size', 'transcription_font_family', 'transcription_font_color', 
-                  'transcription_background', 'transcription_padding', 'transcription_rounded'];
+                  'transcription_font_bold', 'transcription_font_italic',
+                  'transcription_background', 'transcription_border_color', 'transcription_padding', 'transcription_rounded',
+                  'show_response', 'response_font_size', 'response_font_family', 'response_font_color',
+                  'response_font_bold', 'response_font_italic',
+                  'response_background', 'response_border_color', 'response_padding', 'response_rounded'];
     
     fields.forEach(function(id) {
       var el = self.querySelector('#' + id);
@@ -1271,7 +1462,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c VOICE-SATELLITE-CARD %c v1.1.0 ',
+  '%c VOICE-SATELLITE-CARD %c v1.2.0 ',
   'color: white; background: #4CAF50; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'color: #4CAF50; background: white; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0; border: 1px solid #4CAF50;'
 );
