@@ -2,10 +2,8 @@
 
 Transform any browser into a voice-activated satellite for Home Assistant's Assist. This custom card enables wake word detection directly in your browser, turning tablets, wall-mounted displays, or any device with a microphone into a hands-free voice assistant.
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/hacs/integration)
-[![version](https://shields.io/github/v/release/jxlarrea/Voice-Satellite-Card-for-Home-Assistant?style=for-the-badge)](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant/releases)
-
-![screenshot1](https://github.com/user-attachments/assets/32e34e0b-ce27-4e12-8efe-7b4d8500ed25)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![HACS](https://img.shields.io/badge/HACS-Custom-orange)
 
 ## Why This Card?
 
@@ -60,7 +58,7 @@ Before using this card, ensure you have:
 
 1. Open HACS in Home Assistant
 2. Click the three dots menu, then Custom repositories
-3. Add this repository URL and select Dashboard as the category
+3. Add this repository URL and select Lovelace as the category
 4. Click Install
 5. Refresh your browser
 
@@ -138,7 +136,7 @@ The gradient bar indicates the current state:
 | Listening for wake word | Bar hidden (passive listening) |
 | Wake word detected | Bar visible, flowing animation |
 | Processing speech | Bar visible, fast animation |
-| Speaking response | Bar visible, pulsing animation |
+| Speaking response | Bar visible, flowing animation |
 
 ### Screensaver Control
 
@@ -175,6 +173,12 @@ When the wake word is detected, this switch will be turned OFF, which exits the 
 
 This is intentional. The card itself is invisible and only shows the gradient bar and transcription bubble when active. Add it to any view and it will work in the background.
 
+## Technical Details
+
+- **Audio Format**: 16kHz, mono, 16-bit PCM
+- **Communication**: WebSocket binary streaming to Home Assistant
+- **Browser Support**: Chrome, Firefox, Safari, Edge (modern versions)
+
 ## Contributing
 
 Contributions are welcome. Please feel free to submit issues or pull requests.
@@ -182,3 +186,7 @@ Contributions are welcome. Please feel free to submit issues or pull requests.
 ## License
 
 MIT License - feel free to use and modify as needed.
+
+## Credits
+
+Built for the Home Assistant community. Thanks to the Home Assistant team for the Assist Pipeline API and the openWakeWord project.
