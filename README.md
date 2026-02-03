@@ -46,8 +46,7 @@ For kiosk setups like Fully Kiosk Browser, make sure to enable microphone permis
 
 Before using this card, ensure you have:
 
-1. **Home Assistant** with the **Assist Pipeline** configured.
-2. **A configured Assist Pipeline** consists of:
+1. **Home Assistant** with the **Assist Pipeline** fully set up. A configured Assist Pipeline consists of:
    - Wake word detection (openWakeWord)
    - Speech-to-Text (Whisper, OpenAI, etc.)
    - Conversation agent (Home Assistant, OpenAI, Qwen, etc.)
