@@ -8,7 +8,7 @@
  * - Intent processing  
  * - Text-to-speech response
  * 
- * @version 1.0.0
+ * @version 1.1.0
  * 
  * Features:
  * - AudioWorklet for efficient audio processing (falls back to ScriptProcessor)
@@ -91,6 +91,7 @@ class VoiceSatelliteCard extends HTMLElement {
     this._isStreaming = false;
     this._isPaused = false;
     this._isConnected = false;
+    this._isSpeaking = false;
     this._reconnectAttempts = 0;
     this._reconnectTimeout = null;
     
@@ -529,11 +530,13 @@ class VoiceSatelliteCard extends HTMLElement {
         
       case 'tts-start':
         this._setState(State.TTS);
+        this._forceUIUpdate();
         break;
         
       case 'tts-end':
         if (eventData.tts_output && eventData.tts_output.url) {
           this._playResponse(eventData.tts_output.url);
+          // Keep TTS state active - will be reset when audio finishes in _playResponse
         }
         break;
         
@@ -541,19 +544,22 @@ class VoiceSatelliteCard extends HTMLElement {
         console.log('[VoiceSatellite] Pipeline run ended');
         this._binaryHandlerId = null;
         
-        if (this._config.chime_on_request_sent && this._state !== State.LISTENING) {
-          this._playChime('done');
-        }
-        
-        // Force state to IDLE first, then restart
-        this._state = State.IDLE;
-        this._updateUI();
-        
-        setTimeout(function() {
-          if (self._isStreaming && !self._isPaused) {
-            self._restartPipeline();
+        // Only reset state if not playing TTS audio
+        if (this._state !== State.TTS || !this._isSpeaking) {
+          if (this._config.chime_on_request_sent && this._state !== State.LISTENING) {
+            this._playChime('done');
           }
-        }, 500);
+          
+          // Force state to IDLE first, then restart
+          this._state = State.IDLE;
+          this._updateUI();
+          
+          setTimeout(function() {
+            if (self._isStreaming && !self._isPaused) {
+              self._restartPipeline();
+            }
+          }, 500);
+        }
         break;
         
       case 'error':
@@ -736,13 +742,41 @@ class VoiceSatelliteCard extends HTMLElement {
   }
 
   async _playResponse(url) {
+    var self = this;
     try {
+      this._isSpeaking = true;
       var audio = new Audio(url);
       // Browser audio maxes out at 1.0 (100%)
       audio.volume = Math.min(this._config.tts_volume / 100, 1.0);
+      
+      audio.onended = function() {
+        self._isSpeaking = false;
+        
+        if (self._config.chime_on_request_sent) {
+          self._playChime('done');
+        }
+        
+        // Now reset state and restart pipeline
+        self._state = State.IDLE;
+        self._updateUI();
+        
+        setTimeout(function() {
+          if (self._isStreaming && !self._isPaused) {
+            self._restartPipeline();
+          }
+        }, 500);
+      };
+      
+      audio.onerror = function() {
+        self._isSpeaking = false;
+        self._state = State.IDLE;
+        self._updateUI();
+      };
+      
       await audio.play();
     } catch (error) {
       console.error('[VoiceSatellite] Playback error:', error);
+      this._isSpeaking = false;
     }
   }
 
@@ -868,18 +902,21 @@ class VoiceSatelliteCard extends HTMLElement {
     );
     
     if (shouldBeVisible) {
-      // Force visibility with inline styles (more reliable than classes on slow devices)
-      bar.style.opacity = '1';
-      bar.classList.add('visible', 'listening');
+      // Remove all animation classes first
+      bar.classList.remove('listening', 'processing', 'speaking');
+      bar.classList.add('visible');
       
-      // Update animation based on state
-      bar.classList.remove('processing', 'speaking');
+      // Add correct animation class based on state
       if (this._state === State.INTENT) {
-        bar.classList.remove('listening');
+        bar.style.opacity = '1';
         bar.classList.add('processing');
       } else if (this._state === State.TTS) {
-        bar.classList.remove('listening');
+        // Clear inline opacity so CSS pulse animation can control it
+        bar.style.opacity = '';
         bar.classList.add('speaking');
+      } else {
+        bar.style.opacity = '1';
+        bar.classList.add('listening');
       }
     }
   }
@@ -1000,16 +1037,12 @@ class VoiceSatelliteCard extends HTMLElement {
           'height: ' + (height + 4) + 'px;' +
         '}' +
         '#voice-satellite-ui .vs-rainbow-bar.speaking {' +
-          'animation: vs-flow 2s linear infinite, vs-pulse 0.6s ease-in-out infinite;' +
+          'animation: vs-flow 1.5s linear infinite;' +
           'height: ' + (height + 2) + 'px;' +
         '}' +
         '@keyframes vs-flow {' +
           '0% { background-position: 0% 50%; }' +
           '100% { background-position: 200% 50%; }' +
-        '}' +
-        '@keyframes vs-pulse {' +
-          '0%, 100% { opacity: 1; }' +
-          '50% { opacity: 0.6; }' +
         '}' +
       '</style>' +
       '<button class="vs-start-btn"><svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg></button>' +
@@ -1238,7 +1271,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c VOICE-SATELLITE-CARD %c v1.0.0 ',
+  '%c VOICE-SATELLITE-CARD %c v1.1.0 ',
   'color: white; background: #4CAF50; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'color: #4CAF50; background: white; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0; border: 1px solid #4CAF50;'
 );
