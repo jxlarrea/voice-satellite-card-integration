@@ -8,7 +8,7 @@
  * - Intent processing  
  * - Text-to-speech response
  * 
- * @version 1.4.0
+ * @version 1.6.0
  * 
  * Features:
  * - AudioWorklet for efficient audio processing (falls back to ScriptProcessor)
@@ -614,16 +614,23 @@ class VoiceSatelliteCard extends HTMLElement {
         this._hideTranscription();
         this._hideResponse();
         
-        // Check error type - some errors should be handled silently
-        if (eventData.code === 'stt-no-text-recognized' || 
-            eventData.code === 'duplicate_wake_up_detected') {
-          // Silent errors - just hide UI quietly and reconnect
-          // stt-no-text-recognized: user stayed silent after wake word
-          // duplicate_wake_up_detected: another satellite already handling this wake word
+        // Determine if we should show error feedback
+        // Only show error chime/flash if user was actively interacting (not just idle listening)
+        var isActiveInteraction = this._state !== State.IDLE && 
+                                   this._state !== State.LISTENING && 
+                                   this._state !== State.CONNECTING;
+        
+        // Some errors should always be silent
+        var isSilentError = eventData.code === 'stt-no-text-recognized' || 
+                           eventData.code === 'duplicate_wake_up_detected' ||
+                           eventData.code === 'timeout';
+        
+        if (isSilentError || !isActiveInteraction) {
+          // Silent handling - just hide UI quietly and reconnect
           this._state = State.IDLE;
           this._updateUI();
         } else {
-          // Other errors - show error feedback
+          // Active interaction error - show error feedback
           this._playChime('error');
           this._flashError();
         }
@@ -1665,7 +1672,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c VOICE-SATELLITE-CARD %c v1.4.0 ',
+  '%c VOICE-SATELLITE-CARD %c v1.6.0 ',
   'color: white; background: #4CAF50; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'color: #4CAF50; background: white; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0; border: 1px solid #4CAF50;'
 );
