@@ -8,7 +8,7 @@
  * - Intent processing  
  * - Text-to-speech response
  * 
- * @version 1.2.0
+ * @version 1.3.0
  * 
  * Features:
  * - AudioWorklet for efficient audio processing (falls back to ScriptProcessor)
@@ -167,7 +167,10 @@ class VoiceSatelliteCard extends HTMLElement {
       response_background: config.response_background || '#ffffff',
       response_padding: config.response_padding !== undefined ? config.response_padding : 16,
       response_rounded: config.response_rounded !== false,
-      response_border_color: config.response_border_color || 'rgba(100, 200, 150, 0.5)'
+      response_border_color: config.response_border_color || 'rgba(100, 200, 150, 0.5)',
+      // Background blur
+      background_blur: config.background_blur !== false,
+      background_blur_intensity: config.background_blur_intensity !== undefined ? config.background_blur_intensity : 5
     };
     
     this._render();
@@ -883,10 +886,35 @@ class VoiceSatelliteCard extends HTMLElement {
     el.offsetHeight; // Force repaint
     el.textContent = text;
     el.classList.add('visible');
+    
+    // Show blur overlay if enabled
+    if (this._config.background_blur) {
+      this._showBlur();
+    }
   }
 
   _hideTranscription() {
     var el = this._globalUI ? this._globalUI.querySelector('.vs-transcription') : null;
+    if (el) {
+      el.classList.remove('visible');
+    }
+    
+    // Hide blur when transcription hides (only if response is also hidden)
+    var responseEl = this._globalUI ? this._globalUI.querySelector('.vs-response') : null;
+    if (!responseEl || !responseEl.classList.contains('visible')) {
+      this._hideBlur();
+    }
+  }
+
+  _showBlur() {
+    var el = this._globalUI ? this._globalUI.querySelector('.vs-blur-overlay') : null;
+    if (el) {
+      el.classList.add('visible');
+    }
+  }
+
+  _hideBlur() {
+    var el = this._globalUI ? this._globalUI.querySelector('.vs-blur-overlay') : null;
     if (el) {
       el.classList.remove('visible');
     }
@@ -950,6 +978,12 @@ class VoiceSatelliteCard extends HTMLElement {
     var el = this._globalUI ? this._globalUI.querySelector('.vs-response') : null;
     if (el) {
       el.classList.remove('visible');
+    }
+    
+    // Hide blur when response hides (only if transcription is also hidden)
+    var transcriptionEl = this._globalUI ? this._globalUI.querySelector('.vs-transcription') : null;
+    if (!transcriptionEl || !transcriptionEl.classList.contains('visible')) {
+      this._hideBlur();
     }
   }
 
@@ -1174,7 +1208,25 @@ class VoiceSatelliteCard extends HTMLElement {
           '0% { background-position: 0% 50%; }' +
           '100% { background-position: 200% 50%; }' +
         '}' +
+        '#voice-satellite-ui .vs-blur-overlay {' +
+          'position: fixed;' +
+          'top: 0;' +
+          'left: 0;' +
+          'right: 0;' +
+          'bottom: 0;' +
+          'backdrop-filter: blur(' + this._config.background_blur_intensity + 'px);' +
+          '-webkit-backdrop-filter: blur(' + this._config.background_blur_intensity + 'px);' +
+          'background: rgba(0, 0, 0, 0.2);' +
+          'opacity: 0;' +
+          'pointer-events: none;' +
+          'transition: opacity 0.3s ease;' +
+          'z-index: 10000;' +
+        '}' +
+        '#voice-satellite-ui .vs-blur-overlay.visible {' +
+          'opacity: 1;' +
+        '}' +
       '</style>' +
+      '<div class="vs-blur-overlay"></div>' +
       '<button class="vs-start-btn"><svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg></button>' +
       '<div class="vs-transcription"></div>' +
       '<div class="vs-response"></div>' +
@@ -1399,6 +1451,16 @@ class VoiceSatelliteCardEditor extends HTMLElement {
         '<label for="response_rounded">Rounded corners on response bubble</label>' +
       '</div>' +
       
+      '<div class="section">Background Blur</div>' +
+      '<div class="row checkbox-row">' +
+        '<input type="checkbox" id="background_blur"' + (this._config.background_blur !== false ? ' checked' : '') + '>' +
+        '<label for="background_blur">Blur background when bubbles are visible</label>' +
+      '</div>' +
+      '<div class="row">' +
+        '<label>Blur Intensity (px)</label>' +
+        '<input type="number" id="background_blur_intensity" value="' + (this._config.background_blur_intensity !== undefined ? this._config.background_blur_intensity : 5) + '" min="1" max="30">' +
+      '</div>' +
+      
       '</div>';
     
     // Set up fields
@@ -1410,7 +1472,8 @@ class VoiceSatelliteCardEditor extends HTMLElement {
                   'transcription_background', 'transcription_border_color', 'transcription_padding', 'transcription_rounded',
                   'show_response', 'response_font_size', 'response_font_family', 'response_font_color',
                   'response_font_bold', 'response_font_italic',
-                  'response_background', 'response_border_color', 'response_padding', 'response_rounded'];
+                  'response_background', 'response_border_color', 'response_padding', 'response_rounded',
+                  'background_blur', 'background_blur_intensity'];
     
     fields.forEach(function(id) {
       var el = self.querySelector('#' + id);
@@ -1462,7 +1525,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c VOICE-SATELLITE-CARD %c v1.2.0 ',
+  '%c VOICE-SATELLITE-CARD %c v1.3.0 ',
   'color: white; background: #4CAF50; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'color: #4CAF50; background: white; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0; border: 1px solid #4CAF50;'
 );
