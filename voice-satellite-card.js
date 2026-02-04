@@ -1706,7 +1706,7 @@ class VoiceSatelliteCardEditor extends HTMLElement {
       '</div>' +
       '<div class="row checkbox-row">' +
         '<input type="checkbox" id="streaming_response"' + (this._config.streaming_response ? ' checked' : '') + '>' +
-        '<label for="streaming_response">Stream response in real-time (requires cloud conversation agent)</label>' +
+        '<label for="streaming_response">Stream text response in real-time</label>' +
       '</div>' +
       '<div class="row">' +
         '<label>Response Font Size (px)</label>' +
