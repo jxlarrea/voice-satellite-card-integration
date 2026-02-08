@@ -1,6 +1,6 @@
 # Voice Satellite Card - Design Document
 
-**Version:** 1.12.0  
+**Version:** 1.13.0  
 **Last Updated:** February 2026
 
 ## Overview
@@ -68,6 +68,326 @@ IDLE ──────────────▶ CONNECTING ──────
 | `INTENT` | Processing user intent |
 | `TTS` | Playing text-to-speech response |
 | `ERROR` | Error state with recovery |
+
+## UI Components & Visual Feedback
+
+### UI Elements
+
+The card uses a **global UI overlay** (`#voice-satellite-ui`) that contains:
+
+1. **Rainbow Bar** (`.vs-rainbow-bar`) - Animated gradient bar showing activity state
+2. **Start Button** (`.vs-start-btn`) - Floating mic button for manual start
+3. **Blur Overlay** (`.vs-blur-overlay`) - Background blur during active interaction
+4. **Transcription Bubble** (`.vs-transcription`) - Shows user's speech text
+5. **Response Bubble** (`.vs-response`) - Shows assistant's response text
+
+### Rainbow Bar States
+
+| State | Visible | Animation | Color |
+|-------|---------|-----------|-------|
+| IDLE | No | None | - |
+| CONNECTING | No | None | - |
+| LISTENING | No | None | - |
+| PAUSED | No | None | - |
+| WAKE_WORD_DETECTED | Yes | `listening` (3s flow) | Gradient |
+| STT | Yes | `listening` (3s flow) | Gradient |
+| INTENT | Yes | `processing` (0.5s flow) | Gradient |
+| TTS | Yes | `speaking` (2s flow) | Gradient |
+| ERROR (unexpected) | Yes | None | Solid Red (#ff4444) |
+
+### Start Button Visibility
+
+The floating microphone button appears when:
+- Auto-start fails due to browser restrictions (user gesture required)
+- Microphone permission denied
+- Any startup error occurs
+
+Hidden when:
+- Microphone successfully started
+- Pipeline actively running
+
+### Blur Overlay
+
+Activated when:
+- Wake word detected (`wake_word-end` event)
+
+Deactivated when:
+- TTS playback complete
+- Pipeline run ends (`run-end` event)
+- Error occurs
+
+### Transcription & Response Bubbles
+
+**Transcription Bubble:**
+- Shown on `stt-end` event with transcribed text
+- Auto-hides after 5 seconds
+- Hidden on `run-end`
+
+**Response Bubble:**
+- Shown on `intent-end` event with assistant response
+- Hidden when TTS playback completes
+- Hidden on `run-end`
+
+## UI State Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              NORMAL FLOW                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+User says wake word
+        │
+        ▼
+┌─────────────────┐
+│  wake_word-end  │ ──────▶ Play wake chime
+│     event       │ ──────▶ Show blur overlay
+└────────┬────────┘ ──────▶ Turn off wake_word_switch (if configured)
+         │                  Rainbow bar: visible + "listening" animation
+         ▼
+┌─────────────────┐
+│    stt-end      │ ──────▶ Show transcription bubble with text
+│     event       │         Rainbow bar: continues "listening"
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   intent-start  │ ──────▶ Rainbow bar: "processing" animation (fast)
+│     event       │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   intent-end    │ ──────▶ Show response bubble with text
+│     event       │ ──────▶ Play request sent chime
+└────────┬────────┘         Rainbow bar: continues "processing"
+         │
+         ▼
+┌─────────────────┐
+│    tts-end      │ ──────▶ Rainbow bar: "speaking" animation
+│     event       │ ──────▶ Play TTS audio
+└────────┬────────┘
+         │
+         ▼
+   TTS Playback Complete
+         │
+         ▼
+┌─────────────────┐
+│    run-end      │ ──────▶ Hide blur overlay
+│     event       │ ──────▶ Hide transcription bubble
+└────────┬────────┘ ──────▶ Hide response bubble
+         │                  Rainbow bar: hidden
+         ▼
+   Restart Pipeline (immediate, 0ms delay)
+         │
+         ▼
+   Back to LISTENING state
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           EXPECTED ERRORS                                    │
+│            (No error UI, no chime, immediate restart)                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐
+│  error event    │
+│                 │
+│ code:           │
+│ - timeout       │──────▶ Restart pipeline immediately (0ms)
+│ - wake-word-    │        No red bar
+│   timeout       │        No error chime
+│ - stt-no-text-  │        UI returns to LISTENING state
+│   recognized    │
+│ - duplicate_    │
+│   wake_up_      │
+│   detected      │
+└─────────────────┘
+
+Note: `wake-word-timeout` occurs when the pipeline's wake word detection 
+times out (configured via `wake_word_timeout` in input). This is normal 
+operation - the pipeline simply restarts to continue listening.
+
+Note: `duplicate_wake_up_detected` uses underscores (not dashes) - this is
+an inconsistency in the Home Assistant API.
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          UNEXPECTED ERRORS                                   │
+│              (Full error UI, chime, backoff retry)                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐
+│  error event    │
+│                 │
+│ code:           │
+│ - stt-stream-   │
+│   failed        │
+│ - wake-stream-  │──────▶ Play error chime
+│   failed        │──────▶ Rainbow bar: solid RED, stays visible
+│ - intent-failed │──────▶ Set _serviceUnavailable = true
+│ - tts-failed    │──────▶ Hide blur overlay
+│ - (any other)   │──────▶ Log error to console
+└────────┬────────┘
+         │
+         ▼
+   Calculate retry delay (exponential backoff)
+   3s → 6s → 12s → 24s → 30s (max)
+         │
+         ▼
+   Wait for delay
+         │
+         ▼
+   Restart pipeline
+         │
+         ▼
+┌─────────────────┐
+│  run-start      │──────▶ _serviceUnavailable = false
+│     event       │──────▶ _retryCount = 0
+└────────┬────────┘──────▶ Red bar automatically hides
+         │
+         ▼
+   Back to LISTENING state
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         PIPELINE IDLE TIMEOUT                                │
+│              (TTS token refresh - silent restart)                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Pipeline running in LISTENING state
+         │
+         ▼
+   pipeline_idle_timeout reached (default 300s)
+         │
+         ▼
+   Timer fires
+         │
+         ▼
+   Stop current pipeline
+         │
+         ▼
+   Restart pipeline immediately (0ms)
+         │                  
+         ▼                  No UI change
+   New pipeline starts      No chime
+   with fresh TTS token     User doesn't notice
+         │
+         ▼
+   Back to LISTENING state
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          TAB VISIBILITY                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Tab becomes hidden
+         │
+         ▼
+   Start 500ms debounce timer
+         │
+         ├──────▶ Tab visible again within 500ms?
+         │              │
+         │              ▼ YES
+         │        Cancel timer, no action
+         │
+         ▼ NO (500ms passed)
+   Pause microphone
+   State → PAUSED
+   Audio tracks disabled
+         │
+         ▼
+   Tab becomes visible
+         │
+         ▼
+   Resume microphone (immediate, no debounce)
+   Re-enable audio tracks
+   Restart send interval
+   State → LISTENING
+```
+
+## UI Update Logic (`_updateUI` method)
+
+```javascript
+_updateUI() {
+  // State to UI mapping
+  var states = {
+    IDLE:              { barVisible: false },
+    CONNECTING:        { barVisible: false },
+    LISTENING:         { barVisible: false },
+    PAUSED:            { barVisible: false },
+    WAKE_WORD_DETECTED:{ barVisible: true, animation: 'listening' },
+    STT:               { barVisible: true, animation: 'listening' },
+    INTENT:            { barVisible: true, animation: 'processing' },
+    TTS:               { barVisible: true, animation: 'speaking' },
+    ERROR:             { barVisible: false }
+  };
+  
+  var config = states[this._state];
+  
+  // CRITICAL: If service unavailable (error state), keep red bar visible
+  if (this._serviceUnavailable && !config.barVisible) {
+    return; // Don't hide the red error bar
+  }
+  
+  // Apply bar visibility and animation
+  if (config.barVisible) {
+    bar.classList.add('visible');
+    if (config.animation) {
+      bar.classList.add(config.animation);
+    }
+  } else {
+    bar.classList.remove('visible', 'listening', 'processing', 'speaking');
+  }
+}
+```
+
+## Error Bar Persistence
+
+The `_serviceUnavailable` flag controls error bar persistence:
+
+```javascript
+// On unexpected error
+this._serviceUnavailable = true;
+bar.classList.add('error-mode'); // Solid red background
+
+// _updateUI checks this flag
+if (this._serviceUnavailable && !config.barVisible) {
+  return; // Keep red bar visible even in IDLE/LISTENING state
+}
+
+// On successful recovery (run-start event)
+this._serviceUnavailable = false;
+this._retryCount = 0;
+// Next _updateUI call will hide the bar normally
+```
+
+## Chime Trigger Points
+
+| Event | Chime | Condition |
+|-------|-------|-----------|
+| `wake_word-end` | Wake word chime | `chime_on_wake_word: true` |
+| `intent-end` | Request sent chime | `chime_on_request_sent: true` |
+| Unexpected error | Error chime | `chime_on_wake_word: true` |
+
+Note: Error chime respects the `chime_on_wake_word` setting.
+
+## Bubble Display Timing
+
+```
+wake_word-end ─────────────────────────────────────────────────▶
+                                                                │
+stt-end ──────────────▶ Show transcription ────────────────────▶│
+                              │                                 │
+                              └── Auto-hide after 5s ──────────▶│
+                                                                │
+intent-end ───────────▶ Show response ─────────────────────────▶│
+                              │                                 │
+                              └── Hidden on TTS complete ──────▶│
+                                                                │
+run-end ──────────────────────────────────────────▶ Hide all ──▶│
+                                                                │
+                                                     Pipeline   │
+                                                     Restarts ◀─┘
+```
 
 ## Audio Pipeline
 
@@ -279,11 +599,12 @@ These errors are normal operational events and trigger **immediate** pipeline re
 | Code | Meaning |
 |------|---------|
 | `timeout` | Pipeline idle timeout (no wake word detected) |
+| `wake-word-timeout` | Wake word detection timed out (normal cycling) |
 | `stt-no-text-recognized` | User spoke but no text recognized |
-| `duplicate-wake-word-id` | Wake word already being processed |
+| `duplicate_wake_up_detected` | Wake word already being processed (note: uses underscores) |
 
 ```javascript
-var expectedErrors = ['timeout', 'stt-no-text-recognized', 'duplicate-wake-word-id'];
+var expectedErrors = ['timeout', 'wake-word-timeout', 'stt-no-text-recognized', 'duplicate_wake_up_detected'];
 if (expectedErrors.indexOf(errorCode) !== -1) {
   // Restart immediately without error UI
   this._restartPipeline(0);
@@ -435,21 +756,64 @@ this._resetIdleTimeout();
 
 ## Chime System
 
-### Built-in Chimes (Base64 WAV)
+### Programmatic Chimes (Web Audio API)
 
-Three chimes are embedded as base64-encoded WAV files:
+Chimes are generated programmatically using the Web Audio API oscillator, not from audio files. This eliminates the need for base64-encoded audio data.
 
-| Chime | Trigger | Purpose |
-|-------|---------|---------|
-| Wake Word Chime | `wake_word-end` event | Confirms wake word heard |
-| Request Sent Chime | `intent-end` event | Confirms request processed |
-| Error Chime | Unexpected error | Indicates failure |
+| Chime | Trigger | Sound |
+|-------|---------|-------|
+| Wake Word Chime | `wake_word-end` event | Rising tone: C5 → E5 → G5 (523Hz → 659Hz → 784Hz) |
+| Request Sent Chime | `intent-end` event | Falling tone: G5 → E5 (784Hz → 659Hz) |
+| Error Chime | Unexpected error | Low buzz: 300Hz → 200Hz (square wave) |
+
+### Implementation
+
+```javascript
+_playChime(type) {
+  var ctx = new (window.AudioContext || window.webkitAudioContext)();
+  var osc = ctx.createOscillator();
+  var gain = ctx.createGain();
+  
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  
+  osc.type = 'sine';
+  var volume = (this._config.chime_volume / 100) * 0.5; // Max 0.5 to avoid clipping
+  gain.gain.setValueAtTime(volume, ctx.currentTime);
+  
+  if (type === 'wake') {
+    // Rising tone: C5 -> E5 -> G5
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+    osc.frequency.setValueAtTime(523, ctx.currentTime);
+    osc.frequency.setValueAtTime(659, ctx.currentTime + 0.08);
+    osc.frequency.setValueAtTime(784, ctx.currentTime + 0.16);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.25);
+  } else if (type === 'error') {
+    // Error tone: Short low buzz
+    osc.type = 'square';
+    gain.gain.setValueAtTime(volume * 0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+    osc.frequency.setValueAtTime(300, ctx.currentTime);
+    osc.frequency.setValueAtTime(200, ctx.currentTime + 0.08);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.15);
+  } else {
+    // Done tone: G5 -> E5
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+    osc.frequency.setValueAtTime(784, ctx.currentTime);
+    osc.frequency.setValueAtTime(659, ctx.currentTime + 0.08);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.25);
+  }
+}
+```
 
 ### Volume Control
 
 ```javascript
-// Applied to <audio> element
-audioElement.volume = this._config.chime_volume / 100;
+// Volume is scaled to max 0.5 to avoid clipping
+var volume = (this._config.chime_volume / 100) * 0.5;
 ```
 
 ### Chime Configuration
@@ -601,6 +965,7 @@ if (this._hass && this._hass.connection) {
 | 1.10.0 | Mic sensitivity control, removed auto_gain_control |
 | 1.11.0 | Fixed live mic sensitivity updates, removed on-screen slider |
 | 1.12.0 | Removed mic_sensitivity and GainNode, restored auto_gain_control |
+| 1.13.0 | Added wake-word-timeout to expected errors, comprehensive UI documentation |
 
 ## Future Considerations
 
@@ -918,31 +1283,58 @@ _showResponse(text) {
 
 ---
 
-## Appendix D: Chime Audio Data
+## Appendix D: Chime Generation Details
 
-The chimes are short WAV files encoded as base64 data URIs. They should be:
-- **Format:** WAV (PCM)
-- **Sample Rate:** 44100 Hz
-- **Channels:** Mono or Stereo
-- **Duration:** ~200-500ms
+Chimes are generated programmatically using the Web Audio API oscillator. No base64 audio files are used.
 
-### Wake Word Chime
-A pleasant ascending tone indicating "I heard you"
+### Chime Specifications
 
-### Request Sent Chime  
-A confirmation tone indicating "Got it, processing"
+| Chime | Type | Waveform | Frequencies | Duration | Volume |
+|-------|------|----------|-------------|----------|--------|
+| Wake | Rising arpeggio | Sine | C5(523) → E5(659) → G5(784) | 250ms | 100% |
+| Done | Falling interval | Sine | G5(784) → E5(659) | 250ms | 100% |
+| Error | Low buzz | Square | 300Hz → 200Hz | 150ms | 30% |
 
-### Error Chime
-A distinct lower tone indicating "Something went wrong"
+### Frequency Timing
 
-```javascript
-// Structure in code
-this._wakeChimeData = 'data:audio/wav;base64,UklGRl9vT19...';
-this._requestChimeData = 'data:audio/wav;base64,UklGRm9vT19...';
-this._errorChimeData = 'data:audio/wav;base64,UklGRn9vT19...';
+**Wake Chime (C-E-G Major arpeggio):**
+```
+Time:  0ms     80ms    160ms   250ms
+Freq:  523 ──▶ 659 ──▶ 784 ──▶ (end)
+       C5      E5      G5
 ```
 
-Note: Actual base64 data is ~10-50KB per chime. Generate using any audio editor, export as WAV, then base64 encode.
+**Done Chime (G-E falling):**
+```
+Time:  0ms     80ms    250ms
+Freq:  784 ──▶ 659 ──▶ (end)
+       G5      E5
+```
+
+**Error Chime (descending buzz):**
+```
+Time:  0ms     80ms    150ms
+Freq:  300 ──▶ 200 ──▶ (end)
+Wave:  Square wave (harsh tone)
+```
+
+### Envelope (Gain)
+
+All chimes use exponential decay to avoid clicking:
+```javascript
+gain.gain.setValueAtTime(volume, ctx.currentTime);
+gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+```
+
+### Musical Notes Reference
+
+| Note | Frequency (Hz) |
+|------|---------------|
+| C5 | 523.25 |
+| E5 | 659.25 |
+| G5 | 783.99 |
+
+The wake chime plays a C major triad (C-E-G), a universally pleasant "listening" sound.
 
 ---
 
@@ -1050,7 +1442,7 @@ window.customCards.push({
 
 // Console branding
 console.info(
-  '%c VOICE-SATELLITE-CARD %c v1.12.0 ',
+  '%c VOICE-SATELLITE-CARD %c v1.13.0 ',
   'color: white; background: #03a9f4; font-weight: bold;',
   'color: #03a9f4; background: white; font-weight: bold;'
 );
@@ -1900,7 +2292,7 @@ _onPipelineSuccess() {
 
 **Bypassed for expected errors:**
 ```javascript
-var expectedErrors = ['timeout', 'stt-no-text-recognized', 'duplicate-wake-word-id'];
+var expectedErrors = ['timeout', 'wake-word-timeout', 'stt-no-text-recognized', 'duplicate_wake_up_detected'];
 if (expectedErrors.indexOf(errorCode) !== -1) {
   // No backoff - restart immediately
   this._restartPipeline(0);
@@ -2666,7 +3058,7 @@ stt-end            → Transcription complete
 
 ### Current Usage
 
-In v1.12.0, VAD events are **logged but not acted upon**:
+In v1.13.0, VAD events are **logged but not acted upon**:
 
 ```javascript
 case 'stt-vad-start':
