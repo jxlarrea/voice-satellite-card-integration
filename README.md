@@ -92,6 +92,7 @@ start_listening_on_load: true      # Auto-start on page load
 wake_word_switch: ''               # Switch to turn OFF when wake word detected
                                    # e.g., 'switch.tablet_screensaver'
 pipeline_timeout: 60               # Max seconds to wait for pipeline response (0 = no timeout)
+pipeline_refresh_interval: 30      # Minutes between pipeline restarts to keep TTS fresh (0 = disable)
 chime_on_wake_word: true           # Play chime when wake word detected
 chime_on_request_sent: true        # Play chime after request processed
 debug: false                       # Show debug info in browser console
