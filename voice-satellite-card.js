@@ -8,7 +8,7 @@
  * - Intent processing  
  * - Text-to-speech response
  * 
- * @version 1.9.0
+ * @version 1.10.0
  * 
  * Features:
  * - AudioWorklet for efficient audio processing (falls back to ScriptProcessor)
@@ -93,6 +93,7 @@ class VoiceSatelliteCard extends HTMLElement {
     this._binaryHandlerId = null;
     this._unsub = null;
     this._sendInterval = null;
+    this._sourceNode = null;
     
     this._isStreaming = false;
     this._isPaused = false;
@@ -105,6 +106,10 @@ class VoiceSatelliteCard extends HTMLElement {
     this._errorHandlingRestart = false;
     this._streamingResponse = '';
     this._serviceUnavailable = false;
+    this._resumeDebounceTimer = null;
+    this._serviceRecoveryTimer = null;
+    this._pipelineRefreshTimer = null;
+    this._pipelineStartTime = null;
     
     // Bind visibility handler
     this._boundVisibilityHandler = this._handleVisibilityChange.bind(this);
@@ -184,7 +189,10 @@ class VoiceSatelliteCard extends HTMLElement {
       response_border_color: config.response_border_color || 'rgba(100, 200, 150, 0.5)',
       // Background blur
       background_blur: config.background_blur !== false,
-      background_blur_intensity: config.background_blur_intensity !== undefined ? config.background_blur_intensity : 5
+      background_blur_intensity: config.background_blur_intensity !== undefined ? config.background_blur_intensity : 5,
+      // Pipeline refresh interval (minutes) - restart pipeline periodically to keep TTS tokens fresh
+      // Default 30 minutes, 0 to disable
+      pipeline_refresh_interval: config.pipeline_refresh_interval !== undefined ? config.pipeline_refresh_interval : 30
     };
     
     this._render();
@@ -446,16 +454,16 @@ class VoiceSatelliteCard extends HTMLElement {
       }
     });
     
-    var source = this._audioContext.createMediaStreamSource(this._mediaStream);
+    this._sourceNode = this._audioContext.createMediaStreamSource(this._mediaStream);
     
     // Try to use AudioWorklet (more efficient), fall back to ScriptProcessor
     try {
-      await this._setupAudioWorklet(source);
+      await this._setupAudioWorklet(this._sourceNode);
       this._useWorklet = true;
       console.log('[VoiceSatellite] Using AudioWorklet for audio processing');
     } catch (e) {
       console.log('[VoiceSatellite] AudioWorklet not available, using ScriptProcessor:', e.message);
-      this._setupScriptProcessor(source);
+      this._setupScriptProcessor(this._sourceNode);
       this._useWorklet = false;
     }
     
@@ -606,6 +614,9 @@ class VoiceSatelliteCard extends HTMLElement {
         if (eventData.runner_data && eventData.runner_data.stt_binary_handler_id !== undefined) {
           this._binaryHandlerId = eventData.runner_data.stt_binary_handler_id;
         }
+        // Track when pipeline started for refresh timer
+        this._pipelineStartTime = Date.now();
+        this._startPipelineRefreshTimer();
         // Don't clear _serviceUnavailable here - we need to wait for wake_word-end
         // to confirm the service is actually working (non-empty wake_word_output)
         this._setState(State.LISTENING);
@@ -794,16 +805,13 @@ class VoiceSatelliteCard extends HTMLElement {
                                    this._state !== State.LISTENING && 
                                    this._state !== State.CONNECTING;
         
-        // Some errors should always be silent
-        var isSilentError = eventData.code === 'stt-no-text-recognized' || 
-                           eventData.code === 'duplicate_wake_up_detected' ||
-                           eventData.code === 'timeout';
+        // Some errors are expected and should restart immediately without counting as failures
+        var isExpectedError = eventData.code === 'stt-no-text-recognized' || 
+                              eventData.code === 'duplicate_wake_up_detected' ||
+                              eventData.code === 'timeout';
         
-        // Check if this is a pipeline idle timeout (expected behavior)
-        var isIdleTimeout = eventData.code === 'timeout';
-        
-        if (isSilentError || !isActiveInteraction) {
-          // Silent handling - just hide UI quietly and reconnect
+        if (isExpectedError || !isActiveInteraction) {
+          // Silent handling - just hide UI quietly
           this._state = State.IDLE;
           this._updateUI();
         } else {
@@ -812,11 +820,12 @@ class VoiceSatelliteCard extends HTMLElement {
           this._flashError();
         }
         
-        if (isIdleTimeout) {
-          // Pipeline expired due to idle timeout - restart immediately, no delay needed
-          console.log('[VoiceSatellite] Pipeline idle timeout expired, restarting immediately');
+        if (isExpectedError) {
+          // Expected errors - restart immediately, no delay, don't increment counter
+          console.log('[VoiceSatellite] Expected error, restarting immediately');
           this._restartPipeline();
         } else {
+          // Unexpected errors - use normal error handling with delay and counter
           this._handlePipelineError();
         }
         break;
@@ -856,8 +865,8 @@ class VoiceSatelliteCard extends HTMLElement {
     
     this._reconnectTimeout = setTimeout(async function() {
       if (self._isStreaming && !self._isPaused) {
-        // Reconnect microphone to ensure fresh audio stream
-        await self._reconnectMicrophone();
+        // Full microphone reset for service recovery
+        await self._fullMicrophoneReset();
         self._restartPipeline();
       }
     }, delay);
@@ -919,82 +928,62 @@ class VoiceSatelliteCard extends HTMLElement {
   async _resumeListening() {
     if (!this._isStreaming || !this._isPaused) return;
     
-    console.log('[VoiceSatellite] Resuming (tab visible)');
+    // Debounce rapid tab switches - wait 500ms before actually resuming
+    if (this._resumeDebounceTimer) {
+      clearTimeout(this._resumeDebounceTimer);
+    }
     
-    // Clear the paused flag
-    this._isPaused = false;
-    
-    // The audio nodes may have stopped working after suspend
-    // Safest approach is to recreate the microphone connection
-    await this._reconnectMicrophone();
-    
-    // Restart pipeline to get fresh handler ID
-    await this._restartPipeline();
+    var self = this;
+    this._resumeDebounceTimer = setTimeout(async function() {
+      self._resumeDebounceTimer = null;
+      
+      if (!self._isStreaming || !self._isPaused) return;
+      
+      console.log('[VoiceSatellite] Resuming (tab visible)');
+      
+      // Clear the paused flag
+      self._isPaused = false;
+      
+      // The audio nodes may have stopped working after suspend
+      // Safest approach is to recreate the microphone connection
+      await self._reconnectMicrophone();
+      
+      // Restart pipeline to get fresh handler ID
+      await self._restartPipeline();
+    }, 500);
   }
 
   async _reconnectMicrophone() {
     console.log('[VoiceSatellite] Reconnecting microphone...');
     
     // Stop existing audio processing
+    if (this._sourceNode) {
+      try {
+        this._sourceNode.disconnect();
+      } catch (e) {
+        // Ignore - might already be disconnected
+      }
+      this._sourceNode = null;
+    }
+    
     if (this._workletNode) {
-      this._workletNode.disconnect();
+      try {
+        this._workletNode.disconnect();
+      } catch (e) {
+        // Ignore
+      }
       this._workletNode = null;
     }
     
     if (this._processor) {
-      this._processor.disconnect();
+      try {
+        this._processor.disconnect();
+      } catch (e) {
+        // Ignore
+      }
       this._processor = null;
     }
     
-    // If service was unavailable, do a full microphone reset
-    if (this._serviceUnavailable) {
-      console.log('[VoiceSatellite] Full microphone reset for service recovery');
-      
-      // Stop old stream
-      if (this._mediaStream) {
-        this._mediaStream.getTracks().forEach(function(track) { track.stop(); });
-        this._mediaStream = null;
-      }
-      
-      // Close old audio context
-      if (this._audioContext) {
-        await this._audioContext.close();
-        this._audioContext = null;
-      }
-      
-      // Get fresh microphone
-      try {
-        this._mediaStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            channelCount: 1,
-            sampleRate: 16000,
-            echoCancellation: true,
-            noiseSuppression: true
-          }
-        });
-        
-        this._audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        var source = this._audioContext.createMediaStreamSource(this._mediaStream);
-        
-        if (this._useWorklet) {
-          try {
-            await this._setupAudioWorklet(source);
-            console.log('[VoiceSatellite] AudioWorklet fully recreated');
-          } catch (e) {
-            console.log('[VoiceSatellite] AudioWorklet failed, using ScriptProcessor');
-            this._setupScriptProcessor(source);
-            this._useWorklet = false;
-          }
-        } else {
-          this._setupScriptProcessor(source);
-        }
-        return;
-      } catch (e) {
-        console.error('[VoiceSatellite] Failed to get fresh microphone:', e);
-      }
-    }
-    
-    // Normal reconnect (tab visibility change, etc.)
     // Resume audio context if needed
     if (this._audioContext && this._audioContext.state === 'suspended') {
       await this._audioContext.resume();
@@ -1003,22 +992,104 @@ class VoiceSatelliteCard extends HTMLElement {
     
     // Recreate the source and processor nodes
     if (this._mediaStream && this._audioContext) {
-      var source = this._audioContext.createMediaStreamSource(this._mediaStream);
+      this._sourceNode = this._audioContext.createMediaStreamSource(this._mediaStream);
       
       // Try to use AudioWorklet, fall back to ScriptProcessor
       if (this._useWorklet) {
         try {
-          await this._setupAudioWorklet(source);
+          await this._setupAudioWorklet(this._sourceNode);
           console.log('[VoiceSatellite] AudioWorklet reconnected');
         } catch (e) {
           console.log('[VoiceSatellite] AudioWorklet reconnect failed, using ScriptProcessor');
-          this._setupScriptProcessor(source);
+          this._setupScriptProcessor(this._sourceNode);
           this._useWorklet = false;
         }
       } else {
-        this._setupScriptProcessor(source);
+        this._setupScriptProcessor(this._sourceNode);
         console.log('[VoiceSatellite] ScriptProcessor reconnected');
       }
+    }
+  }
+
+  async _fullMicrophoneReset() {
+    console.log('[VoiceSatellite] Full microphone reset for service recovery');
+    
+    // Stop existing audio processing
+    if (this._sourceNode) {
+      try {
+        this._sourceNode.disconnect();
+      } catch (e) {
+        // Ignore
+      }
+      this._sourceNode = null;
+    }
+    
+    if (this._workletNode) {
+      try {
+        this._workletNode.disconnect();
+      } catch (e) {
+        // Ignore
+      }
+      this._workletNode = null;
+    }
+    
+    if (this._processor) {
+      try {
+        this._processor.disconnect();
+      } catch (e) {
+        // Ignore
+      }
+      this._processor = null;
+    }
+    
+    // Stop old stream
+    if (this._mediaStream) {
+      this._mediaStream.getTracks().forEach(function(track) { track.stop(); });
+      this._mediaStream = null;
+    }
+    
+    // Close old audio context
+    if (this._audioContext) {
+      try {
+        await this._audioContext.close();
+      } catch (e) {
+        console.log('[VoiceSatellite] Error closing audio context:', e);
+      }
+      this._audioContext = null;
+    }
+    
+    // Reset worklet registration since we're creating a new audio context
+    this._workletRegistered = false;
+    
+    // Get fresh microphone
+    try {
+      this._mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
+      
+      this._audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      this._sourceNode = this._audioContext.createMediaStreamSource(this._mediaStream);
+      
+      if (this._useWorklet) {
+        try {
+          await this._setupAudioWorklet(this._sourceNode);
+          console.log('[VoiceSatellite] AudioWorklet fully recreated');
+        } catch (e) {
+          console.log('[VoiceSatellite] AudioWorklet failed, using ScriptProcessor');
+          this._setupScriptProcessor(this._sourceNode);
+          this._useWorklet = false;
+        }
+      } else {
+        this._setupScriptProcessor(this._sourceNode);
+        console.log('[VoiceSatellite] ScriptProcessor recreated');
+      }
+    } catch (e) {
+      console.error('[VoiceSatellite] Failed to get fresh microphone:', e);
     }
   }
 
@@ -1037,6 +1108,9 @@ class VoiceSatelliteCard extends HTMLElement {
     
     // Clear pipeline timeout
     this._clearPipelineTimeout();
+    
+    // Clear pipeline refresh timer
+    this._clearPipelineRefreshTimer();
     
     if (this._sendInterval) {
       clearInterval(this._sendInterval);
@@ -1104,6 +1178,42 @@ class VoiceSatelliteCard extends HTMLElement {
           self._restartPipeline();
         }, 1000);
       }, this._config.pipeline_timeout * 1000);
+    }
+  }
+
+  _startPipelineRefreshTimer() {
+    var self = this;
+    
+    // Clear any existing refresh timer
+    this._clearPipelineRefreshTimer();
+    
+    // If refresh interval is 0 or not set, don't start timer
+    if (!this._config.pipeline_refresh_interval) return;
+    
+    var refreshMs = this._config.pipeline_refresh_interval * 60 * 1000;
+    
+    console.log('[VoiceSatellite] Pipeline refresh timer started:', this._config.pipeline_refresh_interval, 'minutes');
+    
+    this._pipelineRefreshTimer = setTimeout(function() {
+      // Only refresh if we're in idle listening state (not actively processing)
+      if (self._isStreaming && !self._isPaused && 
+          (self._state === State.LISTENING || self._state === State.IDLE)) {
+        console.log('[VoiceSatellite] Pipeline refresh - restarting to get fresh TTS token');
+        self._restartPipeline();
+      } else {
+        // Not in idle state, try again in 1 minute
+        console.log('[VoiceSatellite] Pipeline refresh deferred - not in idle state');
+        self._pipelineRefreshTimer = setTimeout(function() {
+          self._startPipelineRefreshTimer();
+        }, 60000);
+      }
+    }, refreshMs);
+  }
+
+  _clearPipelineRefreshTimer() {
+    if (this._pipelineRefreshTimer) {
+      clearTimeout(this._pipelineRefreshTimer);
+      this._pipelineRefreshTimer = null;
     }
   }
 
@@ -1182,7 +1292,25 @@ class VoiceSatelliteCard extends HTMLElement {
     var self = this;
     try {
       this._isSpeaking = true;
-      var audio = new Audio(url);
+      
+      // Ensure audio context is running (may be suspended after tab visibility changes)
+      if (this._audioContext && this._audioContext.state === 'suspended') {
+        await this._audioContext.resume();
+      }
+      
+      // Convert relative URL to absolute URL using Home Assistant connection
+      var fullUrl = url;
+      if (url.startsWith('/') && this._hass && this._hass.auth && this._hass.auth.data) {
+        // Get the base URL from HA connection
+        var hassUrl = this._hass.auth.data.hassUrl || '';
+        if (hassUrl) {
+          fullUrl = hassUrl + url;
+        }
+      }
+      
+      console.log('[VoiceSatellite] Playing TTS:', fullUrl);
+      
+      var audio = new Audio(fullUrl);
       // Browser audio maxes out at 1.0 (100%)
       audio.volume = Math.min(this._config.tts_volume / 100, 1.0);
       
@@ -1207,17 +1335,47 @@ class VoiceSatelliteCard extends HTMLElement {
         }, 500);
       };
       
-      audio.onerror = function() {
+      audio.onerror = function(e) {
+        // Get more details about the error
+        var errorDetails = '';
+        if (audio.error) {
+          errorDetails = 'code=' + audio.error.code + ' message=' + (audio.error.message || 'unknown');
+        }
+        console.error('[VoiceSatellite] Audio element error:', errorDetails, 'url:', fullUrl);
+        console.error('[VoiceSatellite] Audio networkState:', audio.networkState, 'readyState:', audio.readyState);
+        
         self._isSpeaking = false;
-        // Don't clear timeout on audio error - let it trigger if needed
         self._state = State.IDLE;
         self._updateUI();
+        
+        // Still restart pipeline after audio error
+        setTimeout(function() {
+          if (self._isStreaming && !self._isPaused) {
+            self._restartPipeline();
+          }
+        }, 500);
+      };
+      
+      // Add canplaythrough event to ensure audio is ready
+      audio.oncanplaythrough = function() {
+        console.log('[VoiceSatellite] Audio ready to play');
       };
       
       await audio.play();
     } catch (error) {
-      console.error('[VoiceSatellite] Playback error:', error);
+      console.error('[VoiceSatellite] Playback error:', error.name, error.message);
+      console.error('[VoiceSatellite] URL was:', url);
       this._isSpeaking = false;
+      
+      // Still restart pipeline after playback error
+      var self = this;
+      this._state = State.IDLE;
+      this._updateUI();
+      setTimeout(function() {
+        if (self._isStreaming && !self._isPaused) {
+          self._restartPipeline();
+        }
+      }, 500);
     }
   }
 
