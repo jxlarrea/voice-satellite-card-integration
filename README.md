@@ -9,7 +9,7 @@ Transform any browser into a voice-activated satellite for Home Assistant's Assi
 
 ## Why This Card?
 
-Home Assistant's built-in voice features require dedicated hardware like ESPHome devices or specific voice assistant hardware. But what if you already have a tablet mounted on your wall running the Home Assistant dashboard?
+Home Assistant's built-in voice features require dedicated hardware like ESPHome devices or specific voice assistant hardware. But what if you already have a tablet mounted on your wall running the Home Assistant dashboard?a
 
 **Voice Satellite Card** solves this by:
 
@@ -98,6 +98,7 @@ chime_on_wake_word: true           # Play chime when wake word detected
 chime_on_request_sent: true        # Play chime after request processed
 chime_volume: 100                  # Chime volume (0-100)
 tts_volume: 100                    # TTS playback volume (0-100)
+tts_target: ''                     # TTS output device (empty = browser, or media_player entity ID)
 debug: false                       # Show debug info in browser console
 
 # Microphone Processing
