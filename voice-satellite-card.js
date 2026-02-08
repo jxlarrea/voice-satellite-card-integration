@@ -8,7 +8,7 @@
  * - Intent processing  
  * - Text-to-speech response
  * 
- * @version 1.11.0
+ * @version 1.12.0
  * 
  * Features:
  * - AudioWorklet for efficient audio processing (falls back to ScriptProcessor)
@@ -94,7 +94,7 @@ class VoiceSatelliteCard extends HTMLElement {
     this._unsub = null;
     this._sendInterval = null;
     this._sourceNode = null;
-    this._gainNode = null;
+    this._sourceNode = null;
     
     this._isStreaming = false;
     this._isPaused = false;
@@ -127,7 +127,7 @@ class VoiceSatelliteCard extends HTMLElement {
       start_listening_on_load: true,
       noise_suppression: true,
       echo_cancellation: true,
-      mic_sensitivity: 1.0,
+      auto_gain_control: true,
       chime_on_wake_word: true,
       chime_on_request_sent: true,
       wake_word_switch: '',
@@ -162,8 +162,7 @@ class VoiceSatelliteCard extends HTMLElement {
       // Microphone processing options
       noise_suppression: config.noise_suppression !== false,
       echo_cancellation: config.echo_cancellation !== false,
-      // Microphone sensitivity (gain multiplier: 0.1 to 3.0, default 1.0)
-      mic_sensitivity: config.mic_sensitivity !== undefined ? Math.max(0.1, Math.min(3.0, config.mic_sensitivity)) : 1.0,
+      auto_gain_control: config.auto_gain_control !== false,
       // Transcription bubble options (user speech)
       show_transcription: config.show_transcription !== false,
       transcription_font_size: config.transcription_font_size !== undefined ? config.transcription_font_size : 20,
@@ -194,12 +193,6 @@ class VoiceSatelliteCard extends HTMLElement {
       // Default 300 seconds (5 minutes), 0 means no timeout (not recommended)
       pipeline_idle_timeout: config.pipeline_idle_timeout !== undefined ? config.pipeline_idle_timeout : 300
     };
-    
-    // Update gain node if it exists (live update without restart)
-    if (this._gainNode && this._audioContext) {
-      this._gainNode.gain.setValueAtTime(this._config.mic_sensitivity, this._audioContext.currentTime);
-      console.log('[VoiceSatellite] Mic sensitivity updated to:', this._config.mic_sensitivity);
-    }
     
     this._render();
   }
@@ -456,28 +449,20 @@ class VoiceSatelliteCard extends HTMLElement {
         sampleRate: SAMPLE_RATE,
         echoCancellation: this._config.echo_cancellation,
         noiseSuppression: this._config.noise_suppression,
-        autoGainControl: false  // Disabled - we use manual mic_sensitivity instead
+        autoGainControl: this._config.auto_gain_control
       }
     });
     
     this._sourceNode = this._audioContext.createMediaStreamSource(this._mediaStream);
     
-    // Create gain node for mic sensitivity control
-    this._gainNode = this._audioContext.createGain();
-    this._gainNode.gain.value = this._config.mic_sensitivity;
-    console.log('[VoiceSatellite] Mic sensitivity set to:', this._config.mic_sensitivity);
-    
-    // Connect source -> gain
-    this._sourceNode.connect(this._gainNode);
-    
     // Try to use AudioWorklet (more efficient), fall back to ScriptProcessor
     try {
-      await this._setupAudioWorklet(this._gainNode);
+      await this._setupAudioWorklet(this._sourceNode);
       this._useWorklet = true;
       console.log('[VoiceSatellite] Using AudioWorklet for audio processing');
     } catch (e) {
       console.log('[VoiceSatellite] AudioWorklet not available, using ScriptProcessor:', e.message);
-      this._setupScriptProcessor(this._gainNode);
+      this._setupScriptProcessor(this._sourceNode);
       this._useWorklet = false;
     }
     
@@ -542,21 +527,6 @@ class VoiceSatelliteCard extends HTMLElement {
     
     source.connect(this._processor);
     this._processor.connect(this._audioContext.destination);
-  }
-
-  /**
-   * Set microphone sensitivity dynamically
-   * @param {number} value - Gain value (0.1 to 3.0, where 1.0 is normal)
-   */
-  setMicSensitivity(value) {
-    var clampedValue = Math.max(0.1, Math.min(3.0, value));
-    this._config.mic_sensitivity = clampedValue;
-    
-    if (this._gainNode) {
-      // Use setValueAtTime to avoid audio clicks
-      this._gainNode.gain.setValueAtTime(clampedValue, this._audioContext.currentTime);
-      console.log('[VoiceSatellite] Mic sensitivity changed to:', clampedValue);
-    }
   }
 
   _convertToPcm(floatData) {
@@ -1942,12 +1912,10 @@ class VoiceSatelliteCardEditor extends HTMLElement {
         '<input type="checkbox" id="echo_cancellation"' + (this._config.echo_cancellation !== false ? ' checked' : '') + '>' +
         '<label for="echo_cancellation">Echo Cancellation</label>' +
       '</div>' +
-      '<div class="row">' +
-        '<label>Mic Sensitivity</label>' +
-        '<input type="range" id="mic_sensitivity" min="10" max="300" value="' + Math.round((this._config.mic_sensitivity || 1.0) * 100) + '" style="flex:1; margin-right: 8px;">' +
-        '<span id="mic_sensitivity_value" style="min-width: 45px; text-align: right;">' + Math.round((this._config.mic_sensitivity || 1.0) * 100) + '%</span>' +
+      '<div class="row checkbox-row">' +
+        '<input type="checkbox" id="auto_gain_control"' + (this._config.auto_gain_control !== false ? ' checked' : '') + '>' +
+        '<label for="auto_gain_control">Auto Gain Control</label>' +
       '</div>' +
-      '<div class="help" style="margin-top: -8px; margin-bottom: 12px;">10% = very quiet, 100% = normal, 300% = boosted</div>' +
       
       '<div class="section">Appearance - Bar</div>' +
       '<div class="row">' +
@@ -2071,7 +2039,7 @@ class VoiceSatelliteCardEditor extends HTMLElement {
     // Set up fields
     var fields = ['bar_height', 'bar_position', 'bar_gradient', 'start_listening_on_load', 
                   'wake_word_switch', 'pipeline_timeout', 'chime_on_wake_word', 'chime_on_request_sent', 'debug',
-                  'noise_suppression', 'echo_cancellation', 'mic_sensitivity',
+                  'noise_suppression', 'echo_cancellation', 'auto_gain_control',
                   'show_transcription', 'transcription_font_size', 'transcription_font_family', 'transcription_font_color', 
                   'transcription_font_bold', 'transcription_font_italic',
                   'transcription_background', 'transcription_border_color', 'transcription_padding', 'transcription_rounded',
@@ -2090,14 +2058,6 @@ class VoiceSatelliteCardEditor extends HTMLElement {
       }
     });
     
-    // Special handler for mic_sensitivity to update the display value
-    var micSlider = this.querySelector('#mic_sensitivity');
-    var micValue = this.querySelector('#mic_sensitivity_value');
-    if (micSlider && micValue) {
-      micSlider.addEventListener('input', function(e) {
-        micValue.textContent = e.target.value + '%';
-      });
-    }
   }
 
   _valueChanged(key, value) {
@@ -2119,10 +2079,6 @@ class VoiceSatelliteCardEditor extends HTMLElement {
       value = t.checked;
     } else if (t.type === 'number' || t.type === 'range') {
       value = parseFloat(t.value);
-      // Convert mic_sensitivity from percentage to decimal
-      if (t.id === 'mic_sensitivity') {
-        value = value / 100;
-      }
     } else {
       value = t.value;
     }
@@ -2143,7 +2099,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c VOICE-SATELLITE-CARD %c v1.11.0 ',
+  '%c VOICE-SATELLITE-CARD %c v1.12.0 ',
   'color: white; background: #4CAF50; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'color: #4CAF50; background: white; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0; border: 1px solid #4CAF50;'
 );
