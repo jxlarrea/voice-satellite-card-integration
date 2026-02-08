@@ -223,6 +223,8 @@ TTS tokens expire after some time. The `pipeline_idle_timeout` (default 300 seco
 
 The timeout resets on any pipeline activity (`run-start`, `wake_word-end`).
 
+**Interaction guard:** When the idle timeout fires, it checks whether the user is mid-interaction (state is WAKE_WORD_DETECTED, STT, INTENT, or TTS) or TTS audio is still playing. If so, it defers by resetting itself rather than killing the active interaction. This prevents the timeout from interrupting a conversation if someone sets a short `pipeline_idle_timeout` combined with a slow LLM response.
+
 ### 8.3 Pipeline Response Timeout
 
 The `pipeline_timeout` value (default 60 seconds) is sent to Home Assistant in the `timeout` field of the pipeline run config. If the entire interaction exceeds this duration, HA sends an error event.
@@ -605,6 +607,7 @@ When recreating or modifying this card, verify:
 - [ ] `duplicate_wake_up_detected` uses underscores (HA API inconsistency)
 - [ ] `_restartPipeline` uses `_isRestarting` flag to prevent concurrent restarts
 - [ ] `_restartPipeline` clears idle timeout at entry to prevent re-triggering during restart
+- [ ] Idle timeout callback checks for active interaction and defers if user is mid-conversation
 - [ ] `_handleRunEnd` checks `_isRestarting` and skips if restart already in flight
 - [ ] `_restartPipeline` awaits `_stopPipeline` before scheduling new subscription
 - [ ] `_sendBinaryAudio` checks `socket.readyState === WebSocket.OPEN`
