@@ -1,118 +1,235 @@
 /**
- * Voice Satellite Card for Home Assistant
+ * Voice Satellite Card v1.14.0
+ * Transform your browser into a voice satellite for Home Assistant Assist
  * 
- * Turns your browser into a voice satellite by streaming audio to
- * Home Assistant's Assist Pipeline, which handles:
- * - Wake word detection (via openWakeWord add-on)
- * - Speech-to-text
- * - Intent processing  
- * - Text-to-speech response
- * 
- * @version 1.13.0
- * 
- * Features:
- * - AudioWorklet for efficient audio processing (falls back to ScriptProcessor)
- * - Visibility API to pause when tab/screen is hidden (saves battery)
- * - Automatic reconnection on WebSocket disconnect
- * - Reusable buffers to reduce memory allocations
- * - Auto-start with fallback button for browsers requiring user gesture
- * - Pastel rainbow gradient bar indicator
- * - Invisible card - only shows floating button when needed
+ * A custom Lovelace card that enables wake word detection, speech-to-text,
+ * intent processing, and text-to-speech playback directly in the browser.
  */
 
-var SAMPLE_RATE = 16000;
-var BUFFER_SIZE = 2048;
-var AUDIO_CHUNK_MS = 100;
-var RECONNECT_DELAY_MS = 3000;
-var MAX_RECONNECT_ATTEMPTS = 5;
+// ============================================================================
+// State Constants
+// ============================================================================
 
 var State = {
-  IDLE: 'idle',
-  CONNECTING: 'connecting',
-  LISTENING: 'listening',
-  WAKE_WORD_DETECTED: 'wake_word_detected',
-  STT: 'stt',
-  INTENT: 'intent',
-  TTS: 'tts',
-  PAUSED: 'paused',
-  ERROR: 'error'
+  IDLE: 'IDLE',
+  CONNECTING: 'CONNECTING',
+  LISTENING: 'LISTENING',
+  PAUSED: 'PAUSED',
+  WAKE_WORD_DETECTED: 'WAKE_WORD_DETECTED',
+  STT: 'STT',
+  INTENT: 'INTENT',
+  TTS: 'TTS',
+  ERROR: 'ERROR'
 };
 
-// AudioWorklet processor code as a string (will be loaded as blob URL)
-var WORKLET_CODE = '\
-class AudioProcessor extends AudioWorkletProcessor {\
-  constructor() {\
-    super();\
-    this.bufferSize = 2048;\
-    this.buffer = new Float32Array(this.bufferSize);\
-    this.bufferIndex = 0;\
-  }\
-  process(inputs) {\
-    var input = inputs[0];\
-    if (!input || !input[0]) return true;\
-    var channelData = input[0];\
-    for (var i = 0; i < channelData.length; i++) {\
-      this.buffer[this.bufferIndex++] = channelData[i];\
-      if (this.bufferIndex >= this.bufferSize) {\
-        this.port.postMessage({ audio: this.buffer.slice() });\
-        this.bufferIndex = 0;\
-      }\
-    }\
-    return true;\
-  }\
-}\
-registerProcessor("audio-processor", AudioProcessor);';
+// ============================================================================
+// Default Configuration
+// ============================================================================
 
-// Global flag to track if connection listeners are registered
-var _vsConnectionListenersRegistered = false;
+var DEFAULT_CONFIG = {
+  // Behavior
+  start_listening_on_load: true,
+  wake_word_switch: '',
+  pipeline_id: '',
+  pipeline_timeout: 60,
+  pipeline_idle_timeout: 300,
+  chime_on_wake_word: true,
+  chime_on_request_sent: true,
+  chime_volume: 100,
+  tts_volume: 100,
+  debug: false,
 
-// Global mutex to prevent multiple pipelines starting
-var _vsPipelineStarting = false;
+  // Microphone Processing
+  noise_suppression: true,
+  echo_cancellation: true,
+  auto_gain_control: true,
+  voice_isolation: false,
+
+  // Rainbow Bar
+  bar_position: 'bottom',
+  bar_height: 16,
+  bar_gradient: '#FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC',
+  background_blur: true,
+  background_blur_intensity: 5,
+
+  // Transcription Bubble
+  show_transcription: true,
+  transcription_font_size: 20,
+  transcription_font_family: 'inherit',
+  transcription_font_color: '#444444',
+  transcription_font_bold: true,
+  transcription_font_italic: false,
+  transcription_background: '#ffffff',
+  transcription_border_color: 'rgba(0, 180, 255, 0.5)',
+  transcription_padding: 16,
+  transcription_rounded: true,
+
+  // Response Bubble
+  show_response: true,
+  streaming_response: false,
+  response_font_size: 20,
+  response_font_family: 'inherit',
+  response_font_color: '#444444',
+  response_font_bold: true,
+  response_font_italic: false,
+  response_background: '#ffffff',
+  response_border_color: 'rgba(100, 200, 150, 0.5)',
+  response_padding: 16,
+  response_rounded: true
+};
+
+// ============================================================================
+// Expected error codes (no error UI, immediate restart)
+// ============================================================================
+
+var EXPECTED_ERRORS = [
+  'timeout',
+  'wake-word-timeout',
+  'stt-no-text-recognized',
+  'duplicate_wake_up_detected'
+];
+
+// ============================================================================
+// VoiceSatelliteCard - Main Card
+// ============================================================================
 
 class VoiceSatelliteCard extends HTMLElement {
+
   constructor() {
     super();
-    this.attachShadow({ mode: 'open' });
-    
-    this._config = {};
-    this._hass = null;
+
+    // State
     this._state = State.IDLE;
-    
-    this._audioContext = null;
-    this._mediaStream = null;
-    this._workletNode = null;
-    this._workletRegistered = false;
-    this._processor = null; // Fallback ScriptProcessor
-    this._useWorklet = false;
-    
-    // Reusable buffers to reduce allocations
-    this._audioChunks = [];
-    this._reusablePcmBuffer = null;
-    this._reusableMessageBuffer = null;
-    
-    this._binaryHandlerId = null;
-    this._unsub = null;
-    this._sendInterval = null;
-    this._sourceNode = null;
-    this._sourceNode = null;
-    
+    this._config = Object.assign({}, DEFAULT_CONFIG);
+    this._hass = null;
+    this._connection = null;
+    this._hasStarted = false;
     this._isStreaming = false;
     this._isPaused = false;
-    this._isConnected = false;
-    this._isSpeaking = false;
-    this._isRestarting = false;
-    this._reconnectAttempts = 0;
-    this._reconnectTimeout = null;
-    this._pipelineTimeoutId = null;
-    this._errorHandlingRestart = false;
-    this._streamingResponse = '';
+
+    // Pipeline
+    this._unsubscribe = null;
+    this._binaryHandlerId = null;
+    this._retryCount = 0;
     this._serviceUnavailable = false;
-    this._resumeDebounceTimer = null;
-    this._serviceRecoveryTimer = null;
-    
-    // Bind visibility handler
-    this._boundVisibilityHandler = this._handleVisibilityChange.bind(this);
+    this._restartTimeout = null;
+    this._isRestarting = false;
+    this._idleTimeoutId = null;
+    this._pendingRunEnd = false;
+    this._recoveryTimeout = null;
+    this._suppressTTS = false;
+    this._intentErrorBarTimeout = null;
+
+    // Audio
+    this._audioContext = null;
+    this._mediaStream = null;
+    this._sourceNode = null;
+    this._workletNode = null;
+    this._scriptProcessor = null;
+    this._audioBuffer = [];
+    this._sendInterval = null;
+    this._actualSampleRate = 16000;
+    this._currentAudio = null;
+
+    // UI
     this._globalUI = null;
+    this._responseTimeout = null;
+    this._streamedResponse = '';
+    this._shiftRecalcTimer = null;
+
+    // Visibility
+    this._visibilityDebounceTimer = null;
+    this._disconnectTimeout = null;
+    this._wasConnected = false;
+    this._pendingStartButtonReason = undefined;
+
+    // Bind methods
+    this._handleVisibilityChange = this._handleVisibilityChangeFn.bind(this);
+  }
+
+  // --------------------------------------------------------------------------
+  // Logging
+  // --------------------------------------------------------------------------
+
+  _log(category, msg, data) {
+    if (!this._config.debug) return;
+    if (data !== undefined) {
+      console.log('[VS][' + category + '] ' + msg, data);
+    } else {
+      console.log('[VS][' + category + '] ' + msg);
+    }
+  }
+
+  _logError(category, msg, data) {
+    if (data !== undefined) {
+      console.error('[VS][' + category + '] ' + msg, data);
+    } else {
+      console.error('[VS][' + category + '] ' + msg);
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Lifecycle
+  // --------------------------------------------------------------------------
+
+  connectedCallback() {
+    if (this._disconnectTimeout) {
+      clearTimeout(this._disconnectTimeout);
+      this._disconnectTimeout = null;
+    }
+    this._render();
+    this._ensureGlobalUI();
+    this._setupVisibilityHandler();
+
+    if (!window._voiceSatelliteActive && this._hass && this._hass.connection) {
+      this._startListening();
+    }
+  }
+
+  disconnectedCallback() {
+    var self = this;
+    this._disconnectTimeout = setTimeout(function () {
+      if (window._voiceSatelliteInstance === self) {
+        // We're still the active instance but truly disconnected — keep running via global UI
+      }
+    }, 100);
+  }
+
+  setConfig(config) {
+    this._config = Object.assign({}, DEFAULT_CONFIG, config);
+    if (this._globalUI) {
+      this._applyStyles();
+    }
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+
+    if (this._hasStarted) return;
+    if (!hass || !hass.connection) return;
+    if (window._voiceSatelliteStarting) return;
+    if (window._voiceSatelliteActive && window._voiceSatelliteInstance !== this) return;
+
+    this._connection = hass.connection;
+
+    // Ensure global UI exists before we try to start or show the button.
+    // The hass setter can fire before connectedCallback in some HA lifecycle paths.
+    this._ensureGlobalUI();
+
+    if (this._config.start_listening_on_load) {
+      // Mark _hasStarted true so we only attempt auto-start once via the setter.
+      // If auto-start fails (user gesture required), the start button click will retry.
+      this._hasStarted = true;
+      this._startListening();
+    } else {
+      // start_listening_on_load is false — show the button so user can manually start
+      this._hasStarted = true;
+      this._showStartButton();
+    }
+  }
+
+  getCardSize() {
+    return 0;
   }
 
   static getConfigElement() {
@@ -120,1238 +237,1184 @@ class VoiceSatelliteCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return {
-      bar_position: 'bottom',
-      bar_height: 4,
-      bar_gradient: '#FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC',
-      start_listening_on_load: true,
-      noise_suppression: true,
-      echo_cancellation: true,
-      auto_gain_control: true,
-      chime_on_wake_word: true,
-      chime_on_request_sent: true,
-      wake_word_switch: '',
-      show_transcription: true,
-      transcription_font_size: 30,
-      transcription_font_family: 'inherit',
-      transcription_font_color: '#444444',
-      transcription_background: 'rgba(255, 255, 255, 0.85)',
-      transcription_padding: 16,
-      transcription_rounded: true
-    };
+    return { start_listening_on_load: true };
   }
 
-  setConfig(config) {
-    this._config = {
-      pipeline_id: config.pipeline_id || '',
-      bar_position: config.bar_position || 'bottom',
-      bar_height: config.bar_height !== undefined ? config.bar_height : 16,
-      bar_gradient: config.bar_gradient || '#FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC',
-      start_listening_on_load: config.start_listening_on_load !== false,
-      chime_on_wake_word: config.chime_on_wake_word !== false,
-      chime_on_request_sent: config.chime_on_request_sent !== false,
-      chime_volume: config.chime_volume !== undefined ? config.chime_volume : 100,
-      tts_volume: config.tts_volume !== undefined ? config.tts_volume : 100,
-      wake_word_switch: config.wake_word_switch || '',
-      debug: config.debug || false,
-      // Audio processing options (still used internally)
-      wake_word_timeout: config.wake_word_timeout !== undefined ? config.wake_word_timeout : 0,
-      stt_timeout: config.stt_timeout !== undefined ? config.stt_timeout : 0,
-      // Pipeline timeout (seconds) - 0 means no timeout
-      pipeline_timeout: config.pipeline_timeout !== undefined ? config.pipeline_timeout : 60,
-      // Microphone processing options
-      noise_suppression: config.noise_suppression !== false,
-      echo_cancellation: config.echo_cancellation !== false,
-      auto_gain_control: config.auto_gain_control !== false,
-      // Transcription bubble options (user speech)
-      show_transcription: config.show_transcription !== false,
-      transcription_font_size: config.transcription_font_size !== undefined ? config.transcription_font_size : 20,
-      transcription_font_family: config.transcription_font_family || 'inherit',
-      transcription_font_color: config.transcription_font_color || '#444444',
-      transcription_font_bold: config.transcription_font_bold !== false,
-      transcription_font_italic: config.transcription_font_italic || false,
-      transcription_background: config.transcription_background || '#ffffff',
-      transcription_padding: config.transcription_padding !== undefined ? config.transcription_padding : 16,
-      transcription_rounded: config.transcription_rounded !== false,
-      transcription_border_color: config.transcription_border_color || 'rgba(0, 180, 255, 0.5)',
-      // Response bubble options (assistant speech)
-      show_response: config.show_response !== false,
-      streaming_response: config.streaming_response || false,
-      response_font_size: config.response_font_size !== undefined ? config.response_font_size : 20,
-      response_font_family: config.response_font_family || 'inherit',
-      response_font_color: config.response_font_color || '#444444',
-      response_font_bold: config.response_font_bold !== false,
-      response_font_italic: config.response_font_italic || false,
-      response_background: config.response_background || '#ffffff',
-      response_padding: config.response_padding !== undefined ? config.response_padding : 16,
-      response_rounded: config.response_rounded !== false,
-      response_border_color: config.response_border_color || 'rgba(100, 200, 150, 0.5)',
-      // Background blur
-      background_blur: config.background_blur !== false,
-      background_blur_intensity: config.background_blur_intensity !== undefined ? config.background_blur_intensity : 5,
-      // Pipeline idle timeout (seconds) - pipeline restarts after this time to keep TTS tokens fresh
-      // Default 300 seconds (5 minutes), 0 means no timeout (not recommended)
-      pipeline_idle_timeout: config.pipeline_idle_timeout !== undefined ? config.pipeline_idle_timeout : 300
-    };
+  // --------------------------------------------------------------------------
+  // Render & Global UI
+  // --------------------------------------------------------------------------
+
+  _render() {
+    if (!this.shadowRoot) {
+      this.attachShadow({ mode: 'open' });
+    }
+    this.shadowRoot.innerHTML = '<div id="voice-satellite-card" style="display:none;"></div>';
+  }
+
+  _ensureGlobalUI() {
+    var alreadyExists = !!document.getElementById('voice-satellite-ui');
     
-    this._render();
-  }
+    if (alreadyExists) {
+      this._globalUI = document.getElementById('voice-satellite-ui');
+      this._flushPendingStartButton();
+      return;
+    }
 
-  set hass(hass) {
-    var firstSet = !this._hass;
+    var ui = document.createElement('div');
+    ui.id = 'voice-satellite-ui';
+    ui.innerHTML =
+      '<div class="vs-blur-overlay"></div>' +
+      '<button class="vs-start-btn">' +
+        '<svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>' +
+      '</button>' +
+      '<div class="vs-transcription"></div>' +
+      '<div class="vs-response"></div>' +
+      '<div class="vs-rainbow-bar"></div>';
+
+    document.body.appendChild(ui);
+    this._globalUI = ui;
+
+    // Inject styles
+    this._injectGlobalStyles();
+    this._applyStyles();
+
+    // Start button handler
     var self = this;
-    this._hass = hass;
-    
-    // Monitor connection state changes (only register once globally)
-    if (firstSet && hass && hass.connection && !_vsConnectionListenersRegistered) {
-      // Try to subscribe to connection state changes
-      try {
-        // Home Assistant connection uses addEventListener
-        if (typeof hass.connection.addEventListener === 'function') {
-          // Track if we've had an initial connection
-          var hadInitialConnection = false;
-          
-          hass.connection.addEventListener('ready', function() {
-            console.log('[VoiceSatellite] Connection ready event, hadInitialConnection:', hadInitialConnection);
-            
-            // Skip the first ready event (initial page load)
-            if (!hadInitialConnection) {
-              hadInitialConnection = true;
-              console.log('[VoiceSatellite] Initial connection, skipping restart');
-              return;
-            }
-            
-            // This is a reconnect - clear stale handler ID
-            if (self._binaryHandlerId) {
-              console.log('[VoiceSatellite] Clearing stale binary handler after reconnect');
-              self._binaryHandlerId = null;
-            }
-            // Restart pipeline if we were streaming
-            if (self._isStreaming) {
-              console.log('[VoiceSatellite] Restarting pipeline after reconnect');
-              self._restartPipeline();
-            }
-          });
-          
-          hass.connection.addEventListener('disconnected', function() {
-            console.log('[VoiceSatellite] Connection disconnected event');
-            // Mark that we've had a connection (so next ready is a reconnect)
-            hadInitialConnection = true;
-            // Immediately invalidate the handler to stop sending
-            self._binaryHandlerId = null;
-            // Unsubscribe from pipeline to clean up server-side tasks
-            if (self._unsub) {
-              console.log('[VoiceSatellite] Unsubscribing pipeline on disconnect');
-              try { 
-                self._unsub(); 
-              } catch(e) {
-                // Connection is already closed, this is expected
-              }
-              self._unsub = null;
-            }
-          });
-          
-          _vsConnectionListenersRegistered = true;
-          console.log('[VoiceSatellite] Connection event listeners registered');
-        } else {
-          console.log('[VoiceSatellite] Connection addEventListener not available');
-        }
-      } catch (e) {
-        console.error('[VoiceSatellite] Error registering connection listeners:', e);
+    ui.querySelector('.vs-start-btn').addEventListener('click', function () {
+      self._handleStartClick();
+    });
+
+    // Show the start button immediately. It acts as the user gesture fallback.
+    // _hideStartButton() will be called if/when the mic starts successfully.
+    // This ensures the button is always visible when needed, regardless of
+    // race conditions between connectedCallback, hass setter, and async mic access.
+    var btn = ui.querySelector('.vs-start-btn');
+    btn.classList.add('visible');
+    btn.title = 'Tap to start voice assistant';
+
+    // Flush any pending start button show
+    this._flushPendingStartButton();
+  }
+
+  _flushPendingStartButton() {
+    if (this._pendingStartButtonReason !== undefined) {
+      this._showStartButton(this._pendingStartButtonReason);
+      this._pendingStartButtonReason = undefined;
+    }
+  }
+
+  _injectGlobalStyles() {
+    if (document.getElementById('voice-satellite-styles')) return;
+
+    var style = document.createElement('style');
+    style.id = 'voice-satellite-styles';
+    style.textContent =
+      '#voice-satellite-ui .vs-blur-overlay {' +
+        'position: fixed; top: 0; left: 0; right: 0; bottom: 0;' +
+        'backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);' +
+        'background: rgba(0,0,0,0.3); opacity: 0; transition: opacity 0.3s ease;' +
+        'z-index: 9999; pointer-events: none;' +
+      '}' +
+      '#voice-satellite-ui .vs-blur-overlay.visible { opacity: 1; }' +
+
+      '#voice-satellite-ui .vs-start-btn {' +
+        'position: fixed; bottom: 20px; right: 20px; width: 56px; height: 56px;' +
+        'border-radius: 50%; background: var(--primary-color, #03a9f4);' +
+        'border: none; cursor: pointer; display: none; align-items: center;' +
+        'justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3);' +
+        'z-index: 10001; transition: transform 0.2s, box-shadow 0.2s;' +
+      '}' +
+      '#voice-satellite-ui .vs-start-btn.visible { display: flex; animation: vs-btn-pulse 2s ease-in-out infinite; }' +
+      '#voice-satellite-ui .vs-start-btn:hover {' +
+        'transform: scale(1.1); box-shadow: 0 6px 16px rgba(0,0,0,0.4); animation: none;' +
+      '}' +
+      '#voice-satellite-ui .vs-start-btn svg { width: 28px; height: 28px; fill: white; }' +
+      '@keyframes vs-btn-pulse {' +
+        '0%, 100% { transform: scale(1); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }' +
+        '50% { transform: scale(1.08); box-shadow: 0 6px 20px rgba(3,169,244,0.5); }' +
+      '}' +
+
+      '#voice-satellite-ui .vs-transcription,' +
+      '#voice-satellite-ui .vs-response {' +
+        'position: fixed; left: 50%; transform: translateX(-50%);' +
+        'opacity: 0; transition: opacity 0.3s ease, bottom 0.3s ease; z-index: 10001;' +
+        'max-width: 80%; text-align: center;' +
+        'box-shadow: 0 4px 12px rgba(0,0,0,0.15);' +
+        'pointer-events: none;' +
+      '}' +
+      '#voice-satellite-ui .vs-response {' +
+        'max-height: 40vh; overflow-y: auto;' +
+      '}' +
+      '#voice-satellite-ui .vs-transcription.visible,' +
+      '#voice-satellite-ui .vs-response.visible { opacity: 1; pointer-events: auto; }' +
+      // When response is visible, slide transcription up to make room
+      '#voice-satellite-ui .vs-transcription.shifted { bottom: var(--vs-shifted-bottom, 100px) !important; }' +
+
+      '#voice-satellite-ui .vs-rainbow-bar {' +
+        'position: fixed; left: 0; right: 0;' +
+        'background-size: 200% 100%; opacity: 0; transition: opacity 0.3s ease;' +
+        'z-index: 10000; pointer-events: none;' +
+      '}' +
+      '#voice-satellite-ui .vs-rainbow-bar.visible { opacity: 1; }' +
+      '#voice-satellite-ui .vs-rainbow-bar.connecting {' +
+        'animation: vs-bar-breathe 1.5s ease-in-out infinite;' +
+      '}' +
+      '#voice-satellite-ui .vs-rainbow-bar.listening {' +
+        'animation: vs-gradient-flow 3s linear infinite;' +
+      '}' +
+      '#voice-satellite-ui .vs-rainbow-bar.processing {' +
+        'animation: vs-gradient-flow 0.5s linear infinite;' +
+      '}' +
+      '#voice-satellite-ui .vs-rainbow-bar.speaking {' +
+        'animation: vs-gradient-flow 2s linear infinite;' +
+      '}' +
+      '#voice-satellite-ui .vs-rainbow-bar.error-mode {' +
+        'animation: vs-gradient-flow 2s linear infinite; opacity: 1;' +
+      '}' +
+      '@keyframes vs-gradient-flow {' +
+        '0% { background-position: 0% 50%; }' +
+        '100% { background-position: 200% 50%; }' +
+      '}' +
+      '@keyframes vs-bar-breathe {' +
+        '0%, 100% { opacity: 0.3; }' +
+        '50% { opacity: 0.7; }' +
+      '}';
+
+    document.head.appendChild(style);
+  }
+
+  _applyStyles() {
+    if (!this._globalUI) return;
+    var cfg = this._config;
+
+    // Rainbow bar
+    var bar = this._globalUI.querySelector('.vs-rainbow-bar');
+    bar.style.height = cfg.bar_height + 'px';
+    bar.style[cfg.bar_position === 'top' ? 'top' : 'bottom'] = '0';
+    bar.style[cfg.bar_position === 'top' ? 'bottom' : 'top'] = 'auto';
+    bar.style.background = 'linear-gradient(90deg, ' + cfg.bar_gradient + ')';
+    bar.style.backgroundSize = '200% 100%';
+
+    // Blur overlay
+    var blur = this._globalUI.querySelector('.vs-blur-overlay');
+    if (cfg.background_blur) {
+      blur.style.backdropFilter = 'blur(' + cfg.background_blur_intensity + 'px)';
+      blur.style.webkitBackdropFilter = 'blur(' + cfg.background_blur_intensity + 'px)';
+    } else {
+      blur.style.backdropFilter = 'none';
+      blur.style.webkitBackdropFilter = 'none';
+    }
+
+    // Transcription bubble
+    var trans = this._globalUI.querySelector('.vs-transcription');
+    trans.style.fontSize = cfg.transcription_font_size + 'px';
+    trans.style.fontFamily = cfg.transcription_font_family;
+    trans.style.color = cfg.transcription_font_color;
+    trans.style.fontWeight = cfg.transcription_font_bold ? 'bold' : 'normal';
+    trans.style.fontStyle = cfg.transcription_font_italic ? 'italic' : 'normal';
+    trans.style.background = cfg.transcription_background;
+    trans.style.border = '3px solid ' + cfg.transcription_border_color;
+    trans.style.padding = cfg.transcription_padding + 'px';
+    trans.style.borderRadius = cfg.transcription_rounded ? '12px' : '0';
+
+    // Response bubble
+    var resp = this._globalUI.querySelector('.vs-response');
+    resp.style.fontSize = cfg.response_font_size + 'px';
+    resp.style.fontFamily = cfg.response_font_family;
+    resp.style.color = cfg.response_font_color;
+    resp.style.fontWeight = cfg.response_font_bold ? 'bold' : 'normal';
+    resp.style.fontStyle = cfg.response_font_italic ? 'italic' : 'normal';
+    resp.style.background = cfg.response_background;
+    resp.style.border = '3px solid ' + cfg.response_border_color;
+    resp.style.padding = cfg.response_padding + 'px';
+    resp.style.borderRadius = cfg.response_rounded ? '12px' : '0';
+
+    // Position bubbles above the gradient bar
+    var bubbleGap = 12; // gap between bar and first bubble
+    var bubbleSpacing = 10; // gap between the two bubbles
+    var barH = cfg.bar_height || 6;
+
+    if (cfg.bar_position === 'bottom') {
+      var responseBottom = barH + bubbleGap;
+      resp.style.bottom = responseBottom + 'px';
+      resp.style.top = 'auto';
+      trans.style.bottom = responseBottom + 'px';
+      trans.style.top = 'auto';
+
+      // Update the shifted position dynamically via a CSS custom property
+      // so the .shifted class can use it
+      this._globalUI.style.setProperty('--vs-shifted-bottom',
+        (responseBottom + resp.offsetHeight + bubbleSpacing) + 'px');
+    } else {
+      // Bar is at top — position bubbles at bottom of screen
+      var responseBottom = bubbleGap;
+      resp.style.bottom = responseBottom + 'px';
+      resp.style.top = 'auto';
+      trans.style.bottom = responseBottom + 'px';
+      trans.style.top = 'auto';
+
+      this._globalUI.style.setProperty('--vs-shifted-bottom',
+        (responseBottom + resp.offsetHeight + bubbleSpacing) + 'px');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // State Management
+  // --------------------------------------------------------------------------
+
+  _setState(newState) {
+    var oldState = this._state;
+    this._state = newState;
+    this._log('state', oldState + ' → ' + newState)
+    this._updateUI();
+  }
+
+  _updateUI() {
+    if (!this._globalUI) return;
+
+    var states = {
+      IDLE:               { barVisible: false },
+      CONNECTING:         { barVisible: false },
+      LISTENING:          { barVisible: false },
+      PAUSED:             { barVisible: false },
+      WAKE_WORD_DETECTED: { barVisible: true, animation: 'listening' },
+      STT:                { barVisible: true, animation: 'listening' },
+      INTENT:             { barVisible: true, animation: 'processing' },
+      TTS:                { barVisible: true, animation: 'speaking' },
+      ERROR:              { barVisible: false }
+    };
+
+    var config = states[this._state];
+    if (!config) return;
+
+    // If service unavailable (error state), keep red bar visible
+    if (this._serviceUnavailable && !config.barVisible) {
+      return;
+    }
+
+    // If TTS audio is still playing, keep the bar visible in speaking mode
+    // even if the pipeline has restarted and state moved to LISTENING/IDLE
+    if (this._currentAudio && !config.barVisible) {
+      return;
+    }
+
+    var bar = this._globalUI.querySelector('.vs-rainbow-bar');
+
+    if (config.barVisible) {
+      // Transitioning to an active state — restore rainbow gradient if needed
+      if (bar.classList.contains('error-mode')) {
+        this._clearErrorBar();
       }
-    }
-    
-    if (firstSet && hass && this._config.start_listening_on_load) {
-      setTimeout(function() { self._tryAutoStart(); }, 1000);
+      bar.classList.add('visible');
+      bar.classList.remove('connecting', 'listening', 'processing', 'speaking');
+      if (config.animation) {
+        bar.classList.add(config.animation);
+      }
+    } else {
+      if (bar.classList.contains('error-mode')) {
+        this._clearErrorBar();
+      }
+      bar.classList.remove('visible', 'connecting', 'listening', 'processing', 'speaking');
     }
   }
 
-  async _tryAutoStart() {
-    // If already streaming, nothing to do
-    if (this._isStreaming) {
-      console.log('[VoiceSatellite] Already streaming, skipping auto-start');
-      this._hideStartButton();
+  // --------------------------------------------------------------------------
+  // Start / Stop Listening
+  // --------------------------------------------------------------------------
+
+  async _startListening() {
+    if (window._voiceSatelliteActive && window._voiceSatelliteInstance !== this) {
+      this._log('lifecycle', 'Another instance is active, skipping')
       return;
     }
-    
-    try {
-      await this._startPipeline('_tryAutoStart');
-      this._hideStartButton();
-    } catch (error) {
-      console.log('[VoiceSatellite] Auto-start failed:', error.message);
-      this._showStartButton();
-      this._stopPipeline();
-    }
-  }
-
-  _showStartButton() {
-    var btn = this._globalUI ? this._globalUI.querySelector('.vs-start-btn') : null;
-    if (btn) {
-      btn.classList.add('visible');
-      console.log('[VoiceSatellite] Showing start button');
-    }
-  }
-
-  _hideStartButton() {
-    var btn = this._globalUI ? this._globalUI.querySelector('.vs-start-btn') : null;
-    if (btn) {
-      btn.classList.remove('visible');
-    }
-  }
-
-  async _handleStartClick() {
-    this._hideStartButton();
-    try {
-      await this._startPipeline('_handleStartClick');
-    } catch (error) {
-      console.error('[VoiceSatellite] Start failed:', error);
-      this._showStartButton();
-    }
-  }
-
-  async _startPipeline(caller) {
-    // Log who's calling
-    console.log('[VoiceSatellite] _startPipeline called by:', caller || 'unknown');
-    
-    // Check global mutex first
-    if (_vsPipelineStarting) {
-      console.log('[VoiceSatellite] Pipeline already starting globally, skipping');
+    if (window._voiceSatelliteStarting) {
+      this._log('lifecycle', 'Pipeline already starting globally, skipping')
       return;
     }
-    
-    if (this._isStreaming) {
-      console.log('[VoiceSatellite] Already streaming, skipping _startPipeline');
-      return;
-    }
-    var self = this;
-    
-    // Set both flags immediately to prevent race conditions
-    _vsPipelineStarting = true;
-    this._isStreaming = true;
-    
-    // Clear any pending reconnect timeout
-    if (this._reconnectTimeout) {
-      clearTimeout(this._reconnectTimeout);
-      this._reconnectTimeout = null;
-    }
-    
-    this._setState(State.CONNECTING);
-    this._reconnectAttempts = 0;
-    
+
+    window._voiceSatelliteStarting = true;
+
     try {
-      // Start microphone first (needs user gesture context)
+      this._setState(State.CONNECTING);
       await this._startMicrophone();
-      
-      // Add visibility listener
-      document.addEventListener('visibilitychange', this._boundVisibilityHandler);
-      
-      var pipelinesResult = await this._hass.connection.sendMessagePromise({
-        type: 'assist_pipeline/pipeline/list'
-      });
-      
-      if (this._config.debug) {
-        console.log('[VoiceSatellite] Available pipelines:', pipelinesResult);
-      }
-      
-      var pipelineId = this._config.pipeline_id;
-      if (!pipelineId && pipelinesResult && pipelinesResult.pipelines) {
-        pipelineId = pipelinesResult.preferred_pipeline || 
-                     (pipelinesResult.pipelines[0] ? pipelinesResult.pipelines[0].id : null);
-      }
-      
-      if (!pipelineId) {
-        throw new Error('No pipeline available');
-      }
-      
-      console.log('[VoiceSatellite] Using pipeline:', pipelineId);
-      
-      this._pipelineId = pipelineId;
-      
-      await this._subscribeToPipeline(pipelineId);
+      await this._startPipeline();
+
+      window._voiceSatelliteActive = true;
+      window._voiceSatelliteInstance = this;
+      this._hideStartButton();
     } catch (e) {
-      // If startup fails, reset the flag
-      this._isStreaming = false;
-      throw e;
+      this._logError('pipeline', 'Failed to start: ' + e);
+
+      // Determine what went wrong and show an appropriate start button
+      var reason = 'error';
+      if (e.name === 'NotAllowedError') {
+        // Could be either: user denied permission, OR no user gesture yet.
+        // Browsers throw NotAllowedError for both cases.
+        // Show mic button so user can tap to provide the gesture / re-prompt.
+        reason = 'not-allowed';
+        this._log('mic', 'Access denied — browser requires user gesture');
+      } else if (e.name === 'NotFoundError') {
+        reason = 'not-found';
+        this._logError('mic', 'No microphone found');
+      } else if (e.name === 'NotReadableError' || e.name === 'AbortError') {
+        reason = 'not-readable';
+        this._logError('mic', 'Microphone in use or not readable');
+      }
+
+      this._showStartButton(reason);
+      this._setState(State.IDLE);
     } finally {
-      _vsPipelineStarting = false;
+      window._voiceSatelliteStarting = false;
     }
   }
 
-  async _subscribeToPipeline(pipelineId) {
-    var self = this;
-    
-    // Always unsubscribe from existing pipeline first to prevent leaks
-    if (this._unsub) {
-      console.log('[VoiceSatellite] Unsubscribing from previous pipeline');
-      try { 
-        this._unsub(); 
-        console.log('[VoiceSatellite] Successfully unsubscribed from previous pipeline');
-      } catch(e) {
-        console.log('[VoiceSatellite] Error unsubscribing from previous pipeline:', e);
-      }
-      this._unsub = null;
-    }
-    
-    var pipelineOptions = {
-      type: 'assist_pipeline/run',
-      start_stage: 'wake_word',
-      end_stage: 'tts',
-      input: {
-        sample_rate: SAMPLE_RATE,
-        timeout: this._config.wake_word_timeout
-      },
-      pipeline: pipelineId,
-      // Pipeline idle timeout in seconds - pipeline will end and restart after this time
-      // This ensures TTS tokens stay fresh. Default is 300 seconds (5 minutes)
-      timeout: this._config.pipeline_idle_timeout
-    };
-    
-    this._unsub = await this._hass.connection.subscribeMessage(
-      function(event) { 
-        self._handlePipelineEvent(event); 
-      },
-      pipelineOptions
-    );
-  }
+  // --------------------------------------------------------------------------
+  // Microphone
+  // --------------------------------------------------------------------------
 
   async _startMicrophone() {
-    var self = this;
-    
-    this._audioContext = new (window.AudioContext || window.webkitAudioContext)({
-      sampleRate: SAMPLE_RATE
+    await this._ensureAudioContextRunning();
+
+    this._log('mic', 'AudioContext state=' + this._audioContext.state +
+                  ' sampleRate=' + this._audioContext.sampleRate)
+
+    var audioConstraints = {
+      sampleRate: 16000,
+      channelCount: 1,
+      echoCancellation: this._config.echo_cancellation,
+      noiseSuppression: this._config.noise_suppression,
+      autoGainControl: this._config.auto_gain_control
+    };
+
+    // voiceIsolation is Chrome-only; use advanced so unsupported browsers ignore it
+    if (this._config.voice_isolation) {
+      audioConstraints.advanced = [{ voiceIsolation: true }];
+    }
+
+    this._mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: audioConstraints
     });
-    
-    console.log('[VoiceSatellite] Audio context initial state:', this._audioContext.state);
-    
-    if (this._audioContext.state === 'suspended') {
-      console.log('[VoiceSatellite] Attempting to resume audio context...');
-      
-      var resumePromise = this._audioContext.resume();
-      var timeoutPromise = new Promise(function(resolve) { 
-        setTimeout(function() { resolve('timeout'); }, 200); 
-      });
-      
-      await Promise.race([resumePromise, timeoutPromise]);
-      
-      console.log('[VoiceSatellite] Audio context state after resume attempt:', this._audioContext.state);
-      
-      if (this._audioContext.state === 'suspended') {
-        console.log('[VoiceSatellite] Audio context still suspended, need user gesture');
-        this._audioContext.close();
-        this._audioContext = null;
-        throw new Error('Audio context suspended - user gesture required');
+
+    if (this._config.debug) {
+      var tracks = this._mediaStream.getAudioTracks();
+      this._log('mic', 'Got media stream with ' + tracks.length + ' audio track(s)');
+      if (tracks.length > 0) {
+        var settings = tracks[0].getSettings();
+        this._log('mic', 'Track settings: ' + JSON.stringify(settings));
       }
     }
-    
-    this._mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        sampleRate: SAMPLE_RATE,
-        echoCancellation: this._config.echo_cancellation,
-        noiseSuppression: this._config.noise_suppression,
-        autoGainControl: this._config.auto_gain_control
-      }
-    });
-    
+
     this._sourceNode = this._audioContext.createMediaStreamSource(this._mediaStream);
-    
-    // Try to use AudioWorklet (more efficient), fall back to ScriptProcessor
+    this._actualSampleRate = this._audioContext.sampleRate;
+
+    this._log('mic', 'Actual sample rate: ' + this._actualSampleRate)
+
+    // Try AudioWorklet, fall back to ScriptProcessor
     try {
       await this._setupAudioWorklet(this._sourceNode);
-      this._useWorklet = true;
-      console.log('[VoiceSatellite] Using AudioWorklet for audio processing');
+      this._log('mic', 'Audio capture via AudioWorklet')
     } catch (e) {
-      console.log('[VoiceSatellite] AudioWorklet not available, using ScriptProcessor:', e.message);
+      this._log('mic', 'AudioWorklet unavailable (' + e.message + '), using ScriptProcessor');
       this._setupScriptProcessor(this._sourceNode);
-      this._useWorklet = false;
-    }
-    
-    // Start send interval
-    this._sendInterval = setInterval(function() {
-      self._sendAudioBuffer();
-    }, AUDIO_CHUNK_MS);
-    
-    console.log('[VoiceSatellite] Microphone started successfully');
-  }
-
-  async _setupAudioWorklet(source) {
-    var self = this;
-    
-    // Only register the worklet if not already registered
-    if (!this._workletRegistered) {
-      try {
-        // Create blob URL from worklet code
-        var blob = new Blob([WORKLET_CODE], { type: 'application/javascript' });
-        var workletUrl = URL.createObjectURL(blob);
-        
-        await this._audioContext.audioWorklet.addModule(workletUrl);
-        URL.revokeObjectURL(workletUrl);
-        
-        this._workletRegistered = true;
-      } catch (e) {
-        // Already registered or other error - that's okay, continue
-        if (e.message && e.message.indexOf('already registered') !== -1) {
-          this._workletRegistered = true;
-        } else {
-          throw e;
-        }
-      }
-    }
-    
-    this._workletNode = new AudioWorkletNode(this._audioContext, 'audio-processor');
-    
-    this._workletNode.port.onmessage = function(event) {
-      if (!self._isStreaming || !self._binaryHandlerId || self._isPaused) return;
-      
-      var audioData = event.data.audio;
-      var pcm = self._convertToPcm(audioData);
-      self._audioChunks.push(pcm);
-    };
-    
-    source.connect(this._workletNode);
-    this._workletNode.connect(this._audioContext.destination);
-  }
-
-  _setupScriptProcessor(source) {
-    var self = this;
-    
-    this._processor = this._audioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
-    
-    this._processor.onaudioprocess = function(e) {
-      if (!self._isStreaming || !self._binaryHandlerId || self._isPaused) return;
-      
-      var inputData = e.inputBuffer.getChannelData(0);
-      var pcm = self._convertToPcm(inputData);
-      self._audioChunks.push(pcm);
-    };
-    
-    source.connect(this._processor);
-    this._processor.connect(this._audioContext.destination);
-  }
-
-  _convertToPcm(floatData) {
-    // Reuse buffer if same size, otherwise create new one
-    var length = floatData.length;
-    if (!this._reusablePcmBuffer || this._reusablePcmBuffer.length !== length) {
-      this._reusablePcmBuffer = new Int16Array(length);
-    }
-    
-    var pcm = new Int16Array(length); // Need new array for storage
-    for (var i = 0; i < length; i++) {
-      var s = floatData[i];
-      s = s < -1 ? -1 : (s > 1 ? 1 : s);
-      pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-    }
-    return pcm;
-  }
-
-  _sendAudioBuffer() {
-    if (!this._binaryHandlerId || this._audioChunks.length === 0 || this._isPaused) return;
-    
-    // Check if connection is still valid
-    if (!this._hass || !this._hass.connection || !this._hass.connection.connected) {
-      // Connection lost - clear handler and stop sending
-      this._binaryHandlerId = null;
-      return;
-    }
-    
-    // Calculate total length
-    var totalLength = 0;
-    for (var i = 0; i < this._audioChunks.length; i++) {
-      totalLength += this._audioChunks[i].length;
-    }
-    
-    // Combine chunks
-    var combined = new Int16Array(totalLength);
-    var offset = 0;
-    for (var i = 0; i < this._audioChunks.length; i++) {
-      combined.set(this._audioChunks[i], offset);
-      offset += this._audioChunks[i].length;
-    }
-    this._audioChunks.length = 0; // Clear array without reallocating
-    
-    // Create message with handler ID prefix
-    var audioBytes = new Uint8Array(combined.buffer);
-    var messageLength = 1 + audioBytes.length;
-    
-    // Reuse message buffer if possible
-    if (!this._reusableMessageBuffer || this._reusableMessageBuffer.length !== messageLength) {
-      this._reusableMessageBuffer = new Uint8Array(messageLength);
-    }
-    
-    this._reusableMessageBuffer[0] = this._binaryHandlerId;
-    this._reusableMessageBuffer.set(audioBytes, 1);
-    
-    try {
-      var socket = this._hass.connection.socket;
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(this._reusableMessageBuffer.buffer);
-      } else {
-        // Socket not ready - clear handler
-        this._binaryHandlerId = null;
-      }
-    } catch (e) {
-      console.error('[VoiceSatellite] Error sending audio:', e);
-      this._binaryHandlerId = null;
+      this._log('mic', 'Audio capture via ScriptProcessor')
     }
   }
 
-  _handlePipelineEvent(event) {
-    var self = this;
-    var eventType = event.type;
-    var eventData = event.data || {};
-    
-    if (this._config.debug) {
-      console.log('[VoiceSatellite] Event:', eventType, JSON.stringify(eventData));
-    }
-    
-    // Don't reset reconnect attempts here - only reset on successful wake word detection
-    // This allows the counter to accumulate when service is unavailable
-    
-    switch (eventType) {
-      case 'run-start':
-        if (eventData.runner_data && eventData.runner_data.stt_binary_handler_id !== undefined) {
-          this._binaryHandlerId = eventData.runner_data.stt_binary_handler_id;
-        }
-        // Don't clear _serviceUnavailable here - we need to wait for wake_word-end
-        // to confirm the service is actually working (non-empty wake_word_output)
-        this._setState(State.LISTENING);
-        console.log('[VoiceSatellite] Pipeline started, binary_handler_id:', this._binaryHandlerId);
-        break;
-        
-      case 'wake_word-start':
-        this._setState(State.LISTENING);
-        // If service was unavailable, set a timer to clear the error bar
-        // If we don't get an empty wake_word-end within 2 seconds, service is working
-        if (this._serviceUnavailable) {
-          var self = this;
-          this._serviceRecoveryTimer = setTimeout(function() {
-            if (self._serviceUnavailable) {
-              console.log('[VoiceSatellite] Service appears recovered (no immediate error)');
-              self._serviceUnavailable = false;
-              self._reconnectAttempts = 0;
-              self._hideErrorBar();
-            }
-          }, 2000);
-        }
-        break;
-        
-      case 'wake_word-end':
-        // Clear the service recovery timer if it's running
-        if (this._serviceRecoveryTimer) {
-          clearTimeout(this._serviceRecoveryTimer);
-          this._serviceRecoveryTimer = null;
-        }
-        // Only trigger if wake_word_output contains actual data (wake_word_id)
-        // An empty object {} means no wake word was detected (e.g., service unavailable)
-        if (eventData.wake_word_output && Object.keys(eventData.wake_word_output).length > 0) {
-          // Service is working - clear error state and reset attempts
-          this._reconnectAttempts = 0;
-          if (this._serviceUnavailable) {
-            this._serviceUnavailable = false;
-            this._hideErrorBar();
-            console.log('[VoiceSatellite] Service recovered, cleared error state');
-          }
-          console.log('[VoiceSatellite] Wake word detected:', JSON.stringify(eventData.wake_word_output));
-          
-          // Force hide transcription and response from previous run
-          this._hideTranscription();
-          this._hideResponse();
-          
-          // Force state update
-          this._state = State.WAKE_WORD_DETECTED;
-          
-          // Start pipeline timeout if configured
-          this._startPipelineTimeout();
-          
-          // Multiple attempts to show UI for slower devices
-          var self = this;
-          self._forceUIUpdate();
-          setTimeout(function() { self._forceUIUpdate(); }, 50);
-          setTimeout(function() { self._forceUIUpdate(); }, 150);
-          setTimeout(function() { self._forceUIUpdate(); }, 300);
-          
-          if (this._config.chime_on_wake_word) {
-            this._playChime('wake');
-          }
-          // Turn off configured switch (e.g., to exit screensaver)
-          if (this._config.wake_word_switch) {
-            this._hass.callService('switch', 'turn_off', {
-              entity_id: this._config.wake_word_switch
-            });
-          }
-        } else {
-          console.log('[VoiceSatellite] wake_word-end received with empty output (service may be unavailable)');
-          // Mark service as unavailable and show error bar immediately
-          this._serviceUnavailable = true;
-          this._showErrorBar();
-          // Only play chime on first detection
-          if (this._reconnectAttempts === 0) {
-            this._playChime('error');
-          }
-          // Set flag so run-end doesn't also restart
-          this._errorHandlingRestart = true;
-          // Use service unavailable reconnect (keeps trying indefinitely)
-          this._handleServiceUnavailable();
-        }
-        break;
-        
-      case 'stt-start':
-        this._setState(State.STT);
-        break;
-        
-      case 'stt-end':
-        if (eventData.stt_output && eventData.stt_output.text) {
-          var sttText = eventData.stt_output.text.trim();
-          console.log('[VoiceSatellite] STT:', sttText);
-          this._showTranscription(sttText);
-        }
-        break;
-        
-      case 'intent-start':
-        this._setState(State.INTENT);
-        // Reset streaming response buffer
-        this._streamingResponse = '';
-        break;
-      
-      case 'intent-progress':
-        // Stream response text in real-time (requires cloud models)
-        if (this._config.streaming_response && eventData.chat_log_delta && eventData.chat_log_delta.content) {
-          this._streamingResponse = (this._streamingResponse || '') + eventData.chat_log_delta.content;
-          this._showResponse(this._streamingResponse);
-        }
-        break;
-        
-      case 'intent-end':
-        if (eventData.intent_output && eventData.intent_output.response) {
-          var response = eventData.intent_output.response;
-          if (response.speech && response.speech.plain) {
-            var responseText = response.speech.plain.speech;
-            console.log('[VoiceSatellite] Response:', responseText);
-            // Show final response (in case streaming missed anything)
-            this._showResponse(responseText);
-          }
-        }
-        // Clear streaming buffer
-        this._streamingResponse = '';
-        break;
-        
-      case 'tts-start':
-        this._setState(State.TTS);
-        this._forceUIUpdate();
-        // Clear pipeline timeout - TTS has arrived, no longer stuck
-        this._clearPipelineTimeout();
-        break;
-        
-      case 'tts-end':
-        if (eventData.tts_output && eventData.tts_output.url) {
-          this._playResponse(eventData.tts_output.url);
-          // Keep TTS state active - will be reset when audio finishes in _playResponse
-        }
-        break;
-        
-      case 'run-end':
-        console.log('[VoiceSatellite] Pipeline run ended');
-        this._binaryHandlerId = null;
-        
-        // Note: Don't clear pipeline timeout here - it should only clear when TTS starts
-        // This handles cases where the pipeline ends without reaching TTS
-        
-        // Only reset state if not playing TTS audio
-        if (this._state !== State.TTS || !this._isSpeaking) {
-          // If error handler is already restarting, don't restart again
-          if (this._errorHandlingRestart) {
-            this._errorHandlingRestart = false;
-            break;
-          }
-          
-          // If we never reached TTS and timeout is still running, let it handle the restart
-          // Otherwise proceed normally
-          if (!this._pipelineTimeoutId) {
-            if (this._config.chime_on_request_sent && this._state !== State.LISTENING) {
-              this._playChime('done');
-            }
-            
-            // Force state to IDLE first, then restart
-            this._state = State.IDLE;
-            this._updateUI();
-            
-            setTimeout(function() {
-              if (self._isStreaming && !self._isPaused) {
-                self._restartPipeline();
-              }
-            }, 500);
-          }
-        }
-        break;
-        
-      case 'error':
-        console.error('[VoiceSatellite] Pipeline error:', eventData.code, '-', eventData.message);
-        // Clear pipeline timeout - error is being handled, don't trigger timeout later
-        this._clearPipelineTimeout();
-        // Set flag so run-end doesn't also restart
-        this._errorHandlingRestart = true;
-        // Hide bubbles
-        this._hideTranscription();
-        this._hideResponse();
-        
-        // Determine if we should show error feedback
-        // Only show error chime/flash if user was actively interacting (not just idle listening)
-        var isActiveInteraction = this._state !== State.IDLE && 
-                                   this._state !== State.LISTENING && 
-                                   this._state !== State.CONNECTING;
-        
-        // Some errors are expected and should restart immediately without counting as failures
-        var isExpectedError = eventData.code === 'stt-no-text-recognized' || 
-                              eventData.code === 'wake-word-timeout' ||
-                              eventData.code === 'duplicate_wake_up_detected' ||
-                              eventData.code === 'timeout';
-        
-        if (isExpectedError || !isActiveInteraction) {
-          // Silent handling - just hide UI quietly
-          this._state = State.IDLE;
-          this._updateUI();
-        } else {
-          // Active interaction error - show error feedback
-          this._playChime('error');
-          this._flashError();
-        }
-        
-        if (isExpectedError) {
-          // Expected errors - restart immediately, no delay, don't increment counter
-          console.log('[VoiceSatellite] Expected error, restarting immediately');
-          this._restartPipeline();
-        } else {
-          // Unexpected errors - use normal error handling with delay and counter
-          this._handlePipelineError();
-        }
-        break;
-    }
-  }
-
-  _handlePipelineError() {
-    var self = this;
-    
-    this._reconnectAttempts++;
-    
-    if (this._reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      console.error('[VoiceSatellite] Max reconnect attempts reached');
-      this._setState(State.ERROR);
-      this._showStartButton();
-      return;
-    }
-    
-    console.log('[VoiceSatellite] Reconnecting in', RECONNECT_DELAY_MS, 'ms (attempt', this._reconnectAttempts, ')');
-    
-    this._reconnectTimeout = setTimeout(function() {
-      if (self._isStreaming && !self._isPaused) {
-        self._restartPipeline();
-      }
-    }, RECONNECT_DELAY_MS);
-  }
-
-  _handleServiceUnavailable() {
-    var self = this;
-    
-    this._reconnectAttempts++;
-    
-    // Use exponential backoff: 5s, 10s, 15s, max 30s
-    var delay = Math.min(5000 + (this._reconnectAttempts - 1) * 5000, 30000);
-    
-    console.log('[VoiceSatellite] Service unavailable, retrying in', delay, 'ms (attempt', this._reconnectAttempts, ')');
-    
-    this._reconnectTimeout = setTimeout(async function() {
-      if (self._isStreaming && !self._isPaused) {
-        // Full microphone reset for service recovery
-        await self._fullMicrophoneReset();
-        self._restartPipeline();
-      }
-    }, delay);
-  }
-
-  async _restartPipeline() {
-    var self = this;
-    
-    // Prevent concurrent restarts
-    if (this._isRestarting) {
-      console.log('[VoiceSatellite] Already restarting, skipping');
-      return;
-    }
-    
-    // Clear any pending reconnect timeout to prevent double restarts
-    if (this._reconnectTimeout) {
-      clearTimeout(this._reconnectTimeout);
-      this._reconnectTimeout = null;
-    }
-    
-    this._isRestarting = true;
-    console.log('[VoiceSatellite] Restarting pipeline...');
-    this._binaryHandlerId = null;
-    
-    try {
-      await this._subscribeToPipeline(this._pipelineId);
-    } catch (error) {
-      console.error('[VoiceSatellite] Failed to restart pipeline:', error);
-      this._handlePipelineError();
-    } finally {
-      this._isRestarting = false;
-    }
-  }
-
-  _handleVisibilityChange() {
-    if (document.hidden) {
-      this._pauseListening();
-    } else {
-      this._resumeListening();
-    }
-  }
-
-  _pauseListening() {
-    if (!this._isStreaming || this._isPaused) return;
-    
-    console.log('[VoiceSatellite] Pausing (tab hidden)');
-    this._isPaused = true;
-    this._setState(State.PAUSED);
-    
-    // Clear audio buffer
-    this._audioChunks.length = 0;
-    
-    // Suspend audio context to save resources
-    if (this._audioContext && this._audioContext.state === 'running') {
-      this._audioContext.suspend();
-    }
-  }
-
-  async _resumeListening() {
-    if (!this._isStreaming || !this._isPaused) return;
-    
-    // Debounce rapid tab switches - wait 500ms before actually resuming
-    if (this._resumeDebounceTimer) {
-      clearTimeout(this._resumeDebounceTimer);
-    }
-    
-    var self = this;
-    this._resumeDebounceTimer = setTimeout(async function() {
-      self._resumeDebounceTimer = null;
-      
-      if (!self._isStreaming || !self._isPaused) return;
-      
-      console.log('[VoiceSatellite] Resuming (tab visible)');
-      
-      // Clear the paused flag
-      self._isPaused = false;
-      
-      // The audio nodes may have stopped working after suspend
-      // Safest approach is to recreate the microphone connection
-      await self._reconnectMicrophone();
-      
-      // Restart pipeline to get fresh handler ID
-      await self._restartPipeline();
-    }, 500);
-  }
-
-  async _reconnectMicrophone() {
-    console.log('[VoiceSatellite] Reconnecting microphone...');
-    
-    // Stop existing audio processing
-    if (this._sourceNode) {
-      try {
-        this._sourceNode.disconnect();
-      } catch (e) {
-        // Ignore - might already be disconnected
-      }
-      this._sourceNode = null;
-    }
-    
-    if (this._workletNode) {
-      try {
-        this._workletNode.disconnect();
-      } catch (e) {
-        // Ignore
-      }
-      this._workletNode = null;
-    }
-    
-    if (this._processor) {
-      try {
-        this._processor.disconnect();
-      } catch (e) {
-        // Ignore
-      }
-      this._processor = null;
-    }
-    
-    // Resume audio context if needed
-    if (this._audioContext && this._audioContext.state === 'suspended') {
-      await this._audioContext.resume();
-      console.log('[VoiceSatellite] Audio context resumed, state:', this._audioContext.state);
-    }
-    
-    // Recreate the source and processor nodes
-    if (this._mediaStream && this._audioContext) {
-      this._sourceNode = this._audioContext.createMediaStreamSource(this._mediaStream);
-      
-      // Try to use AudioWorklet, fall back to ScriptProcessor
-      if (this._useWorklet) {
-        try {
-          await this._setupAudioWorklet(this._sourceNode);
-          console.log('[VoiceSatellite] AudioWorklet reconnected');
-        } catch (e) {
-          console.log('[VoiceSatellite] AudioWorklet reconnect failed, using ScriptProcessor');
-          this._setupScriptProcessor(this._sourceNode);
-          this._useWorklet = false;
-        }
-      } else {
-        this._setupScriptProcessor(this._sourceNode);
-        console.log('[VoiceSatellite] ScriptProcessor reconnected');
-      }
-    }
-  }
-
-  async _fullMicrophoneReset() {
-    console.log('[VoiceSatellite] Full microphone reset for service recovery');
-    
-    // Stop existing audio processing
-    if (this._sourceNode) {
-      try {
-        this._sourceNode.disconnect();
-      } catch (e) {
-        // Ignore
-      }
-      this._sourceNode = null;
-    }
-    
-    if (this._workletNode) {
-      try {
-        this._workletNode.disconnect();
-      } catch (e) {
-        // Ignore
-      }
-      this._workletNode = null;
-    }
-    
-    if (this._processor) {
-      try {
-        this._processor.disconnect();
-      } catch (e) {
-        // Ignore
-      }
-      this._processor = null;
-    }
-    
-    // Stop old stream
-    if (this._mediaStream) {
-      this._mediaStream.getTracks().forEach(function(track) { track.stop(); });
-      this._mediaStream = null;
-    }
-    
-    // Close old audio context
-    if (this._audioContext) {
-      try {
-        await this._audioContext.close();
-      } catch (e) {
-        console.log('[VoiceSatellite] Error closing audio context:', e);
-      }
-      this._audioContext = null;
-    }
-    
-    // Reset worklet registration since we're creating a new audio context
-    this._workletRegistered = false;
-    
-    // Get fresh microphone
-    try {
-      this._mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 16000,
-          echoCancellation: true,
-          noiseSuppression: true
-        }
-      });
-      
-      this._audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-      this._sourceNode = this._audioContext.createMediaStreamSource(this._mediaStream);
-      
-      if (this._useWorklet) {
-        try {
-          await this._setupAudioWorklet(this._sourceNode);
-          console.log('[VoiceSatellite] AudioWorklet fully recreated');
-        } catch (e) {
-          console.log('[VoiceSatellite] AudioWorklet failed, using ScriptProcessor');
-          this._setupScriptProcessor(this._sourceNode);
-          this._useWorklet = false;
-        }
-      } else {
-        this._setupScriptProcessor(this._sourceNode);
-        console.log('[VoiceSatellite] ScriptProcessor recreated');
-      }
-    } catch (e) {
-      console.error('[VoiceSatellite] Failed to get fresh microphone:', e);
-    }
-  }
-
-  _stopPipeline() {
-    this._isStreaming = false;
-    this._isPaused = false;
-    
-    // Remove visibility listener
-    document.removeEventListener('visibilitychange', this._boundVisibilityHandler);
-    
-    // Clear reconnect timeout
-    if (this._reconnectTimeout) {
-      clearTimeout(this._reconnectTimeout);
-      this._reconnectTimeout = null;
-    }
-    
-    // Clear pipeline timeout
-    this._clearPipelineTimeout();
-    
+  _stopMicrophone() {
     if (this._sendInterval) {
       clearInterval(this._sendInterval);
       this._sendInterval = null;
     }
-    
-    if (this._unsub) {
-      try { this._unsub(); } catch(e) {}
-      this._unsub = null;
-    }
-    
-    this._binaryHandlerId = null;
-    
     if (this._workletNode) {
       this._workletNode.disconnect();
       this._workletNode = null;
     }
-    
-    if (this._processor) {
-      this._processor.disconnect();
-      this._processor = null;
+    if (this._scriptProcessor) {
+      this._scriptProcessor.disconnect();
+      this._scriptProcessor = null;
     }
-    
+    if (this._sourceNode) {
+      this._sourceNode.disconnect();
+      this._sourceNode = null;
+    }
     if (this._mediaStream) {
-      this._mediaStream.getTracks().forEach(function(t) { t.stop(); });
+      this._mediaStream.getTracks().forEach(function (track) { track.stop(); });
       this._mediaStream = null;
     }
-    
-    if (this._audioContext && this._audioContext.state !== 'closed') {
-      this._audioContext.close();
-      this._audioContext = null;
-    }
-    
-    this._audioChunks.length = 0;
-    this._setState(State.IDLE);
-    
-    console.log('[VoiceSatellite] Pipeline stopped');
+    this._audioBuffer = [];
   }
 
-  _startPipelineTimeout() {
-    var self = this;
-    
-    // Clear any existing timeout
-    this._clearPipelineTimeout();
-    
-    // Only set timeout if configured (> 0)
-    if (this._config.pipeline_timeout > 0) {
-      console.log('[VoiceSatellite] Starting pipeline timeout:', this._config.pipeline_timeout, 'seconds');
-      
-      this._pipelineTimeoutId = setTimeout(function() {
-        console.warn('[VoiceSatellite] Pipeline timeout! Restarting...');
-        
-        // Play error chime
-        self._playChime('error');
-        
-        // Flash red on the bar
-        self._flashError();
-        
-        // Hide any visible bubbles
-        self._hideTranscription();
-        self._hideResponse();
-        
-        // Force restart the pipeline after a brief delay for visual feedback
-        setTimeout(function() {
-          self._restartPipeline();
-        }, 1000);
-      }, this._config.pipeline_timeout * 1000);
+  async _ensureAudioContextRunning() {
+    if (!this._audioContext) {
+      this._audioContext = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 16000
+      });
+    }
+    if (this._audioContext.state === 'suspended') {
+      this._log('mic', 'Resuming suspended AudioContext')
+      await this._audioContext.resume();
+    }
+    if (this._audioContext.state !== 'running') {
+      throw new Error('AudioContext failed to start: ' + this._audioContext.state);
     }
   }
 
-  _flashError() {
-    var bar = this._globalUI ? this._globalUI.querySelector('.vs-rainbow-bar') : null;
-    if (!bar) return;
-    
-    // Store original background
-    var originalBg = bar.style.background;
-    
-    // Flash red
-    bar.style.background = '#ff4444';
-    bar.classList.add('visible');
-    bar.style.opacity = '1';
-    
-    // Flash 3 times
+  async _setupAudioWorklet(sourceNode) {
+    var workletCode =
+      'class VoiceSatelliteProcessor extends AudioWorkletProcessor {' +
+        'constructor() { super(); this.buffer = []; }' +
+        'process(inputs, outputs, parameters) {' +
+          'var input = inputs[0];' +
+          'if (input && input[0]) {' +
+            'var channelData = new Float32Array(input[0]);' +
+            'this.port.postMessage(channelData);' +
+          '}' +
+          'return true;' +
+        '}' +
+      '}' +
+      'registerProcessor("voice-satellite-processor", VoiceSatelliteProcessor);';
+
+    var blob = new Blob([workletCode], { type: 'application/javascript' });
+    var workletUrl = URL.createObjectURL(blob);
+    await this._audioContext.audioWorklet.addModule(workletUrl);
+    URL.revokeObjectURL(workletUrl);
+
+    this._workletNode = new AudioWorkletNode(this._audioContext, 'voice-satellite-processor');
     var self = this;
-    var flashCount = 0;
-    var flashInterval = setInterval(function() {
-      flashCount++;
-      if (flashCount % 2 === 0) {
-        bar.style.background = '#ff4444';
-        bar.style.opacity = '1';
+    this._workletNode.port.onmessage = function (e) {
+      self._audioBuffer.push(new Float32Array(e.data));
+    };
+    sourceNode.connect(this._workletNode);
+    this._workletNode.connect(this._audioContext.destination);
+  }
+
+  _setupScriptProcessor(sourceNode) {
+    this._scriptProcessor = this._audioContext.createScriptProcessor(2048, 1, 1);
+    var self = this;
+    this._scriptProcessor.onaudioprocess = function (e) {
+      var inputData = e.inputBuffer.getChannelData(0);
+      self._audioBuffer.push(new Float32Array(inputData));
+    };
+    sourceNode.connect(this._scriptProcessor);
+    this._scriptProcessor.connect(this._audioContext.destination);
+  }
+
+  // --------------------------------------------------------------------------
+  // Audio Processing
+  // --------------------------------------------------------------------------
+
+  _sendAudioBuffer() {
+    if (this._binaryHandlerId === null || this._binaryHandlerId === undefined) return;
+    if (this._audioBuffer.length === 0) return;
+
+    // Combine all chunks
+    var totalLength = 0;
+    for (var i = 0; i < this._audioBuffer.length; i++) {
+      totalLength += this._audioBuffer[i].length;
+    }
+    var combined = new Float32Array(totalLength);
+    var offset = 0;
+    for (var i = 0; i < this._audioBuffer.length; i++) {
+      combined.set(this._audioBuffer[i], offset);
+      offset += this._audioBuffer[i].length;
+    }
+    this._audioBuffer = [];
+
+    // Resample if needed
+    if (this._actualSampleRate !== 16000) {
+      combined = this._resample(combined, this._actualSampleRate, 16000);
+    }
+
+    // Convert and send
+    var pcmData = this._floatTo16BitPCM(combined);
+    this._sendBinaryAudio(pcmData);
+
+
+  }
+
+  _resample(inputSamples, fromSampleRate, toSampleRate) {
+    if (fromSampleRate === toSampleRate) return inputSamples;
+
+    var ratio = fromSampleRate / toSampleRate;
+    var outputLength = Math.round(inputSamples.length / ratio);
+    var output = new Float32Array(outputLength);
+
+    for (var i = 0; i < outputLength; i++) {
+      var srcIndex = i * ratio;
+      var low = Math.floor(srcIndex);
+      var high = Math.min(low + 1, inputSamples.length - 1);
+      var frac = srcIndex - low;
+      output[i] = inputSamples[low] * (1 - frac) + inputSamples[high] * frac;
+    }
+    return output;
+  }
+
+  _floatTo16BitPCM(float32Array) {
+    var pcmData = new Int16Array(float32Array.length);
+    for (var i = 0; i < float32Array.length; i++) {
+      var s = Math.max(-1, Math.min(1, float32Array[i]));
+      pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return pcmData;
+  }
+
+  _sendBinaryAudio(pcmData) {
+    if (this._binaryHandlerId === null || this._binaryHandlerId === undefined) return;
+    if (!this._connection || !this._connection.socket) return;
+
+    // Don't send if WebSocket is closing or closed
+    if (this._connection.socket.readyState !== WebSocket.OPEN) return;
+
+    var message = new Uint8Array(1 + pcmData.byteLength);
+    message[0] = this._binaryHandlerId;
+    message.set(new Uint8Array(pcmData.buffer), 1);
+    this._connection.socket.send(message.buffer);
+  }
+
+  // --------------------------------------------------------------------------
+  // Pipeline
+  // --------------------------------------------------------------------------
+
+  async _startPipeline() {
+    var self = this;
+
+    if (!this._connection) {
+      if (this._hass && this._hass.connection) {
+        this._connection = this._hass.connection;
       } else {
-        bar.style.opacity = '0.3';
+        throw new Error('No Home Assistant connection available');
       }
-      
-      if (flashCount >= 6) {
-        clearInterval(flashInterval);
-        bar.style.background = originalBg;
-        bar.style.opacity = '';
-        bar.classList.remove('visible');
+    }
+
+    // Get available pipelines
+    var pipelines = await this._connection.sendMessagePromise({
+      type: 'assist_pipeline/pipeline/list'
+    });
+
+    this._log('pipeline', 'Available: ' + pipelines.pipelines.map(function(p) {
+        return p.name + ' (' + p.id + ')' + (p.preferred ? ' [preferred]' : '');
+      }).join(', '));
+
+    // Select pipeline
+    var pipelineId = this._config.pipeline_id;
+    if (!pipelineId) {
+      var preferred = pipelines.pipelines.find(function (p) { return p.preferred; });
+      pipelineId = preferred ? preferred.id : pipelines.pipelines[0].id;
+    }
+
+    this._log('pipeline', 'Starting pipeline: ' + pipelineId);
+
+    // Subscribe to pipeline events
+    var runConfig = {
+      type: 'assist_pipeline/run',
+      start_stage: 'wake_word',
+      end_stage: 'tts',
+      input: {
+        sample_rate: 16000,
+        timeout: 0              // Wait indefinitely for wake word
+      },
+      pipeline: pipelineId,
+      timeout: this._config.pipeline_idle_timeout
+    };
+
+    this._log('pipeline', 'Run config: ' + JSON.stringify(runConfig));
+
+    this._unsubscribe = await this._connection.subscribeMessage(
+      function (message) {
+        self._handlePipelineMessage(message);
+      },
+      runConfig
+    );
+
+    this._log('pipeline', 'Subscribed, waiting for run-start...');
+
+    // Start sending audio
+    this._sendInterval = setInterval(function () {
+      self._sendAudioBuffer();
+    }, 100);
+
+    this._isStreaming = true;
+    this._startIdleTimeout();
+  }
+
+  async _stopPipeline() {
+    if (this._sendInterval) {
+      clearInterval(this._sendInterval);
+      this._sendInterval = null;
+    }
+    this._binaryHandlerId = null;
+    this._isStreaming = false;
+
+    if (this._unsubscribe) {
+      try {
+        await this._unsubscribe();
+      } catch (e) {
+        // Ignore unsubscribe errors
       }
-    }, 150);
+      this._unsubscribe = null;
+    }
+
+    this._clearIdleTimeout();
+  }
+
+  _restartPipeline(delay) {
+    var self = this;
+
+    // Prevent concurrent restarts — if one is already in flight, skip
+    if (this._isRestarting) {
+      this._log('pipeline', 'Restart already in progress — skipping');
+      return;
+    }
+    this._isRestarting = true;
+
+    if (this._restartTimeout) {
+      clearTimeout(this._restartTimeout);
+      this._restartTimeout = null;
+    }
+
+    // Clear idle timeout to prevent it from triggering during restart
+    this._clearIdleTimeout();
+
+    // _stopPipeline is async (awaits unsubscribe). We must wait for it
+    // to complete before scheduling the new pipeline to avoid stale
+    // subscriptions piling up.
+    var stopPromise = this._stopPipeline();
+    stopPromise.then(function () {
+      self._restartTimeout = setTimeout(function () {
+        self._restartTimeout = null;
+        self._isRestarting = false;
+        self._startPipeline().catch(function (e) {
+          self._logError('pipeline', 'Restart failed: ' + e);
+
+          // Show error bar on connection/startup failures too
+          if (!self._serviceUnavailable) {
+            self._showErrorBar();
+            self._serviceUnavailable = true;
+          }
+
+          self._restartPipeline(self._calculateRetryDelay());
+        });
+      }, delay || 0);
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // Pipeline Message Handling
+  // --------------------------------------------------------------------------
+
+  _handlePipelineMessage(message) {
+    // HA's assist_pipeline/run subscribeMessage delivers events directly as:
+    //   { type: "run-start", data: {...}, timestamp: "..." }
+    //   { type: "wake_word-end", data: {...}, timestamp: "..." }
+    // NOT wrapped in { type: "event", event: {...} }
+
+    var eventType = message.type;
+    var eventData = message.data || {};
+
+    if (this._config.debug) {
+      var timestamp = message.timestamp ? message.timestamp.split('T')[1].split('.')[0] : '';
+      this._log('event', timestamp + ' ' + eventType + ' ' + JSON.stringify(eventData).substring(0, 500));
+    }
+
+    switch (eventType) {
+      case 'run-start':
+        this._handleRunStart(eventData);
+        break;
+      case 'wake_word-start':
+        this._handleWakeWordStart();
+        break;
+      case 'wake_word-end':
+        this._handleWakeWordEnd(eventData);
+        break;
+      case 'stt-start':
+        this._setState(State.STT);
+        break;
+      case 'stt-vad-start':
+        this._log('event', 'VAD: speech started');
+        break;
+      case 'stt-vad-end':
+        this._log('event', 'VAD: speech ended');
+        break;
+      case 'stt-end':
+        this._handleSttEnd(eventData);
+        break;
+      case 'intent-start':
+        this._setState(State.INTENT);
+        break;
+      case 'intent-progress':
+        if (this._config.streaming_response) {
+          this._handleIntentProgress(eventData);
+        }
+        break;
+      case 'intent-end':
+        this._handleIntentEnd(eventData);
+        break;
+      case 'tts-start':
+        this._setState(State.TTS);
+        break;
+      case 'tts-end':
+        this._handleTtsEnd(eventData);
+        break;
+      case 'run-end':
+        this._handleRunEnd();
+        break;
+      case 'error':
+        this._handlePipelineError(eventData);
+        break;
+    }
+  }
+
+  _handleRunStart(eventData) {
+    this._binaryHandlerId = eventData.runner_data.stt_binary_handler_id;
+    this._setState(State.LISTENING);
+    this._resetIdleTimeout();
+
+    this._log('pipeline', 'Running — binary handler ID: ' + this._binaryHandlerId);
+    this._log('pipeline', 'Listening for wake word...');
+  }
+
+  _handleWakeWordStart() {
+    // When the wake word service is down, wake_word-start is immediately
+    // followed by wake_word-end with empty output (within milliseconds).
+    // If 2 seconds pass without that, the service is healthy — clear error state.
+    if (this._serviceUnavailable) {
+      var self = this;
+      if (this._recoveryTimeout) clearTimeout(this._recoveryTimeout);
+      this._recoveryTimeout = setTimeout(function () {
+        if (self._serviceUnavailable) {
+          self._log('recovery', 'Wake word service recovered');
+          self._serviceUnavailable = false;
+          self._retryCount = 0;
+          self._clearErrorBar();
+          self._globalUI.querySelector('.vs-rainbow-bar').classList.remove('visible');
+        }
+      }, 2000);
+    }
+  }
+
+  _handleWakeWordEnd(eventData) {
+    // If wake_word_output is empty, the wake word service is unavailable.
+    var wakeOutput = eventData.wake_word_output;
+    if (!wakeOutput || Object.keys(wakeOutput).length === 0) {
+      this._logError('error', 'Wake word service unavailable (empty wake_word_output)');
+
+      // Cancel any pending recovery — service is still down
+      if (this._recoveryTimeout) {
+        clearTimeout(this._recoveryTimeout);
+        this._recoveryTimeout = null;
+      }
+
+      this._binaryHandlerId = null;
+
+      this._showErrorBar();
+      this._serviceUnavailable = true;
+      this._restartPipeline(this._calculateRetryDelay());
+      return;
+    }
+
+    // Valid wake word detected — service is healthy, reset error state
+    if (this._recoveryTimeout) {
+      clearTimeout(this._recoveryTimeout);
+      this._recoveryTimeout = null;
+    }
+    this._serviceUnavailable = false;
+    this._retryCount = 0;
+    this._clearErrorBar();
+
+    // If TTS is still playing from a previous interaction, stop it
+    if (this._currentAudio) {
+      this._stopTTS();
+      this._pendingRunEnd = false;
+    }
+    // Cancel any pending intent error bar timeout
+    if (this._intentErrorBarTimeout) {
+      clearTimeout(this._intentErrorBarTimeout);
+      this._intentErrorBarTimeout = null;
+    }
+    // Clear any leftover UI from previous interaction
+    this._hideTranscription();
+    this._hideResponse();
+
+    this._setState(State.WAKE_WORD_DETECTED);
+    this._resetIdleTimeout();
+
+    if (this._config.chime_on_wake_word) {
+      this._playChime('wake');
+    }
+    this._turnOffWakeWordSwitch();
+    this._showBlurOverlay();
+  }
+
+  _handleSttEnd(eventData) {
+    var text = eventData.stt_output ? eventData.stt_output.text : '';
+    if (text) {
+      this._showTranscription(text);
+    }
+  }
+
+  _handleIntentEnd(eventData) {
+    // Check if the intent response is an error (e.g. LLM service down)
+    var responseType = null;
+    try {
+      responseType = eventData.intent_output.response.response_type;
+    } catch (e) { /* ignore */ }
+
+    if (responseType === 'error') {
+      var errorText = this._extractResponseText(eventData) || 'An error occurred';
+      this._logError('error', 'Intent error: ' + errorText);
+
+      // Show the red error bar and play error chime
+      this._showErrorBar();
+      if (this._config.chime_on_wake_word) {
+        this._playChime('error');
+      }
+
+      // Suppress TTS for this interaction
+      this._suppressTTS = true;
+
+      // Auto-hide error bar after 3 seconds
+      var self = this;
+      if (this._intentErrorBarTimeout) clearTimeout(this._intentErrorBarTimeout);
+      this._intentErrorBarTimeout = setTimeout(function () {
+        self._intentErrorBarTimeout = null;
+        self._clearErrorBar();
+        if (self._globalUI) {
+          self._globalUI.querySelector('.vs-rainbow-bar').classList.remove('visible');
+        }
+      }, 3000);
+
+      // Clear streaming accumulator
+      this._streamedResponse = '';
+      return;
+    }
+
+    var responseText = this._extractResponseText(eventData);
+    if (responseText) {
+      this._showResponse(responseText);
+    }
+    // Clear streaming accumulator
+    this._streamedResponse = '';
+  }
+
+  _handleIntentProgress(eventData) {
+    // HA sends streaming chunks as: { chat_log_delta: { content: " word" } }
+    // The first chunk may be { chat_log_delta: { role: "assistant" } } with no content.
+    if (!eventData.chat_log_delta) return;
+
+    var chunk = eventData.chat_log_delta.content;
+    if (typeof chunk !== 'string') return;
+
+    this._streamedResponse = (this._streamedResponse || '') + chunk;
+    this._updateResponse(this._streamedResponse);
+  }
+
+  _handleTtsEnd(eventData) {
+    // If intent returned an error, suppress TTS playback
+    if (this._suppressTTS) {
+      this._suppressTTS = false;
+      this._log('tts', 'TTS suppressed (intent error)');
+      this._restartPipeline(0);
+      return;
+    }
+
+    var url = eventData.tts_output ? (eventData.tts_output.url || eventData.tts_output.url_path) : null;
+    if (url) {
+      this._playTTS(url);
+    }
+
+    // Restart the pipeline immediately so it listens for the wake word
+    // while TTS is playing. This allows the user to interrupt TTS by
+    // saying the wake word — the new wake_word-end will stop playback.
+    this._restartPipeline(0);
+  }
+
+  _handleRunEnd() {
+    this._log('pipeline', 'Run ended')
+
+    this._binaryHandlerId = null;
+
+    // If a restart is already in progress (e.g. idle timeout fired), skip
+    if (this._isRestarting) {
+      this._log('pipeline', 'Restart already in progress — skipping run-end restart');
+      return;
+    }
+
+    // If error recovery is already handling the restart, don't interfere
+    if (this._serviceUnavailable) {
+      this._log('ui', 'Error recovery handling restart')
+      this._hideBlurOverlay();
+      this._hideTranscription();
+      this._hideResponse();
+      return;
+    }
+
+    // If TTS is still playing, defer UI cleanup and pipeline restart
+    // until playback completes. HA sends run-end as soon as the TTS URL
+    // is dispatched, but the browser still needs time to play the audio.
+    if (this._currentAudio) {
+      this._log('ui', 'TTS playing — deferring cleanup')
+      this._pendingRunEnd = true;
+      return;
+    }
+
+    this._finishRunEnd();
+  }
+
+  _finishRunEnd() {
+    this._pendingRunEnd = false;
+    this._hideBlurOverlay();
+    this._hideTranscription();
+    this._hideResponse();
+    this._setState(State.IDLE);
+
+    // Don't restart if we're already in error recovery with backoff
+    if (this._serviceUnavailable) {
+      this._log('ui', 'Retry already scheduled — skipping restart')
+      return;
+    }
+
+    // Restart pipeline immediately
+    this._restartPipeline(0);
+  }
+
+  _handlePipelineError(errorData) {
+    var errorCode = errorData.code || '';
+    var errorMessage = errorData.message || '';
+
+    this._log('error', errorCode + ' — ' + errorMessage)
+
+    // Expected errors — immediate restart, no error UI
+    if (EXPECTED_ERRORS.indexOf(errorCode) !== -1) {
+      this._log('pipeline', 'Expected error: ' + errorCode + ' — restarting');
+      this._restartPipeline(0);
+      return;
+    }
+
+    // Unexpected errors — full error handling
+    this._logError('error', 'Unexpected: ' + errorCode + ' — ' + errorMessage);
+
+    // Only play error chime if user was actively interacting
+    // (after wake word detection, during STT, intent processing, or TTS)
+    var interactingStates = [State.WAKE_WORD_DETECTED, State.STT, State.INTENT, State.TTS];
+    var wasInteracting = interactingStates.indexOf(this._state) !== -1;
+
+    this._binaryHandlerId = null;
+
+    if (wasInteracting && this._config.chime_on_wake_word) {
+      this._playChime('error');
+    }
+    this._showErrorBar();
+    this._serviceUnavailable = true;
+    this._hideBlurOverlay();
+
+    this._restartPipeline(this._calculateRetryDelay());
+  }
+
+  _extractResponseText(eventData) {
+    // Primary path
+    try {
+      var text = eventData.intent_output.response.speech.plain.speech;
+      if (text) return text;
+    } catch (e) { /* ignore */ }
+
+    // Fallbacks
+    try { if (eventData.intent_output.response.speech.speech) return eventData.intent_output.response.speech.speech; } catch (e) { /* ignore */ }
+    try { if (eventData.intent_output.response.plain) return eventData.intent_output.response.plain; } catch (e) { /* ignore */ }
+    try { if (typeof eventData.intent_output.response === 'string') return eventData.intent_output.response; } catch (e) { /* ignore */ }
+
+    this._log('error', 'Could not extract response text')
+    return null;
+  }
+
+  // --------------------------------------------------------------------------
+  // Error Recovery
+  // --------------------------------------------------------------------------
+
+  _calculateRetryDelay() {
+    // Linear backoff: 5s, 10s, 15s, 20s, 25s, 30s (capped)
+    this._retryCount++;
+    var delay = Math.min(5000 * this._retryCount, 30000);
+    this._log('pipeline', 'Retry in ' + delay + 'ms (attempt #' + this._retryCount + ')');
+    return delay;
+  }
+
+  // --------------------------------------------------------------------------
+  // Idle Timeout (TTS Token Refresh)
+  // --------------------------------------------------------------------------
+
+  _startIdleTimeout() {
+    var self = this;
+    this._clearIdleTimeout();
+
+    if (this._config.pipeline_idle_timeout <= 0) return;
+
+    this._idleTimeoutId = setTimeout(function () {
+      // Don't restart if user is mid-interaction
+      var activeStates = [State.WAKE_WORD_DETECTED, State.STT, State.INTENT, State.TTS];
+      if (activeStates.indexOf(self._state) !== -1) {
+        self._log('pipeline', 'Idle timeout fired but interaction in progress — deferring');
+        self._resetIdleTimeout();
+        return;
+      }
+      // Don't restart if TTS is still playing (pipeline may have restarted for barge-in)
+      if (self._currentAudio) {
+        self._log('pipeline', 'Idle timeout fired but TTS playing — deferring');
+        self._resetIdleTimeout();
+        return;
+      }
+
+      self._log('pipeline', 'Idle timeout — restarting');
+      self._restartPipeline(0);
+    }, this._config.pipeline_idle_timeout * 1000);
+  }
+
+  _clearIdleTimeout() {
+    if (this._idleTimeoutId) {
+      clearTimeout(this._idleTimeoutId);
+      this._idleTimeoutId = null;
+    }
+  }
+
+  _resetIdleTimeout() {
+    this._startIdleTimeout();
+  }
+
+  // --------------------------------------------------------------------------
+  // UI Methods
+  // --------------------------------------------------------------------------
+
+  _showStartButton(reason) {
+    if (!this._globalUI) {
+      // Global UI not ready yet — defer until it is
+      var self = this;
+      this._pendingStartButtonReason = reason;
+      return;
+    }
+    var btn = this._globalUI.querySelector('.vs-start-btn');
+    btn.classList.add('visible');
+
+    // Set tooltip based on failure reason
+    if (reason === 'not-allowed') {
+      btn.title = 'Tap to enable microphone';
+    } else if (reason === 'not-found') {
+      btn.title = 'No microphone found';
+    } else if (reason === 'not-readable') {
+      btn.title = 'Microphone unavailable - tap to retry';
+    } else {
+      btn.title = 'Tap to start voice assistant';
+    }
+  }
+
+  _hideStartButton() {
+    if (!this._globalUI) return;
+    this._globalUI.querySelector('.vs-start-btn').classList.remove('visible');
+  }
+
+  _showBlurOverlay() {
+    if (!this._globalUI || !this._config.background_blur) return;
+    this._globalUI.querySelector('.vs-blur-overlay').classList.add('visible');
+  }
+
+  _hideBlurOverlay() {
+    if (!this._globalUI) return;
+    this._globalUI.querySelector('.vs-blur-overlay').classList.remove('visible');
+  }
+
+  _showTranscription(text) {
+    if (!this._config.show_transcription || !this._globalUI) return;
+    var el = this._globalUI.querySelector('.vs-transcription');
+    el.textContent = text;
+    el.classList.add('visible');
+  }
+
+  _hideTranscription() {
+    if (!this._globalUI) return;
+    this._globalUI.querySelector('.vs-transcription').classList.remove('visible');
+  }
+
+  _showResponse(text) {
+    if (!this._config.show_response || !this._globalUI) return;
+    var el = this._globalUI.querySelector('.vs-response');
+    el.textContent = text;
+    el.classList.add('visible');
+    // Slide transcription bubble up to make room
+    this._globalUI.querySelector('.vs-transcription').classList.add('shifted');
+    this._recalcShiftedPosition();
+  }
+
+  _updateResponse(text) {
+    if (!this._config.show_response || !this._globalUI) return;
+    var el = this._globalUI.querySelector('.vs-response');
+    el.textContent = text;
+    if (!el.classList.contains('visible')) {
+      el.classList.add('visible');
+      // Slide transcription bubble up to make room
+      this._globalUI.querySelector('.vs-transcription').classList.add('shifted');
+    }
+    this._recalcShiftedPosition();
+  }
+
+  _hideResponse() {
+    if (!this._globalUI) return;
+    if (this._responseTimeout) clearTimeout(this._responseTimeout);
+    this._globalUI.querySelector('.vs-response').classList.remove('visible');
+    // Slide transcription back down
+    this._globalUI.querySelector('.vs-transcription').classList.remove('shifted');
+  }
+
+  _recalcShiftedPosition() {
+    // Debounce to avoid forcing layout reflow on every streaming token
+    if (this._shiftRecalcTimer) return;
+    var self = this;
+    this._shiftRecalcTimer = requestAnimationFrame(function () {
+      self._shiftRecalcTimer = null;
+      var resp = self._globalUI.querySelector('.vs-response');
+      var barH = self._config.bar_height || 6;
+      var bubbleGap = 12;
+      var bubbleSpacing = 10;
+      var responseBottom = (self._config.bar_position === 'bottom') ? barH + bubbleGap : bubbleGap;
+      var shiftedBottom = responseBottom + resp.offsetHeight + bubbleSpacing;
+      self._globalUI.style.setProperty('--vs-shifted-bottom', shiftedBottom + 'px');
+    });
   }
 
   _showErrorBar() {
-    var bar = this._globalUI ? this._globalUI.querySelector('.vs-rainbow-bar') : null;
-    if (!bar) {
-      // Try to ensure UI exists first
-      if (!this._globalUI || !document.body.contains(this._globalUI)) {
-        this._ensureGlobalUI();
-        bar = this._globalUI ? this._globalUI.querySelector('.vs-rainbow-bar') : null;
-      }
-      if (!bar) return;
-    }
-    
-    // Show red gradient bar with flowing animation
-    bar.style.background = 'linear-gradient(90deg, #ff2222, #ff6666, #ff4444, #ff8888, #ff4444, #ff6666, #ff2222)';
+    if (!this._globalUI) return;
+    var bar = this._globalUI.querySelector('.vs-rainbow-bar');
+    bar.classList.remove('connecting', 'listening', 'processing', 'speaking');
+    bar.classList.add('visible', 'error-mode');
+    // Override the inline background set by _applyStyles
+    bar.style.background = 'linear-gradient(90deg, #ff4444, #ff6666, #cc2222, #ff4444, #ff6666, #cc2222)';
     bar.style.backgroundSize = '200% 100%';
-    bar.classList.add('visible');
-    bar.classList.add('error-mode');
-    bar.style.opacity = '1';
   }
 
-  _hideErrorBar() {
-    var bar = this._globalUI ? this._globalUI.querySelector('.vs-rainbow-bar') : null;
-    if (!bar) return;
-    
-    // Restore gradient background
-    bar.style.background = '';
-    bar.style.backgroundSize = '';
-    bar.style.opacity = '';
-    bar.classList.remove('visible');
+  _clearErrorBar() {
+    if (!this._globalUI) return;
+    var bar = this._globalUI.querySelector('.vs-rainbow-bar');
     bar.classList.remove('error-mode');
+    // Restore the rainbow gradient from config
+    bar.style.background = 'linear-gradient(90deg, ' + this._config.bar_gradient + ')';
+    bar.style.backgroundSize = '200% 100%';
   }
 
-  _clearPipelineTimeout() {
-    if (this._pipelineTimeoutId) {
-      clearTimeout(this._pipelineTimeoutId);
-      this._pipelineTimeoutId = null;
-    }
-  }
-
-  async _playResponse(url) {
-    var self = this;
-    try {
-      this._isSpeaking = true;
-      
-      // Ensure audio context is running (may be suspended after tab visibility changes)
-      if (this._audioContext && this._audioContext.state === 'suspended') {
-        await this._audioContext.resume();
-      }
-      
-      // Convert relative URL to absolute URL using Home Assistant connection
-      var fullUrl = url;
-      if (url.startsWith('/') && this._hass && this._hass.auth && this._hass.auth.data) {
-        // Get the base URL from HA connection
-        var hassUrl = this._hass.auth.data.hassUrl || '';
-        if (hassUrl) {
-          fullUrl = hassUrl + url;
-        }
-      }
-      
-      console.log('[VoiceSatellite] Playing TTS:', fullUrl);
-      
-      var audio = new Audio(fullUrl);
-      // Browser audio maxes out at 1.0 (100%)
-      audio.volume = Math.min(this._config.tts_volume / 100, 1.0);
-      
-      audio.onended = function() {
-        self._isSpeaking = false;
-        
-        // Clear pipeline timeout - TTS completed successfully
-        self._clearPipelineTimeout();
-        
-        if (self._config.chime_on_request_sent) {
-          self._playChime('done');
-        }
-        
-        // Now reset state and restart pipeline
-        self._state = State.IDLE;
-        self._updateUI();
-        
-        setTimeout(function() {
-          if (self._isStreaming && !self._isPaused) {
-            self._restartPipeline();
-          }
-        }, 500);
-      };
-      
-      audio.onerror = function(e) {
-        // Get more details about the error
-        var errorDetails = '';
-        if (audio.error) {
-          errorDetails = 'code=' + audio.error.code + ' message=' + (audio.error.message || 'unknown');
-        }
-        console.error('[VoiceSatellite] Audio element error:', errorDetails, 'url:', fullUrl);
-        console.error('[VoiceSatellite] Audio networkState:', audio.networkState, 'readyState:', audio.readyState);
-        
-        self._isSpeaking = false;
-        self._state = State.IDLE;
-        self._updateUI();
-        
-        // Still restart pipeline after audio error
-        setTimeout(function() {
-          if (self._isStreaming && !self._isPaused) {
-            self._restartPipeline();
-          }
-        }, 500);
-      };
-      
-      // Add canplaythrough event to ensure audio is ready
-      audio.oncanplaythrough = function() {
-        console.log('[VoiceSatellite] Audio ready to play');
-      };
-      
-      await audio.play();
-    } catch (error) {
-      console.error('[VoiceSatellite] Playback error:', error.name, error.message);
-      console.error('[VoiceSatellite] URL was:', url);
-      this._isSpeaking = false;
-      
-      // Still restart pipeline after playback error
-      var self = this;
-      this._state = State.IDLE;
-      this._updateUI();
-      setTimeout(function() {
-        if (self._isStreaming && !self._isPaused) {
-          self._restartPipeline();
-        }
-      }, 500);
-    }
-  }
+  // --------------------------------------------------------------------------
+  // Chimes (Web Audio API)
+  // --------------------------------------------------------------------------
 
   _playChime(type) {
     try {
       var ctx = new (window.AudioContext || window.webkitAudioContext)();
       var osc = ctx.createOscillator();
       var gain = ctx.createGain();
-      
+
       osc.connect(gain);
       gain.connect(ctx.destination);
-      
-      osc.type = 'sine';
-      var volume = (this._config.chime_volume / 100) * 0.5; // Scale to max 0.5 to avoid clipping
-      gain.gain.setValueAtTime(volume, ctx.currentTime);
-      
+
+      var volume = (this._config.chime_volume / 100) * 0.5;
+
       if (type === 'wake') {
-        // Rising tone: C5 -> E5 -> G5
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(volume, ctx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
         osc.frequency.setValueAtTime(523, ctx.currentTime);
         osc.frequency.setValueAtTime(659, ctx.currentTime + 0.08);
@@ -1359,7 +1422,6 @@ class VoiceSatelliteCard extends HTMLElement {
         osc.start();
         osc.stop(ctx.currentTime + 0.25);
       } else if (type === 'error') {
-        // Error tone: Short low buzz
         osc.type = 'square';
         gain.gain.setValueAtTime(volume * 0.3, ctx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
@@ -1368,725 +1430,485 @@ class VoiceSatelliteCard extends HTMLElement {
         osc.start();
         osc.stop(ctx.currentTime + 0.15);
       } else {
-        // Done tone: G5 -> E5
+        // done chime
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(volume, ctx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
         osc.frequency.setValueAtTime(784, ctx.currentTime);
         osc.frequency.setValueAtTime(659, ctx.currentTime + 0.08);
         osc.start();
         osc.stop(ctx.currentTime + 0.25);
       }
-    } catch (e) {}
+
+      // Clean up context after chime
+      setTimeout(function () { ctx.close(); }, 500);
+    } catch (e) {
+      this._logError('tts', 'Chime error: ' + e);
+    }
   }
 
-  _setState(state) {
-    if (this._state !== state) {
-      if (this._config.debug) {
-        console.log('[VoiceSatellite] State:', this._state, '->', state);
-      }
-      this._state = state;
-      
-      // Hide transcription and response when going back to listening
-      if (state === State.LISTENING) {
-        this._hideTranscription();
-        this._hideResponse();
-      }
-      
-      // Use requestAnimationFrame for smoother UI updates
-      var self = this;
-      requestAnimationFrame(function() {
-        self._updateUI();
+  // --------------------------------------------------------------------------
+  // TTS Playback
+  // --------------------------------------------------------------------------
+
+  _playTTS(urlPath) {
+    var self = this;
+    var url = this._buildTtsUrl(urlPath);
+
+    var audio = new Audio();
+    audio.volume = this._config.tts_volume / 100;
+
+    audio.onended = function () {
+      self._log('tts', 'Playback complete');
+      self._onTTSComplete();
+    };
+
+    audio.onerror = function (e) {
+      self._logError('tts', 'Playback error: ' + e);
+      self._logError('tts', 'URL: ' + url);
+      self._onTTSComplete();
+    };
+
+    audio.src = url;
+    audio.play().catch(function (e) {
+      self._logError('tts', 'play() failed: ' + e);
+      self._onTTSComplete();
+    });
+
+    this._currentAudio = audio;
+  }
+
+  _onTTSComplete() {
+    this._log('tts', 'Complete — cleaning up UI');
+    this._currentAudio = null;
+
+    // If a new interaction is already in progress (user said wake word
+    // during TTS), don't touch the UI — it belongs to the new interaction.
+    var activeInteraction = [State.WAKE_WORD_DETECTED, State.STT, State.INTENT, State.TTS];
+    if (activeInteraction.indexOf(this._state) !== -1) {
+      this._log('tts', 'New interaction in progress — skipping cleanup');
+      return;
+    }
+
+    // Play done chime after TTS finishes
+    if (this._config.chime_on_request_sent) {
+      this._playChime('done');
+    }
+
+    this._hideResponse();
+    this._hideBlurOverlay();
+    this._hideTranscription();
+    // Re-evaluate bar visibility now that TTS is done
+    this._updateUI();
+  }
+
+  _stopTTS() {
+    if (this._currentAudio) {
+      this._currentAudio.onended = null;
+      this._currentAudio.onerror = null;
+      this._currentAudio.pause();
+      this._currentAudio.src = '';
+      this._currentAudio = null;
+    }
+  }
+
+  _buildTtsUrl(urlPath) {
+    if (urlPath.startsWith('http://') || urlPath.startsWith('https://')) {
+      return urlPath;
+    }
+    // Use window.location.origin as the reliable base URL.
+    // hass.hassUrl may be a URL object, undefined, or other non-string types.
+    var baseUrl = window.location.origin;
+    if (!urlPath.startsWith('/')) {
+      urlPath = '/' + urlPath;
+    }
+    return baseUrl + urlPath;
+  }
+
+  // --------------------------------------------------------------------------
+  // Home Assistant Service Calls
+  // --------------------------------------------------------------------------
+
+  _turnOffWakeWordSwitch() {
+    if (!this._config.wake_word_switch || !this._hass) return;
+    var self = this;
+
+    var entityId = this._config.wake_word_switch;
+    if (!entityId.includes('.')) {
+      this._log('switch', 'Invalid entity: ' + entityId);
+      return;
+    }
+
+    this._log('switch', 'Turning off: ' + entityId);
+
+    this._hass.callService('homeassistant', 'turn_off', {
+      entity_id: entityId
+    }).catch(function (err) {
+      self._logError('switch', 'Failed to turn off: ' + err);
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // Tab Visibility
+  // --------------------------------------------------------------------------
+
+  _setupVisibilityHandler() {
+    document.addEventListener('visibilitychange', this._handleVisibilityChange);
+  }
+
+  _handleVisibilityChangeFn() {
+    var self = this;
+
+    if (this._visibilityDebounceTimer) {
+      clearTimeout(this._visibilityDebounceTimer);
+    }
+
+    if (document.hidden) {
+      this._visibilityDebounceTimer = setTimeout(function () {
+        self._log('visibility', 'Tab hidden — pausing');
+        self._pauseMicrophone();
+      }, 500);
+    } else {
+      self._log('visibility', 'Tab visible — resuming');
+      self._resumeMicrophone();
+    }
+  }
+
+  _pauseMicrophone() {
+    this._isPaused = true;
+    this._setState(State.PAUSED);
+
+    if (this._sendInterval) {
+      clearInterval(this._sendInterval);
+      this._sendInterval = null;
+    }
+
+    if (this._mediaStream) {
+      this._mediaStream.getAudioTracks().forEach(function (track) {
+        track.enabled = false;
       });
     }
   }
 
-  _showTranscription(text) {
-    if (!this._config.show_transcription) return;
-    
-    var el = this._globalUI ? this._globalUI.querySelector('.vs-transcription') : null;
-    var responseEl = this._globalUI ? this._globalUI.querySelector('.vs-response') : null;
-    if (!el) return;
-    
-    var pos = this._config.bar_position;
-    var barHeight = this._config.bar_height;
-    
-    // Calculate position - transcription appears ABOVE response (further from bar)
-    var baseOffset = barHeight + 12;
-    var responseHeight = 0;
-    
-    if (responseEl) {
-      responseEl.offsetHeight; // Force layout
-      if (responseEl.classList.contains('visible') || responseEl.textContent) {
-        responseHeight = responseEl.offsetHeight + 12; // 12px gap
-      }
+  _resumeMicrophone() {
+    if (!this._isPaused) return;
+    this._isPaused = false;
+
+    if (this._mediaStream) {
+      this._mediaStream.getAudioTracks().forEach(function (track) {
+        track.enabled = true;
+      });
     }
-    
-    var transcriptionOffset = baseOffset + responseHeight;
-    
-    // Set position
-    if (pos === 'top') {
-      el.style.top = transcriptionOffset + 'px';
-      el.style.bottom = '';
+
+    var self = this;
+    if (!this._sendInterval && this._isStreaming) {
+      this._sendInterval = setInterval(function () {
+        self._sendAudioBuffer();
+      }, 100);
+    }
+
+    // If the pipeline subscription was lost during pause, restart it
+    if (!this._unsubscribe && !this._restartTimeout) {
+      this._log('visibility', 'Pipeline subscription lost during pause — restarting');
+      this._restartPipeline(0);
     } else {
-      el.style.bottom = transcriptionOffset + 'px';
-      el.style.top = '';
-    }
-    
-    // Force hide first, then show with new text
-    el.classList.remove('visible');
-    el.offsetHeight; // Force repaint
-    el.textContent = text;
-    el.classList.add('visible');
-    
-    // Show blur overlay if enabled
-    if (this._config.background_blur) {
-      this._showBlur();
+      this._setState(State.LISTENING);
     }
   }
 
-  _hideTranscription() {
-    var el = this._globalUI ? this._globalUI.querySelector('.vs-transcription') : null;
-    if (el) {
-      el.classList.remove('visible');
-    }
-    
-    // Hide blur when transcription hides (only if response is also hidden)
-    var responseEl = this._globalUI ? this._globalUI.querySelector('.vs-response') : null;
-    if (!responseEl || !responseEl.classList.contains('visible')) {
-      this._hideBlur();
-    }
-  }
+  // --------------------------------------------------------------------------
+  // Start Button Handler
+  // --------------------------------------------------------------------------
 
-  _showBlur() {
-    var el = this._globalUI ? this._globalUI.querySelector('.vs-blur-overlay') : null;
-    if (el) {
-      el.classList.add('visible');
-    }
-  }
+  async _handleStartClick() {
+    // CRITICAL: This click IS the user gesture that browsers require.
+    // We must initiate AudioContext resume and getUserMedia from within
+    // this synchronous click handler context. Browsers track the "user
+    // activation" state and it can expire if we defer too long.
 
-  _hideBlur() {
-    var el = this._globalUI ? this._globalUI.querySelector('.vs-blur-overlay') : null;
-    if (el) {
-      el.classList.remove('visible');
-    }
-  }
-
-  _showResponse(text) {
-    if (!this._config.show_response) return;
-    
-    var el = this._globalUI ? this._globalUI.querySelector('.vs-response') : null;
-    var transcriptionEl = this._globalUI ? this._globalUI.querySelector('.vs-transcription') : null;
-    if (!el) return;
-    
-    var pos = this._config.bar_position;
-    var barHeight = this._config.bar_height;
-    
-    // Reset to default width first
-    el.style.width = '';
-    el.style.maxWidth = '85%';
-    el.classList.remove('visible');
-    el.textContent = text;
-    
-    // Force layout calculation
-    el.offsetHeight;
-    
-    // Check if content overflows and needs more width
-    var viewportHeight = window.innerHeight;
-    var viewportWidth = window.innerWidth;
-    var maxAllowedHeight = viewportHeight * 0.5; // Max 50% of viewport height
-    
-    // If too tall, progressively increase width
-    if (el.scrollHeight > maxAllowedHeight) {
-      var widthPercents = [90, 92, 94, 96];
-      for (var i = 0; i < widthPercents.length; i++) {
-        var newWidth = Math.floor(viewportWidth * widthPercents[i] / 100);
-        el.style.width = newWidth + 'px';
-        el.style.maxWidth = newWidth + 'px';
-        el.offsetHeight; // Force recalc
-        if (el.scrollHeight <= maxAllowedHeight) break;
+    // Step 1: Create or resume AudioContext synchronously within the click.
+    // This consumes the user gesture for audio policy.
+    try {
+      if (!this._audioContext) {
+        this._audioContext = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: 16000
+        });
       }
-    }
-    
-    el.classList.add('visible');
-    
-    // Reposition transcription bubble above response
-    if (transcriptionEl && transcriptionEl.classList.contains('visible')) {
-      var baseOffset = barHeight + 12;
-      var responseHeight = el.offsetHeight + 12; // 12px gap
-      var transcriptionOffset = baseOffset + responseHeight;
-      
-      if (pos === 'top') {
-        transcriptionEl.style.top = transcriptionOffset + 'px';
-        transcriptionEl.style.bottom = '';
-      } else {
-        transcriptionEl.style.bottom = transcriptionOffset + 'px';
-        transcriptionEl.style.top = '';
+      if (this._audioContext.state === 'suspended') {
+        // .resume() must be called in the same event handler as the user gesture
+        await this._audioContext.resume();
       }
+    } catch (e) {
+      this._logError('mic', 'Failed to resume AudioContext on click: ' + e);
     }
-  }
 
-  _hideResponse() {
-    var el = this._globalUI ? this._globalUI.querySelector('.vs-response') : null;
-    if (el) {
-      el.classList.remove('visible');
-    }
-    
-    // Hide blur when response hides (only if transcription is also hidden)
-    var transcriptionEl = this._globalUI ? this._globalUI.querySelector('.vs-transcription') : null;
-    if (!transcriptionEl || !transcriptionEl.classList.contains('visible')) {
-      this._hideBlur();
-    }
-  }
-
-  _updateUI() {
-    var bar = this._globalUI ? this._globalUI.querySelector('.vs-rainbow-bar') : null;
-    
-    if (!bar) return;
-    
-    var states = {};
-    states[State.IDLE] = { active: false };
-    states[State.CONNECTING] = { active: false };
-    states[State.LISTENING] = { active: false };
-    states[State.PAUSED] = { active: false };
-    states[State.WAKE_WORD_DETECTED] = { active: true, anim: 'listening' };
-    states[State.STT] = { active: true, anim: 'listening' };
-    states[State.INTENT] = { active: true, anim: 'processing' };
-    states[State.TTS] = { active: true, anim: 'speaking' };
-    states[State.ERROR] = { active: false };
-    
-    var s = states[this._state] || states[State.IDLE];
-    
-    // If service is unavailable and we're going to IDLE/LISTENING, keep error bar visible
-    if (this._serviceUnavailable && !s.active) {
-      return;
-    }
-    
-    // Clear any inline styles that might override CSS
-    bar.style.opacity = '';
-    bar.style.transition = '';
-    bar.style.background = '';
-    bar.style.backgroundSize = '';
-    
-    // Force remove all classes first
-    bar.classList.remove('visible', 'listening', 'processing', 'speaking', 'error-mode');
-    
-    // Force a repaint by reading offsetHeight
-    bar.offsetHeight;
-    
-    if (s.active) {
-      bar.classList.add('visible');
-      if (s.anim) bar.classList.add(s.anim);
-    }
-  }
-
-  _forceUIUpdate() {
-    var self = this;
-    
-    // Ensure global UI exists
-    if (!this._globalUI || !document.body.contains(this._globalUI)) {
-      this._ensureGlobalUI();
-    }
-    
-    var bar = this._globalUI ? this._globalUI.querySelector('.vs-rainbow-bar') : null;
-    if (!bar) return;
-    
-    // Check if we should be visible
-    var shouldBeVisible = (
-      this._state === State.WAKE_WORD_DETECTED ||
-      this._state === State.STT ||
-      this._state === State.INTENT ||
-      this._state === State.TTS
-    );
-    
-    if (shouldBeVisible) {
-      // Remove all animation classes first (including error-mode)
-      bar.classList.remove('listening', 'processing', 'speaking', 'error-mode');
-      // Clear any inline styles from error bar
-      bar.style.background = '';
-      bar.style.backgroundSize = '';
-      
-      bar.classList.add('visible');
-      
-      // Clear inline opacity so CSS animations can control it
-      bar.style.opacity = '';
-      
-      // Add correct animation class based on state
-      if (this._state === State.INTENT) {
-        bar.classList.add('processing');
-      } else if (this._state === State.TTS) {
-        bar.classList.add('speaking');
-      } else {
-        bar.classList.add('listening');
-      }
-    }
-  }
-
-  _buildGradient(colors) {
-    var colorList = colors.split(',').map(function(c) { return c.trim(); });
-    var stops = [];
-    for (var i = 0; i < colorList.length; i++) {
-      var percent = Math.round((i / (colorList.length - 1)) * 100);
-      stops.push(colorList[i] + ' ' + percent + '%');
-    }
-    return 'linear-gradient(90deg, ' + stops.join(', ') + ')';
-  }
-
-  _render() {
-    var self = this;
-    
-    // Render minimal content in shadow DOM
-    this.shadowRoot.innerHTML = 
-      '<style>:host { display: none; }</style>';
-    
-    // Remove existing global UI to recreate with new config
-    this._removeGlobalUI();
-    
-    // Create global UI elements in document body
-    this._ensureGlobalUI();
-  }
-
-  _ensureGlobalUI() {
-    var self = this;
-    
-    var pos = this._config.bar_position;
-    var height = this._config.bar_height;
-    var posStyle = pos === 'top' ? 'top: 0;' : 'bottom: 0;';
-    var gradient = this._buildGradient(this._config.bar_gradient);
-    
-    // Create container
-    var container = document.createElement('div');
-    container.id = 'voice-satellite-ui';
-    container.innerHTML = 
-      '<style>' +
-        '#voice-satellite-ui .vs-start-btn {' +
-          'display: none;' +
-          'position: fixed;' +
-          'bottom: 20px;' +
-          'right: 20px;' +
-          'width: 56px;' +
-          'height: 56px;' +
-          'border-radius: 50%;' +
-          'background: var(--primary-color, #03a9f4);' +
-          'color: white;' +
-          'border: none;' +
-          'cursor: pointer;' +
-          'box-shadow: 0 4px 12px rgba(0,0,0,0.3);' +
-          'z-index: 10001;' +
-          'align-items: center;' +
-          'justify-content: center;' +
-          'transition: transform 0.2s, box-shadow 0.2s;' +
-        '}' +
-        '#voice-satellite-ui .vs-start-btn.visible {' +
-          'display: flex;' +
-        '}' +
-        '#voice-satellite-ui .vs-start-btn:hover {' +
-          'transform: scale(1.1);' +
-          'box-shadow: 0 6px 16px rgba(0,0,0,0.4);' +
-        '}' +
-        '#voice-satellite-ui .vs-start-btn:active {' +
-          'transform: scale(0.95);' +
-        '}' +
-        '#voice-satellite-ui .vs-start-btn svg {' +
-          'width: 28px;' +
-          'height: 28px;' +
-          'fill: white;' +
-        '}' +
-        '#voice-satellite-ui .vs-transcription {' +
-          'position: fixed;' +
-          'left: 50%;' +
-          'transform: translateX(-50%);' +
-          'background: ' + this._config.transcription_background + ';' +
-          'color: ' + this._config.transcription_font_color + ';' +
-          'padding: ' + this._config.transcription_padding + 'px ' + (this._config.transcription_padding * 2) + 'px;' +
-          'border-radius: ' + (this._config.transcription_rounded ? '20px' : '0') + ';' +
-          'font-size: ' + this._config.transcription_font_size + 'px;' +
-          'font-family: ' + this._config.transcription_font_family + ';' +
-          'font-weight: ' + (this._config.transcription_font_bold ? '700' : '400') + ';' +
-          'font-style: ' + (this._config.transcription_font_italic ? 'italic' : 'normal') + ';' +
-          'max-width: 80%;' +
-          'text-align: center;' +
-          'opacity: 0;' +
-          'transition: opacity 0.3s ease;' +
-          'z-index: 10002;' +
-          'pointer-events: none;' +
-          'border: 2px solid ' + this._config.transcription_border_color + ';' +
-        '}' +
-        '#voice-satellite-ui .vs-transcription.visible {' +
-          'opacity: 1;' +
-        '}' +
-        '#voice-satellite-ui .vs-response {' +
-          'position: fixed;' +
-          'left: 50%;' +
-          'transform: translateX(-50%);' +
-          (pos === 'top' ? 'top: ' + (height + 12) + 'px;' : 'bottom: ' + (height + 12) + 'px;') +
-          'background: ' + this._config.response_background + ';' +
-          'color: ' + this._config.response_font_color + ';' +
-          'padding: ' + this._config.response_padding + 'px ' + (this._config.response_padding * 2) + 'px;' +
-          'border-radius: ' + (this._config.response_rounded ? '20px' : '0') + ';' +
-          'font-size: ' + this._config.response_font_size + 'px;' +
-          'font-family: ' + this._config.response_font_family + ';' +
-          'font-weight: ' + (this._config.response_font_bold ? '700' : '400') + ';' +
-          'font-style: ' + (this._config.response_font_italic ? 'italic' : 'normal') + ';' +
-          'max-width: 85%;' +
-          'max-height: 70vh;' +
-          'overflow-y: auto;' +
-          'text-align: center;' +
-          'opacity: 0;' +
-          'transition: opacity 0.3s ease;' +
-          'z-index: 10001;' +
-          'pointer-events: none;' +
-          'border: 2px solid ' + this._config.response_border_color + ';' +
-        '}' +
-        '#voice-satellite-ui .vs-response.visible {' +
-          'opacity: 1;' +
-        '}' +
-        '#voice-satellite-ui .vs-rainbow-bar {' +
-          'position: fixed;' +
-          'left: 0;' +
-          'right: 0;' +
-          posStyle +
-          'height: ' + height + 'px;' +
-          'background: ' + gradient + ';' +
-          'background-size: 200% 100%;' +
-          'opacity: 0;' +
-          'transition: opacity 0.3s ease, height 0.2s ease;' +
-          'z-index: 10000;' +
-          'pointer-events: none;' +
-        '}' +
-        '#voice-satellite-ui .vs-rainbow-bar.visible { opacity: 1; }' +
-        '#voice-satellite-ui .vs-rainbow-bar.listening {' +
-          'animation: vs-flow 1.5s linear infinite;' +
-          'height: ' + (height + 2) + 'px;' +
-        '}' +
-        '#voice-satellite-ui .vs-rainbow-bar.processing {' +
-          'animation: vs-flow 0.4s linear infinite;' +
-          'height: ' + (height + 4) + 'px;' +
-        '}' +
-        '#voice-satellite-ui .vs-rainbow-bar.speaking {' +
-          'animation: vs-flow 1.5s linear infinite;' +
-          'height: ' + (height + 2) + 'px;' +
-        '}' +
-        '#voice-satellite-ui .vs-rainbow-bar.error-mode {' +
-          'animation: vs-flow 2s linear infinite;' +
-          'height: ' + (height + 2) + 'px;' +
-        '}' +
-        '@keyframes vs-flow {' +
-          '0% { background-position: 0% 50%; }' +
-          '100% { background-position: 200% 50%; }' +
-        '}' +
-        '#voice-satellite-ui .vs-blur-overlay {' +
-          'position: fixed;' +
-          'top: 0;' +
-          'left: 0;' +
-          'right: 0;' +
-          'bottom: 0;' +
-          'backdrop-filter: blur(' + this._config.background_blur_intensity + 'px);' +
-          '-webkit-backdrop-filter: blur(' + this._config.background_blur_intensity + 'px);' +
-          'background: rgba(0, 0, 0, 0.2);' +
-          'opacity: 0;' +
-          'pointer-events: none;' +
-          'transition: opacity 0.3s ease;' +
-          'z-index: 10000;' +
-        '}' +
-        '#voice-satellite-ui .vs-blur-overlay.visible {' +
-          'opacity: 1;' +
-        '}' +
-      '</style>' +
-      '<div class="vs-blur-overlay"></div>' +
-      '<button class="vs-start-btn"><svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg></button>' +
-      '<div class="vs-transcription"></div>' +
-      '<div class="vs-response"></div>' +
-      '<div class="vs-rainbow-bar"></div>';
-    
-    document.body.appendChild(container);
-    this._globalUI = container;
-    
-    // Add click handler for start button
-    container.querySelector('.vs-start-btn').addEventListener('click', function() { 
-      self._handleStartClick(); 
-    });
-  }
-
-  _removeGlobalUI() {
-    var ui = document.getElementById('voice-satellite-ui');
-    if (ui) {
-      ui.remove();
-    }
-    this._globalUI = null;
-  }
-
-  connectedCallback() {
-    this._render();
-    this._isConnected = true;
-    
-    // Update UI to reflect current state
-    if (this._isStreaming) {
-      this._updateUI();
-    }
-  }
-
-  disconnectedCallback() {
-    this._isConnected = false;
-    // Don't stop the pipeline - keep it running in the background
-    // The audio will continue streaming even when on a different view
-    console.log('[VoiceSatellite] Disconnected from DOM, but keeping pipeline alive');
-  }
-
-  getCardSize() {
-    return 0;
+    // Step 2: Now start the full listening flow. getUserMedia will succeed
+    // because we're still within the user-activation window from the click.
+    await this._startListening();
   }
 }
 
+
+// ============================================================================
+// VoiceSatelliteCardEditor - Visual Configuration Editor
+// ============================================================================
+
 class VoiceSatelliteCardEditor extends HTMLElement {
+
   constructor() {
     super();
+    this._config = {};
     this._hass = null;
-    this._config = null;
-    this._rendered = false;
+    this._pipelines = [];
   }
 
   set hass(hass) {
     this._hass = hass;
-    if (this._config && !this._rendered) {
-      this._render();
+    if (hass && hass.connection && this._pipelines.length === 0) {
+      this._loadPipelines();
     }
   }
 
   setConfig(config) {
-    this._config = config;
-    if (this._hass) {
+    this._config = Object.assign({}, DEFAULT_CONFIG, config);
+    this._render();
+  }
+
+  async _loadPipelines() {
+    try {
+      var result = await this._hass.connection.sendMessagePromise({
+        type: 'assist_pipeline/pipeline/list'
+      });
+      this._pipelines = result.pipelines || [];
       this._render();
+    } catch (e) {
+      console.error('[VS][editor] Failed to load pipelines:', e);
     }
   }
 
   _render() {
-    if (this._rendered) return;
-    this._rendered = true;
-    
-    var self = this;
-    
-    this.innerHTML = 
+    var cfg = this._config;
+
+    // Pipeline options
+    var pipelineOptions = '<option value="">Default Pipeline</option>';
+    for (var i = 0; i < this._pipelines.length; i++) {
+      var p = this._pipelines[i];
+      var sel = p.id === cfg.pipeline_id ? ' selected' : '';
+      pipelineOptions += '<option value="' + p.id + '"' + sel + '>' + (p.name || p.id) + '</option>';
+    }
+
+    this.innerHTML =
       '<style>' +
-        '.card-config .row { margin-bottom: 16px; }' +
-        '.card-config .row > label { display: block; font-weight: 500; margin-bottom: 4px; }' +
-        '.card-config .row > input:not([type="checkbox"]):not([type="range"]), .card-config .row > select { width: 100%; padding: 8px; border: 1px solid var(--divider-color, #e0e0e0); border-radius: 4px; box-sizing: border-box; background: var(--card-background-color, #fff); color: var(--primary-text-color, #000); }' +
-        '.card-config .help { font-size: 12px; color: var(--secondary-text-color, #666); margin-top: 4px; }' +
-        '.card-config .checkbox-row { display: flex; align-items: center; gap: 8px; }' +
-        '.card-config .checkbox-row input { width: auto; }' +
-        '.card-config .section { font-weight: 600; margin: 20px 0 12px 0; padding-bottom: 4px; border-bottom: 1px solid var(--divider-color, #e0e0e0); }' +
+        '.vs-editor { padding: 16px; }' +
+        '.vs-section { margin-bottom: 16px; padding: 12px; background: var(--card-background-color, #fff); border-radius: 8px; border: 1px solid var(--divider-color, #e0e0e0); }' +
+        '.vs-section-title { font-weight: bold; font-size: 14px; margin-bottom: 12px; color: var(--primary-color, #03a9f4); }' +
+        '.vs-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; min-height: 36px; }' +
+        '.vs-row label { flex: 1; font-size: 14px; }' +
+        '.vs-row input[type="checkbox"] { width: 20px; height: 20px; }' +
+        '.vs-row input[type="number"], .vs-row input[type="text"], .vs-row input[type="color"], .vs-row select { width: 160px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, #fff); color: var(--primary-text-color, #333); }' +
+        '.vs-row input[type="range"] { width: 120px; }' +
+        '.vs-row .range-val { width: 32px; text-align: right; font-size: 13px; }' +
       '</style>' +
-      '<div class="card-config">' +
-      
-      '<div class="section">Behavior</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="start_listening_on_load"' + (this._config.start_listening_on_load !== false ? ' checked' : '') + '>' +
-        '<label for="start_listening_on_load">Start listening automatically</label>' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Wake Word Switch (optional)</label>' +
-        '<input type="text" id="wake_word_switch" value="' + (this._config.wake_word_switch || '') + '" placeholder="switch.tablet_screensaver">' +
-        '<div class="help">Switch to turn OFF when wake word detected (e.g., Fully Kiosk screensaver)</div>' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Pipeline Timeout (seconds)</label>' +
-        '<input type="number" id="pipeline_timeout" value="' + (this._config.pipeline_timeout !== undefined ? this._config.pipeline_timeout : 60) + '" min="0" max="300">' +
-        '<div class="help">Max time to wait for pipeline to complete after wake word. 0 = no timeout.</div>' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="chime_on_wake_word"' + (this._config.chime_on_wake_word !== false ? ' checked' : '') + '>' +
-        '<label for="chime_on_wake_word">Play chime on wake word detected</label>' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="chime_on_request_sent"' + (this._config.chime_on_request_sent !== false ? ' checked' : '') + '>' +
-        '<label for="chime_on_request_sent">Play chime after request sent</label>' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="debug"' + (this._config.debug ? ' checked' : '') + '>' +
-        '<label for="debug">Show debug info in console</label>' +
-      '</div>' +
-      
-      '<div class="section">Microphone Processing</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="noise_suppression"' + (this._config.noise_suppression !== false ? ' checked' : '') + '>' +
-        '<label for="noise_suppression">Noise Suppression</label>' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="echo_cancellation"' + (this._config.echo_cancellation !== false ? ' checked' : '') + '>' +
-        '<label for="echo_cancellation">Echo Cancellation</label>' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="auto_gain_control"' + (this._config.auto_gain_control !== false ? ' checked' : '') + '>' +
-        '<label for="auto_gain_control">Auto Gain Control</label>' +
-      '</div>' +
-      
-      '<div class="section">Appearance - Bar</div>' +
-      '<div class="row">' +
-        '<label>Bar Height (px)</label>' +
-        '<input type="number" id="bar_height" value="' + (this._config.bar_height || 16) + '" min="2" max="40">' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Bar Position</label>' +
-        '<select id="bar_position">' +
-          '<option value="bottom"' + (this._config.bar_position === 'bottom' ? ' selected' : '') + '>Bottom</option>' +
-          '<option value="top"' + (this._config.bar_position === 'top' ? ' selected' : '') + '>Top</option>' +
-        '</select>' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Bar Gradient Colors</label>' +
-        '<input type="text" id="bar_gradient" value="' + (this._config.bar_gradient || '#FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC') + '">' +
-        '<div class="help">Comma-separated list of colors (e.g., #FF0000, #00FF00, #0000FF)</div>' +
-      '</div>' +
-      
-      '<div class="section">Transcription Bubble (User Speech)</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="show_transcription"' + (this._config.show_transcription !== false ? ' checked' : '') + '>' +
-        '<label for="show_transcription">Show transcription bubble (user speech)</label>' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Transcription Font Size (px)</label>' +
-        '<input type="number" id="transcription_font_size" value="' + (this._config.transcription_font_size || 20) + '" min="10" max="60">' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Transcription Font Family</label>' +
-        '<input type="text" id="transcription_font_family" value="' + (this._config.transcription_font_family || 'inherit') + '" placeholder="inherit">' +
-        '<div class="help">CSS font family (e.g., inherit, Roboto, system-ui, monospace)</div>' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Transcription Font Color</label>' +
-        '<input type="text" id="transcription_font_color" value="' + (this._config.transcription_font_color || '#444444') + '" placeholder="#444444">' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="transcription_font_bold"' + (this._config.transcription_font_bold !== false ? ' checked' : '') + '>' +
-        '<label for="transcription_font_bold">Bold</label>' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="transcription_font_italic"' + (this._config.transcription_font_italic ? ' checked' : '') + '>' +
-        '<label for="transcription_font_italic">Italic</label>' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Transcription Background Color</label>' +
-        '<input type="text" id="transcription_background" value="' + (this._config.transcription_background || '#ffffff') + '" placeholder="#ffffff">' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Transcription Border Color</label>' +
-        '<input type="text" id="transcription_border_color" value="' + (this._config.transcription_border_color || 'rgba(0, 180, 255, 0.5)') + '" placeholder="rgba(0, 180, 255, 0.5)">' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Transcription Padding (px)</label>' +
-        '<input type="number" id="transcription_padding" value="' + (this._config.transcription_padding !== undefined ? this._config.transcription_padding : 16) + '" min="0" max="32">' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="transcription_rounded"' + (this._config.transcription_rounded !== false ? ' checked' : '') + '>' +
-        '<label for="transcription_rounded">Rounded corners on transcription bubble</label>' +
-      '</div>' +
-      
-      '<div class="section">Response Bubble (Assistant Speech)</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="show_response"' + (this._config.show_response !== false ? ' checked' : '') + '>' +
-        '<label for="show_response">Show response bubble (assistant speech)</label>' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="streaming_response"' + (this._config.streaming_response ? ' checked' : '') + '>' +
-        '<label for="streaming_response">Stream text response in real-time</label>' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Response Font Size (px)</label>' +
-        '<input type="number" id="response_font_size" value="' + (this._config.response_font_size || 20) + '" min="10" max="60">' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Response Font Family</label>' +
-        '<input type="text" id="response_font_family" value="' + (this._config.response_font_family || 'inherit') + '" placeholder="inherit">' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Response Font Color</label>' +
-        '<input type="text" id="response_font_color" value="' + (this._config.response_font_color || '#444444') + '" placeholder="#444444">' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="response_font_bold"' + (this._config.response_font_bold !== false ? ' checked' : '') + '>' +
-        '<label for="response_font_bold">Bold</label>' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="response_font_italic"' + (this._config.response_font_italic ? ' checked' : '') + '>' +
-        '<label for="response_font_italic">Italic</label>' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Response Background Color</label>' +
-        '<input type="text" id="response_background" value="' + (this._config.response_background || '#ffffff') + '" placeholder="#ffffff">' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Response Padding (px)</label>' +
-        '<input type="number" id="response_padding" value="' + (this._config.response_padding !== undefined ? this._config.response_padding : 16) + '" min="0" max="32">' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Response Border Color</label>' +
-        '<input type="text" id="response_border_color" value="' + (this._config.response_border_color || 'rgba(100, 200, 150, 0.5)') + '" placeholder="rgba(100, 200, 150, 0.5)">' +
-      '</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="response_rounded"' + (this._config.response_rounded !== false ? ' checked' : '') + '>' +
-        '<label for="response_rounded">Rounded corners on response bubble</label>' +
-      '</div>' +
-      
-      '<div class="section">Background Blur</div>' +
-      '<div class="row checkbox-row">' +
-        '<input type="checkbox" id="background_blur"' + (this._config.background_blur !== false ? ' checked' : '') + '>' +
-        '<label for="background_blur">Blur background when bubbles are visible</label>' +
-      '</div>' +
-      '<div class="row">' +
-        '<label>Blur Intensity (px)</label>' +
-        '<input type="number" id="background_blur_intensity" value="' + (this._config.background_blur_intensity !== undefined ? this._config.background_blur_intensity : 5) + '" min="1" max="30">' +
-      '</div>' +
-      
+      '<div class="vs-editor">' +
+
+        // --- Behavior ---
+        '<div class="vs-section">' +
+          '<div class="vs-section-title">Behavior</div>' +
+          this._selectRow('Pipeline', 'pipeline_id', pipelineOptions) +
+          this._checkboxRow('Start listening on load', 'start_listening_on_load') +
+          this._textRow('Wake word switch entity', 'wake_word_switch', 'switch.screensaver') +
+          this._checkboxRow('Debug logging', 'debug') +
+        '</div>' +
+
+        // --- Microphone ---
+        '<div class="vs-section">' +
+          '<div class="vs-section-title">Microphone Processing</div>' +
+          this._checkboxRow('Noise suppression', 'noise_suppression') +
+          this._checkboxRow('Echo cancellation', 'echo_cancellation') +
+          this._checkboxRow('Auto gain control', 'auto_gain_control') +
+          this._checkboxRow('Voice isolation (Chrome only)', 'voice_isolation') +
+        '</div>' +
+
+        // --- Timeouts ---
+        '<div class="vs-section">' +
+          '<div class="vs-section-title">Timeouts</div>' +
+          this._numberRow('Pipeline timeout (s)', 'pipeline_timeout', 0, 300) +
+          this._numberRow('Pipeline idle timeout (s)', 'pipeline_idle_timeout', 0, 3600) +
+        '</div>' +
+
+        // --- Volume ---
+        '<div class="vs-section">' +
+          '<div class="vs-section-title">Volume & Chimes</div>' +
+          this._sliderRow('Chime volume', 'chime_volume', 0, 100) +
+          this._sliderRow('TTS volume', 'tts_volume', 0, 100) +
+          this._checkboxRow('Chime on wake word', 'chime_on_wake_word') +
+          this._checkboxRow('Chime on request sent', 'chime_on_request_sent') +
+        '</div>' +
+
+        // --- Rainbow Bar ---
+        '<div class="vs-section">' +
+          '<div class="vs-section-title">Rainbow Bar</div>' +
+          this._selectRowRaw('Position', 'bar_position',
+            '<option value="bottom"' + (cfg.bar_position === 'bottom' ? ' selected' : '') + '>Bottom</option>' +
+            '<option value="top"' + (cfg.bar_position === 'top' ? ' selected' : '') + '>Top</option>'
+          ) +
+          this._sliderRow('Height (px)', 'bar_height', 2, 40) +
+          this._textRow('Gradient colors', 'bar_gradient', '#FF7777, #FF9977, ...') +
+        '</div>' +
+
+        // --- Transcription Bubble ---
+        '<div class="vs-section">' +
+          '<div class="vs-section-title">Transcription Bubble</div>' +
+          this._checkboxRow('Show transcription', 'show_transcription') +
+          this._sliderRow('Font size', 'transcription_font_size', 10, 48) +
+          this._textRow('Font family', 'transcription_font_family', 'inherit') +
+          this._colorRow('Font color', 'transcription_font_color') +
+          this._checkboxRow('Bold', 'transcription_font_bold') +
+          this._checkboxRow('Italic', 'transcription_font_italic') +
+          this._colorRow('Background', 'transcription_background') +
+          this._textRow('Border color', 'transcription_border_color', 'rgba(0,180,255,0.5)') +
+          this._sliderRow('Padding', 'transcription_padding', 0, 32) +
+          this._checkboxRow('Rounded corners', 'transcription_rounded') +
+        '</div>' +
+
+        // --- Response Bubble ---
+        '<div class="vs-section">' +
+          '<div class="vs-section-title">Response Bubble</div>' +
+          this._checkboxRow('Show response', 'show_response') +
+          this._checkboxRow('Streaming response', 'streaming_response') +
+          this._sliderRow('Font size', 'response_font_size', 10, 48) +
+          this._textRow('Font family', 'response_font_family', 'inherit') +
+          this._colorRow('Font color', 'response_font_color') +
+          this._checkboxRow('Bold', 'response_font_bold') +
+          this._checkboxRow('Italic', 'response_font_italic') +
+          this._colorRow('Background', 'response_background') +
+          this._textRow('Border color', 'response_border_color', 'rgba(100,200,150,0.5)') +
+          this._sliderRow('Padding', 'response_padding', 0, 32) +
+          this._checkboxRow('Rounded corners', 'response_rounded') +
+        '</div>' +
+
+        // --- Background ---
+        '<div class="vs-section">' +
+          '<div class="vs-section-title">Background</div>' +
+          this._checkboxRow('Background blur', 'background_blur') +
+          this._sliderRow('Blur intensity', 'background_blur_intensity', 0, 20) +
+        '</div>' +
+
       '</div>';
-    
-    // Set up fields
-    var fields = ['bar_height', 'bar_position', 'bar_gradient', 'start_listening_on_load', 
-                  'wake_word_switch', 'pipeline_timeout', 'chime_on_wake_word', 'chime_on_request_sent', 'debug',
-                  'noise_suppression', 'echo_cancellation', 'auto_gain_control',
-                  'show_transcription', 'transcription_font_size', 'transcription_font_family', 'transcription_font_color', 
-                  'transcription_font_bold', 'transcription_font_italic',
-                  'transcription_background', 'transcription_border_color', 'transcription_padding', 'transcription_rounded',
-                  'show_response', 'streaming_response', 'response_font_size', 'response_font_family', 'response_font_color',
-                  'response_font_bold', 'response_font_italic',
-                  'response_background', 'response_border_color', 'response_padding', 'response_rounded',
-                  'background_blur', 'background_blur_intensity'];
-    
-    fields.forEach(function(id) {
-      var el = self.querySelector('#' + id);
-      if (el) {
-        el.addEventListener('change', function(e) { self._changed(e); });
-        if (el.type === 'range') {
-          el.addEventListener('input', function(e) { self._changed(e); });
-        }
-      }
-    });
-    
+
+    // Attach event listeners
+    this._attachListeners();
   }
 
-  _valueChanged(key, value) {
-    var newConfig = Object.assign({}, this._config);
-    newConfig[key] = value;
-    
-    this.dispatchEvent(new CustomEvent('config-changed', {
-      detail: { config: newConfig },
+  // --- Row helpers ---
+
+  _checkboxRow(label, key) {
+    var checked = this._config[key] ? ' checked' : '';
+    return '<div class="vs-row"><label>' + label + '</label><input type="checkbox" data-key="' + key + '"' + checked + '></div>';
+  }
+
+  _textRow(label, key, placeholder) {
+    var val = this._config[key] || '';
+    return '<div class="vs-row"><label>' + label + '</label><input type="text" data-key="' + key + '" value="' + this._escAttr(val) + '" placeholder="' + (placeholder || '') + '"></div>';
+  }
+
+  _numberRow(label, key, min, max) {
+    var val = this._config[key] !== undefined ? this._config[key] : '';
+    return '<div class="vs-row"><label>' + label + '</label><input type="number" data-key="' + key + '" value="' + val + '" min="' + min + '" max="' + max + '"></div>';
+  }
+
+  _sliderRow(label, key, min, max) {
+    var val = this._config[key] !== undefined ? this._config[key] : min;
+    return '<div class="vs-row"><label>' + label + '</label><input type="range" data-key="' + key + '" min="' + min + '" max="' + max + '" value="' + val + '"><span class="range-val" data-range-for="' + key + '">' + val + '</span></div>';
+  }
+
+  _colorRow(label, key) {
+    var val = this._config[key] || '#000000';
+    return '<div class="vs-row"><label>' + label + '</label><input type="color" data-key="' + key + '" value="' + val + '"></div>';
+  }
+
+  _selectRow(label, key, options) {
+    return '<div class="vs-row"><label>' + label + '</label><select data-key="' + key + '">' + options + '</select></div>';
+  }
+
+  _selectRowRaw(label, key, options) {
+    return '<div class="vs-row"><label>' + label + '</label><select data-key="' + key + '">' + options + '</select></div>';
+  }
+
+  _escAttr(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // --- Event handling ---
+
+  _attachListeners() {
+    var self = this;
+
+    // Checkboxes
+    this.querySelectorAll('input[type="checkbox"]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        self._updateConfig(el.dataset.key, el.checked);
+      });
+    });
+
+    // Text inputs
+    this.querySelectorAll('input[type="text"]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        self._updateConfig(el.dataset.key, el.value);
+      });
+    });
+
+    // Number inputs
+    this.querySelectorAll('input[type="number"]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        self._updateConfig(el.dataset.key, parseInt(el.value, 10) || 0);
+      });
+    });
+
+    // Range inputs
+    this.querySelectorAll('input[type="range"]').forEach(function (el) {
+      el.addEventListener('input', function () {
+        var span = self.querySelector('[data-range-for="' + el.dataset.key + '"]');
+        if (span) span.textContent = el.value;
+      });
+      el.addEventListener('change', function () {
+        self._updateConfig(el.dataset.key, parseInt(el.value, 10));
+      });
+    });
+
+    // Color inputs
+    this.querySelectorAll('input[type="color"]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        self._updateConfig(el.dataset.key, el.value);
+      });
+    });
+
+    // Selects
+    this.querySelectorAll('select').forEach(function (el) {
+      el.addEventListener('change', function () {
+        self._updateConfig(el.dataset.key, el.value);
+      });
+    });
+  }
+
+  _updateConfig(key, value) {
+    this._config = Object.assign({}, this._config);
+    this._config[key] = value;
+
+    // Fire config-changed event
+    var event = new CustomEvent('config-changed', {
+      detail: { config: this._config },
       bubbles: true,
       composed: true
-    }));
-  }
-
-  _changed(e) {
-    var t = e.target;
-    var value;
-    
-    if (t.type === 'checkbox') {
-      value = t.checked;
-    } else if (t.type === 'number' || t.type === 'range') {
-      value = parseFloat(t.value);
-    } else {
-      value = t.value;
-    }
-    
-    this._valueChanged(t.id, value);
+    });
+    this.dispatchEvent(event);
   }
 }
+
+
+// ============================================================================
+// Registration
+// ============================================================================
 
 customElements.define('voice-satellite-card', VoiceSatelliteCard);
 customElements.define('voice-satellite-card-editor', VoiceSatelliteCardEditor);
@@ -2095,12 +1917,13 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'voice-satellite-card',
   name: 'Voice Satellite Card',
-  description: 'Turn your browser into a voice satellite with server-side wake word detection',
-  preview: true
+  description: 'Transform your browser into a voice satellite for Home Assistant Assist',
+  preview: false,
+  documentationURL: 'https://github.com/owner/voice-satellite-card'
 });
 
 console.info(
-  '%c VOICE-SATELLITE-CARD %c v1.13.0 ',
-  'color: white; background: #4CAF50; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
-  'color: #4CAF50; background: white; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0; border: 1px solid #4CAF50;'
+  '%c VOICE-SATELLITE-CARD %c v1.14.0 ',
+  'color: white; background: #03a9f4; font-weight: bold;',
+  'color: #03a9f4; background: white; font-weight: bold;'
 );
