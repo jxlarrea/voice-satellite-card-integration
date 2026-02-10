@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-Voice Satellite Card is a single-file custom Home Assistant Lovelace card (~1900 lines of ES5 JavaScript, no build step) that turns any browser into a voice-activated satellite. It captures microphone audio, sends it to Home Assistant's Assist pipeline over WebSocket, and plays back TTS responses — all without leaving the HA dashboard.
+Voice Satellite Card is a single-file custom Home Assistant Lovelace card (~2150 lines of ES5 JavaScript, no build step) that turns any browser into a voice-activated satellite. It captures microphone audio, sends it to Home Assistant's Assist pipeline over WebSocket, and plays back TTS responses — all without leaving the HA dashboard.
 
 The card is invisible (returns `getCardSize() = 0`). All visual feedback is rendered via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes.
 
@@ -27,7 +27,7 @@ The card is invisible (returns `getCardSize() = 0`). All visual feedback is rend
 2. Audio is captured via AudioWorklet (or ScriptProcessor fallback), resampled to 16 kHz mono PCM, and sent as binary WebSocket frames every 100 ms.
 3. Home Assistant's `assist_pipeline/run` subscription routes the audio through wake word detection → speech-to-text → intent processing → text-to-speech.
 4. The card receives pipeline events, updates visual feedback (gradient bar, transcription/response bubbles), and plays the TTS audio via an `<audio>` element.
-5. When TTS begins playing, the pipeline is immediately restarted so it listens for the next wake word while audio plays (barge-in support).
+5. When TTS begins playing, the pipeline is immediately restarted so it listens for the next wake word while audio plays (barge-in support). If the conversation agent signals `continue_conversation`, the card skips the wake word stage and restarts in STT mode for multi-turn dialogues.
 6. The cycle repeats indefinitely.
 
 ---
@@ -38,6 +38,8 @@ The card is invisible (returns `getCardSize() = 0`). All visual feedback is rend
 IDLE → CONNECTING → LISTENING → WAKE_WORD_DETECTED → STT → INTENT → TTS → (restart → LISTENING)
                                                                                 ↓
                                                                              ERROR → (backoff → restart)
+                                                       ↑                        ↓
+                                                       └──── STT ← (continue conversation, skip wake word)
 ```
 
 | State | Description |
@@ -66,8 +68,7 @@ All UI elements are inside a single `<div id="voice-satellite-ui">` appended to 
 <div id="voice-satellite-ui">
   <div class="vs-blur-overlay"></div>
   <button class="vs-start-btn"><svg>...</svg></button>
-  <div class="vs-transcription"></div>
-  <div class="vs-response"></div>
+  <div class="vs-chat-container"></div>
   <div class="vs-rainbow-bar"></div>
 </div>
 ```
@@ -82,17 +83,34 @@ All overlay elements use `opacity: 0` when hidden but remain in the DOM as fixed
 
 A full-screen semi-transparent backdrop with `backdrop-filter: blur()`. Shown when wake word is detected, hidden when TTS completes or an error occurs. Always has `pointer-events: none` so the user can still interact with the dashboard behind it.
 
-### 4.4 Transcription Bubble
+### 4.4 Chat Container
 
-Shows the user's transcribed speech text (from `stt-end` event). Positioned at the bottom of the screen above the gradient bar using CSS `bottom` (not `top`). No auto-hide timer — hidden only explicitly when TTS completes or a new interaction starts.
+All conversation messages (user transcriptions and assistant responses) are displayed in a unified chat container (`.vs-chat-container`). This replaces the previous separate transcription/response bubble system with a single code path that works for both single-turn and multi-turn conversations.
 
-### 4.5 Response Bubble
+The container is a flex column positioned at the bottom of the screen above the gradient bar, centered horizontally. Messages are appended as child `<div class="vs-chat-msg">` elements with either a `.user` or `.assistant` class. Each message is styled according to the transcription or response bubble configuration (font, color, background, border, padding, rounding). Messages fade in with a CSS animation (`vs-chat-fade-in`).
 
-Shows the assistant's response text (from `intent-end` or streamed via `intent-progress`). Positioned just above the gradient bar. When the response bubble appears, the transcription bubble slides upward via a `.shifted` CSS class that uses a CSS custom property `--vs-shifted-bottom` calculated dynamically from the response bubble's actual rendered height. This recalculation is debounced with `requestAnimationFrame` because it's called on every streaming token and `offsetHeight` forces a layout reflow.
+**Key methods:**
 
-Has `max-height: 40vh` and `overflow-y: auto` for long streaming responses.
+- `_chatAddUser(text)` — appends a user message (styled with transcription config)
+- `_chatAddAssistant(text)` — appends an assistant message (styled with response config), stores element as `_chatStreamEl`
+- `_chatUpdateAssistant(text)` — updates the current `_chatStreamEl` text (used for streaming)
+- `_chatClear()` — removes all messages, hides container, resets `_chatStreamEl`
 
-### 4.6 Start Button
+**Legacy API wrappers** route old calls to the chat container so all existing callers work unchanged:
+
+- `_showTranscription(text)` → `_chatAddUser(text)` (respects `show_transcription` config)
+- `_showResponse(text)` → `_chatAddAssistant(text)` or `_chatUpdateAssistant(text)` if `_chatStreamEl` exists (respects `show_response` config)
+- `_updateResponse(text)` → creates or updates assistant bubble via `_chatStreamEl`
+- `_hideTranscription()` → no-op (messages persist until `_chatClear`)
+- `_hideResponse()` → no-op (messages persist until `_chatClear`)
+
+**Single-turn behavior:** One user message + one assistant message appear during the interaction, then `_chatClear()` removes everything when the conversation ends.
+
+**Multi-turn behavior (continue conversation):** Messages accumulate in the container across turns, creating a chat-style thread. The container is only cleared when the conversation fully ends (done chime) or is interrupted (barge-in, tab switch, error).
+
+The container has `overflow: visible` and no scrollbar — messages simply grow upward from the bottom. All messages are centered horizontally within the container.
+
+### 4.5 Start Button
 
 A floating circular microphone button (56×56px, bottom-right corner) with a pulsing animation. Shown when automatic microphone access fails (browser user gesture required, mic permission denied, no mic found). Hidden once the microphone starts successfully. The click handler is the critical user gesture entry point (see Section 10: Browser Microphone Restrictions).
 
@@ -120,7 +138,7 @@ For intent-specific errors (LLM service down), a separate `_intentErrorBarTimeou
 
 ### 5.3 TTS Bar Persistence
 
-When TTS starts playing, the pipeline is immediately restarted for barge-in. This causes the state to transition to LISTENING, which normally hides the bar. The `_updateUI()` method has a special check: if `this._currentAudio` exists (TTS audio is playing), the bar remains visible regardless of state. Once TTS finishes, `_onTTSComplete()` calls `_updateUI()` which then hides the bar normally.
+When TTS starts playing, the pipeline is immediately restarted for barge-in. This causes the state to transition to LISTENING, which normally hides the bar. The `_updateUI()` method has a special check: if `this._ttsPlaying` is true, the bar remains visible regardless of state. Once TTS finishes, `_onTTSComplete()` calls `_updateUI()` which then hides the bar normally.
 
 ### 5.4 CSS Animations
 
@@ -231,11 +249,11 @@ The timeout resets on any pipeline activity (`run-start`, `wake_word-end`).
 
 The `pipeline_timeout` value (default 60 seconds) is sent to Home Assistant in the `timeout` field of the pipeline run config. If the entire interaction exceeds this duration, HA sends an error event.
 
-### 8.4 Tab Visibility Debounce
+### 8.4 Tab Visibility & Pause/Resume
 
-When the tab is hidden, a 500ms debounce timer starts before pausing the microphone. This prevents rapid pause/resume thrashing during quick tab switches (Cmd+Tab). When the tab becomes visible again, the microphone resumes immediately with no debounce.
+When the tab is hidden, `_isPaused` is set **immediately** (before the debounce) to block all incoming pipeline events in `_handlePipelineMessage`. If the user is mid-interaction (WAKE_WORD_DETECTED, STT, INTENT, TTS), all UI is cleaned up immediately: chat container cleared, blur overlay hidden, TTS stopped, continue conversation state reset. After a 500ms debounce, `_pauseMicrophone` disables audio tracks and sets state to PAUSED.
 
-On resume, the card checks if the pipeline subscription (`_unsubscribe`) was lost during the pause and restarts the pipeline if needed.
+When the tab becomes visible again, `_resumeMicrophone` resets all in-flight state (`_isRestarting`, `_continueMode`, pending `_restartTimeout`) and always calls `_restartPipeline(0)` to start fresh in wake word mode. This is necessary because while paused, the server-side pipeline likely completed or errored — the `run-end` event was dropped by the `_isPaused` guard — so the old subscription is stale.
 
 ### 8.5 Intent Error Bar Timeout
 
@@ -288,16 +306,19 @@ this._unsubscribe = await this._connection.subscribeMessage(
   function(message) { self._handlePipelineMessage(message); },
   {
     type: 'assist_pipeline/run',
-    start_stage: 'wake_word',
+    start_stage: 'wake_word',  // or 'stt' for continue conversation
     end_stage: 'tts',
     input: { sample_rate: 16000, timeout: 0 },
     pipeline: pipelineId,
-    timeout: this._config.pipeline_idle_timeout
+    timeout: this._config.pipeline_idle_timeout,
+    // conversation_id: '...'  // included for continue conversation
   }
 );
 ```
 
-**`input.timeout: 0` is critical.** If omitted, HA defaults to 3 seconds, causing `wake-word-timeout` errors every 3 seconds. Setting it to 0 means "listen indefinitely for the wake word."
+**`input.timeout: 0` is critical.** If omitted, HA defaults to 3 seconds, causing `wake-word-timeout` errors every 3 seconds. Setting it to 0 means "listen indefinitely for the wake word." The `timeout` field is omitted when `start_stage` is `'stt'` (continue conversation) so the server VAD handles silence detection.
+
+`_startPipeline` accepts an optional `options` parameter with `start_stage` and `conversation_id` for continue conversation mode. When not provided, defaults to `start_stage: 'wake_word'`.
 
 The `timeout` at the top level is the overall pipeline response timeout sent to HA.
 
@@ -327,7 +348,7 @@ The handler reads `message.type` and `message.data` directly. Do NOT check `mess
 | `stt-end` | Transcription complete | `data.stt_output.text` |
 | `intent-start` | Intent processing started | State → INTENT |
 | `intent-progress` | Streaming response token (when `streaming_response: true`) | `data.chat_log_delta.content` (string, append to accumulator). First chunk may be `{ role: "assistant" }` with no content — skip it. |
-| `intent-end` | Intent processing complete | `data.intent_output.response.speech.plain.speech` — the response text. Also check `data.intent_output.response.response_type` — if `"error"`, the LLM service is down. |
+| `intent-end` | Intent processing complete | `data.intent_output.response.speech.plain.speech` — the response text. Also check `data.intent_output.response.response_type` — if `"error"`, the LLM service is down. `data.intent_output.continue_conversation` (boolean) — if `true`, the agent expects a follow-up. `data.intent_output.conversation_id` (string) — pass to next pipeline run for conversation context. |
 | `tts-start` | TTS generation started | State → TTS |
 | `tts-end` | TTS audio URL ready | `data.tts_output.url` or `data.tts_output.url_path` — relative path, must be prefixed with `window.location.origin` |
 | `run-end` | Pipeline run complete | Cleanup and restart |
@@ -433,7 +454,7 @@ pcmData[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
 
 ### 10.7 Tab Visibility
 
-When the tab is hidden (after 500ms debounce), audio tracks are disabled and the send interval is cleared. When the tab becomes visible, tracks are re-enabled, the send interval restarts, and the pipeline subscription is checked — if it was lost during the pause, a full pipeline restart is triggered.
+When the tab is hidden, `_isPaused` is set immediately to block pipeline events, interaction UI is cleaned up (chat, blur, TTS, continue state), and after 500ms debounce audio tracks are disabled and the send interval cleared. When the tab becomes visible, tracks are re-enabled, the send interval restarts, in-flight restart guards are reset (`_isRestarting`, `_continueMode`, `_restartTimeout`), and a full pipeline restart is always triggered to start fresh in wake word mode.
 
 ---
 
@@ -497,6 +518,7 @@ Three global flags prevent this:
 | `wake_word_switch` | string | `''` | Entity to turn OFF on wake word (e.g. screensaver) |
 | `pipeline_timeout` | number | `60` | Max seconds for pipeline response (sent to HA) |
 | `pipeline_idle_timeout` | number | `300` | Seconds before client-side pipeline restart for TTS token refresh |
+| `continue_conversation` | boolean | `true` | Continue listening after assistant asks a follow-up question (multi-turn) |
 | `chime_on_wake_word` | boolean | `true` | Play wake chime |
 | `chime_on_request_sent` | boolean | `true` | Play done chime after TTS |
 | `chime_volume` | number | `100` | Chime volume 0-100 |
@@ -587,7 +609,11 @@ A boolean `_ttsPlaying` flag tracks whether TTS is active, regardless of playbac
 
 ### 14.5 Cleanup
 
-`_onTTSComplete` clears both `_currentAudio` and `_ttsPlaying`, cancels `_ttsEndTimer` if pending, then checks if a new interaction is already in progress (barge-in). If so, it does nothing — the UI belongs to the new interaction. Otherwise, it plays the done chime (browser only), hides all overlays, and calls `_updateUI()`.
+`_onTTSComplete` clears both `_currentAudio` and `_ttsPlaying`, cancels `_ttsEndTimer` if pending, then checks if a new interaction is already in progress (barge-in). If so, it does nothing — the UI belongs to the new interaction.
+
+Next, it checks if continue conversation mode is active (`_shouldContinue` and `_continueConversationId` set by `_handleIntentEnd`). If so, it keeps the chat container and blur overlay visible, clears `_chatStreamEl` so the next turn creates a fresh assistant bubble, and calls `_restartPipelineContinue(conversationId)` to start a new pipeline with `start_stage: 'stt'` and the stored `conversation_id`.
+
+Otherwise (normal completion), it plays the done chime (browser only), calls `_chatClear()` to remove all chat messages, hides the blur overlay, and calls `_updateUI()`.
 
 ### 14.6 Chimes Stay Local
 
@@ -595,7 +621,54 @@ Chimes (wake, done, error) always play on the browser via the Web Audio API osci
 
 ---
 
-## 15. Structured Logging
+## 15. Continue Conversation
+
+### 15.1 Overview
+
+Continue conversation mode enables multi-turn dialogues. When the conversation agent (e.g. an LLM) asks a follow-up question, the card automatically listens for the user's response without requiring the wake word again. The conversation history is displayed in a chat-style interface where messages stack up.
+
+### 15.2 Protocol
+
+The `intent-end` pipeline event contains `intent_output.continue_conversation` (boolean) and `intent_output.conversation_id` (string). When `continue_conversation` is `true` and the `continue_conversation` config option is enabled, the card stores these values as `_shouldContinue` and `_continueConversationId`.
+
+### 15.3 Flow
+
+1. **`_handleIntentEnd`** — stores `_shouldContinue = true` and `_continueConversationId` from `intent_output`
+2. **`_onTTSComplete`** — checks `_shouldContinue`. If true:
+   - Clears `_shouldContinue` and `_continueConversationId` (consumed)
+   - Resets `_chatStreamEl` (so next turn creates a new assistant bubble)
+   - Keeps blur overlay, gradient bar, and chat messages visible
+   - Calls `_restartPipelineContinue(conversationId)`
+3. **`_restartPipelineContinue`** — stops the current pipeline, sets `_continueMode = true`, calls `_startPipeline({ start_stage: 'stt', conversation_id: conversationId })`
+4. **`_startPipeline`** — builds the pipeline config with `start_stage: 'stt'` and includes `conversation_id` in the run config. The `input.timeout` field is omitted for STT start stage so the server VAD handles silence detection.
+5. **`_handleRunStart`** — checks `_continueMode`. If true, sets state to STT (instead of LISTENING) so the gradient bar stays visible. Clears the flag.
+6. **User speaks** → `stt-end` → new user message appended to chat → `intent-end` → new assistant message appended → cycle repeats if `continue_conversation` is still true
+7. When `continue_conversation` is `false` or absent → normal `_onTTSComplete` path → done chime, `_chatClear()`, blur hidden
+
+### 15.4 State Flags
+
+| Flag | Type | Purpose |
+|------|------|---------|
+| `_shouldContinue` | boolean | Set by `_handleIntentEnd`, consumed by `_onTTSComplete` |
+| `_continueConversationId` | string | Conversation ID to pass to next pipeline run |
+| `_continueMode` | boolean | Set by `_restartPipelineContinue`, consumed by `_handleRunStart` to set state to STT instead of LISTENING |
+
+### 15.5 Cleanup
+
+Continue conversation state is cleared in all cleanup paths:
+
+- **Barge-in** (`_handleWakeWordEnd`) — new wake word starts a fresh conversation
+- **Expected errors** (e.g. `stt-no-text-recognized` during continue) — falls back to wake word mode
+- **Tab hidden** — immediate cleanup, `_resumeMicrophone` restarts pipeline fresh
+- **`_restartPipelineContinue` failure** — falls back to normal wake word mode
+
+### 15.6 Chat Container Integration
+
+The chat container (Section 4.4) handles both single-turn and multi-turn conversations with one code path. In single-turn mode, one user + one assistant message appear, then `_chatClear()` removes them. In multi-turn mode, messages accumulate across turns. The done chime only plays when the conversation actually ends (not between turns).
+
+---
+
+## 16. Structured Logging
 
 All console output uses `_log(category, msg)` and `_logError(category, msg)`:
 
@@ -611,13 +684,13 @@ Categories: `state`, `lifecycle`, `mic`, `pipeline`, `event`, `error`, `recovery
 
 ---
 
-## 16. Visual Editor
+## 17. Visual Editor
 
-The card provides a visual configuration editor (`VoiceSatelliteCardEditor`) with collapsible sections: Behavior, Microphone Processing (including voice isolation), Timeouts, Volume & Chimes (including TTS output device dropdown), Rainbow Bar, Transcription Bubble, Response Bubble, Background. The editor fetches available pipelines from HA for the pipeline dropdown, lists `media_player.*` entities for the TTS output device dropdown, and lists switch entities for the wake word switch picker.
+The card provides a visual configuration editor (`VoiceSatelliteCardEditor`) with collapsible sections: Behavior (including continue conversation toggle), Microphone Processing (including voice isolation), Timeouts, Volume & Chimes (including TTS output device dropdown), Rainbow Bar, Transcription Bubble, Response Bubble, Background. The editor fetches available pipelines from HA for the pipeline dropdown, lists `media_player.*` entities for the TTS output device dropdown, and lists switch entities for the wake word switch picker.
 
 ---
 
-## 17. Implementation Checklist
+## 18. Implementation Checklist
 
 When recreating or modifying this card, verify:
 
@@ -628,17 +701,15 @@ When recreating or modifying this card, verify:
 - [ ] All hidden overlay elements have `pointer-events: none`
 - [ ] TTS playback triggers immediate `_restartPipeline(0)` for barge-in
 - [ ] `_updateUI` keeps bar visible while `_ttsPlaying` is true
-- [ ] No auto-hide timers on bubbles
-- [ ] Bubbles positioned with CSS `bottom`, not `top`
-- [ ] `_recalcShiftedPosition` debounced with `requestAnimationFrame`
-- [ ] Response bubble has `max-height: 40vh` and `overflow-y: auto`
+- [ ] No auto-hide timers on chat messages
+- [ ] Chat container positioned with CSS `bottom`, not `top`
 - [ ] Done chime plays in `_onTTSComplete`, not `_handleIntentEnd`
-- [ ] Done chime suppressed during barge-in (check state) and for remote TTS
+- [ ] Done chime suppressed during barge-in (check state), continue conversation, and remote TTS
 - [ ] Intent errors detected via `response_type === 'error'`; TTS suppressed
 - [ ] Intent error bar timeout cancelled on new `wake_word-end`
 - [ ] All callbacks use `var self = this` (ES5, no arrow functions)
 - [ ] `_stopTTS` nulls `onended`/`onerror` before pausing (ghost prevention)
-- [ ] `_resumeMicrophone` checks for lost pipeline subscription
+- [ ] `_resumeMicrophone` always restarts pipeline (not conditional on `_unsubscribe`)
 - [ ] `_log()` checks debug internally — no redundant guards
 - [ ] `voice_isolation` uses `advanced` constraint array (graceful fallback)
 - [ ] `duplicate_wake_up_detected` uses underscores (HA API inconsistency)
@@ -653,4 +724,12 @@ When recreating or modifying this card, verify:
 - [ ] `_ttsPlaying` flag used for all TTS state checks (not `_currentAudio`)
 - [ ] `_ttsEndTimer` cleans up UI after 2s for remote playback
 - [ ] `setConfig` propagates config to `window._voiceSatelliteInstance` for live updates
-- [ ] Expected errors clean up UI (blur, bubbles) and play done chime if user was mid-interaction
+- [ ] Expected errors clean up UI (chat, blur) and play done chime if user was mid-interaction
+- [ ] `_chatClear()` called in all cleanup paths (finish run end, errors, barge-in, tab hidden, TTS complete)
+- [ ] `_chatStreamEl` cleared between turns so `_showResponse` doesn't update stale bubble
+- [ ] Continue conversation stores `_shouldContinue` and `_continueConversationId` from `intent-end`
+- [ ] `_restartPipelineContinue` uses `start_stage: 'stt'` with `conversation_id`
+- [ ] `_handleRunStart` checks `_continueMode` to set state to STT instead of LISTENING
+- [ ] Tab hidden sets `_isPaused` immediately (before debounce) to block pipeline events
+- [ ] `_resumeMicrophone` resets `_isRestarting`, `_continueMode`, `_restartTimeout` before restart
+- [ ] `_handlePipelineMessage` drops all events while `_isPaused` is true
