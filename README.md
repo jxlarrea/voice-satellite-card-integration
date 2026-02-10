@@ -41,6 +41,7 @@ For kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/d
 - **Auto-Start** - Automatically begins listening on page load (with fallback button).
 - **Visual Feedback** - Customizable rainbow gradient bar shows listening/processing/speaking states.
 - **Transcription Display** - Shows what was understood in a styled bubble.
+- **Continue Conversation** - When the assistant asks a follow-up question, the card automatically listens for a response without requiring the wake word again. Conversation history is displayed in a chat-style interface.
 - **Screensaver Control** - Optionally turn off Fully Kiosk screensaver when wake word is detected.
 - **Configurable Chimes** - Audio feedback for wake word detection and request completion.
 
@@ -94,6 +95,7 @@ wake_word_switch: ''               # Switch to turn OFF when wake word detected
                                    # e.g., 'switch.tablet_screensaver'
 pipeline_timeout: 60               # Max seconds to wait for pipeline response (0 = no timeout)
 pipeline_idle_timeout: 300         # Seconds before pipeline restarts to keep TTS fresh (default 5 min)
+continue_conversation: true        # Continue listening after assistant asks a follow-up question
 chime_on_wake_word: true           # Play chime when wake word detected
 chime_on_request_sent: true        # Play chime after request processed
 chime_volume: 100                  # Chime volume (0-100)
