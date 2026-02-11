@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card v2.2.0
+ * Voice Satellite Card v2.3.0
  * Transform your browser into a voice satellite for Home Assistant Assist
  * 
  * A custom Lovelace card that enables wake word detection, speech-to-text,
@@ -1447,9 +1447,9 @@ class VoiceSatelliteCard extends HTMLElement {
 
   _showResponse(text) {
     if (!this._config.show_response) return;
-    // If streaming already created a bubble, just update it
+    // If streaming already created a bubble, set final text (no fade)
     if (this._chatStreamEl) {
-      this._chatUpdateAssistant(text);
+      this._chatStreamEl.textContent = text;
     } else {
       this._chatAddAssistant(text);
     }
@@ -1513,9 +1513,30 @@ class VoiceSatelliteCard extends HTMLElement {
   }
 
   _chatUpdateAssistant(text) {
-    if (this._chatStreamEl) {
+    if (!this._chatStreamEl) return;
+
+    // Apply a trailing character fade: the last FADE_LEN characters get
+    // decreasing opacity so new text appears to flow in smoothly.
+    var FADE_LEN = 24;
+    if (text.length <= FADE_LEN) {
       this._chatStreamEl.textContent = text;
+      return;
     }
+
+    var solid = text.slice(0, text.length - FADE_LEN);
+    var tail = text.slice(text.length - FADE_LEN);
+
+    // Build HTML: solid text + faded tail spans
+    var html = this._escapeHtml(solid);
+    for (var i = 0; i < tail.length; i++) {
+      var opacity = ((FADE_LEN - i) / FADE_LEN).toFixed(2);
+      html += '<span style="opacity:' + opacity + '">' + this._escapeHtml(tail[i]) + '</span>';
+    }
+    this._chatStreamEl.innerHTML = html;
+  }
+
+  _escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   _chatClear() {
@@ -2237,7 +2258,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c VOICE-SATELLITE-CARD %c v2.2.0 ',
+  '%c VOICE-SATELLITE-CARD %c v2.3.0 ',
   'color: white; background: #03a9f4; font-weight: bold;',
   'color: #03a9f4; background: white; font-weight: bold;'
 );
