@@ -245,9 +245,9 @@ The timeout resets on any pipeline activity (`run-start`, `wake_word-end`).
 
 **Interaction guard:** When the idle timeout fires, it checks whether the user is mid-interaction (state is WAKE_WORD_DETECTED, STT, INTENT, or TTS) or TTS audio is still playing. If so, it defers by resetting itself rather than killing the active interaction. This prevents the timeout from interrupting a conversation if someone sets a short `pipeline_idle_timeout` combined with a slow LLM response.
 
-### 8.3 Pipeline Response Timeout
+### 8.3 Pipeline Response Timeout (Server-Side)
 
-The `pipeline_timeout` value (default 60 seconds) is sent to Home Assistant in the `timeout` field of the pipeline run config. If the entire interaction exceeds this duration, HA sends an error event.
+The `pipeline_timeout` value (default 60 seconds) is sent to Home Assistant in the `timeout` field of the pipeline run config. This is a per-run timeout — if a single pipeline run (wake word through TTS) exceeds this duration, HA sends an error event. In continue conversation mode, each turn is a separate pipeline run with its own timeout. Note: this is distinct from `pipeline_idle_timeout` which is a client-side timer (see §8.2).
 
 ### 8.4 Tab Visibility & Pause/Resume
 
@@ -516,9 +516,10 @@ Three global flags prevent this:
 | `start_listening_on_load` | boolean | `true` | Auto-start on page load |
 | `pipeline_id` | string | `''` | Pipeline ID (empty = preferred/first) |
 | `wake_word_switch` | string | `''` | Entity to turn OFF on wake word (e.g. screensaver) |
-| `pipeline_timeout` | number | `60` | Max seconds for pipeline response (sent to HA) |
-| `pipeline_idle_timeout` | number | `300` | Seconds before client-side pipeline restart for TTS token refresh |
+| `pipeline_timeout` | number | `60` | Server-side: max seconds HA allows for a single pipeline run (sent to HA as `timeout`) |
+| `pipeline_idle_timeout` | number | `300` | Client-side: seconds of inactivity before silent pipeline restart to refresh TTS tokens |
 | `continue_conversation` | boolean | `true` | Continue listening after assistant asks a follow-up question (multi-turn) |
+| `double_tap_cancel` | boolean | `true` | Double-tap screen to cancel active interaction and stop TTS |
 | `chime_on_wake_word` | boolean | `true` | Play wake chime |
 | `chime_on_request_sent` | boolean | `true` | Play done chime after TTS |
 | `chime_volume` | number | `100` | Chime volume 0-100 |
@@ -668,7 +669,35 @@ The chat container (Section 4.4) handles both single-turn and multi-turn convers
 
 ---
 
-## 16. Structured Logging
+## 16. Double-Tap to Cancel
+
+### 16.1 Overview
+
+When `double_tap_cancel` is enabled (default: `true`), double-tapping anywhere on the screen during an active interaction cancels it immediately. This allows users to interrupt long TTS responses or abort mid-conversation without waiting for the pipeline to finish.
+
+### 16.2 Implementation
+
+`_setupDoubleTapHandler` registers listeners on `document` for both `touchstart` (mobile) and `click` (desktop). The handler uses a timestamp comparison — two taps within 400ms counts as a double-tap. It only activates when:
+
+- `double_tap_cancel` config is enabled
+- The current state is an active interaction (WAKE_WORD_DETECTED, STT, INTENT, TTS) OR `_ttsPlaying` is true
+
+Since the listener is on `document`, it catches taps on any element: the blur overlay, chat messages, gradient bar, or empty space. Chat messages have `pointer-events: auto` when the container is visible, so events bubble up normally.
+
+### 16.3 Cancellation Actions
+
+When a double-tap is detected:
+
+1. `_stopTTS()` — stops browser audio or sends `media_player.media_stop` for remote playback
+2. Clears `_shouldContinue` and `_continueConversationId` — ends any multi-turn conversation
+3. `_chatClear()` — removes all chat messages
+4. `_hideBlurOverlay()` — hides the backdrop
+5. Plays the done chime (browser only) to acknowledge cancellation
+6. `_restartPipeline(0)` — restarts fresh in wake word mode
+
+---
+
+## 17. Structured Logging
 
 All console output uses `_log(category, msg)` and `_logError(category, msg)`:
 
@@ -684,13 +713,13 @@ Categories: `state`, `lifecycle`, `mic`, `pipeline`, `event`, `error`, `recovery
 
 ---
 
-## 17. Visual Editor
+## 18. Visual Editor
 
-The card provides a visual configuration editor (`VoiceSatelliteCardEditor`) with collapsible sections: Behavior (including continue conversation toggle), Microphone Processing (including voice isolation), Timeouts, Volume & Chimes (including TTS output device dropdown), Rainbow Bar, Transcription Bubble, Response Bubble, Background. The editor fetches available pipelines from HA for the pipeline dropdown, lists `media_player.*` entities for the TTS output device dropdown, and lists switch entities for the wake word switch picker.
+The card provides a visual configuration editor (`VoiceSatelliteCardEditor`) with collapsible sections: Behavior (including continue conversation and double-tap cancel toggles), Microphone Processing (including voice isolation), Timeouts (with server-side/client-side labels), Volume & Chimes (including TTS output device dropdown), Rainbow Bar, Transcription Bubble, Response Bubble, Background. The editor fetches available pipelines from HA for the pipeline dropdown, lists `media_player.*` entities for the TTS output device dropdown, and lists switch entities for the wake word switch picker.
 
 ---
 
-## 18. Implementation Checklist
+## 19. Implementation Checklist
 
 When recreating or modifying this card, verify:
 
@@ -733,3 +762,7 @@ When recreating or modifying this card, verify:
 - [ ] Tab hidden sets `_isPaused` immediately (before debounce) to block pipeline events
 - [ ] `_resumeMicrophone` resets `_isRestarting`, `_continueMode`, `_restartTimeout` before restart
 - [ ] `_handlePipelineMessage` drops all events while `_isPaused` is true
+- [ ] `pipeline_timeout` (not `pipeline_idle_timeout`) sent to HA as the run config `timeout`
+- [ ] Double-tap handler checks `double_tap_cancel` config before acting
+- [ ] Double-tap listener on `document` catches events from chat messages, blur overlay, and empty space
+- [ ] Double-tap cancellation stops TTS, clears chat, hides blur, plays done chime, restarts pipeline
