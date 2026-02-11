@@ -93,9 +93,10 @@ start_listening_on_load: true      # Auto-start on page load
 pipeline_id: ''                    # Pipeline ID (empty = default pipeline)
 wake_word_switch: ''               # Switch to turn OFF when wake word detected
                                    # e.g., 'switch.tablet_screensaver'
-pipeline_timeout: 60               # Max seconds to wait for pipeline response (0 = no timeout)
-pipeline_idle_timeout: 300         # Seconds before pipeline restarts to keep TTS fresh (default 5 min)
+pipeline_timeout: 60               # Server-side: max seconds for pipeline response (0 = no timeout)
+pipeline_idle_timeout: 300         # Client-side: seconds before pipeline restarts to keep TTS fresh (default 5 min)
 continue_conversation: true        # Continue listening after assistant asks a follow-up question
+double_tap_cancel: true            # Double-tap screen to cancel active interaction and stop TTS
 chime_on_wake_word: true           # Play chime when wake word detected
 chime_on_request_sent: true        # Play chime after request processed
 chime_volume: 100                  # Chime volume (0-100)
