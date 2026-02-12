@@ -48,7 +48,7 @@ voice-satellite-card/
 │   ├── pipeline.js                   ← PipelineManager (start/stop/restart, events, recovery)
 │   ├── ui.js                         ← UIManager (overlay, bar, blur, start button)
 │   ├── chat.js                       ← ChatManager (bubbles, streaming fade)
-│   ├── styles.js                     ← All CSS strings
+│   ├── styles.css                    ← CSS styles (imported as raw string via webpack)
 │   ├── double-tap.js                 ← DoubleTapHandler (cancel with touch dedup)
 │   ├── visibility.js                 ← VisibilityManager (tab pause/resume)
 │   └── editor.js                     ← VoiceSatelliteCardEditor (visual config)
@@ -65,13 +65,18 @@ voice-satellite-card/
 
 ### 3.2 Build System
 
-Webpack bundles all ES6 modules into a single file for HA custom card deployment. Babel transpiles only features unsupported by the last 2 versions of Chrome, Firefox, Safari, and Edge — native ES6+ (classes, arrow functions, async/await, const/let) passes through untranspiled for performance.
+Webpack bundles all ES6 modules into a single file for HA custom card deployment. Babel transpiles only features unsupported by the last 2 versions of Chrome, Firefox, Safari, and Edge — native ES6+ (classes, arrow functions, async/await, const/let) passes through untranspiled for performance. CSS files are imported as raw strings via Webpack's `asset/source` type (no CSS extraction — the string is injected into the DOM at runtime by `UIManager`).
+
+The version number is defined once in `package.json` and injected at build time via Webpack's `DefinePlugin` as `__VERSION__`, consumed by `constants.js`.
 
 **npm scripts:**
 
-- `npm run build` — produces both `voice-satellite-card.js` (readable, with source map) and `voice-satellite-card.min.js` (minified) in the repo root
+- `npm run build` — produces both `voice-satellite-card.js` (readable, with source map) and `voice-satellite-card.min.js` (minified, no source map) in the repo root
+- `npm run deploy` — builds and copies the readable version + source map to HA (`\\hassio\config\www\`)
 
 Only `voice-satellite-card.min.js` is committed to git. The readable version and source map are gitignored (local debugging only).
+
+**VS Code integration:** `.vscode/tasks.json` maps **Ctrl+Shift+B** to `npm run deploy` (default build task).
 
 ### 3.3 Composition Pattern
 
