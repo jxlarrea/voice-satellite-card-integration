@@ -72,11 +72,11 @@ The version number is defined once in `package.json` and injected at build time 
 **npm scripts:**
 
 - `npm run build` — produces both `voice-satellite-card.js` (readable, with source map) and `voice-satellite-card.min.js` (minified, no source map) in the repo root
-- `npm run deploy` — builds and copies the readable version + source map to HA (`\\hassio\config\www\`)
+- `npm run dev` — builds and copies the readable version + source map to HA (`\\hassio\config\www\`)
 
 Only `voice-satellite-card.min.js` is committed to git. The readable version and source map are gitignored (local debugging only).
 
-**VS Code integration:** `.vscode/tasks.json` maps **Ctrl+Shift+B** to `npm run deploy` (default build task).
+**VS Code integration:** `.vscode/tasks.json` maps **Ctrl+Shift+B** to `npm run dev` (default build task).
 
 ### 3.3 Composition Pattern
 
