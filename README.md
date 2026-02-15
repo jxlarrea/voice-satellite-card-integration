@@ -37,15 +37,14 @@ For kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/d
 ## How It Works
 
 ```mermaid
-graph LR
-    A[🎤 Browser Mic] -->|16kHz PCM| B[Home Assistant WebSocket]
-    B --> C[Assist Pipeline]
-    C --> D[Wake Word Detection]
-    D --> E[Speech-to-Text]
-    E --> F[Conversation Agent]
-    F --> G[Text-to-Speech]
-    G -->|Audio URL| H[🔊 TTS Playback]
-    H -->|Restart| D
+graph TD
+    A[🎤 Browser Mic] -->|16kHz PCM| B[Home Assistant]
+    B --> C[Wake Word Detection]
+    C --> D[Speech-to-Text]
+    D --> E[Conversation Agent]
+    E --> F[Text-to-Speech]
+    F -->|Audio URL| G[🔊 TTS Playback]
+    G -->|Restart| C
 ```
 
 ## Features
