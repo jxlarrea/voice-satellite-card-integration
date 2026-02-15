@@ -9,7 +9,7 @@ Transform any browser into a voice-activated satellite for Home Assistant's Assi
 
 ## Why This Card?
 
-Home Assistant's built-in voice features require dedicated hardware like ESPHome devices or specific voice assistant hardware. But what if you already have a tablet mounted on your wall running the Home Assistant dashboard?a
+Home Assistant's built-in voice features require dedicated hardware like ESPHome devices or specific voice assistant hardware. But what if you already have a tablet mounted on your wall running the Home Assistant dashboard?
 
 **Voice Satellite Card** solves this by:
 
@@ -44,6 +44,7 @@ For kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/d
 - **Continue Conversation** - When the assistant asks a follow-up question, the card automatically listens for a response without requiring the wake word again. Conversation history is displayed in a chat-style interface.
 - **Screensaver Control** - Optionally turn off Fully Kiosk screensaver when wake word is detected.
 - **Configurable Chimes** - Audio feedback for wake word detection and request completion.
+- **State Tracking** - Expose the card's interaction state (`ACTIVE`/`IDLE`) to a Home Assistant entity for per-device automations.
 
 ## Prerequisites
 
@@ -93,6 +94,8 @@ start_listening_on_load: true      # Auto-start on page load
 pipeline_id: ''                    # Pipeline ID (empty = default pipeline)
 wake_word_switch: ''               # Switch to turn OFF when wake word detected
                                    # e.g., 'switch.tablet_screensaver'
+state_entity: ''                   # input_text entity to track interaction state (ACTIVE/IDLE)
+                                   # e.g., 'input_text.voice_satellite_living_room'
 pipeline_timeout: 60               # Server-side: max seconds for pipeline response (0 = no timeout)
 pipeline_idle_timeout: 300         # Client-side: seconds before pipeline restarts to keep TTS fresh (default 5 min)
 continue_conversation: true        # Continue listening after assistant asks a follow-up question
@@ -177,6 +180,62 @@ wake_word_switch: switch.tablet_screensaver
 When the wake word is detected, this switch will be turned OFF, which exits the screensaver and wakes up the display for the interaction.
 
 **Important:** In Fully Kiosk, do NOT use the screen on/off switch for this purpose. If the screen turns off completely, the microphone will stop working. Instead, use the screensaver switch which keeps the screen dimmed but the microphone active.
+
+### State Tracking for Per-Device Automations
+
+If you run the card on multiple devices (e.g., a living room tablet and a bedroom tablet), you can use the `state_entity` option to track each device's interaction state independently. This lets you create automations specific to each device, such as muting a TV when a nearby tablet hears the wake word.
+
+The card updates the entity with two values:
+
+| Value | Meaning |
+|-------|---------|
+| `ACTIVE` | Wake word was detected — an interaction is in progress |
+| `IDLE` | Interaction has fully ended (TTS finished, conversation complete, or cancelled via double-tap) |
+
+The entity stays `ACTIVE` throughout multi-turn conversations (continue conversation mode), so automations won't trigger repeatedly between follow-up questions.
+
+**Setup:**
+
+1. Create an `input_text` helper for each device in Settings → Devices & Services → Helpers:
+   - Name: `Voice Satellite Living Room`
+   - Entity ID: `input_text.voice_satellite_living_room`
+
+2. Add the entity to the card config:
+
+```yaml
+type: custom:voice-satellite-card
+state_entity: input_text.voice_satellite_living_room
+```
+
+3. Create automations based on the entity state:
+
+```yaml
+# Mute the living room TV when voice interaction starts
+automation:
+  - alias: "Mute TV on voice interaction"
+    trigger:
+      - platform: state
+        entity_id: input_text.voice_satellite_living_room
+        to: "ACTIVE"
+    action:
+      - service: media_player.volume_mute
+        target:
+          entity_id: media_player.living_room_tv
+        data:
+          is_volume_muted: true
+
+  - alias: "Unmute TV after voice interaction"
+    trigger:
+      - platform: state
+        entity_id: input_text.voice_satellite_living_room
+        to: "IDLE"
+    action:
+      - service: media_player.volume_mute
+        target:
+          entity_id: media_player.living_room_tv
+        data:
+          is_volume_muted: false
+```
 
 ## Troubleshooting
 

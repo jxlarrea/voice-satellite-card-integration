@@ -142,6 +142,24 @@ export class VoiceSatelliteCard extends HTMLElement {
     this._state = newState;
     this._logger.log('state', oldState + ' → ' + newState);
     this._ui.updateForState(newState, this._pipeline.serviceUnavailable, this._tts.isPlaying);
+
+    if (newState === State.WAKE_WORD_DETECTED) {
+      this.updateInteractionState('ACTIVE');
+    }
+  }
+
+  updateInteractionState(interactionState) {
+    var entityId = this._config.state_entity;
+    if (!entityId || !this._hass) return;
+
+    var self = this;
+    this._logger.log('state_entity', entityId + ' → ' + interactionState);
+    this._hass.callService('input_text', 'set_value', {
+      entity_id: entityId,
+      value: interactionState,
+    }).catch(function (e) {
+      self._logger.error('state_entity', 'Failed to update ' + entityId + ': ' + e);
+    });
   }
 
   // --- Callbacks from managers ---
@@ -182,6 +200,7 @@ export class VoiceSatelliteCard extends HTMLElement {
     this._chat.clear();
     this._ui.hideBlurOverlay();
     this._ui.updateForState(this._state, this._pipeline.serviceUnavailable, false);
+    this.updateInteractionState('IDLE');
   }
 
   turnOffWakeWordSwitch() {

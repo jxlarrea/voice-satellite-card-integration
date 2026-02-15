@@ -41,7 +41,7 @@ voice-satellite-card/
 ├── src/                              ← ES6 source modules
 │   ├── index.js                      ← Entry point, custom element registration
 │   ├── card.js                       ← VoiceSatelliteCard (thin orchestrator)
-│   ├── constants.js                  ← State enum, DEFAULT_CONFIG, VERSION
+│   ├── constants.js                  ← State enum, DEFAULT_CONFIG (incl. state_entity), VERSION
 │   ├── logger.js                     ← Shared Logger class
 │   ├── audio.js                      ← AudioManager (mic, worklet, resample, send)
 │   ├── tts.js                        ← TtsManager (playback, chimes, streaming TTS)
@@ -98,7 +98,7 @@ Each manager receives the card instance via its constructor and accesses other m
 **Callback pattern:** Managers that need to notify the card use explicit callback methods rather than events:
 
 - `TtsManager` → `card.onTTSComplete()` — playback finished, clean up UI or continue conversation
-- `DoubleTapHandler` → `card.setState()`, `card.pipeline.restart()` — cancel interaction
+- `DoubleTapHandler` → `card.setState()`, `card.pipeline.restart()`, `card.updateInteractionState('IDLE')` — cancel interaction
 - `VisibilityManager` → `card.setState()`, `card.pipeline.restart()` — resume after tab switch
 
 The `connection` getter includes a fallback: if `this._connection` is null (e.g. after a tab switch where the `hass` setter hasn't re-fired), it re-grabs the connection from `this._hass.connection` automatically.
@@ -703,6 +703,7 @@ Three global flags prevent this:
 | `start_listening_on_load` | boolean | `true` | Auto-start on page load |
 | `pipeline_id` | string | `''` | Pipeline ID (empty = preferred/first) |
 | `wake_word_switch` | string | `''` | Entity to turn OFF on wake word (e.g. screensaver) |
+| `state_entity` | string | `''` | `input_text` entity to track interaction state (`ACTIVE`/`IDLE`) for per-device automations |
 | `pipeline_timeout` | number | `60` | Server-side: max seconds HA allows for a single pipeline run (sent to HA as `timeout`) |
 | `pipeline_idle_timeout` | number | `300` | Client-side: seconds of inactivity before silent pipeline restart to refresh TTS tokens |
 | `continue_conversation` | boolean | `true` | Continue listening after assistant asks a follow-up question (multi-turn) |
@@ -908,7 +909,48 @@ When a double-tap is detected:
 
 ---
 
-## 18. Structured Logging
+## 18. Interaction State Tracking
+
+### 18.1 Overview
+
+When the card runs on multiple devices (e.g. a living room tablet and a bedroom tablet), the `state_entity` config option allows each device to expose its interaction state to Home Assistant via an `input_text` helper. This enables per-device automations — for example, muting a TV when the nearby tablet hears the wake word.
+
+### 18.2 State Values
+
+The entity receives only two values:
+
+| Value | Set When |
+|-------|----------|
+| `ACTIVE` | Wake word detected (`card.setState(State.WAKE_WORD_DETECTED)` triggers `card.updateInteractionState('ACTIVE')`) |
+| `IDLE` | Interaction fully ended: normal TTS completion in `card.onTTSComplete()`, or double-tap cancellation in `DoubleTapHandler` |
+
+The entity stays `ACTIVE` throughout multi-turn conversations (continue conversation mode). It does NOT update on internal state transitions like LISTENING, STT, INTENT, or TTS — only on the two user-meaningful boundaries.
+
+### 18.3 Implementation
+
+`card.updateInteractionState(interactionState)` is a public method that calls `hass.callService('input_text', 'set_value', { entity_id, value })`. It is called from:
+
+1. **`card.setState()`** — when `newState === State.WAKE_WORD_DETECTED`, calls `updateInteractionState('ACTIVE')`
+2. **`card.onTTSComplete()`** — on normal completion (not barge-in, not continue conversation), calls `updateInteractionState('IDLE')`
+3. **`DoubleTapHandler`** — after cancellation cleanup, calls `card.updateInteractionState('IDLE')`
+
+Errors are caught and logged via `logger.error('state_entity', ...)`. If `state_entity` is empty (default) or `hass` is unavailable, the method returns immediately — zero overhead.
+
+### 18.4 Editor
+
+The visual editor shows a dropdown filtered to `input_text.*` entities, with a "None" option.
+
+### 18.5 Setup
+
+Users create an `input_text` helper per device in HA (Settings → Devices & Services → Helpers), then reference it in the card config:
+
+```yaml
+state_entity: input_text.voice_satellite_living_room
+```
+
+---
+
+## 19. Structured Logging
 
 All console output uses the shared `Logger` class (`card.logger`). All managers receive the logger via `this._log = card.logger`.
 
@@ -924,13 +966,13 @@ Categories: `state`, `lifecycle`, `mic`, `pipeline`, `event`, `error`, `recovery
 
 ---
 
-## 19. Visual Editor
+## 20. Visual Editor
 
-The card provides a visual configuration editor (`VoiceSatelliteCardEditor`, defined in `src/editor.js`) with collapsible sections: Behavior (including continue conversation and double-tap cancel toggles), Microphone Processing (including voice isolation), Timeouts (with server-side/client-side labels), Volume & Chimes (including TTS output device dropdown), Rainbow Bar, Transcription Bubble, Response Bubble, Background. The editor fetches available pipelines from HA for the pipeline dropdown, lists `media_player.*` entities for the TTS output device dropdown, and lists switch entities for the wake word switch picker.
+The card provides a visual configuration editor (`VoiceSatelliteCardEditor`, defined in `src/editor.js`) with collapsible sections: Behavior (including continue conversation and double-tap cancel toggles), Microphone Processing (including voice isolation), Timeouts (with server-side/client-side labels), Volume & Chimes (including TTS output device dropdown), Rainbow Bar, Transcription Bubble, Response Bubble, Background. The editor fetches available pipelines from HA for the pipeline dropdown, lists `media_player.*` entities for the TTS output device dropdown, lists `switch.*` and `input_boolean.*` entities for the wake word switch picker, and lists `input_text.*` entities for the state tracking entity picker. Entity dropdowns are built by the shared `_entityOptions(currentValue, prefixes)` helper which filters `hass.states` by domain prefix and includes a "None" option.
 
 ---
 
-## 20. Implementation Checklist
+## 21. Implementation Checklist
 
 When recreating or modifying this card, verify:
 
@@ -990,3 +1032,9 @@ When recreating or modifying this card, verify:
 - [ ] Double-tap handler deduplicates `touchstart`/`click` via `doubleTap._lastTapWasTouch` flag
 - [ ] Double-tap sets state to IDLE before clearing UI (blocks straggling event handlers)
 - [ ] Chat container uses `display: none` by default, `display: flex` when `.visible`
+- [ ] `state_entity` updates to `ACTIVE` only on `WAKE_WORD_DETECTED` (not on every state change)
+- [ ] `state_entity` updates to `IDLE` on normal TTS completion and double-tap cancel
+- [ ] `state_entity` stays `ACTIVE` during continue conversation (no IDLE between turns)
+- [ ] `card.updateInteractionState()` is a no-op when `state_entity` is empty (zero overhead)
+- [ ] Editor `_entityOptions()` filters entities by domain prefix and includes "None" option
+- [ ] Wake word switch dropdown shows `switch.*` and `input_boolean.*` entities

@@ -21,6 +21,7 @@ export const DEFAULT_CONFIG = {
   // Behavior
   start_listening_on_load: true,
   wake_word_switch: '',
+  state_entity: '',
   pipeline_id: '',
   pipeline_timeout: 60,
   pipeline_idle_timeout: 300,

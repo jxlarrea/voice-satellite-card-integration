@@ -46,6 +46,7 @@ export class DoubleTapHandler {
         self._card.setState(State.IDLE);
         self._card.chat.clear();
         self._card.ui.hideBlurOverlay();
+        self._card.updateInteractionState('IDLE');
 
         var isRemote = self._card.config.tts_target && self._card.config.tts_target !== 'browser';
         if (self._card.config.chime_on_request_sent && !isRemote) {

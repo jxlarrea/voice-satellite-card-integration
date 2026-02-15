@@ -62,6 +62,9 @@ export class VoiceSatelliteCardEditor extends HTMLElement {
       }
     }
 
+    var wakeWordSwitchOptions = this._entityOptions(cfg.wake_word_switch, ['switch.', 'input_boolean.']);
+    var stateEntityOptions = this._entityOptions(cfg.state_entity, ['input_text.']);
+
     this.innerHTML =
       '<style>' +
       '.vs-editor { padding: 16px; }' +
@@ -80,7 +83,8 @@ export class VoiceSatelliteCardEditor extends HTMLElement {
       '<div class="vs-section-title">Behavior</div>' +
       this._selectRow('Pipeline', 'pipeline_id', pipelineOptions) +
       this._checkboxRow('Start listening on load', 'start_listening_on_load') +
-      this._textRow('Wake word switch entity', 'wake_word_switch', 'switch.screensaver') +
+      this._selectRow('Wake word switch entity', 'wake_word_switch', wakeWordSwitchOptions) +
+      this._selectRow('State tracking entity', 'state_entity', stateEntityOptions) +
       this._checkboxRow('Continue conversation mode', 'continue_conversation') +
       this._checkboxRow('Double-tap screen to cancel interaction', 'double_tap_cancel') +
       this._checkboxRow('Debug logging', 'debug') +
@@ -190,6 +194,27 @@ export class VoiceSatelliteCardEditor extends HTMLElement {
 
   _selectRowRaw(label, key, options) {
     return '<div class="vs-row"><label>' + label + '</label><select data-key="' + key + '">' + options + '</select></div>';
+  }
+
+  _entityOptions(currentValue, prefixes) {
+    var options = '<option value=""' + (!currentValue ? ' selected' : '') + '>None</option>';
+    if (!this._hass) return options;
+
+    var states = this._hass.states || {};
+    var entityIds = Object.keys(states).filter(function (id) {
+      for (var i = 0; i < prefixes.length; i++) {
+        if (id.startsWith(prefixes[i])) return true;
+      }
+      return false;
+    }).sort();
+
+    for (var i = 0; i < entityIds.length; i++) {
+      var eid = entityIds[i];
+      var friendly = states[eid].attributes.friendly_name || eid;
+      var sel = eid === currentValue ? ' selected' : '';
+      options += '<option value="' + eid + '"' + sel + '>' + friendly + '</option>';
+    }
+    return options;
   }
 
   _escAttr(str) {
