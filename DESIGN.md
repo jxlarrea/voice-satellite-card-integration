@@ -10,17 +10,13 @@ The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel in
 
 ## 2. High-Level Flow
 
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Browser   │────▶│  Home Assistant  │────▶│  Assist Pipeline │
-│ Microphone  │     │   WebSocket API  │     │  (Wake/STT/TTS)  │
-└─────────────┘     └──────────────────┘     └─────────────────┘
-      │                      │                        │
-      ▼                      ▼                        ▼
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Audio     │     │   Pipeline       │     │   TTS Audio     │
-│  Processing │     │   Events         │     │   Playback      │
-└─────────────┘     └──────────────────┘     └─────────────────┘
+```mermaid
+graph LR
+    A[Browser Microphone] --> B[Audio Processing]
+    B -->|Binary WebSocket| C[Home Assistant WebSocket API]
+    C --> D[Assist Pipeline]
+    D -->|Wake Word / STT / TTS| E[Pipeline Events]
+    E --> F[Visual Feedback & TTS Playback]
 ```
 
 1. The card acquires the browser microphone via `getUserMedia`.
@@ -194,12 +190,24 @@ When `run-end` arrives while TTS is still playing, the pipeline sets `_pendingRu
 
 ## 4. State Machine
 
-```
-IDLE → CONNECTING → LISTENING → WAKE_WORD_DETECTED → STT → INTENT → TTS → (restart → LISTENING)
-                                                                                ↓
-                                                                             ERROR → (backoff → restart)
-                                                       ↑                        ↓
-                                                       └──── STT ← (continue conversation, skip wake word)
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> CONNECTING
+    CONNECTING --> LISTENING
+    LISTENING --> WAKE_WORD_DETECTED
+    LISTENING --> PAUSED : Tab hidden
+    PAUSED --> LISTENING : Tab visible
+    WAKE_WORD_DETECTED --> STT
+    STT --> INTENT
+    INTENT --> TTS
+    TTS --> LISTENING : Restart for barge-in
+    STT --> STT : Continue conversation\n(skip wake word)
+    CONNECTING --> ERROR
+    LISTENING --> ERROR
+    STT --> ERROR
+    INTENT --> ERROR
+    ERROR --> LISTENING : Backoff & restart
 ```
 
 | State | Description |

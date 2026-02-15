@@ -34,6 +34,20 @@ https://github.com/user-attachments/assets/50f51ebc-be70-4ea2-a1b5-8d80446f55c2
 
 For kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/details?id=de.ozerov.fully), make sure to enable microphone permissions and use the screensaver feature (not screen off) to keep the microphone active while dimming the display.
 
+## How It Works
+
+```mermaid
+graph LR
+    A[🎤 Browser Mic] -->|16kHz PCM| B[Home Assistant WebSocket]
+    B --> C[Assist Pipeline]
+    C --> D[Wake Word Detection]
+    D --> E[Speech-to-Text]
+    E --> F[Conversation Agent]
+    F --> G[Text-to-Speech]
+    G -->|Audio URL| H[🔊 TTS Playback]
+    H -->|Restart| D
+```
+
 ## Features
 
 - **Wake Word Detection** - Uses Home Assistant's already configured wake word detection (like Wyoming openWakeWord) for server-side processing.
@@ -160,14 +174,21 @@ All options are also available in the visual card editor.
 
 ### Visual States
 
-The gradient bar indicates the current state:
+The gradient bar indicates the current pipeline state:
 
-| State | Appearance |
-|-------|------------|
-| Listening for wake word | Bar hidden (passive listening) |
-| Wake word detected | Bar visible, flowing animation |
-| Processing speech | Bar visible, fast animation |
-| Speaking response | Bar visible, flowing animation |
+```mermaid
+stateDiagram-v2
+    direction LR
+    Listening --> WakeWord : Wake word detected
+    WakeWord --> Processing : Speech captured
+    Processing --> Speaking : Response ready
+    Speaking --> Listening : Restart
+
+    note right of Listening : Bar hidden
+    note right of WakeWord : Bar visible, slow flow
+    note right of Processing : Bar visible, fast flow
+    note right of Speaking : Bar visible, medium flow
+```
 
 ### Screensaver Control
 
