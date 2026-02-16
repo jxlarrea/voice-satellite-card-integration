@@ -48,7 +48,7 @@ export class TtsManager {
     audio.volume = config.tts_volume / 100;
 
     // Watchdog: if playback hasn't completed after 30s, force completion.
-    // Covers Android WebView / Companion App where events may never fire.
+    // Covers Companion App WebView where events may never fire.
     this._playbackWatchdog = setTimeout(function () {
       self._playbackWatchdog = null;
       if (self._playing && self._currentAudio === audio) {
