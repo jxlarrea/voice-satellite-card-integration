@@ -39,7 +39,7 @@ voice-satellite-card/
 ├── src/                              ← ES6 source modules
 │   ├── index.js                      ← Entry point, custom element registration
 │   ├── card.js                       ← VoiceSatelliteCard (thin orchestrator)
-│   ├── constants.js                  ← State enum, DEFAULT_CONFIG, VERSION, seamlessGradient()
+│   ├── constants.js                  ← State enum, DEFAULT_CONFIG, EXPECTED_ERRORS, VERSION, seamlessGradient()
 │   ├── logger.js                     ← Shared Logger class
 │   ├── audio.js                      ← AudioManager (mic, worklet, resample, send)
 │   ├── tts.js                        ← TtsManager (playback, chimes, streaming TTS)
@@ -51,15 +51,22 @@ voice-satellite-card/
 │   ├── visibility.js                 ← VisibilityManager (tab pause/resume)
 │   ├── preview.js                    ← Editor preview (isEditorPreview, renderPreview)
 │   └── editor.js                     ← getConfigForm() schema (native HA selectors)
-├── voice-satellite-card.min.js       ← Built output (minified, committed)
+├── .github/
+│   ├── workflows/
+│   │   └── release.yml               ← Build + upload release assets on GitHub release
+│   └── FUNDING.yml                   ← Sponsor links (Buy Me a Coffee, GitHub Sponsors)
+├── voice-satellite-card.min.js       ← Built output (minified, committed for HACS)
 ├── voice-satellite-card.js           ← Built output (readable, gitignored)
 ├── voice-satellite-card.js.map       ← Source map (gitignored)
-├── package.json                      ← npm scripts: build, release
+├── package.json                      ← npm scripts: build, dev
 ├── webpack.config.js                 ← Dual output (readable + minified)
 ├── babel.config.js                   ← ES6+ target (modern browsers)
+├── .gitignore                        ← Ignores node_modules/, .js, .js.map (not .min.js)
+├── README.md                         ← User-facing docs, badges, installation, configuration
+├── DESIGN.md                         ← This file — architecture, implementation details
 └── .vscode/
     ├── settings.json                 ← Editor config
-    └── tasks.json                    ← Ctrl+Shift+B → npm run build
+    └── tasks.json                    ← Ctrl+Shift+B → npm run dev
 ```
 
 ### 3.2 Build System
@@ -76,6 +83,21 @@ The version number is defined once in `package.json` and injected at build time 
 Only `voice-satellite-card.min.js` is committed to git. The readable version and source map are gitignored (local debugging only).
 
 **VS Code integration:** `.vscode/tasks.json` maps **Ctrl+Shift+B** to `npm run dev` (default build task).
+
+**GitHub infrastructure:**
+
+- **Release workflow** (`.github/workflows/release.yml`): Triggers on GitHub release creation or manual `workflow_dispatch`. Checks out code, installs Node 20, runs `npm ci && npm run build`, then uploads `voice-satellite-card.min.js` as a release asset via `softprops/action-gh-release@v2`. This enables download tracking via the GitHub API and shields.io badges.
+- **Funding** (`.github/FUNDING.yml`): Configures the "Sponsor" button with `buy_me_a_coffee: jxlarrea` and `github: jxlarrea`.
+- **HACS compliance**: `voice-satellite-card.min.js` must remain committed to the default branch. HACS validates repository structure against `refs/heads/main` even when release assets are configured. The `.gitignore` only ignores the readable `.js` and `.js.map`, not `.min.js`.
+- **README badges**: shields.io badges for HACS, version, downloads (from GitHub release assets), build status (from release workflow), and Buy Me a Coffee.
+
+**Constants (`src/constants.js`):**
+
+- `VERSION` — injected at build time via `__VERSION__` (Webpack DefinePlugin from `package.json` version)
+- `State` — enum object with all pipeline states (IDLE, CONNECTING, LISTENING, PAUSED, WAKE_WORD_DETECTED, STT, INTENT, TTS, ERROR)
+- `DEFAULT_CONFIG` — full default configuration object with all card options and their defaults
+- `EXPECTED_ERRORS` — array of pipeline error codes that are expected and trigger a clean restart rather than error recovery: `timeout`, `wake-word-timeout`, `stt-no-text-recognized`, `duplicate_wake_up_detected`. Note: `pipeline.js` currently defines this array inline rather than importing from constants.
+- `seamlessGradient(colorList)` — takes a comma-separated color string, splits into array, appends the first color to the end if not already there, and returns a CSS `linear-gradient(90deg, ...)` string. This eliminates the hard edge when the gradient animation loops from 200% back to 0%. Used by `UIManager.applyStyles()`, `UIManager.clearErrorBar()`, and `preview.js`.
 
 ### 3.3 Composition Pattern
 
