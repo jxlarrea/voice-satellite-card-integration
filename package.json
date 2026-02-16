@@ -1,6 +1,6 @@
 {
   "name": "voice-satellite-card",
-  "version": "2.9.1",
+  "version": "2.9.3",
   "description": "Transform your browser into a voice satellite for Home Assistant.",
   "private": true,
   "scripts": {
