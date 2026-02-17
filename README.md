@@ -28,6 +28,8 @@ This integration solves that by creating a virtual Assist Satellite entity for e
 
 ## Installation
 
+> **Note:** This is a companion integration for the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). You need to install the card as well for this integration to be useful.
+
 ### HACS (Recommended)
 
 1. Add this repository as a custom repository in HACS (type: Integration)
