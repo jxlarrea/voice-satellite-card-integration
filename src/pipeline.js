@@ -86,6 +86,33 @@ export class PipelineManager {
       throw new Error('No Home Assistant connection available');
     }
 
+    // Listen for HA reconnection (e.g. after restart) to reset retries
+    if (!this._reconnectListener) {
+      this._reconnectListener = function () {
+        self._log.log('pipeline', 'Connection reconnected — resetting retry state');
+        self._retryCount = 0;
+
+        // Cancel any pending retry and restart immediately
+        if (self._restartTimeout) {
+          clearTimeout(self._restartTimeout);
+          self._restartTimeout = null;
+        }
+        if (self._isRestarting) {
+          self._isRestarting = false;
+        }
+
+        // Clear error state
+        self._serviceUnavailable = false;
+        self._card.ui.clearErrorBar();
+
+        // Small delay to let HA fully initialize after reconnect
+        setTimeout(function () {
+          self.restart(0);
+        }, 2000);
+      };
+      connection.addEventListener('ready', this._reconnectListener);
+    }
+
     var pipelines = await connection.sendMessagePromise({
       type: 'assist_pipeline/pipeline/list',
     });
@@ -188,7 +215,8 @@ export class PipelineManager {
         self._restartTimeout = null;
         self._isRestarting = false;
         self.start().catch(function (e) {
-          self._log.error('pipeline', 'Restart failed: ' + e);
+          var msg = (e && e.message) ? e.message : JSON.stringify(e);
+          self._log.error('pipeline', 'Restart failed: ' + msg);
           if (!self._serviceUnavailable) {
             self._card.ui.showErrorBar();
             self._serviceUnavailable = true;
@@ -217,7 +245,7 @@ export class PipelineManager {
         start_stage: 'stt',
         conversation_id: conversationId,
       }).catch(function (e) {
-        self._log.error('pipeline', 'Continue conversation failed: ' + e);
+        self._log.error('pipeline', 'Continue conversation failed: ' + ((e && e.message) ? e.message : JSON.stringify(e)));
         self._card.chat.clear();
         self._card.ui.hideBlurOverlay('pipeline');
         self.restart(0);

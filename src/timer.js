@@ -65,6 +65,10 @@ export class TimerManager {
       this._unsubscribe();
       this._unsubscribe = null;
     }
+    if (this._reconnectListener && this._card.connection) {
+      this._card.connection.removeEventListener('ready', this._reconnectListener);
+      this._reconnectListener = null;
+    }
     this._subscribed = false;
   }
 
@@ -72,6 +76,32 @@ export class TimerManager {
 
   _subscribe(connection, entityId) {
     this._subscribed = true;
+    this._entityId = entityId;
+    var self = this;
+
+    this._doSubscribe(connection, entityId);
+
+    // Re-subscribe when HA reconnects (e.g. after restart)
+    if (!this._reconnectListener) {
+      this._reconnectListener = function () {
+        // Only re-subscribe if this card is still the active instance
+        if (window._voiceSatelliteInstance && window._voiceSatelliteInstance !== self._card) return;
+
+        self._log.log('timer', 'Connection reconnected — re-subscribing');
+        if (self._unsubscribe) {
+          try { self._unsubscribe(); } catch (e) {}
+          self._unsubscribe = null;
+        }
+        var conn = self._card.connection;
+        if (conn) {
+          self._doSubscribe(conn, self._entityId);
+        }
+      };
+      connection.addEventListener('ready', this._reconnectListener);
+    }
+  }
+
+  _doSubscribe(connection, entityId) {
     var self = this;
 
     connection.subscribeEvents(function (event) {
@@ -90,10 +120,10 @@ export class TimerManager {
     });
 
     // Immediate check
-    var hass = this._card.hass;
+    var hass = self._card.hass;
     if (hass && hass.states && hass.states[entityId]) {
       var attrs = hass.states[entityId].attributes || {};
-      this._processStateChange(attrs);
+      self._processStateChange(attrs);
     }
   }
 

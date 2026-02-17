@@ -319,7 +319,8 @@ export class VoiceSatelliteCard extends HTMLElement {
       // Setup double-tap after first successful start
       this._doubleTap.setup();
     } catch (e) {
-      this._logger.error('pipeline', 'Failed to start: ' + e);
+      var msg = (e && e.message) ? e.message : JSON.stringify(e);
+      this._logger.error('pipeline', 'Failed to start: ' + msg);
 
       var reason = 'error';
       if (e.name === 'NotAllowedError') {
@@ -333,8 +334,15 @@ export class VoiceSatelliteCard extends HTMLElement {
         this._logger.error('mic', 'Microphone in use or not readable');
       }
 
-      this._ui.showStartButton(reason);
-      this.setState(State.IDLE);
+      // For mic errors, show the start button (needs user gesture)
+      // For pipeline errors, retry automatically
+      if (reason !== 'error') {
+        this._ui.showStartButton(reason);
+        this.setState(State.IDLE);
+      } else {
+        this.setState(State.IDLE);
+        this._pipeline.restart(this._pipeline._calculateRetryDelay());
+      }
     } finally {
       window._voiceSatelliteStarting = false;
     }

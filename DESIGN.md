@@ -4,7 +4,7 @@
 
 Voice Satellite Card is a custom Home Assistant Lovelace card that turns any browser into a voice-activated satellite. It captures microphone audio, sends it to Home Assistant's Assist pipeline over WebSocket, and plays back TTS responses — all without leaving the HA dashboard.
 
-The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel into a single `voice-satellite-card.min.js` for deployment. The card is invisible (returns `getCardSize() = 0`). All visual feedback is rendered via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes. Current version: 3.0.0.
+The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel into a single `voice-satellite-card.min.js` for deployment. The card is invisible (returns `getCardSize() = 0`). All visual feedback is rendered via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes. Current version: 3.0.2.
 
 ---
 
@@ -553,6 +553,22 @@ restart(delay) {
 
 The flag is set at entry, cleared just before `pipeline.start()` executes. Additionally, `pipeline.handleRunEnd()` checks `pipeline.isRestarting` early and skips entirely if a restart is already in flight.
 
+### 9.7 Home Assistant Reconnection Recovery
+
+When Home Assistant restarts, the WebSocket connection drops. The HA frontend's `hass.connection` object handles reconnection automatically and fires a `'ready'` event when the new connection is established. Three components listen for this event:
+
+**PipelineManager:** On `'ready'`, resets `_retryCount` to 0, cancels any pending `_restartTimeout`, clears `_isRestarting` and `_serviceUnavailable` flags, clears the error bar, then calls `restart(0)` after a 2-second delay. The delay allows HA's integrations (including the companion integration and Assist pipeline) to fully initialize before the card attempts a new pipeline run. Without this listener, the pipeline would continue retrying with stale backoff state against a connection that just came back up but whose services aren't ready yet.
+
+**TimerManager:** On `'ready'`, cleans up the old (dead) `_unsubscribe` function and calls `_doSubscribe()` with the fresh connection. The `state_changed` subscription from before the restart is invalid server-side even though the `_subscribed` flag is still `true`. The reconnect handler bypasses the `_subscribed` guard in `update()` by calling `_doSubscribe()` directly.
+
+**AnnouncementManager:** Same pattern as TimerManager — re-subscribes to `state_changed` events on reconnection.
+
+**Singleton guard:** All three reconnect handlers check `window._voiceSatelliteInstance` to ensure only the active card instance re-subscribes. Without this guard, multiple card elements (from view changes or editor previews) could each register their own reconnect listener and create duplicate subscriptions on reconnect.
+
+**Error serialization:** Pipeline errors from HA are objects (not strings). All error logging uses `(e && e.message) ? e.message : JSON.stringify(e)` to produce readable messages instead of `[object Object]`.
+
+**Initial start retry:** When `pipeline.start()` fails during the initial `_startListening()` call (e.g., HA services still loading after restart), the card now retries with backoff instead of just showing the start button and giving up. Microphone permission errors (`NotAllowedError`, `NotFoundError`, `NotReadableError`) still show the start button since they require a user gesture to resolve.
+
 ---
 
 ## 10. WebSocket Communication
@@ -560,6 +576,8 @@ The flag is set at entry, cleared just before `pipeline.start()` executes. Addit
 ### 10.1 Connection
 
 The card uses Home Assistant's existing WebSocket connection, available via `hass.connection`. It does not create its own WebSocket. The raw socket for binary audio is at `hass.connection.socket`.
+
+When Home Assistant restarts, `hass.connection` reconnects automatically and fires a `'ready'` event. The card listens for this event to re-establish pipeline subscriptions, timer/announcement `state_changed` subscriptions, and reset retry state (see §9.7). The reconnect listener is registered once per component (pipeline, timer, announcement) via a `_reconnectListener` flag to prevent duplicate registrations.
 
 ### 10.2 Pipeline Subscription
 
@@ -1166,6 +1184,8 @@ For integration implementation details, see the [Voice Satellite Card Integratio
 
 `TimerManager` (`src/timer.js`) subscribes to `state_changed` events via `connection.subscribeEvents()` filtered to the `satellite_entity`. This gives real-time updates (unlike polling in `set hass()`). On first `update()` call, it subscribes once and does an immediate check of current entity state. The subscription is cleaned up in `destroy()`.
 
+**Reconnection:** On HA restart, the `state_changed` subscription is lost server-side but the `_subscribed` flag remains `true`. A `'ready'` event listener on the connection re-subscribes automatically (see §9.7). The listener includes a singleton guard to prevent duplicate subscriptions from non-active card instances.
+
 **State change processing:**
 - `_processStateChange(attrs)` called on every `state_changed` event
 - `window._vsLastTimerJson` JSON string comparison prevents re-processing unchanged timer data (see Dual-Instance Deduplication below)
@@ -1249,6 +1269,8 @@ For integration implementation details, see the [Voice Satellite Card Integratio
 
 `AnnouncementManager` (`src/announcement.js`) subscribes to `state_changed` events via `connection.subscribeEvents()` filtered to the `satellite_entity`. This gives real-time updates that survive long idle periods and Fully Kiosk screensaver states (unlike polling in `set hass()` which depends on Lovelace delivering updates). On first `update()` call, it subscribes once and does an immediate check of current entity state in the `.then()` callback. The subscription is cleaned up in `destroy()`.
 
+**Reconnection:** Same pattern as TimerManager — a `'ready'` event listener re-subscribes on HA restart with singleton guard (see §9.7).
+
 **Deduplication:** Uses `window._vsLastAnnounceId` (see Dual-Instance Deduplication below). Only processes announcements with `id > window._vsLastAnnounceId`.
 
 **Pipeline queue:** If a voice interaction is in progress (`WAKE_WORD_DETECTED`, `STT`, `INTENT`, `TTS`, or `tts.isPlaying`), the announcement is stored in `_queued`. When `card.onTTSComplete()` fires and the pipeline returns to idle, it calls `announcement.playQueued()`.
@@ -1296,6 +1318,10 @@ When recreating or modifying this card, verify:
 - [ ] `duplicate_wake_up_detected` uses underscores (HA API inconsistency)
 - [ ] `pipeline.restart()` uses `pipeline.isRestarting` flag to prevent concurrent restarts
 - [ ] `pipeline.restart()` clears idle timeout at entry to prevent re-triggering during restart
+- [ ] Pipeline listens for connection `'ready'` event to reset retry state and restart after HA reconnection
+- [ ] Pipeline reconnect handler waits 2s after `'ready'` before restarting (allows HA services to initialize)
+- [ ] Pipeline error logging uses `(e.message) ? e.message : JSON.stringify(e)` (not `+ e`)
+- [ ] `_startListening()` retries on pipeline errors with backoff (only shows start button for mic permission errors)
 - [ ] Idle timeout callback checks for active interaction and defers if user is mid-conversation
 - [ ] `pipeline.handleRunEnd()` checks `pipeline.isRestarting` and skips if restart already in flight
 - [ ] `pipeline.restart()` awaits `pipeline.stop()` before scheduling new subscription
@@ -1345,6 +1371,8 @@ When recreating or modifying this card, verify:
 
 **Timers (requires integration):**
 - [ ] `TimerManager` subscribes to `state_changed` events for `satellite_entity` (not polling in `set hass()`)
+- [ ] `TimerManager` listens for connection `'ready'` event and re-subscribes on HA reconnection
+- [ ] `TimerManager` reconnect handler includes singleton guard (`window._voiceSatelliteInstance` check)
 - [ ] Timer pills rendered outside Shadow DOM (global overlay) for cross-view persistence
 - [ ] `_knownTimerIds` set prevents re-alerting finished timers
 - [ ] Timer countdown uses `seconds_left` minus elapsed time since `updated_at`
@@ -1359,6 +1387,8 @@ When recreating or modifying this card, verify:
 
 **Announcements (requires integration):**
 - [ ] `AnnouncementManager` subscribes to `state_changed` events for `satellite_entity` (not polling in `set hass()`)
+- [ ] `AnnouncementManager` listens for connection `'ready'` event and re-subscribes on HA reconnection
+- [ ] `AnnouncementManager` reconnect handler includes singleton guard (`window._voiceSatelliteInstance` check)
 - [ ] Subscription survives long idle/screensaver periods (unlike `set hass()` which depends on Lovelace)
 - [ ] Announcement `media_id` is the resolved playable URL (not `media_id_source`)
 - [ ] Pre-announcement chime: default ding-dong (G5 → D5) or custom media from `preannounce_media_id`
