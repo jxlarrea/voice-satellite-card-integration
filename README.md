@@ -1,0 +1,1 @@
+# voice-satellite-card-integration
