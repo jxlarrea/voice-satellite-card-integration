@@ -13,18 +13,18 @@ Companion integration for the [Voice Satellite Card](https://github.com/jxlarrea
 
 The [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) runs in your browser and uses HA's Assist Pipeline API to process voice commands. However, because the browser isn't a registered satellite device, Home Assistant doesn't give it a device identity. This means:
 
-- **Timers don't work** — HA tells the LLM "this device is not able to start timers"
-- **No announcements** — you can't push TTS messages to a specific browser
-- **No per-device automations** — HA doesn't know which browser is talking
+- **Timers don't work** - HA tells the LLM "this device is not able to start timers"
+- **No announcements** - you can't push TTS messages to a specific browser
+- **No per-device automations** - HA doesn't know which browser is talking
 
 This integration solves that by creating a virtual Assist Satellite entity for each browser.
 
 ## What it does
 
 - Creates an `assist_satellite.*` entity per browser with a proper device identity
-- **Timers** — Registers as a timer handler so the LLM gets access to `HassStartTimer`, and exposes active timer state as entity attributes for the card to display countdown pills
-- **Announcements** — Implements `assist_satellite.announce` so you can push TTS messages to specific browsers from automations and scripts
-- **State sync** — Reflects real-time pipeline state (`idle`, `listening`, `processing`, `responding`) on the entity, enabling automations that react to voice activity
+- **Timers** - Registers as a timer handler so the LLM gets access to `HassStartTimer`, and exposes active timer state as entity attributes for the card to display countdown pills
+- **Announcements** - Implements `assist_satellite.announce` so you can push TTS messages to specific browsers from automations and scripts
+- **State sync** - Reflects real-time pipeline state (`idle`, `listening`, `processing`, `responding`) on the entity, enabling automations that react to voice activity
 
 ## Installation
 
@@ -58,7 +58,7 @@ satellite_entity: assist_satellite.kitchen_tablet
 
 ## Timer Support
 
-Once configured, you can say "set a timer for 5 minutes" through the Voice Satellite Card and it will work. The integration registers as a timer handler for the device, which tells HA's intent system (and any connected LLM) that this satellite supports timers. The integration handles the full timer lifecycle — start, update, cancel, and finish — and exposes active timers as entity attributes that the card reads to display countdown pills.
+Once configured, you can say "set a timer for 5 minutes" through the Voice Satellite Card and it will work. The integration registers as a timer handler for the device, which tells HA's intent system (and any connected LLM) that this satellite supports timers. The integration handles the full timer lifecycle - start, update, cancel, and finish - and exposes active timers as entity attributes that the card reads to display countdown pills.
 
 ## Announcement Support
 
@@ -87,7 +87,7 @@ The Voice Satellite Card syncs its pipeline state back to the entity in real tim
 | `processing` | Processing the user's intent |
 | `responding` | Speaking a TTS response |
 
-You can use this in automations — for example, muting a TV when the nearby satellite starts listening:
+You can use this in automations - for example, muting a TV when the nearby satellite starts listening:
 
 ```yaml
 trigger:
@@ -125,4 +125,4 @@ Example template to check for active timers:
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT - see [LICENSE](LICENSE) for details.
