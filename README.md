@@ -3,7 +3,7 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Companion integration for the [Voice Satellite Card](https://github.com/jxlarrea/voice-satellite-card). Registers browser tablets as proper Assist Satellite devices in Home Assistant.
+Companion integration for the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Registers browser tablets as proper Assist Satellite devices in Home Assistant.
 
 ## Why?
 
@@ -57,7 +57,7 @@ Once configured, you can say "set a timer for 5 minutes" through the Voice Satel
 ## Requirements
 
 - Home Assistant 2024.10 or later (Assist Satellite entity support)
-- [Voice Satellite Card](https://github.com/jxlarrea/voice-satellite-card) v3.0.0 or later
+- [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) v3.0.0 or later
 
 ## License
 
