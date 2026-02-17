@@ -1,17 +1,17 @@
 # Voice Satellite Card Integration
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jxlarrea&repository=voice-satellite-card-integration)
+Companion integration for the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Registers browser tablets as proper Assist Satellite devices in Home Assistant.
+
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
 [![version](https://shields.io/github/v/release/jxlarrea/voice-satellite-card-integration?style=for-the-badge)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
 [![Downloads](https://img.shields.io/github/downloads/jxlarrea/voice-satellite-card-integration/total?style=for-the-badge&label=Downloads)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/jxlarrea/voice-satellite-card-integration/hacs.yml?style=for-the-badge&label=Build)](https://github.com/jxlarrea/voice-satellite-card-integration/actions/workflows/hacs.yml)
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jxlarrea)
 
-Companion integration for the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Registers browser tablets as proper Assist Satellite devices in Home Assistant.
-
 ## Why?
 
-The Voice Satellite Card runs in your browser and uses HA's Assist Pipeline API to process voice commands. However, because the browser isn't a registered satellite device, Home Assistant doesn't give it a device identity. This means:
+The [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) runs in your browser and uses HA's Assist Pipeline API to process voice commands. However, because the browser isn't a registered satellite device, Home Assistant doesn't give it a device identity. This means:
 
 - **Timers don't work** — HA tells the LLM "this device is not able to start timers"
 - **No announcements** — you can't push TTS messages to a specific tablet
