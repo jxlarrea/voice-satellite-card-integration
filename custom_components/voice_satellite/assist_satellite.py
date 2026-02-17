@@ -78,7 +78,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
             "name": self._satellite_name,
-            "manufacturer": "Voice Satellite Card",
+            "manufacturer": "Voice Satellite Card Integration",
             "model": "Browser Satellite",
             "sw_version": "1.0.0",
         }
@@ -207,6 +207,44 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 self._announce_id,
                 self._satellite_name,
             )
+
+    # Map card state strings to HA satellite state values
+    _STATE_MAP: dict[str, str] = {
+        "IDLE": "idle",
+        "CONNECTING": "idle",
+        "LISTENING": "idle",
+        "PAUSED": "idle",
+        "WAKE_WORD_DETECTED": "listening",
+        "STT": "listening",
+        "INTENT": "processing",
+        "TTS": "responding",
+        "ERROR": "idle",
+    }
+
+    @callback
+    def set_pipeline_state(self, state: str) -> None:
+        """Update entity state from the card's pipeline state."""
+        mapped = self._STATE_MAP.get(state)
+        if mapped is None:
+            return
+
+        current = self.hass.states.get(self.entity_id)
+        if current and current.state == mapped:
+            return
+
+        # Force state via state machine — the base class doesn't expose
+        # a public method to set satellite state externally.
+        self.hass.states.async_set(
+            self.entity_id,
+            mapped,
+            current.attributes if current else {},
+        )
+        _LOGGER.debug(
+            "Pipeline state for '%s': %s -> %s",
+            self._satellite_name,
+            state,
+            mapped,
+        )
 
     @callback
     def on_pipeline_event(self, event_type: str, data: dict | None) -> None:

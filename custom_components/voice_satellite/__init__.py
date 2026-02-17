@@ -34,6 +34,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except ValueError:
         pass  # Already registered from another config entry
 
+    try:
+        websocket_api.async_register_command(hass, ws_update_state)
+    except ValueError:
+        pass
+
     return True
 
 
@@ -76,4 +81,37 @@ async def ws_announce_finished(
         return
 
     entity.announce_finished(announce_id)
+    connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "voice_satellite/update_state",
+        vol.Required("entity_id"): str,
+        vol.Required("state"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_update_state(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Handle pipeline state updates from the card."""
+    entity_id = msg["entity_id"]
+    state = msg["state"]
+
+    entity = None
+    for entry_id, ent in hass.data.get(DOMAIN, {}).items():
+        if ent.entity_id == entity_id:
+            entity = ent
+            break
+
+    if entity is None:
+        connection.send_error(
+            msg["id"], "not_found", f"Entity {entity_id} not found"
+        )
+        return
+
+    entity.set_pipeline_state(state)
     connection.send_result(msg["id"], {"success": True})

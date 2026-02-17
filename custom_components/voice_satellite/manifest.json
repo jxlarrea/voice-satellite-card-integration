@@ -1,6 +1,6 @@
 {
   "domain": "voice_satellite",
-  "name": "Voice Satellite Card",
+  "name": "Voice Satellite Card Integration",
   "codeowners": ["@jxlarrea"],
   "config_flow": true,
   "dependencies": ["assist_satellite", "intent"],
