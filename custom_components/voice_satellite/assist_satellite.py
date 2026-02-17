@@ -19,7 +19,6 @@ from homeassistant.components.assist_satellite import (
     AssistSatelliteAnnouncement,
     AssistSatelliteConfiguration,
     AssistSatelliteEntity,
-    AssistSatelliteEntityDescription,
     AssistSatelliteEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
