@@ -3,12 +3,13 @@
 Registers a virtual satellite device that gives browser-based voice
 tablets a proper device identity in Home Assistant. This enables:
 - Timer support (HassStartTimer exposed to LLM)
-- Announcements (future)
+- Announcements (assist_satellite.announce)
 - Per-device automations
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -29,6 +30,9 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+# Timeout for waiting for the card to ACK announcement playback
+ANNOUNCE_TIMEOUT = 120  # seconds
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -36,7 +40,12 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Voice Satellite entity from a config entry."""
-    async_add_entities([VoiceSatelliteEntity(entry)])
+    entity = VoiceSatelliteEntity(entry)
+    async_add_entities([entity])
+
+    # Store entity reference so __init__.py websocket handler can access it
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = entity
 
 
 class VoiceSatelliteEntity(AssistSatelliteEntity):
@@ -44,7 +53,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
     _attr_has_entity_name = True
     _attr_name = None  # Use device name
-    _attr_supported_features = AssistSatelliteEntityFeature.ANNOUNCE
     _attr_supported_features = AssistSatelliteEntityFeature.ANNOUNCE
 
     def __init__(self, entry: ConfigEntry) -> None:
@@ -59,6 +67,11 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._active_timers: list[dict[str, Any]] = []
         self._last_timer_event: str | None = None
 
+        # Announcement state
+        self._pending_announcement: dict[str, Any] | None = None
+        self._announce_event: asyncio.Event | None = None
+        self._announce_id: int = 0
+
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device info to create a device registry entry."""
@@ -72,11 +85,14 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose timer state for the card to read."""
-        return {
+        """Expose timer and announcement state for the card to read."""
+        attrs: dict[str, Any] = {
             "active_timers": self._active_timers,
             "last_timer_event": self._last_timer_event,
         }
+        if self._pending_announcement is not None:
+            attrs["announcement"] = self._pending_announcement
+        return attrs
 
     async def async_added_to_hass(self) -> None:
         """Register timer handler when entity is added."""
@@ -84,11 +100,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
         assert self.device_entry is not None
 
-        # Register this device as a timer handler — the key line that
-        # tells HA this device supports timers, which:
-        # 1. Removes "This device is not able to start timers" from LLM prompt
-        # 2. Exposes HassStartTimer tool to the LLM
-        # 3. Routes timer events to our _handle_timer_event callback
+        # Register this device as a timer handler
         self.async_on_remove(
             intent.async_register_timer_handler(
                 self.hass,
@@ -105,11 +117,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
     @callback
     def async_get_configuration(self) -> AssistSatelliteConfiguration:
-        """Return satellite configuration.
-
-        Wake words are handled client-side by the card, so we return
-        an empty configuration here.
-        """
+        """Return satellite configuration."""
         return AssistSatelliteConfiguration(
             available_wake_words=[],
             active_wake_words=[],
@@ -119,38 +127,90 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
     async def async_set_configuration(
         self, config: AssistSatelliteConfiguration
     ) -> None:
-        """Set satellite configuration.
-
-        No-op for browser satellites — wake words are managed
-        client-side by the card.
-        """
+        """Set satellite configuration (no-op for browser satellites)."""
 
     async def async_announce(
         self, announcement: AssistSatelliteAnnouncement
     ) -> None:
         """Handle an announcement.
 
-        Stores the announcement details as entity attributes so the
-        card can pick them up and play the audio.
+        Stores the announcement in entity attributes for the card to read,
+        then blocks until the card signals playback is complete via the
+        voice_satellite/announce_finished WebSocket command.
         """
-        self._last_announcement = {
-            "message": announcement.message,
-            "media_id": announcement.media_id,
+        self._announce_id += 1
+        announce_id = self._announce_id
+
+        self._pending_announcement = {
+            "id": announce_id,
+            "message": announcement.message or "",
+            "media_id": announcement.media_id or "",
+            "preannounce_media_id": (
+                getattr(announcement, "preannounce_media_id", None) or ""
+            ),
         }
+
+        # Create an event to wait for the card to ACK playback
+        self._announce_event = asyncio.Event()
+
+        # Push state so the card sees the new announcement
         self.async_write_ha_state()
+
         _LOGGER.debug(
-            "Announcement on '%s': %s",
+            "Announcement #%d on '%s': %s (media: %s)",
+            announce_id,
             self._satellite_name,
-            announcement.message or announcement.media_id,
+            announcement.message or "(no message)",
+            announcement.media_id or "(no media)",
         )
+
+        # Wait for the card to finish playback
+        try:
+            await asyncio.wait_for(
+                self._announce_event.wait(),
+                timeout=ANNOUNCE_TIMEOUT,
+            )
+            _LOGGER.debug(
+                "Announcement #%d on '%s' completed",
+                announce_id,
+                self._satellite_name,
+            )
+        except asyncio.TimeoutError:
+            _LOGGER.warning(
+                "Announcement #%d on '%s' timed out after %ds",
+                announce_id,
+                self._satellite_name,
+                ANNOUNCE_TIMEOUT,
+            )
+        finally:
+            self._pending_announcement = None
+            self._announce_event = None
+            self.async_write_ha_state()
+
+    @callback
+    def announce_finished(self, announce_id: int) -> None:
+        """Called by the WebSocket handler when the card finishes playback."""
+        if (
+            self._announce_event is not None
+            and self._announce_id == announce_id
+        ):
+            _LOGGER.debug(
+                "Announcement #%d ACK received for '%s'",
+                announce_id,
+                self._satellite_name,
+            )
+            self._announce_event.set()
+        else:
+            _LOGGER.debug(
+                "Ignoring stale announce ACK #%d (current: #%d) for '%s'",
+                announce_id,
+                self._announce_id,
+                self._satellite_name,
+            )
 
     @callback
     def on_pipeline_event(self, event_type: str, data: dict | None) -> None:
-        """Handle pipeline events.
-
-        The card processes pipeline events directly via WebSocket,
-        so this is primarily for logging/debugging.
-        """
+        """Handle pipeline events."""
         _LOGGER.debug(
             "Pipeline event for '%s': %s",
             self._satellite_name,
@@ -163,11 +223,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         event_type: intent.TimerEventType,
         timer_info: intent.TimerInfo,
     ) -> None:
-        """Handle timer events from the intent system.
-
-        Stores timer state as entity attributes that the Voice Satellite
-        Card reads via hass.states to render countdown UI.
-        """
+        """Handle timer events from the intent system."""
         timer_id = timer_info.id
         self._last_timer_event = event_type.value
 
