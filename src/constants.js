@@ -54,6 +54,9 @@ export const DEFAULT_CONFIG = {
   timer_rounded: true,
   timer_finished_duration: 60,
 
+  // Announcements
+  announcement_display_duration: 5,
+
   // Rainbow Bar
   bar_position: 'bottom',
   bar_height: 16,

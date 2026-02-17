@@ -265,6 +265,22 @@ export function getConfigForm() {
         ],
       },
 
+      // --- Announcements ---
+      {
+        type: 'expandable',
+        name: '',
+        title: 'Announcements',
+        flatten: true,
+        schema: [
+          {
+            name: 'announcement_display_duration',
+            selector: {
+              number: { min: 1, max: 60, step: 1, unit_of_measurement: 's', mode: 'slider' },
+            },
+          },
+        ],
+      },
+
       // --- Rainbow Bar ---
       {
         type: 'expandable',
@@ -494,6 +510,7 @@ export function getConfigForm() {
         timer_border_color: 'Border color',
         timer_padding: 'Padding',
         timer_finished_duration: 'Auto-dismiss timer',
+        announcement_display_duration: 'Announcement display duration',
         continue_conversation: 'Continue conversation mode',
         double_tap_cancel: 'Double-tap to cancel interaction',
         debug: 'Debug logging',
@@ -546,6 +563,7 @@ export function getConfigForm() {
         timer_font_family: 'CSS font-family value (e.g., inherit, Arial, monospace)',
         timer_border_color: 'CSS color value (supports rgba)',
         timer_finished_duration: 'Seconds to show finished timer alert (0 = until dismissed)',
+        announcement_display_duration: 'Seconds to show announcement bubble after playback',
         tts_target: 'Leave empty for browser audio, or select a media player entity',
         pipeline_timeout: 'Max seconds to wait for pipeline response (0 = no timeout)',
         pipeline_idle_timeout: 'Seconds before pipeline restarts to keep connection fresh',

@@ -15,6 +15,7 @@ import { ChatManager } from './chat.js';
 import { DoubleTapHandler } from './double-tap.js';
 import { VisibilityManager } from './visibility.js';
 import { TimerManager } from './timer.js';
+import { AnnouncementManager } from './announcement.js';
 import { getConfigForm } from './editor.js';
 import { isEditorPreview, renderPreview } from './preview.js';
 
@@ -42,6 +43,7 @@ export class VoiceSatelliteCard extends HTMLElement {
     this._doubleTap = new DoubleTapHandler(this);
     this._visibility = new VisibilityManager(this);
     this._timer = new TimerManager(this);
+    this._announcement = new AnnouncementManager(this);
   }
 
   // --- Public accessors for managers ---
@@ -54,6 +56,7 @@ export class VoiceSatelliteCard extends HTMLElement {
   get chat() { return this._chat; }
   get config() { return this._config; }
   get timer() { return this._timer; }
+  get announcement() { return this._announcement; }
   get currentState() { return this._state; }
   get connection() {
     if (!this._connection && this._hass && this._hass.connection) {
@@ -123,9 +126,10 @@ export class VoiceSatelliteCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
 
-    // Only update timer on the active card instance
+    // Only update timer and announcements on the active card instance
     if (!window._voiceSatelliteInstance || window._voiceSatelliteInstance === this) {
       this._timer.update();
+      this._announcement.update();
     }
 
     if (this._hasStarted) return;
