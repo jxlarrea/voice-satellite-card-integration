@@ -221,7 +221,7 @@ The card syncs its pipeline state to the integration's `assist_satellite` entity
 
 **Barge-in guard:** When TTS is playing and the pipeline restarts for barge-in (setState → LISTENING), the sync is suppressed. The satellite stays `responding` until TTS actually finishes, at which point `onTTSComplete()` explicitly syncs `IDLE`.
 
-**Integration side:** `set_pipeline_state()` on `VoiceSatelliteEntity` uses `hass.states.async_set()` to directly write the state to the state machine. The base `AssistSatelliteEntity` class doesn't expose a public method to set satellite state externally (it's normally managed automatically via `async_accept_pipeline_from_satellite`), so we bypass it. `AssistSatelliteState` is not exported from the `assist_satellite` package's `__all__`, so string values are used directly.
+**Integration side:** The integration maps card state strings to HA's satellite states (`idle`, `listening`, `processing`, `responding`) and writes them via `hass.states.async_set()`. The base `AssistSatelliteEntity` class doesn't expose a public method to set satellite state externally, so the integration bypasses it. Note: `AssistSatelliteState` is not exported from the `assist_satellite` package's `__all__`, so string values are used directly. For integration implementation details, see the [Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration) repository.
 
 **WebSocket command:**
 ```python
@@ -1073,34 +1073,28 @@ Since the card is normally invisible (`getCardSize() = 0`), the editor preview p
 
 ## 21. Companion Integration
 
-The card works standalone for core voice functionality. Advanced features (timers, announcements, satellite state sync) require the **Voice Satellite Card Integration**, a separate custom component (`custom_components/voice_satellite/`) that registers an `assist_satellite` entity in Home Assistant.
+The card works standalone for core voice functionality. Advanced features (timers, announcements, satellite state sync) require the **[Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration)**, a separate custom component in its own repository. The integration registers an `assist_satellite` entity in Home Assistant that the card communicates with.
 
-### 21.1 Integration Architecture
+### 21.1 Communication Architecture
 
-The integration creates a virtual `AssistSatelliteEntity` that acts as a bridge between HA's satellite platform and the browser card. Communication flows in two directions:
+The card and integration communicate in two directions:
 - **HA → Card:** Entity state attributes (timers, announcements) polled by card via `set hass()`
-- **Card → HA:** Custom WebSocket commands (`voice_satellite/announce_finished`, `voice_satellite/update_state`)
+- **Card → HA:** Custom WebSocket commands sent by the card
 
-**Entity storage:** Each config entry stores its entity in `hass.data[DOMAIN][entry_id]` for WebSocket command handlers to look up.
-
-**Key files:**
-- `assist_satellite.py` — `VoiceSatelliteEntity` with timer, announcement, and state sync support
-- `__init__.py` — Integration setup, WebSocket command registration (`ws_announce_finished`, `ws_update_state`)
-- `config_flow.py` — User-facing config flow (satellite name)
-- `const.py` — Domain constant (`voice_satellite`)
-- `manifest.json` — Integration metadata (name: "Voice Satellite Card Integration")
-
-**WebSocket commands registered:**
+**WebSocket commands (card → integration):**
 
 | Command | Purpose | Payload |
 |---------|---------|---------|
 | `voice_satellite/announce_finished` | Card ACKs announcement playback complete | `entity_id`, `announce_id` |
 | `voice_satellite/update_state` | Card syncs pipeline state to entity | `entity_id`, `state` |
 
-**Device info:**
-- `manufacturer`: "Voice Satellite Card Integration"
-- `model`: "Browser Satellite"
-- `sw_version`: "1.0.0"
+**Entity attributes read by card (integration → card):**
+
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| `active_timers` | `list[dict]` | Active timer objects with `id`, `name`, `total_seconds`, `started_at` |
+| `last_timer_event` | `string` | Last timer event type (e.g. `"started"`, `"cancelled"`, `"finished"`) |
+| `announcement` | `dict` or absent | Pending announcement with `id`, `message`, `media_id`, `preannounce_media_id` |
 
 ### 21.2 Satellite Entity Config
 
@@ -1123,27 +1117,25 @@ This is typically used to disable a screensaver (e.g., Fully Kiosk Browser) when
 
 Timers are managed server-side by the integration's `AssistSatelliteEntity` (which implements HA's `AssistSatelliteEntityFeature.TIMER`) and displayed client-side by `TimerManager`. The integration stores active timers in entity attributes; the card renders countdown pills and handles alerts.
 
-### 22.2 Server Side (Integration)
+### 22.2 Entity Attribute Contract
 
-The `VoiceSatelliteEntity` registers a timer handler via `intent.async_register_timer_handler()` in `async_added_to_hass()`. Timer events are handled by `_handle_timer_event()`:
+The integration exposes timer data via the satellite entity's `active_timers` attribute (a list of timer dicts). Each timer dict contains:
 
-- `TimerEventType.STARTED` — Appends timer dict to `_active_timers` with `id`, `name`, `total_seconds`, `started_at` (Unix timestamp), `start_hours/minutes/seconds`
-- `TimerEventType.UPDATED` — Updates existing timer's duration and `started_at`
-- `TimerEventType.CANCELLED` / `FINISHED` — Removes timer from `_active_timers`
-
-Each event calls `async_write_ha_state()` to push the update to the card immediately.
-
-Timer data is exposed via entity attributes:
-
-```python
-@property
-def extra_state_attributes(self):
-    return {
-        "active_timers": self._active_timers,  # list of timer dicts
-        "last_timer_event": self._last_timer_event,  # event type string
-        # ... announcement attributes
-    }
+```json
+{
+  "id": "timer_id_string",
+  "name": "pizza timer",
+  "total_seconds": 600,
+  "started_at": 1708000000.0,
+  "start_hours": 0,
+  "start_minutes": 10,
+  "start_seconds": 0
+}
 ```
+
+The `last_timer_event` attribute contains the most recent event type string (e.g. `"started"`, `"updated"`, `"cancelled"`, `"finished"`).
+
+For integration implementation details, see the [Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration) repository.
 
 ### 22.3 Client Side (TimerManager)
 
@@ -1204,36 +1196,24 @@ Reason strings: `'pipeline'` (voice interactions), `'timer'` (timer alert), `'an
 
 Announcements enable the `assist_satellite.announce` service, allowing HA automations to send TTS messages to specific browser satellites. The integration blocks the service call until the card ACKs playback completion.
 
-### 23.2 Server Side (Integration)
+### 23.2 Entity Attribute Contract
 
-`async_announce(announcement)` in `AssistSatelliteEntity`:
+The integration exposes a pending announcement via the satellite entity's `announcement` attribute (present only when an announcement is active):
 
-1. Increments `_announce_id` counter
-2. Stores announcement data in `_pending_announcement` (exposed via entity attributes)
-3. Creates `asyncio.Event` and waits on it (with 120s timeout)
-4. When card sends ACK via WebSocket → `announce_finished()` sets the event
-5. Finally block clears `_pending_announcement` and writes state
-
-**WebSocket ACK command:**
-```python
-@websocket_api.websocket_command({
-    vol.Required("type"): "voice_satellite/announce_finished",
-    vol.Required("entity_id"): str,
-    vol.Required("announce_id"): int,
-})
-```
-
-**Announcement attributes exposed:**
-```python
-"announcement": {
-    "id": announce_id,
-    "message": announcement.message,
-    "media_id": announcement.media_id,  # Full playable URL
-    "preannounce_media_id": announcement.preannounce_media_id,
+```json
+{
+  "id": 1,
+  "message": "Dinner is ready!",
+  "media_id": "/api/tts_proxy/xxxxx.mp3",
+  "preannounce_media_id": ""
 }
 ```
 
-Key detail: `media_id` contains the resolved TTS URL (e.g., `/api/tts_proxy/xxx.mp3`), not the media source reference. `media_id_source` (which contains just `"tts"`) is not passed to the card.
+Key detail: `media_id` contains the resolved TTS URL (e.g., `/api/tts_proxy/xxx.mp3`), not the media source reference. The integration resolves TTS text to a playable URL before exposing it.
+
+**ACK mechanism:** The integration's `async_announce()` blocks until the card sends a `voice_satellite/announce_finished` WebSocket command with the matching `announce_id`, or a 120s timeout expires.
+
+For integration implementation details, see the [Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration) repository.
 
 ### 23.3 Client Side (AnnouncementManager)
 
