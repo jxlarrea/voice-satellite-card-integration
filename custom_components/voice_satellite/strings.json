@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Voice Satellite",
+        "description": "Create a virtual Assist satellite for a browser tablet running the Voice Satellite Card.",
+        "data": {
+          "name": "Satellite name"
+        },
+        "data_description": {
+          "name": "A descriptive name for this tablet (e.g. Kitchen Tablet, Entrance Tablet)."
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "A satellite with this name already exists."
+    }
+  }
+}
