@@ -19,6 +19,13 @@ graph TD
     E --> F[Visual Feedback]
     E --> G[TTS Playback]
     G -->|Restart| D
+
+    H[Companion Integration] -->|Entity Attributes| I[Card polls via set hass]
+    I --> J[TimerManager]
+    I --> K[AnnouncementManager]
+    K -->|announce_finished WS| H
+    F -->|update_state WS| H
+    H -->|Timers, Announcements| I
 ```
 
 1. The card acquires the browser microphone via `getUserMedia`.
@@ -27,6 +34,7 @@ graph TD
 4. The card receives pipeline events, updates visual feedback (gradient bar, transcription/response bubbles), and plays the TTS audio via an `<audio>` element.
 5. When TTS begins playing, the pipeline is immediately restarted so it listens for the next wake word while audio plays (barge-in support). If the conversation agent signals `continue_conversation`, the card skips the wake word stage and restarts in STT mode for multi-turn dialogues.
 6. The cycle repeats indefinitely.
+7. When the optional **[companion integration](https://github.com/jxlarrea/voice-satellite-card-integration)** is configured, the card also polls entity attributes for timer and announcement state changes, syncs its pipeline state back to the integration entity via WebSocket, and sends announcement playback ACKs.
 
 ---
 
