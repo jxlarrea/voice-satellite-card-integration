@@ -10,6 +10,7 @@ tablets a proper device identity in Home Assistant. This enables:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.components import intent
@@ -180,6 +181,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                     "id": timer_id,
                     "name": timer_info.name or "",
                     "total_seconds": total,
+                    "started_at": time.time(),
                     "start_hours": h,
                     "start_minutes": m,
                     "start_seconds": s,
@@ -199,6 +201,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                     m = timer_info.start_minutes or 0
                     s = timer_info.start_seconds or 0
                     timer["total_seconds"] = h * 3600 + m * 60 + s
+                    timer["started_at"] = time.time()
                     timer["start_hours"] = h
                     timer["start_minutes"] = m
                     timer["start_seconds"] = s
