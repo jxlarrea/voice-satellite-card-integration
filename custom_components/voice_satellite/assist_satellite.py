@@ -14,9 +14,11 @@ from typing import Any
 
 from homeassistant.components import intent
 from homeassistant.components.assist_satellite import (
+    AssistSatelliteAnnouncement,
     AssistSatelliteConfiguration,
     AssistSatelliteEntity,
     AssistSatelliteEntityDescription,
+    AssistSatelliteEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -41,6 +43,8 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
     _attr_has_entity_name = True
     _attr_name = None  # Use device name
+    _attr_supported_features = AssistSatelliteEntityFeature.ANNOUNCE
+    _attr_supported_features = AssistSatelliteEntityFeature.ANNOUNCE
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize the satellite entity."""
@@ -111,6 +115,34 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             max_active_wake_words=0,
         )
 
+    async def async_set_configuration(
+        self, config: AssistSatelliteConfiguration
+    ) -> None:
+        """Set satellite configuration.
+
+        No-op for browser satellites — wake words are managed
+        client-side by the card.
+        """
+
+    async def async_announce(
+        self, announcement: AssistSatelliteAnnouncement
+    ) -> None:
+        """Handle an announcement.
+
+        Stores the announcement details as entity attributes so the
+        card can pick them up and play the audio.
+        """
+        self._last_announcement = {
+            "message": announcement.message,
+            "media_id": announcement.media_id,
+        }
+        self.async_write_ha_state()
+        _LOGGER.debug(
+            "Announcement on '%s': %s",
+            self._satellite_name,
+            announcement.message or announcement.media_id,
+        )
+
     @callback
     def on_pipeline_event(self, event_type: str, data: dict | None) -> None:
         """Handle pipeline events.
@@ -139,33 +171,42 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._last_timer_event = event_type.value
 
         if event_type == intent.TimerEventType.STARTED:
+            h = timer_info.start_hours or 0
+            m = timer_info.start_minutes or 0
+            s = timer_info.start_seconds or 0
+            total = h * 3600 + m * 60 + s
             self._active_timers.append(
                 {
                     "id": timer_id,
                     "name": timer_info.name or "",
-                    "seconds": timer_info.seconds,
-                    "created_at": timer_info.created_at.isoformat()
-                    if timer_info.created_at
-                    else None,
+                    "total_seconds": total,
+                    "start_hours": h,
+                    "start_minutes": m,
+                    "start_seconds": s,
                 }
             )
             _LOGGER.debug(
                 "Timer started on '%s': %s (%ds)",
                 self._satellite_name,
                 timer_info.name or timer_id,
-                timer_info.seconds,
+                total,
             )
 
         elif event_type == intent.TimerEventType.UPDATED:
             for timer in self._active_timers:
                 if timer["id"] == timer_id:
-                    timer["seconds"] = timer_info.seconds
+                    h = timer_info.start_hours or 0
+                    m = timer_info.start_minutes or 0
+                    s = timer_info.start_seconds or 0
+                    timer["total_seconds"] = h * 3600 + m * 60 + s
+                    timer["start_hours"] = h
+                    timer["start_minutes"] = m
+                    timer["start_seconds"] = s
                     break
             _LOGGER.debug(
-                "Timer updated on '%s': %s (%ds)",
+                "Timer updated on '%s': %s",
                 self._satellite_name,
                 timer_info.name or timer_id,
-                timer_info.seconds,
             )
 
         elif event_type in (
