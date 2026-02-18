@@ -146,7 +146,8 @@ export class AnnouncementManager {
     this._queued = null;
     this._log.log('announce', 'New announcement #' + ann.id +
       ': message="' + (ann.message || '') +
-      '" media="' + (ann.media_id || '') + '"');
+      '" media="' + (ann.media_id || '') + '"' +
+      (ann.start_conversation ? ' [start_conversation]' : ''));
 
     this._playAnnouncement(ann);
   }
@@ -232,15 +233,32 @@ export class AnnouncementManager {
 
     this._log.log('announce', 'Announcement #' + ann.id + ' playback complete');
 
-    // ACK to the integration so async_announce unblocks
+    // ACK to the integration so async_announce/async_start_conversation unblocks
     this._sendAck(ann.id);
+
+    // If this is a start_conversation request, enter STT mode after clearing
+    var startConversation = ann.start_conversation || false;
 
     // Auto-clear the bubble and blur after a delay
     var self = this;
     var clearDelay = (this._card.config.announcement_display_duration || 5) * 1000;
-    this._clearTimeout = setTimeout(function () {
-      self._clearAnnouncement();
-    }, clearDelay);
+
+    if (startConversation) {
+      // For start_conversation: clear announcement UI, then enter listening mode
+      this._log.log('announce', 'Start conversation requested — entering STT mode');
+      this._clearAnnouncement();
+
+      // Show pipeline blur overlay and restart in STT mode (skip wake word)
+      this._card.ui.showBlurOverlay('pipeline');
+      var pipeline = this._card.pipeline;
+      if (pipeline) {
+        pipeline.restartContinue(null);
+      }
+    } else {
+      this._clearTimeout = setTimeout(function () {
+        self._clearAnnouncement();
+      }, clearDelay);
+    }
   }
 
   _clearAnnouncement() {

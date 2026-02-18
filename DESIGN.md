@@ -4,7 +4,7 @@
 
 Voice Satellite Card is a custom Home Assistant Lovelace card that turns any browser into a voice-activated satellite. It captures microphone audio, sends it to Home Assistant's Assist pipeline over WebSocket, and plays back TTS responses — all without leaving the HA dashboard.
 
-The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel into a single `voice-satellite-card.min.js` for deployment. The card is invisible (returns `getCardSize() = 0`). All visual feedback is rendered via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes. Current version: 3.0.2.
+The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel into a single `voice-satellite-card.min.js` for deployment. The card is invisible (returns `getCardSize() = 0`). All visual feedback is rendered via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes. Current version: 3.0.5.
 
 ---
 
@@ -1291,6 +1291,27 @@ For integration implementation details, see the [Voice Satellite Card Integratio
 
 **Overlap guard:** If an announcement is already playing (`_playing` flag), new announcements are ignored.
 
+### 23.4 Start Conversation
+
+Start Conversation (`assist_satellite.start_conversation`) is a variant of announcements that triggers listening after playback. The integration sets a `start_conversation: true` flag on the announcement attribute:
+
+```json
+{
+  "id": 2,
+  "message": "The garage door has been open for 30 minutes. Should I close it?",
+  "media_id": "/api/tts_proxy/xxxxx.mp3",
+  "preannounce_media_id": "",
+  "start_conversation": true
+}
+```
+
+The `AnnouncementManager` processes this identically to a regular announcement (chime → TTS → ACK), but `_onAnnouncementComplete` checks the `start_conversation` flag:
+
+- **If `true`:** Clears the announcement UI immediately (no display delay), shows the pipeline blur overlay, and calls `pipeline.restartContinue(null)` to enter STT mode with a fresh conversation (no `conversation_id`). The user can then speak a response, which is processed through the configured conversation agent as a normal voice interaction.
+- **If `false` (or absent):** Normal announcement behavior — auto-clear after `announcement_display_duration` seconds.
+
+The `null` argument to `restartContinue()` starts a fresh conversation rather than continuing an existing one. This is intentional — the start_conversation prompt is a standalone question, not a continuation of a previous exchange.
+
 ---
 
 ## 24. Implementation Checklist
@@ -1401,6 +1422,13 @@ When recreating or modifying this card, verify:
 - [ ] Wake word switch turned off on announcement (wakes screen from screensaver)
 - [ ] `window._vsLastAnnounceId` used for dedup (not instance-level) to prevent dual-instance double-fire
 - [ ] Overlap guard: `_playing` flag prevents concurrent announcement playback
+
+**Start Conversation (requires integration):**
+- [ ] `_onAnnouncementComplete` checks `ann.start_conversation` flag
+- [ ] If `true`: clears announcement UI immediately (no display delay)
+- [ ] If `true`: shows pipeline blur overlay and calls `pipeline.restartContinue(null)` for STT mode
+- [ ] `restartContinue(null)` starts fresh conversation (no `conversation_id`)
+- [ ] If `false`/absent: normal announcement behavior (auto-clear after delay)
 
 **Satellite state synchronization:**
 - [ ] `card._syncSatelliteState(state)` sends `voice_satellite/update_state` WebSocket command

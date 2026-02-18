@@ -63,6 +63,7 @@ graph TD
 - **Continue Conversation** - When the assistant asks a follow-up question, the card automatically listens for a response without requiring the wake word again. Conversation history is displayed in a chat-style interface.
 - **Timers** - Voice-activated timers with on-screen countdown pills, alert chimes, and cancel via double-tap or voice. Requires the [companion integration](https://github.com/jxlarrea/voice-satellite-card-integration).
 - **Announcements** - Receive `assist_satellite.announce` service calls with pre-announcement chimes and TTS playback. Queues behind active conversations. Requires the [companion integration](https://github.com/jxlarrea/voice-satellite-card-integration).
+- **Start Conversation** - Receive `assist_satellite.start_conversation` calls that speak a prompt then automatically listen for the user's response. Requires the [companion integration](https://github.com/jxlarrea/voice-satellite-card-integration).
 - **Screensaver Control** - Optionally turn off Fully Kiosk screensaver when wake word is detected.
 - **Configurable Chimes** - Audio feedback for wake word detection and request completion.
 - **State Tracking** - Expose the card's interaction state (`ACTIVE`/`IDLE`) to a Home Assistant entity for per-device automations.
@@ -314,6 +315,7 @@ Some features require the **[Voice Satellite Card Integration](https://github.co
 | State tracking | ✅ | ✅ |
 | **Timers** | ❌ | ✅ |
 | **Announcements** | ❌ | ✅ |
+| **Start Conversation** | ❌ | ✅ |
 
 ### Timers
 
@@ -341,6 +343,20 @@ data:
 Announcements include a pre-announcement chime (ding-dong), play the TTS message, and show the text on screen. If a voice interaction is in progress, the announcement queues and plays after the conversation ends.
 
 The display duration is configurable in the card editor under **Announcements**.
+
+### Start Conversation
+
+The integration enables `assist_satellite.start_conversation` support, letting automations proactively ask a question and listen for the user's response:
+
+```yaml
+action: assist_satellite.start_conversation
+target:
+  entity_id: assist_satellite.living_room_tablet
+data:
+  start_message: "The garage door has been open for 30 minutes. Should I close it?"
+```
+
+After the announcement plays, the card automatically enters listening mode (skipping wake word detection) so the user can respond immediately. The response is processed through the configured conversation agent as a normal voice interaction.
 
 ## Troubleshooting
 
