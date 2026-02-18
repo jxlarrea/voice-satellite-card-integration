@@ -4,6 +4,7 @@ Registers a virtual satellite device that gives browser-based voice
 tablets a proper device identity in Home Assistant. This enables:
 - Timer support (HassStartTimer exposed to LLM)
 - Announcements (assist_satellite.announce)
+- Start conversation (assist_satellite.start_conversation)
 - Per-device automations
 """
 
@@ -54,7 +55,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
     _attr_name = None  # Use device name
     _attr_supported_features = (
         AssistSatelliteEntityFeature.ANNOUNCE
-        | AssistSatelliteEntityFeature.TIMER
+        | AssistSatelliteEntityFeature.START_CONVERSATION
     )
 
     def __init__(self, entry: ConfigEntry) -> None:
@@ -82,7 +83,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             "name": self._satellite_name,
             "manufacturer": "Voice Satellite Card Integration",
             "model": "Browser Satellite",
-            "sw_version": "1.0.1",
+            "sw_version": "1.1.0",
         }
 
     @property
@@ -209,6 +210,71 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 self._announce_id,
                 self._satellite_name,
             )
+
+    async def async_start_conversation(
+        self, announcement: AssistSatelliteAnnouncement
+    ) -> None:
+        """Handle a start_conversation request.
+
+        Works like an announcement but includes a start_conversation flag
+        so the card enters STT mode (skipping wake word) after playback,
+        enabling the user to respond to the prompt.
+        """
+        self._announce_id += 1
+        announce_id = self._announce_id
+
+        self._pending_announcement = {
+            "id": announce_id,
+            "message": announcement.message or "",
+            "media_id": announcement.media_id or "",
+            "preannounce_media_id": (
+                getattr(announcement, "preannounce_media_id", None) or ""
+            ),
+            "start_conversation": True,
+        }
+
+        # Create an event to wait for the card to ACK playback
+        self._announce_event = asyncio.Event()
+
+        # Push state so the card sees the new announcement
+        self.async_write_ha_state()
+
+        _LOGGER.debug(
+            "Start conversation #%d on '%s': %s (media: %s)",
+            announce_id,
+            self._satellite_name,
+            announcement.message or "(no message)",
+            announcement.media_id or "(no media)",
+        )
+
+        # Wait for the card to finish playback of the announcement
+        try:
+            await asyncio.wait_for(
+                self._announce_event.wait(),
+                timeout=ANNOUNCE_TIMEOUT,
+            )
+            _LOGGER.debug(
+                "Start conversation #%d announcement on '%s' completed",
+                announce_id,
+                self._satellite_name,
+            )
+            # Card is now entering STT mode — set state to listening
+            self.hass.states.async_set(
+                self.entity_id,
+                "listening",
+                self.extra_state_attributes,
+            )
+        except asyncio.TimeoutError:
+            _LOGGER.warning(
+                "Start conversation #%d on '%s' timed out after %ds",
+                announce_id,
+                self._satellite_name,
+                ANNOUNCE_TIMEOUT,
+            )
+        finally:
+            self._pending_announcement = None
+            self._announce_event = None
+            self.async_write_ha_state()
 
     # Map card state strings to HA satellite state values
     _STATE_MAP: dict[str, str] = {
