@@ -1,4 +1,5 @@
-# Voice Satellite Card for Home Assistant
+# <img width="48" height="48" alt="icon" src="https://github.com/user-attachments/assets/6e3abf3c-f20f-4cbe-84fb-4d7e0f04d30c" /> Voice Satellite Card for Home Assistant
+
 
 Transform any browser into a voice-activated satellite for Home Assistant's Assist. This custom card captures microphone audio and streams it to your Assist pipeline for wake word detection, speech recognition, and voice responses - turning tablets, wall-mounted displays, or any device with a microphone into a hands-free voice assistant.
 
