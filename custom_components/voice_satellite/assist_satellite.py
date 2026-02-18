@@ -52,7 +52,10 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
     _attr_has_entity_name = True
     _attr_name = None  # Use device name
-    _attr_supported_features = AssistSatelliteEntityFeature.ANNOUNCE
+    _attr_supported_features = (
+        AssistSatelliteEntityFeature.ANNOUNCE
+        | AssistSatelliteEntityFeature.TIMER
+    )
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize the satellite entity."""
@@ -79,7 +82,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             "name": self._satellite_name,
             "manufacturer": "Voice Satellite Card Integration",
             "model": "Browser Satellite",
-            "sw_version": "1.0.0",
+            "sw_version": "1.0.1",
         }
 
     @property
