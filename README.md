@@ -399,7 +399,7 @@ Sentence templates support optional words in `[brackets]` and wildcards in `{bra
 
 1. **Check HTTPS:** Browsers require HTTPS for microphone access. If you're using HTTP, the microphone permission prompt won't appear. Use HTTPS or access via `localhost`.
 2. **Check browser permissions:** Make sure the browser has microphone permission for your HA URL. Look for a microphone icon in the address bar.
-3. **Check Fully Kiosk settings:** If using Fully Kiosk, ensure **Advanced Web Settings → Microphone Access** is enabled and the HA URL is allowed.
+3. **Check Fully Kiosk settings:** If using Fully Kiosk, ensure **Web Content Settings → Enable Microphone Access** and **Autoplay Audio** are enabled.
 4. **Try the manual start:** If auto-start fails, tap the blue microphone button to start manually. Check the browser console (F12) for errors.
 
 ### Wake word not detected
