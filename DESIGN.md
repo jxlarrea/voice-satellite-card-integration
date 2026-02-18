@@ -1,6 +1,6 @@
 # Voice Satellite Card Integration — Design Document
 
-Current version: 1.1.0
+Current version: 1.2.0
 
 ## 1. Overview
 
@@ -11,6 +11,7 @@ Each config entry creates one `assist_satellite.*` entity backed by a device in 
 - Registers as a **timer handler** so the LLM gets access to `HassStartTimer`, `HassUpdateTimer`, `HassCancelTimer`
 - Implements **`assist_satellite.announce`** so automations can push TTS to specific browsers
 - Implements **`assist_satellite.start_conversation`** so automations can speak a prompt and then listen for the user's voice response
+- Implements **`assist_satellite.ask_question`** so automations can ask a question, capture the user's voice response, and match it against predefined answers using hassil sentence templates
 - Accepts **pipeline state updates** from the card via WebSocket, reflecting real-time state (`idle`, `listening`, `processing`, `responding`) on the entity
 - Exposes **entity attributes** (`active_timers`, `last_timer_event`, `announcement`) that the card reads to render timer pills and announcement bubbles
 
@@ -73,7 +74,7 @@ class VoiceSatelliteConfigFlow(ConfigFlow, domain=DOMAIN):
 `async_setup_entry` does two things:
 
 1. **Forward platform setup** — Calls `async_forward_entry_setups(entry, [Platform.ASSIST_SATELLITE])` which triggers `assist_satellite.py:async_setup_entry()`
-2. **Register WebSocket commands** — Registers `voice_satellite/announce_finished` and `voice_satellite/update_state`. Uses try/except around registration because multiple config entries share the same WebSocket commands (only the first registration succeeds, subsequent ones raise `ValueError`).
+2. **Register WebSocket commands** — Registers `voice_satellite/announce_finished`, `voice_satellite/update_state`, and `voice_satellite/question_answered`. Uses try/except around registration because multiple config entries share the same WebSocket commands (only the first registration succeeds, subsequent ones raise `ValueError`).
 
 ```python
 PLATFORMS = [Platform.ASSIST_SATELLITE]
@@ -121,7 +122,7 @@ Entities are stored in `hass.data[DOMAIN][entry.entry_id]`. The WebSocket handle
 - Pipeline event routing (calls `on_pipeline_event`)
 - Wake word configuration (calls `async_get_configuration`)
 
-The entity declares `AssistSatelliteEntityFeature.ANNOUNCE | AssistSatelliteEntityFeature.START_CONVERSATION` as supported features (value 3).
+The entity declares `AssistSatelliteEntityFeature.ANNOUNCE | AssistSatelliteEntityFeature.START_CONVERSATION` as supported features (value 3). Note: `ask_question` does not have a separate feature flag — the base class routes it via the `async_internal_ask_question` method override, which the entity implements directly.
 
 ### 4.2 Device Info
 
@@ -135,7 +136,7 @@ def device_info(self):
         "name": self._satellite_name,
         "manufacturer": "Voice Satellite Card Integration",
         "model": "Browser Satellite",
-        "sw_version": "1.1.0",
+        "sw_version": "1.2.0",
     }
 ```
 
@@ -412,6 +413,291 @@ _attr_supported_features = (
 
 This matches the feature set of official HA voice satellites like Voice PE.
 
+### 6.6 Ask Question
+
+`assist_satellite.ask_question` (HA 2025.7+) is a variant of announcements that speaks a question, captures the user's voice response via STT, and matches it against predefined answer templates using [hassil](https://github.com/home-assistant/hassil) sentence matching. The result is returned to the calling automation.
+
+#### Flow
+
+1. An automation calls `assist_satellite.ask_question` with a `question`, optional `question_media_id`, and a list of `answers` (each with `id` and `sentences`)
+2. HA calls `async_internal_ask_question(question, question_media_id, answers, ...)` on the entity
+3. The entity delegates TTS resolution to the base class by calling `self.async_internal_announce(message=question, ...)`. This reuses the exact same TTS resolution path that works for regular announcements.
+4. The entity's `async_announce` override adds `"ask_question": True` to `_pending_announcement` when `_ask_question_pending` is set
+5. The card sees the `ask_question` flag, plays the TTS, then enters STT-only mode
+6. The card sends the transcribed text via `voice_satellite/question_answered` WebSocket command
+7. The `question_answered` callback stores the text and signals `_question_event`
+8. `async_internal_ask_question` wakes up, runs hassil matching via `_match_answer()`, stores the result, and signals `_question_match_event`
+9. The WS handler (which has been awaiting `_question_match_event`) reads the result and returns `{ success, matched, id }` to the card
+10. The entity returns `AssistSatelliteAnswer(id, sentence, slots)` to the calling automation
+
+#### TTS Resolution via Base Class Delegation
+
+The key architectural decision is that `async_internal_ask_question` does NOT attempt its own TTS resolution. Instead, it delegates to `self.async_internal_announce()`, which the base class already knows how to resolve (engine selection, language, voice, caching, media source resolution). The `_ask_question_pending` flag tells `async_announce` to include the `ask_question: true` flag in the announcement attributes.
+
+```python
+async def async_internal_ask_question(self, question, question_media_id, answers, ...):
+    self._ask_question_pending = True
+    self._question_event = asyncio.Event()
+    self._question_match_event = asyncio.Event()
+
+    # Phase 1: Delegate TTS to base class announce flow
+    await self.async_internal_announce(message=question, media_id=question_media_id, ...)
+
+    # Phase 2: Wait for card to send transcribed text
+    await asyncio.wait_for(self._question_event.wait(), timeout=ANNOUNCE_TIMEOUT)
+    sentence = self._question_answer_text
+
+    # Phase 3: Match against answers using hassil
+    answer = self._match_answer(sentence, answers)
+    self._question_match_result = {"matched": answer.id is not None, "id": answer.id}
+    self._question_match_event.set()
+    return answer
+```
+
+#### Hassil Matching (`_match_answer`)
+
+Builds a hassil `Intents` structure from the answer list and calls `recognize(sentence, intents)`:
+
+- Each answer's `id` becomes an intent name
+- Each answer's `sentences` become the intent's data sentences
+- On match: returns `AssistSatelliteAnswer(id=matched_id, sentence=sentence, slots={name: value, ...})`
+- On no match or error: returns `AssistSatelliteAnswer(id=None, sentence=sentence, slots={})`
+
+Hassil is imported conditionally (`HAS_HASSIL` flag). If unavailable, the raw sentence is returned without matching.
+
+#### WebSocket: `voice_satellite/question_answered`
+
+```python
+@websocket_api.websocket_command({
+    vol.Required("type"): "voice_satellite/question_answered",
+    vol.Required("entity_id"): str,
+    vol.Required("announce_id"): int,
+    vol.Required("sentence"): str,
+})
+```
+
+The handler:
+1. Grabs `_question_match_event` reference before triggering the answer (avoids race)
+2. Calls `entity.question_answered(announce_id, sentence)` which sets the text and signals `_question_event`
+3. Awaits `_question_match_event` with 10s timeout (hassil matching is fast)
+4. Reads `_question_match_result` immediately after event fires (before `finally` block clears it)
+5. Returns `{ success: true, matched: bool, id: string|null }` to the card
+
+#### State Management
+
+Five state variables coordinate the async flow:
+
+| Variable | Type | Purpose |
+|---|---|---|
+| `_ask_question_pending` | `bool` | Tells `async_announce` to add `ask_question: true` flag |
+| `_question_event` | `asyncio.Event` | Signaled when card sends transcribed text |
+| `_question_answer_text` | `str` | The transcribed text from the card |
+| `_question_match_event` | `asyncio.Event` | Signaled when hassil matching completes |
+| `_question_match_result` | `dict` | `{matched: bool, id: str|null}` for the WS handler |
+
+All are cleaned up in the `finally` block of `async_internal_ask_question`.
+
+#### Complete `async_internal_ask_question` Implementation
+
+```python
+async def async_internal_ask_question(
+    self,
+    question: str | None,
+    question_media_id: str | None,
+    answers: list[dict[str, Any]],
+    preannounce: bool,
+    preannounce_media_id: str | None,
+) -> Any:
+    if AssistSatelliteAnswer is None:
+        raise NotImplementedError(
+            "ask_question requires Home Assistant 2025.7 or later"
+        )
+
+    self._ask_question_pending = True
+    self._question_event = asyncio.Event()
+    self._question_answer_text = None
+    self._question_match_event = asyncio.Event()
+    self._question_match_result = None
+
+    # Phase 1: Delegate TTS to base class announce flow
+    try:
+        await self.async_internal_announce(
+            message=question,
+            media_id=question_media_id,
+            preannounce=preannounce,
+            preannounce_media_id=preannounce_media_id,
+        )
+    except Exception:
+        self._ask_question_pending = False
+        self._question_event = None
+        self._question_answer_text = None
+        self._question_match_result = {"matched": False, "id": None}
+        self._question_match_event.set()
+        return None
+
+    # Set state to listening (card is now in STT mode)
+    self.hass.states.async_set(
+        self.entity_id, "listening", self.extra_state_attributes,
+    )
+
+    try:
+        # Phase 2: Wait for card to send transcribed text
+        await asyncio.wait_for(
+            self._question_event.wait(), timeout=ANNOUNCE_TIMEOUT,
+        )
+
+        sentence = self._question_answer_text or ""
+        if not sentence:
+            self._question_match_result = {"matched": False, "id": None}
+            self._question_match_event.set()
+            return None
+
+        # Phase 3: Match against answers using hassil
+        if answers and HAS_HASSIL:
+            answer = self._match_answer(sentence, answers)
+            self._question_match_result = {
+                "matched": answer.id is not None, "id": answer.id,
+            }
+            self._question_match_event.set()
+            return answer
+
+        # No answers provided or hassil unavailable
+        self._question_match_result = {"matched": False, "id": None}
+        self._question_match_event.set()
+        return AssistSatelliteAnswer(id=None, sentence=sentence, slots={})
+
+    except asyncio.TimeoutError:
+        self._question_match_result = {"matched": False, "id": None}
+        self._question_match_event.set()
+        return None
+    finally:
+        self._ask_question_pending = False
+        self._question_event = None
+        self._question_answer_text = None
+        self._question_match_event = None
+        self._question_match_result = None
+        self.async_write_ha_state()
+```
+
+#### Complete `_match_answer` Implementation
+
+```python
+def _match_answer(self, sentence: str, answers: list[dict[str, Any]]) -> Any:
+    intents_dict: dict[str, Any] = {"language": "en", "intents": {}}
+    for answer in answers:
+        answer_id = answer["id"]
+        sentences = answer.get("sentences", [])
+        intents_dict["intents"][answer_id] = {
+            "data": [{"sentences": sentences}]
+        }
+
+    try:
+        intents = Intents.from_dict(intents_dict)
+        result = recognize(sentence, intents)
+    except Exception:
+        return AssistSatelliteAnswer(id=None, sentence=sentence, slots={})
+
+    if result is None:
+        return AssistSatelliteAnswer(id=None, sentence=sentence, slots={})
+
+    matched_id = result.intent.name
+    slots = {
+        name: slot.value
+        for name, slot in result.entities.items()
+    }
+    return AssistSatelliteAnswer(
+        id=matched_id, sentence=sentence, slots=slots,
+    )
+```
+
+#### Complete `question_answered` Callback
+
+```python
+@callback
+def question_answered(self, announce_id: int, sentence: str) -> None:
+    if (
+        self._question_event is not None
+        and self._announce_id == announce_id
+    ):
+        self._question_answer_text = sentence
+        self._question_event.set()
+```
+
+#### Complete WS Handler
+
+```python
+async def ws_question_answered(hass, connection, msg):
+    entity_id = msg["entity_id"]
+    announce_id = msg["announce_id"]
+    sentence = msg["sentence"]
+
+    entity = None
+    for entry_id, ent in hass.data.get(DOMAIN, {}).items():
+        if ent.entity_id == entity_id:
+            entity = ent
+            break
+
+    if entity is None:
+        connection.send_error(msg["id"], "not_found", f"Entity {entity_id} not found")
+        return
+
+    # Grab the match event BEFORE triggering the answer (avoids race)
+    match_event = entity._question_match_event
+
+    entity.question_answered(announce_id, sentence)
+
+    # Wait for hassil matching to complete
+    result = {"matched": False, "id": None}
+    if match_event is not None:
+        try:
+            await asyncio.wait_for(match_event.wait(), timeout=10.0)
+            # Read result immediately — finally block may clear it
+            result = entity._question_match_result or result
+        except asyncio.TimeoutError:
+            pass
+
+    connection.send_result(msg["id"], {
+        "success": True,
+        "matched": result.get("matched", False),
+        "id": result.get("id"),
+    })
+```
+
+#### Hassil Import Pattern
+
+```python
+try:
+    from hassil.intents import Intents
+    from hassil.recognize import recognize
+    HAS_HASSIL = True
+except ImportError:
+    HAS_HASSIL = False
+
+try:
+    from homeassistant.components.assist_satellite import AssistSatelliteAnswer
+except ImportError:
+    AssistSatelliteAnswer = None
+```
+
+Both are conditionally imported. `AssistSatelliteAnswer` requires HA 2025.7+. If either is unavailable, ask_question degrades gracefully: without hassil, raw sentences are returned; without `AssistSatelliteAnswer`, the method raises `NotImplementedError`.
+
+#### `async_announce` Modification
+
+The `ask_question` flag injection is a two-line addition to `async_announce`:
+
+```python
+async def async_announce(self, announcement):
+    # ... existing code to build _pending_announcement ...
+
+    # If ask_question is pending, add the flag
+    if self._ask_question_pending:
+        self._pending_announcement["ask_question"] = True
+
+    # ... rest of existing code ...
+```
+
+This is the only change to `async_announce`. The flag is read by `_ask_question_pending` which is set before `async_internal_announce` is called in `async_internal_ask_question`.
+
 ## 7. Pipeline State Synchronization
 
 ### 7.1 State Mapping
@@ -575,7 +861,7 @@ HA uses this file for the config flow UI. The `data_description` provides helper
     "documentation": "https://github.com/jxlarrea/voice-satellite-card-integration",
     "iot_class": "local_push",
     "issue_tracker": "https://github.com/jxlarrea/voice-satellite-card-integration/issues",
-    "version": "1.1.0"
+    "version": "1.2.0"
 }
 ```
 
@@ -615,6 +901,15 @@ Single constant. The domain must match the folder name under `custom_components/
 - `AssistSatelliteEntityFeature.START_CONVERSATION` — Feature flag enabling the `assist_satellite.start_conversation` action
 - `AssistSatelliteConfiguration` — Returned by `async_get_configuration()` (wake word config)
 - `AssistSatelliteAnnouncement` — Passed to `async_announce()` and `async_start_conversation()` with `.message`, `.media_id`, and optionally `.preannounce_media_id`
+- `AssistSatelliteAnswer` (HA 2025.7+) — Returned by `async_internal_ask_question()` with `.id`, `.sentence`, `.slots`. Conditionally imported; `None` if unavailable.
+
+### 11.2 `hassil` (bundled with HA)
+
+- `hassil.intents.Intents` — Sentence template collection, built via `Intents.from_dict()`
+- `hassil.recognize.recognize(sentence, intents)` — Matches a sentence against intents, returns `RecognizeResult` or `None`
+- `RecognizeResult.intent.name` — The matched intent/answer ID
+- `RecognizeResult.entities` — Dict of `{name: SlotValue}` for captured wildcards
+- Conditionally imported (`HAS_HASSIL` flag); if unavailable, raw sentences returned without matching
 
 ### 11.2 `intent` Component (HA 2024.10+)
 
@@ -638,6 +933,7 @@ This section documents what the card sends and receives. See the [card's DESIGN.
 |---|---|---|
 | `voice_satellite/announce_finished` | `{entity_id, announce_id}` | ACK that announcement playback completed |
 | `voice_satellite/update_state` | `{entity_id, state}` | Sync pipeline state to entity |
+| `voice_satellite/question_answered` | `{entity_id, announce_id, sentence}` | Send ask_question STT result; returns `{success, matched, id}` |
 
 ### 12.2 Integration → Card (Entity Attributes)
 
@@ -647,7 +943,7 @@ The card reads entity attributes via `hass.states` (polled in `set hass()` for a
 |---|---|---|
 | `active_timers` | `list[dict]` | Active timers with countdown data |
 | `last_timer_event` | `string \| null` | Last event type: `started`, `updated`, `cancelled`, `finished` |
-| `announcement` | `dict \| absent` | Present only during active announcement; includes `start_conversation: true` for start_conversation requests |
+| `announcement` | `dict \| absent` | Present only during active announcement; includes `start_conversation: true` for start_conversation requests, `ask_question: true` for ask_question requests |
 
 ### 12.3 Card Configuration
 
@@ -714,6 +1010,20 @@ Use this checklist to verify a complete implementation:
 - [ ] On successful ACK, explicitly sets entity state to `listening` via `hass.states.async_set()`
 - [ ] `finally` block clears `_pending_announcement` and `_announce_event`
 
+### Ask Question
+- [ ] `async_internal_ask_question` delegates TTS to base class via `self.async_internal_announce()`
+- [ ] `_ask_question_pending` flag causes `async_announce` to add `"ask_question": True` to announcement
+- [ ] `_question_event` + `_question_answer_text` coordinate card → integration text transfer
+- [ ] `_question_match_event` + `_question_match_result` coordinate integration → WS handler result transfer
+- [ ] `question_answered` callback validates `announce_id` before setting event
+- [ ] `_match_answer` builds hassil `Intents` from answers list and calls `recognize()`
+- [ ] Returns `AssistSatelliteAnswer(id, sentence, slots)` — `id=None` on no match
+- [ ] Hassil imported conditionally (`HAS_HASSIL` flag); raw sentence returned if unavailable
+- [ ] `finally` block cleans up all five state variables
+- [ ] WS handler grabs `_question_match_event` before triggering answer (avoids race)
+- [ ] WS handler reads `_question_match_result` immediately after event (before `finally` clears it)
+- [ ] WS handler returns `{ success, matched, id }` to card
+
 ### State Sync
 - [ ] `_STATE_MAP` maps all card states to HA satellite states
 - [ ] `set_pipeline_state` deduplicates (skips if state unchanged)
@@ -723,6 +1033,7 @@ Use this checklist to verify a complete implementation:
 ### WebSocket Commands
 - [ ] `voice_satellite/announce_finished` with `entity_id` + `announce_id`
 - [ ] `voice_satellite/update_state` with `entity_id` + `state`
+- [ ] `voice_satellite/question_answered` with `entity_id` + `announce_id` + `sentence`; returns `{success, matched, id}`
 - [ ] Entity lookup iterates `hass.data[DOMAIN]` by `entity_id`
 - [ ] Registration wrapped in try/except for idempotency
 

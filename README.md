@@ -1,6 +1,5 @@
 # <img width="48" height="48" alt="icon" src="https://github.com/user-attachments/assets/80ff8310-f46d-4f07-9888-6337e5db23fb" /> Voice Satellite Card Integration
 
-
 Companion integration for the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Registers browsers as proper Assist Satellite devices in Home Assistant.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
@@ -27,6 +26,7 @@ This integration solves that by creating a virtual Assist Satellite entity for e
 - **Timers** - Registers as a timer handler so the LLM gets access to `HassStartTimer`, and exposes active timer state as entity attributes for the card to display countdown pills
 - **Announcements** - Implements `assist_satellite.announce` so you can push TTS messages to specific browsers from automations and scripts
 - **Start Conversation** - Implements `assist_satellite.start_conversation` so automations can speak a prompt and then listen for the user's voice response
+- **Ask Question** - Implements `assist_satellite.ask_question` so automations can ask a question, capture the user's voice response, and match it against predefined answers using hassil sentence templates
 - **State sync** - Reflects real-time pipeline state (`idle`, `listening`, `processing`, `responding`) on the entity, enabling automations that react to voice activity
 
 ## Installation
@@ -95,6 +95,44 @@ data:
 
 This enables interactive automations where Home Assistant proactively asks the user a question and acts on their response. The satellite's configured pipeline must use a conversation agent that supports conversations (e.g., OpenAI, Google Generative AI).
 
+## Ask Question Support
+
+The integration implements the `assist_satellite.ask_question` action, allowing automations to ask a question, capture the user's voice response, and match it against predefined answer templates. Unlike `start_conversation` (which passes the response to the conversation agent), `ask_question` returns a structured result directly to the calling automation.
+
+Example automation:
+
+```yaml
+action: assist_satellite.ask_question
+target:
+  entity_id: assist_satellite.kitchen_tablet
+data:
+  question: "The front door has been unlocked for 10 minutes. Should I lock it?"
+  answers:
+    - id: positive
+      sentences:
+        - "yes [please]"
+        - "[go ahead and] lock it [please]"
+        - "sure"
+    - id: negative
+      sentences:
+        - "no [thanks]"
+        - "leave it [unlocked]"
+        - "don't lock it"
+response_variable: answer
+```
+
+The `answer` variable contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string \| null` | Matched answer ID (e.g., `"positive"`), or `null` if no match |
+| `sentence` | `string` | Raw transcribed text from STT |
+| `slots` | `dict` | Captured wildcard values from `{placeholder}` syntax |
+
+Sentence templates use [hassil](https://github.com/home-assistant/hassil) syntax: `[optional words]` and `{wildcard}` placeholders. For example, `"play {genre} music"` captures the genre value in `answer.slots.genre`.
+
+The card provides audio and visual feedback: a done chime on successful match, or an error chime with a flashing red gradient bar when the response doesn't match any answer.
+
 ## Satellite State Sync
 
 The Voice Satellite Card syncs its pipeline state back to the entity in real time. This means the entity accurately reflects what the satellite is doing:
@@ -140,7 +178,7 @@ Example template to check for active timers:
 ## Requirements
 
 - Home Assistant 2025.1.2 or later
-- [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) v3.0.5 or later (for start conversation support; v3.0.0+ for timers and announcements)
+- [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) v3.1.0 or later (for ask question support; v3.0.5+ for start conversation; v3.0.0+ for timers and announcements)
 
 ## License
 

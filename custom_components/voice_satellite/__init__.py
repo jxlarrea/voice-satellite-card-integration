@@ -7,6 +7,7 @@ announcements, and per-device LLM context.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import voluptuous as vol
@@ -36,6 +37,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     try:
         websocket_api.async_register_command(hass, ws_update_state)
+    except ValueError:
+        pass
+
+    try:
+        websocket_api.async_register_command(hass, ws_question_answered)
     except ValueError:
         pass
 
@@ -115,3 +121,56 @@ async def ws_update_state(
 
     entity.set_pipeline_state(state)
     connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "voice_satellite/question_answered",
+        vol.Required("entity_id"): str,
+        vol.Required("announce_id"): int,
+        vol.Required("sentence"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_question_answered(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Handle question answer from the card (STT transcription)."""
+    entity_id = msg["entity_id"]
+    announce_id = msg["announce_id"]
+    sentence = msg["sentence"]
+
+    entity = None
+    for entry_id, ent in hass.data.get(DOMAIN, {}).items():
+        if ent.entity_id == entity_id:
+            entity = ent
+            break
+
+    if entity is None:
+        connection.send_error(
+            msg["id"], "not_found", f"Entity {entity_id} not found"
+        )
+        return
+
+    # Grab the match event before triggering the answer
+    match_event = entity._question_match_event
+
+    entity.question_answered(announce_id, sentence)
+
+    # Wait for hassil matching to complete (with timeout)
+    result = {"matched": False, "id": None}
+    if match_event is not None:
+        try:
+            await asyncio.wait_for(match_event.wait(), timeout=10.0)
+            # Read result immediately — finally block may clear it
+            result = entity._question_match_result or result
+        except asyncio.TimeoutError:
+            pass
+
+    connection.send_result(msg["id"], {
+        "success": True,
+        "matched": result.get("matched", False),
+        "id": result.get("id"),
+    })

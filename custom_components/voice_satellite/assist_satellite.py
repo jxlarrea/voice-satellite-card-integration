@@ -5,6 +5,7 @@ tablets a proper device identity in Home Assistant. This enables:
 - Timer support (HassStartTimer exposed to LLM)
 - Announcements (assist_satellite.announce)
 - Start conversation (assist_satellite.start_conversation)
+- Ask question (assist_satellite.ask_question)
 - Per-device automations
 """
 
@@ -25,6 +26,21 @@ from homeassistant.components.assist_satellite import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+# Conditional import for ask_question support (HA 2025.7+)
+try:
+    from homeassistant.components.assist_satellite import AssistSatelliteAnswer
+except ImportError:
+    AssistSatelliteAnswer = None  # type: ignore[misc,assignment]
+
+# Conditional import for hassil sentence matching
+try:
+    from hassil.recognize import recognize
+    from hassil.intents import Intents
+
+    HAS_HASSIL = True
+except ImportError:
+    HAS_HASSIL = False
 
 from .const import DOMAIN
 
@@ -75,6 +91,13 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._announce_event: asyncio.Event | None = None
         self._announce_id: int = 0
 
+        # Ask question state
+        self._question_event: asyncio.Event | None = None
+        self._question_answer_text: str | None = None
+        self._ask_question_pending: bool = False
+        self._question_match_event: asyncio.Event | None = None
+        self._question_match_result: dict | None = None
+
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device info to create a device registry entry."""
@@ -83,7 +106,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             "name": self._satellite_name,
             "manufacturer": "Voice Satellite Card Integration",
             "model": "Browser Satellite",
-            "sw_version": "1.1.0",
+            "sw_version": "1.2.0",
         }
 
     @property
@@ -152,6 +175,11 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 getattr(announcement, "preannounce_media_id", None) or ""
             ),
         }
+
+        # If ask_question is pending, add the flag so the card enters
+        # STT-only mode after playing the question TTS
+        if self._ask_question_pending:
+            self._pending_announcement["ask_question"] = True
 
         # Create an event to wait for the card to ACK playback
         self._announce_event = asyncio.Event()
@@ -275,6 +303,215 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             self._pending_announcement = None
             self._announce_event = None
             self.async_write_ha_state()
+
+    async def async_internal_ask_question(
+        self,
+        question: str | None = None,
+        question_media_id: str | None = None,
+        preannounce: bool = True,
+        preannounce_media_id: str | None = None,
+        answers: list[dict[str, Any]] | None = None,
+    ) -> Any:
+        """Handle an ask_question request (HA 2025.7+).
+
+        Delegates TTS playback to async_announce (which gets resolved media
+        from the base class), then enters STT-only mode on the card to
+        capture the user's response. Matches against provided answers
+        using hassil sentence templates.
+        """
+        if AssistSatelliteAnswer is None:
+            raise NotImplementedError(
+                "ask_question requires Home Assistant 2025.7 or later"
+            )
+
+        # Set the ask_question flag BEFORE calling async_internal_announce.
+        # Our async_announce override will include this flag in the
+        # announcement attributes so the card knows to enter STT mode
+        # after playback.
+        self._ask_question_pending = True
+        self._question_event = asyncio.Event()
+        self._question_answer_text = None
+        self._question_match_event = asyncio.Event()
+        self._question_match_result = None
+
+        _LOGGER.debug(
+            "Ask question on '%s': %s (answers: %d)",
+            self._satellite_name,
+            question or "(media only)",
+            len(answers) if answers else 0,
+        )
+
+        # Phase 1: Use the base class announce flow for TTS resolution
+        # and playback. The base class will resolve text→media_id and
+        # call our async_announce() which includes the ask_question flag.
+        try:
+            await self.async_internal_announce(
+                message=question,
+                media_id=question_media_id,
+                preannounce=preannounce,
+                preannounce_media_id=preannounce_media_id,
+            )
+        except Exception:
+            _LOGGER.warning(
+                "Ask question TTS/announce failed on '%s'",
+                self._satellite_name,
+                exc_info=True,
+            )
+            self._ask_question_pending = False
+            self._question_event = None
+            self._question_answer_text = None
+            self._question_match_result = {"matched": False, "id": None}
+            self._question_match_event.set()
+            return None
+
+        # Phase 1 complete — card has ACK'd announcement and entered
+        # STT-only mode. Now wait for the transcribed answer.
+
+        # Set state to listening (card is now in STT mode)
+        self.hass.states.async_set(
+            self.entity_id,
+            "listening",
+            self.extra_state_attributes,
+        )
+
+        try:
+            # Phase 2: Wait for the card to send back transcribed text
+            await asyncio.wait_for(
+                self._question_event.wait(),
+                timeout=ANNOUNCE_TIMEOUT,
+            )
+
+            sentence = self._question_answer_text or ""
+            _LOGGER.debug(
+                "Ask question on '%s' got answer: '%s'",
+                self._satellite_name,
+                sentence,
+            )
+
+            if not sentence:
+                self._question_match_result = {
+                    "matched": False, "id": None,
+                }
+                self._question_match_event.set()
+                return None
+
+            # Match against provided answers using hassil
+            if answers and HAS_HASSIL:
+                answer = self._match_answer(sentence, answers)
+                self._question_match_result = {
+                    "matched": answer.id is not None,
+                    "id": answer.id,
+                }
+                self._question_match_event.set()
+                return answer
+
+            # No answers provided or hassil unavailable — return raw
+            self._question_match_result = {
+                "matched": False, "id": None,
+            }
+            self._question_match_event.set()
+            return AssistSatelliteAnswer(
+                id=None,
+                sentence=sentence,
+                slots={},
+            )
+
+        except asyncio.TimeoutError:
+            _LOGGER.warning(
+                "Ask question on '%s' timed out waiting for answer",
+                self._satellite_name,
+            )
+            self._question_match_result = {
+                "matched": False, "id": None,
+            }
+            self._question_match_event.set()
+            return None
+        finally:
+            self._ask_question_pending = False
+            self._question_event = None
+            self._question_answer_text = None
+            self._question_match_event = None
+            self._question_match_result = None
+            self.async_write_ha_state()
+
+    def _match_answer(
+        self, sentence: str, answers: list[dict[str, Any]]
+    ) -> Any:
+        """Match a sentence against answer templates using hassil."""
+        # Build hassil intent structure from the answer list
+        intents_dict: dict[str, Any] = {"language": "en", "intents": {}}
+        for answer in answers:
+            answer_id = answer["id"]
+            sentences = answer.get("sentences", [])
+            intents_dict["intents"][answer_id] = {
+                "data": [{"sentences": sentences}]
+            }
+
+        try:
+            intents = Intents.from_dict(intents_dict)
+            result = recognize(sentence, intents)
+        except Exception:
+            _LOGGER.debug(
+                "Hassil matching failed for '%s', returning raw sentence",
+                sentence,
+                exc_info=True,
+            )
+            return AssistSatelliteAnswer(
+                id=None, sentence=sentence, slots={}
+            )
+
+        if result is None:
+            _LOGGER.debug(
+                "No hassil match for '%s' against %d answers",
+                sentence,
+                len(answers),
+            )
+            return AssistSatelliteAnswer(
+                id=None, sentence=sentence, slots={}
+            )
+
+        matched_id = result.intent.name
+        slots = {
+            name: slot.value
+            for name, slot in result.entities.items()
+        }
+
+        _LOGGER.debug(
+            "Hassil matched '%s' → id=%s, slots=%s",
+            sentence,
+            matched_id,
+            slots,
+        )
+
+        return AssistSatelliteAnswer(
+            id=matched_id,
+            sentence=sentence,
+            slots=slots,
+        )
+
+    @callback
+    def question_answered(self, announce_id: int, sentence: str) -> None:
+        """Called by WebSocket handler when card sends back STT text."""
+        if (
+            self._question_event is not None
+            and self._announce_id == announce_id
+        ):
+            _LOGGER.debug(
+                "Question #%d answer received for '%s': '%s'",
+                announce_id,
+                self._satellite_name,
+                sentence,
+            )
+            self._question_answer_text = sentence
+            self._question_event.set()
+        else:
+            _LOGGER.debug(
+                "Ignoring stale question answer #%d (current: #%d) "
+                "for '%s'",
+                announce_id,
+                self._announce_id,
+                self._satellite_name,
+            )
 
     # Map card state strings to HA satellite state values
     _STATE_MAP: dict[str, str] = {
