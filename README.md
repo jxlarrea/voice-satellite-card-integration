@@ -72,12 +72,12 @@ graph TD
 ## Prerequisites
 
 Before using this card, ensure you have Home Assistant with the [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/) fully set up. A configured Assist Pipeline consists of:
-   - Wake word detection ([openWakeWord](https://www.home-assistant.io/voice_control/install_wake_word_add_on/))
+   - Wake word detection (e.g., [openWakeWord](https://www.home-assistant.io/voice_control/install_wake_word_add_on/), [microWakeWord](https://www.home-assistant.io/integrations/micro_wake_word/))
    - Speech-to-Text ([Whisper](https://www.home-assistant.io/integrations/whisper/), OpenAI, etc.)
    - Conversation agent ([Home Assistant](https://www.home-assistant.io/integrations/conversation/), OpenAI, Qwen, etc.)
    - Text-to-Speech ([Piper](https://www.home-assistant.io/integrations/piper/), Kokoro, etc.)
 
-> **Important:** openWakeWord must be **installed as an add-on or integration** AND **enabled in your Assist pipeline**. The wake word option is hidden by default in the pipeline settings — go to **Settings → Voice assistants**, select your pipeline, click the **⋮ three-dot menu** at the top right, and choose **Edit in YAML** or look for the wake word dropdown that appears after clicking the dots. If you don't see a wake word option, openWakeWord is not installed or not detected by Home Assistant.
+> **Important:** Your wake word service must be **available to Home Assistant as a Wyoming integration** (either as an add-on or an external Wyoming instance) AND **enabled in your Assist pipeline**. The wake word option is hidden by default in the pipeline settings — go to **Settings → Voice assistants**, select your pipeline, click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown. If no wake word option appears, your wake word service is not installed or not detected by Home Assistant.
 
 For Timers and Announcements, the [Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration) is also required.
 
@@ -404,8 +404,8 @@ Sentence templates support optional words in `[brackets]` and wildcards in `{bra
 
 ### Wake word not detected
 
-1. **Verify openWakeWord is installed:** Go to **Settings → Add-ons** and confirm the openWakeWord add-on is installed and running. Alternatively, check **Settings → Devices & Services** if using the Wyoming openWakeWord integration.
-2. **Verify openWakeWord is enabled in your pipeline:** Go to **Settings → Voice assistants**, select your pipeline, and check that a wake word is selected. **This setting is hidden by default** — click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration option.
+1. **Verify your wake word service is running:** Check that your wake word engine (e.g., openWakeWord, microWakeWord) is available to Home Assistant — either as an add-on (**Settings → Add-ons**) or as a Wyoming integration (**Settings → Devices & Services**).
+2. **Verify wake word detection is enabled in your pipeline:** Go to **Settings → Voice assistants**, select your pipeline, and check that a wake word is selected. **This setting is hidden by default** — click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown.
 3. **Check the correct pipeline is selected:** If you have multiple pipelines, make sure the card is using the one with wake word detection. Set `pipeline_id` in the card config, or ensure the correct pipeline is set as the default.
 4. Enable `debug: true` in the card config to see pipeline events in the browser console (F12).
 

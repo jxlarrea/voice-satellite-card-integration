@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Troubleshooting Guide
+    url: https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant#troubleshooting
+    about: Check the troubleshooting section before opening an issue
+  - name: Home Assistant Community Forum
+    url: https://community.home-assistant.io/
+    about: Ask general setup questions on the HA Community Forum
