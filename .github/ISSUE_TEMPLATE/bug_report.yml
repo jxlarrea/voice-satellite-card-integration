@@ -1,0 +1,71 @@
+name: Bug Report
+description: Report a bug with the Voice Satellite Card
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Before submitting, please go through the checklist below to make sure the issue isn't a configuration problem.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites checklist
+      description: Please confirm you've checked all of these before opening an issue.
+      options:
+        - label: I am accessing Home Assistant over **HTTPS** (or localhost). Microphone access requires a secure context.
+          required: true
+        - label: My browser has **microphone permission** granted for my Home Assistant URL.
+          required: true
+        - label: I have **openWakeWord** (or another wake word engine) installed and running as an add-on or integration.
+          required: true
+        - label: I have **wake word detection enabled in my Assist pipeline**. I've confirmed this by going to Settings → Voice assistants → my pipeline → ⋮ three-dot menu, and verifying a wake word is selected.
+          required: true
+        - label: My Assist pipeline has **Speech-to-Text** (e.g., Whisper) and **Text-to-Speech** (e.g., Piper) configured.
+          required: true
+        - label: I have tested the pipeline works independently (e.g., via the Assist dialog in the HA sidebar).
+          required: true
+        - label: I have read the [Troubleshooting section](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant#troubleshooting) in the README.
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear description of what's happening.
+      placeholder: "When I tap the microphone button, nothing happens..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Please provide the following details.
+      value: |
+        - Home Assistant version:
+        - Voice Satellite Card version:
+        - Voice Satellite Card Integration version (if installed):
+        - Browser / app:
+        - Device (tablet model, phone, desktop):
+        - Wake word engine:
+        - STT engine:
+        - TTS engine:
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console output
+      description: |
+        Open browser dev tools (F12), go to the Console tab, and paste any errors here. You can also enable `debug: true` in the card config for more verbose output.
+      render: shell
