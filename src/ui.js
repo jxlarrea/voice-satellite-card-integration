@@ -192,7 +192,7 @@ export class UIManager {
     var bar = this._globalUI.querySelector('.vs-rainbow-bar');
     bar.classList.remove('connecting', 'listening', 'processing', 'speaking');
     bar.classList.add('visible', 'error-mode');
-    bar.style.background = 'linear-gradient(90deg, #ff4444, #ff6666, #cc2222, #ff4444, #ff6666, #cc2222)';
+    bar.style.background = 'linear-gradient(90deg, #ff4444, #ff6666, #cc2222, #ff4444, #ff6666, #cc2222, #ff4444)';
     bar.style.backgroundSize = '200% 100%';
   }
 

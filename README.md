@@ -1,6 +1,5 @@
 # <img width="48" height="48" alt="icon" src="https://github.com/user-attachments/assets/6e3abf3c-f20f-4cbe-84fb-4d7e0f04d30c" /> Voice Satellite Card for Home Assistant
 
-
 Transform any browser into a voice-activated satellite for Home Assistant's Assist. This custom card captures microphone audio and streams it to your Assist pipeline for wake word detection, speech recognition, and voice responses - turning tablets, wall-mounted displays, or any device with a microphone into a hands-free voice assistant.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jxlarrea&repository=Voice-Satellite-Card-for-Home-Assistant)
@@ -65,6 +64,7 @@ graph TD
 - **Timers** - Voice-activated timers with on-screen countdown pills, alert chimes, and cancel via double-tap or voice. Requires the [companion integration](https://github.com/jxlarrea/voice-satellite-card-integration).
 - **Announcements** - Receive `assist_satellite.announce` service calls with pre-announcement chimes and TTS playback. Queues behind active conversations. Requires the [companion integration](https://github.com/jxlarrea/voice-satellite-card-integration).
 - **Start Conversation** - Receive `assist_satellite.start_conversation` calls that speak a prompt then automatically listen for the user's response. Requires the [companion integration](https://github.com/jxlarrea/voice-satellite-card-integration).
+- **Ask Question** - Receive `assist_satellite.ask_question` calls that speak a question, capture the user's voice response, and match it against predefined answers using hassil sentence templates. Returns structured results (matched answer ID and extracted slots) to the calling automation. Includes audio and visual feedback — done chime for matched answers, error chime with flashing red bar for unmatched responses. Requires the [companion integration](https://github.com/jxlarrea/voice-satellite-card-integration).
 - **Screensaver Control** - Optionally turn off Fully Kiosk screensaver when wake word is detected.
 - **Configurable Chimes** - Audio feedback for wake word detection and request completion.
 - **State Tracking** - Expose the card's interaction state (`ACTIVE`/`IDLE`) to a Home Assistant entity for per-device automations.
@@ -317,6 +317,7 @@ Some features require the **[Voice Satellite Card Integration](https://github.co
 | **Timers** | ❌ | ✅ |
 | **Announcements** | ❌ | ✅ |
 | **Start Conversation** | ❌ | ✅ |
+| **Ask Question** | ❌ | ✅ |
 
 ### Timers
 
@@ -358,6 +359,37 @@ data:
 ```
 
 After the announcement plays, the card automatically enters listening mode (skipping wake word detection) so the user can respond immediately. The response is processed through the configured conversation agent as a normal voice interaction.
+
+### Ask Question
+
+The integration enables `assist_satellite.ask_question` support, letting automations ask a question, capture the user's voice response, and match it against predefined answers:
+
+```yaml
+action: assist_satellite.ask_question
+target:
+  entity_id: assist_satellite.living_room_tablet
+data:
+  question: "The front door has been unlocked for 10 minutes. Should I lock it?"
+  answers:
+    - id: positive
+      sentences:
+        - "yes [please]"
+        - "[go ahead and] lock it [please]"
+        - "sure"
+    - id: negative
+      sentences:
+        - "no [thanks]"
+        - "leave it [unlocked]"
+        - "don't lock it"
+response_variable: answer
+```
+
+After the question plays, a wake chime signals the user to speak. The card enters STT-only mode to capture the response, then the integration matches it against the provided sentence templates using [hassil](https://github.com/home-assistant/hassil). The result is returned to the automation via `response_variable`:
+
+- **Matched:** `answer.id` contains the matched answer ID (e.g., `"positive"`), `answer.sentence` has the transcribed text, and `answer.slots` contains any captured wildcard values. A done chime plays.
+- **Unmatched:** `answer.id` is `null`, `answer.sentence` has the raw transcription. An error chime plays and the gradient bar flashes red.
+
+Sentence templates support optional words in `[brackets]` and wildcards in `{braces}` for capturing variable parts of the response (e.g., `"play {genre} music"` captures the genre).
 
 ## Troubleshooting
 

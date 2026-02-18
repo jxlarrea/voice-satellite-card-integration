@@ -4,7 +4,7 @@
 
 Voice Satellite Card is a custom Home Assistant Lovelace card that turns any browser into a voice-activated satellite. It captures microphone audio, sends it to Home Assistant's Assist pipeline over WebSocket, and plays back TTS responses — all without leaving the HA dashboard.
 
-The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel into a single `voice-satellite-card.min.js` for deployment. The card is invisible (returns `getCardSize() = 0`). All visual feedback is rendered via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes. Current version: 3.0.5.
+The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel into a single `voice-satellite-card.min.js` for deployment. The card is invisible (returns `getCardSize() = 0`). All visual feedback is rendered via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes. Current version: 3.1.0.
 
 ---
 
@@ -1312,6 +1312,196 @@ The `AnnouncementManager` processes this identically to a regular announcement (
 
 The `null` argument to `restartContinue()` starts a fresh conversation rather than continuing an existing one. This is intentional — the start_conversation prompt is a standalone question, not a continuation of a previous exchange.
 
+### 23.5 Ask Question
+
+Ask Question (`assist_satellite.ask_question`) is a variant of announcements that speaks a question, captures the user's voice response via STT, and returns a structured match result to the calling automation. The integration sets an `ask_question: true` flag on the announcement attribute:
+
+```json
+{
+  "id": 3,
+  "message": "Should I lock the front door?",
+  "media_id": "/api/tts_proxy/xxxxx.mp3",
+  "preannounce_media_id": "",
+  "ask_question": true
+}
+```
+
+#### Card-Side Flow
+
+1. **TTS playback:** The `AnnouncementManager` processes the announcement normally (chime → TTS). The question bubble stays visible throughout (not cleared after playback like regular announcements).
+
+2. **Wake chime:** After TTS completes, a wake chime plays to signal the user should speak.
+
+3. **STT-only pipeline:** The card calls `pipeline.restartContinue(null, { end_stage: 'stt', onSttEnd: callback })` to start an STT-only pipeline. The `onSttEnd` callback receives the transcribed text.
+
+4. **Pipeline run-end guard:** The `_askQuestionHandled` flag in `PipelineManager` prevents `handleRunEnd` → `_finishRunEnd` from clearing the UI when the STT-only pipeline ends. Without this guard, `_finishRunEnd` would call `chat.clear()`, `hideBlurOverlay()`, and `setState(IDLE)` before the announcement manager's cleanup timeout fires.
+
+5. **Answer submission:** The `onSttEnd` callback sends the transcribed text to the integration via the `voice_satellite/question_answered` WebSocket command. This command now returns the hassil match result (`{ success, matched, id }`).
+
+6. **Cleanup timer:** A 2-second cleanup timer starts immediately when STT ends (not after the WS round-trip) so the UI feels responsive regardless of server latency.
+
+7. **Audio and visual feedback:** When the match result arrives:
+   - **Matched:** Done chime plays. The rainbow gradient bar stays normal.
+   - **Unmatched:** Error chime plays. The gradient bar switches to the red error gradient (`showErrorBar()`) and flashes 3× via the `error-flash` CSS animation.
+
+8. **Final cleanup:** After 2 seconds, all UI is cleared together: `_clearAnnouncement()` (removes question bubble, restores bar), `chat.clear()` (removes STT bubble), `hideBlurOverlay('pipeline')`, `clearErrorBar()` (if error), and `pipeline.restart(0)` resumes wake word detection.
+
+#### Key Implementation Details
+
+- **Bubble persistence:** Unlike regular announcements and start_conversation (which clear the announcement bubble immediately), ask_question keeps the question bubble visible during STT so the user can reference the question while answering. Both bubbles (question + answer) clear together.
+
+- **Blur overlay:** The announcement blur overlay is NOT hidden before entering STT mode. The pipeline blur overlay is added on top via `showBlurOverlay('pipeline')`. Both are cleaned up in the final timeout — `_clearAnnouncement()` handles the announcement reason, `hideBlurOverlay('pipeline')` handles the pipeline reason.
+
+- **`_askQuestionHandled` flag:** Set in `handleSttEnd` when the ask_question callback fires. Checked in `handleRunEnd` to skip `_finishRunEnd`. Reset to `false` after use. Initialized in the constructor. Without this guard, the STT-only pipeline's `run-end` event would trigger `_finishRunEnd` which calls `chat.clear()`, `hideBlurOverlay()`, `setState(IDLE)`, and `pipeline.restart(0)` — nuking all UI before the announcement manager's cleanup timeout fires.
+
+- **`_sendQuestionAnswer` returns a Promise:** The method was changed from fire-and-forget to return the WS response, which now includes `{ success, matched, id }` from the integration's hassil matching.
+
+- **Cleanup guard pattern:** The `onSttEnd` callback uses a `cleaned` boolean guard to ensure cleanup runs exactly once. The 2-second `setTimeout` always fires cleanup. If the WS round-trip is slower than 2 seconds, `matchedResult` will still be `null` when cleanup runs, so `clearErrorBar()` is skipped (safe default). The cleanup function calls: `clearErrorBar()` (if error bar was shown), `_clearAnnouncement()` (removes question bubble, restores activity bar), `chat.clear()` (removes STT bubble), `hideBlurOverlay('pipeline')`, and `pipeline.restart(0)`.
+
+- **Error handling in pipeline:** If the STT-only pipeline errors (e.g., `stt-no-text-recognized`), `handleError` checks for `_askQuestionCallback` first — if present, it invokes the callback with an empty string and returns early (skipping normal error handling). This sends an empty answer to the integration, which returns `AssistSatelliteAnswer(id=None, sentence="", slots={})`.
+
+- **`restartContinue` opts:** The method accepts an `opts` object with `end_stage` (defaults to `'tts'`) and `onSttEnd` (callback function). For ask_question, opts is `{ end_stage: 'stt', onSttEnd: function(text) {...} }`. The `_askQuestionCallback` is stored and invoked in `handleSttEnd`. On pipeline error, the callback is cleared and the error handler invokes it with empty string.
+
+- **Wake chime gating:** The wake chime before STT mode is gated on `tts_target` — only plays when TTS target is browser (not remote media player), same pattern used elsewhere for chime suppression.
+
+#### `_sendQuestionAnswer` Implementation
+
+```javascript
+_sendQuestionAnswer(announceId, sentence) {
+  return connection.sendMessagePromise({
+    type: 'voice_satellite/question_answered',
+    entity_id: config.satellite_entity,
+    announce_id: announceId,
+    sentence: sentence || '',
+  }).then(function (result) {
+    // result: { success: true, matched: bool, id: string|null }
+    return result;
+  }).catch(function (err) {
+    return null;
+  });
+}
+```
+
+Returns a Promise that resolves to the match result or `null` on error. The `then` handler in `onSttEnd` checks `result && result.matched` to determine feedback.
+
+#### CSS
+
+```css
+#voice-satellite-ui .vs-rainbow-bar.error-flash {
+  animation: vs-error-flash 0.15s ease-in-out 3;
+}
+
+@keyframes vs-error-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+```
+
+The error bar gradient uses the same seamless wrap technique as the rainbow bar (first color appended at end): `#ff4444, #ff6666, #cc2222, #ff4444, #ff6666, #cc2222, #ff4444`.
+
+#### Complete `_onAnnouncementComplete` Ask Question Branch
+
+```javascript
+if (askQuestion) {
+  this._log.log('announce', 'Ask question requested — entering STT-only mode');
+
+  // Don't clear the announcement bubble — keep it visible during STT
+  this._card.ui.showBlurOverlay('pipeline');
+
+  var pipeline = this._card.pipeline;
+  if (pipeline) {
+    var announceId = ann.id;
+    // Play wake chime to signal the user should speak
+    var isRemote = this._card.config.tts_target && this._card.config.tts_target !== 'browser';
+    if (!isRemote) {
+      this._card.tts.playChime('wake');
+    }
+    pipeline.restartContinue(null, {
+      end_stage: 'stt',
+      onSttEnd: function (text) {
+        self._log.log('announce', 'Ask question STT result: "' + text + '"');
+
+        // Start cleanup timer immediately — don't wait for WS round-trip
+        var cleaned = false;
+        var matchedResult = null;
+        var cleanup = function () {
+          if (cleaned) return;
+          cleaned = true;
+          if (matchedResult !== null && !matchedResult) {
+            self._card.ui.clearErrorBar();
+          }
+          self._clearAnnouncement();
+          self._card.chat.clear();
+          self._card.ui.hideBlurOverlay('pipeline');
+          pipeline.restart(0);
+        };
+        setTimeout(cleanup, 2000);
+
+        // Send answer and handle feedback when result arrives
+        self._sendQuestionAnswer(announceId, text).then(function (result) {
+          var matched = result && result.matched;
+          matchedResult = matched;
+          var isRemote = self._card.config.tts_target && self._card.config.tts_target !== 'browser';
+          if (!isRemote) {
+            self._card.tts.playChime(matched ? 'done' : 'error');
+          }
+
+          if (!matched) {
+            self._card.ui.showErrorBar();
+            var bar = self._card.ui._globalUI
+              ? self._card.ui._globalUI.querySelector('.vs-rainbow-bar')
+              : null;
+            if (bar) {
+              bar.classList.add('error-flash');
+              bar.addEventListener('animationend', function handler() {
+                bar.classList.remove('error-flash');
+                bar.removeEventListener('animationend', handler);
+              });
+            }
+          }
+        });
+      },
+    });
+  }
+}
+```
+
+#### PipelineManager Changes
+
+Constructor initialization:
+```javascript
+this._askQuestionCallback = null;
+this._askQuestionHandled = false;
+```
+
+`handleSttEnd` addition (after `showTranscription`):
+```javascript
+if (this._askQuestionCallback) {
+  var cb = this._askQuestionCallback;
+  this._askQuestionCallback = null;
+  this._askQuestionHandled = true;
+  cb(text);
+}
+```
+
+`handleRunEnd` guard (before service unavailable check):
+```javascript
+if (this._askQuestionHandled) {
+  this._askQuestionHandled = false;
+  return;
+}
+```
+
+`handleError` early return (before expected error check):
+```javascript
+if (this._askQuestionCallback) {
+  var cb = this._askQuestionCallback;
+  this._askQuestionCallback = null;
+  cb('');
+  return;
+}
+```
+
 ---
 
 ## 24. Implementation Checklist
@@ -1426,6 +1616,18 @@ When recreating or modifying this card, verify:
 **Start Conversation (requires integration):**
 - [ ] `_onAnnouncementComplete` checks `ann.start_conversation` flag
 - [ ] If `true`: clears announcement UI immediately (no display delay)
+
+**Ask Question (requires integration):**
+- [ ] `_onAnnouncementComplete` checks `ann.ask_question` flag
+- [ ] Question bubble stays visible during STT (no `_clearAnnouncement()` call)
+- [ ] Wake chime plays before entering STT mode
+- [ ] `pipeline.restartContinue()` called with `{ end_stage: 'stt', onSttEnd: callback }`
+- [ ] `_askQuestionHandled` flag prevents `handleRunEnd` → `_finishRunEnd` from clearing UI
+- [ ] `_sendQuestionAnswer` sends `voice_satellite/question_answered` WS command and returns match result
+- [ ] Done chime on match, error chime + red bar flash on no match
+- [ ] 2-second cleanup timer starts immediately (not after WS round-trip)
+- [ ] All UI (question bubble, STT bubble, blur, bar, error bar) cleared together in timeout
+- [ ] `pipeline.restart(0)` called in cleanup timeout to resume wake word
 - [ ] If `true`: shows pipeline blur overlay and calls `pipeline.restartContinue(null)` for STT mode
 - [ ] `restartContinue(null)` starts fresh conversation (no `conversation_id`)
 - [ ] If `false`/absent: normal announcement behavior (auto-clear after delay)

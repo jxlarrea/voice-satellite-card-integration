@@ -236,14 +236,80 @@ export class AnnouncementManager {
     // ACK to the integration so async_announce/async_start_conversation unblocks
     this._sendAck(ann.id);
 
-    // If this is a start_conversation request, enter STT mode after clearing
+    // Check announcement type flags
     var startConversation = ann.start_conversation || false;
+    var askQuestion = ann.ask_question || false;
 
     // Auto-clear the bubble and blur after a delay
     var self = this;
     var clearDelay = (this._card.config.announcement_display_duration || 5) * 1000;
 
-    if (startConversation) {
+    if (askQuestion) {
+      // For ask_question: keep the question bubble visible, enter STT-only
+      // mode, capture text and send back to integration. Both the question
+      // bubble and the user's answer bubble will be cleared together.
+      this._log.log('announce', 'Ask question requested — entering STT-only mode');
+
+      // Don't clear the announcement bubble — keep it visible during STT
+      // so the user can see the question while answering.
+      this._card.ui.showBlurOverlay('pipeline');
+
+      var pipeline = this._card.pipeline;
+      if (pipeline) {
+        var announceId = ann.id;
+        // Play wake chime to signal the user should speak
+        var isRemote = this._card.config.tts_target && this._card.config.tts_target !== 'browser';
+        if (!isRemote) {
+          this._card.tts.playChime('wake');
+        }
+        pipeline.restartContinue(null, {
+          end_stage: 'stt',
+          onSttEnd: function (text) {
+            self._log.log('announce', 'Ask question STT result: "' + text + '"');
+
+            // Start cleanup timer immediately — don't wait for WS round-trip
+            var cleaned = false;
+            var matchedResult = null;
+            var cleanup = function () {
+              if (cleaned) return;
+              cleaned = true;
+              if (matchedResult !== null && !matchedResult) {
+                self._card.ui.clearErrorBar();
+              }
+              self._clearAnnouncement();
+              self._card.chat.clear();
+              self._card.ui.hideBlurOverlay('pipeline');
+              pipeline.restart(0);
+            };
+            setTimeout(cleanup, 2000);
+
+            // Send answer and handle feedback when result arrives
+            self._sendQuestionAnswer(announceId, text).then(function (result) {
+              var matched = result && result.matched;
+              matchedResult = matched;
+              var isRemote = self._card.config.tts_target && self._card.config.tts_target !== 'browser';
+              if (!isRemote) {
+                self._card.tts.playChime(matched ? 'done' : 'error');
+              }
+
+              if (!matched) {
+                self._card.ui.showErrorBar();
+                var bar = self._card.ui._globalUI
+                  ? self._card.ui._globalUI.querySelector('.vs-rainbow-bar')
+                  : null;
+                if (bar) {
+                  bar.classList.add('error-flash');
+                  bar.addEventListener('animationend', function handler() {
+                    bar.classList.remove('error-flash');
+                    bar.removeEventListener('animationend', handler);
+                  });
+                }
+              }
+            });
+          },
+        });
+      }
+    } else if (startConversation) {
       // For start_conversation: clear announcement UI, then enter listening mode
       this._log.log('announce', 'Start conversation requested — entering STT mode');
       this._clearAnnouncement();
@@ -406,6 +472,31 @@ export class AnnouncementManager {
     });
 
     this._currentAudio = audio;
+  }
+
+  _sendQuestionAnswer(announceId, sentence) {
+    var connection = this._card.connection;
+    var config = this._card.config;
+    if (!connection || !config.satellite_entity) {
+      this._log.error('announce', 'Cannot send question answer — no connection or entity');
+      return Promise.resolve(null);
+    }
+
+    var self = this;
+    return connection.sendMessagePromise({
+      type: 'voice_satellite/question_answered',
+      entity_id: config.satellite_entity,
+      announce_id: announceId,
+      sentence: sentence || '',
+    }).then(function (result) {
+      var matched = result && result.matched;
+      var matchId = result && result.id;
+      self._log.log('announce', 'Question answer sent for #' + announceId + ': "' + sentence + '" — matched: ' + matched + (matchId ? ' (id: ' + matchId + ')' : ''));
+      return result;
+    }).catch(function (err) {
+      self._log.error('announce', 'Question answer failed: ' + (err.message || JSON.stringify(err)));
+      return null;
+    });
   }
 
   _sendAck(announceId) {

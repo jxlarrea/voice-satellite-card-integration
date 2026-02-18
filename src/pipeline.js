@@ -27,6 +27,8 @@ export class PipelineManager {
     this._shouldContinue = false;
     this._continueMode = false;
     this._isStreaming = false;
+    this._askQuestionCallback = null;
+    this._askQuestionHandled = false;
   }
 
   get binaryHandlerId() {
@@ -135,10 +137,11 @@ export class PipelineManager {
     this._log.log('pipeline', 'Starting pipeline: ' + pipelineId);
 
     var startStage = opts.start_stage || 'wake_word';
+    var endStage = opts.end_stage || 'tts';
     var runConfig = {
       type: 'assist_pipeline/run',
       start_stage: startStage,
-      end_stage: 'tts',
+      end_stage: endStage,
       input: {
         sample_rate: 16000,
         timeout: startStage === 'wake_word' ? 0 : undefined,
@@ -235,8 +238,9 @@ export class PipelineManager {
     });
   }
 
-  restartContinue(conversationId) {
+  restartContinue(conversationId, opts) {
     var self = this;
+    opts = opts || {};
 
     if (this._isRestarting) {
       this._log.log('pipeline', 'Restart already in progress — skipping continue');
@@ -245,15 +249,20 @@ export class PipelineManager {
     this._isRestarting = true;
     this._clearIdleTimeout();
 
+    // Store ask_question callback if provided
+    this._askQuestionCallback = opts.onSttEnd || null;
+
     var stopPromise = this.stop();
     stopPromise.then(function () {
       self._isRestarting = false;
       self._continueMode = true;
       self.start({
         start_stage: 'stt',
+        end_stage: opts.end_stage || 'tts',
         conversation_id: conversationId,
       }).catch(function (e) {
         self._log.error('pipeline', 'Continue conversation failed: ' + ((e && e.message) ? e.message : JSON.stringify(e)));
+        self._askQuestionCallback = null;
         self._card.chat.clear();
         self._card.ui.hideBlurOverlay('pipeline');
         self.restart(0);
@@ -353,6 +362,15 @@ export class PipelineManager {
     var text = eventData.stt_output ? eventData.stt_output.text : '';
     if (text) {
       this._card.chat.showTranscription(text);
+    }
+
+    // If this is an ask_question STT-only pipeline, invoke the callback
+    if (this._askQuestionCallback) {
+      var cb = this._askQuestionCallback;
+      this._askQuestionCallback = null;
+      this._askQuestionHandled = true;
+      this._log.log('pipeline', 'Ask question STT complete: "' + text + '"');
+      cb(text);
     }
   }
 
@@ -457,6 +475,13 @@ export class PipelineManager {
       return;
     }
 
+    // If ask_question just completed, the announcement manager handles cleanup
+    if (this._askQuestionHandled) {
+      this._log.log('pipeline', 'Ask question handled — announcement manager owns cleanup');
+      this._askQuestionHandled = false;
+      return;
+    }
+
     if (this._serviceUnavailable) {
       this._log.log('ui', 'Error recovery handling restart');
       this._card.ui.hideBlurOverlay('pipeline');
@@ -477,6 +502,15 @@ export class PipelineManager {
     var errorMessage = errorData.message || '';
 
     this._log.log('error', errorCode + ' — ' + errorMessage);
+
+    // If an ask_question callback is pending, invoke it with empty string on error
+    if (this._askQuestionCallback) {
+      var cb = this._askQuestionCallback;
+      this._askQuestionCallback = null;
+      this._log.log('pipeline', 'Ask question error (' + errorCode + ') — sending empty answer');
+      cb('');
+      return;
+    }
 
     var EXPECTED_ERRORS = ['timeout', 'wake-word-timeout', 'stt-no-text-recognized', 'duplicate_wake_up_detected'];
 

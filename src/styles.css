@@ -104,6 +104,15 @@
   opacity: 1;
 }
 
+#voice-satellite-ui .vs-rainbow-bar.error-flash {
+  animation: vs-error-flash 0.15s ease-in-out 3;
+}
+
+@keyframes vs-error-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 /* Chat Container */
 #voice-satellite-ui .vs-chat-container {
   position: fixed;
