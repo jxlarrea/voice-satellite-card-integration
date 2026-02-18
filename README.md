@@ -1,4 +1,5 @@
-# Voice Satellite Card Integration
+# <img width="48" height="48" alt="icon" src="https://github.com/user-attachments/assets/80ff8310-f46d-4f07-9888-6337e5db23fb" /> Voice Satellite Card Integration
+
 
 Companion integration for the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Registers browsers as proper Assist Satellite devices in Home Assistant.
 
