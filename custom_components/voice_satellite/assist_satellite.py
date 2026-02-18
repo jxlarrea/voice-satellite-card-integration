@@ -98,6 +98,9 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._question_match_event: asyncio.Event | None = None
         self._question_match_result: dict | None = None
 
+        # Preannounce state (captured from async_internal_announce)
+        self._preannounce_pending: bool = True
+
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device info to create a device registry entry."""
@@ -106,7 +109,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             "name": self._satellite_name,
             "manufacturer": "Voice Satellite Card Integration",
             "model": "Browser Satellite",
-            "sw_version": "1.2.1",
+            "sw_version": "1.2.2",
         }
 
     @property
@@ -155,6 +158,29 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
     ) -> None:
         """Set satellite configuration (no-op for browser satellites)."""
 
+    async def async_internal_announce(
+        self,
+        message: str | None = None,
+        media_id: str | None = None,
+        preannounce: bool = True,
+        preannounce_media_id: str | None = None,
+    ) -> None:
+        """Capture preannounce flag before delegating to base class.
+
+        The base class resolves TTS and calls our async_announce(), but
+        the preannounce boolean is consumed internally and not passed
+        through to the AssistSatelliteAnnouncement object. We store it
+        here so async_announce and async_start_conversation can include
+        it in the entity attributes for the card.
+        """
+        self._preannounce_pending = preannounce
+        await super().async_internal_announce(
+            message=message,
+            media_id=media_id,
+            preannounce=preannounce,
+            preannounce_media_id=preannounce_media_id,
+        )
+
     async def async_announce(
         self, announcement: AssistSatelliteAnnouncement
     ) -> None:
@@ -175,6 +201,10 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 getattr(announcement, "preannounce_media_id", None) or ""
             ),
         }
+
+        # Include preannounce flag so the card knows whether to play a chime
+        if not self._preannounce_pending:
+            self._pending_announcement["preannounce"] = False
 
         # If ask_question is pending, add the flag so the card enters
         # STT-only mode after playing the question TTS
@@ -216,6 +246,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         finally:
             self._pending_announcement = None
             self._announce_event = None
+            self._preannounce_pending = True
             self.async_write_ha_state()
 
     @callback
@@ -239,6 +270,24 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 self._satellite_name,
             )
 
+    async def async_internal_start_conversation(
+        self,
+        start_message: str | None = None,
+        start_media_id: str | None = None,
+        preannounce: bool = True,
+        preannounce_media_id: str | None = None,
+        extra_system_prompt: str | None = None,
+    ) -> None:
+        """Capture preannounce flag before delegating to base class."""
+        self._preannounce_pending = preannounce
+        await super().async_internal_start_conversation(
+            start_message=start_message,
+            start_media_id=start_media_id,
+            preannounce=preannounce,
+            preannounce_media_id=preannounce_media_id,
+            extra_system_prompt=extra_system_prompt,
+        )
+
     async def async_start_conversation(
         self, announcement: AssistSatelliteAnnouncement
     ) -> None:
@@ -260,6 +309,10 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             ),
             "start_conversation": True,
         }
+
+        # Include preannounce flag so the card knows whether to play a chime
+        if not self._preannounce_pending:
+            self._pending_announcement["preannounce"] = False
 
         # Create an event to wait for the card to ACK playback
         self._announce_event = asyncio.Event()
@@ -302,6 +355,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         finally:
             self._pending_announcement = None
             self._announce_event = None
+            self._preannounce_pending = True
             self.async_write_ha_state()
 
     async def async_internal_ask_question(

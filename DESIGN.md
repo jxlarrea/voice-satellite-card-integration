@@ -1,6 +1,6 @@
 # Voice Satellite Card Integration — Design Document
 
-Current version: 1.2.0
+Current version: 1.2.2
 
 ## 1. Overview
 
@@ -267,15 +267,32 @@ The card uses `started_at + total_seconds - now` to compute remaining time clien
 The flow is:
 
 1. An automation calls `assist_satellite.announce` targeting this entity
-2. HA calls `async_announce(announcement)` on the entity
-3. The entity stores the announcement in `_pending_announcement` and calls `async_write_ha_state()`
-4. The card sees the new `announcement` attribute (via `set hass()` polling) and begins playback
-5. When playback finishes, the card sends `voice_satellite/announce_finished` via WebSocket
-6. The WebSocket handler calls `entity.announce_finished(announce_id)`
-7. The `asyncio.Event` is set, unblocking `async_announce`
-8. The entity clears `_pending_announcement` and writes state again
+2. HA calls `async_internal_announce(preannounce=..., preannounce_media_id=..., ...)` — our override captures the `preannounce` boolean in `_preannounce_pending` then delegates to the base class
+3. The base class resolves TTS and calls `async_announce(announcement)` on the entity
+4. The entity stores the announcement in `_pending_announcement` (including `"preannounce": false` when the chime should be suppressed) and calls `async_write_ha_state()`
+5. The card sees the new `announcement` attribute (via `state_changed` subscription) and begins playback
+6. When playback finishes, the card sends `voice_satellite/announce_finished` via WebSocket
+7. The WebSocket handler calls `entity.announce_finished(announce_id)`
+8. The `asyncio.Event` is set, unblocking `async_announce`
+9. The entity clears `_pending_announcement` and resets `_preannounce_pending = True`
 
-### 6.2 `async_announce` Implementation
+### 6.2 `async_internal_announce` Override
+
+The base class `async_internal_announce` consumes the `preannounce` boolean internally (using it to decide whether to resolve the default preannounce URL) but does not pass it through to the `AssistSatelliteAnnouncement` object. We override it to capture the flag before delegating:
+
+```python
+async def async_internal_announce(self, message=None, media_id=None,
+                                   preannounce=True, preannounce_media_id=None):
+    self._preannounce_pending = preannounce
+    await super().async_internal_announce(
+        message=message, media_id=media_id,
+        preannounce=preannounce, preannounce_media_id=preannounce_media_id,
+    )
+```
+
+The same pattern is used for `async_internal_start_conversation` which has its own separate base class method.
+
+### 6.3 `async_announce` Implementation
 
 ```python
 async def async_announce(self, announcement):
@@ -289,6 +306,10 @@ async def async_announce(self, announcement):
         "preannounce_media_id": getattr(announcement, "preannounce_media_id", None) or "",
     }
 
+    # Include preannounce flag so the card knows whether to play a chime
+    if not self._preannounce_pending:
+        self._pending_announcement["preannounce"] = False
+
     self._announce_event = asyncio.Event()
     self.async_write_ha_state()
 
@@ -299,17 +320,19 @@ async def async_announce(self, announcement):
     finally:
         self._pending_announcement = None
         self._announce_event = None
+        self._preannounce_pending = True
         self.async_write_ha_state()
 ```
 
 Key design decisions:
 - `_announce_id` is a monotonically increasing integer — prevents stale ACKs from previous announcements
 - `ANNOUNCE_TIMEOUT = 120` seconds — if the card never ACKs, the method unblocks after 2 minutes
-- `finally` block always clears announcement state, even on timeout
+- `finally` block always clears announcement state and resets `_preannounce_pending`, even on timeout
 - `media_id` is the resolved TTS URL (e.g., `/api/tts_proxy/xxxxx.mp3`), not a `media-source://` reference
 - `preannounce_media_id` uses `getattr` with fallback because the field may not exist on all HA versions
+- `"preannounce": false` is only included when the chime should be suppressed (absent means `true` for backwards compatibility)
 
-### 6.3 Announcement Entity Attribute Contract
+### 6.4 Announcement Entity Attribute Contract
 
 When an announcement is active, the `announcement` attribute contains:
 
@@ -322,9 +345,21 @@ When an announcement is active, the `announcement` attribute contains:
 }
 ```
 
+When `preannounce: false` is set in the automation action:
+
+```json
+{
+    "id": 1,
+    "message": "Dinner is ready!",
+    "media_id": "/api/tts_proxy/xxxxx.mp3",
+    "preannounce_media_id": "",
+    "preannounce": false
+}
+```
+
 When no announcement is active, the `announcement` key is absent from attributes entirely (not `null`).
 
-### 6.4 `announce_finished` Callback
+### 6.5 `announce_finished` Callback
 
 Called by the WebSocket handler. Validates the `announce_id` matches the current pending announcement before setting the event:
 
@@ -337,20 +372,21 @@ def announce_finished(self, announce_id):
 
 Stale ACKs (wrong `announce_id`) are silently ignored with a debug log.
 
-### 6.5 Start Conversation
+### 6.6 Start Conversation
 
-`assist_satellite.start_conversation` is a variant of announcements that triggers listening after playback. The base class calls `async_start_conversation(announcement)` on the entity.
+`assist_satellite.start_conversation` is a variant of announcements that triggers listening after playback. The base class calls `async_internal_start_conversation(preannounce=..., ...)` which we override to capture the `preannounce` flag (same pattern as §6.2), then delegates to the base class which calls `async_start_conversation(announcement)`.
 
 #### Flow
 
 1. An automation calls `assist_satellite.start_conversation` targeting this entity
-2. HA calls `async_start_conversation(announcement)` on the entity
-3. The entity stores the announcement in `_pending_announcement` with `"start_conversation": True` and calls `async_write_ha_state()`
-4. The card sees the `announcement` attribute with the `start_conversation` flag and begins playback
-5. When playback finishes, the card sends `voice_satellite/announce_finished` via WebSocket (same ACK as regular announcements)
-6. The `asyncio.Event` is set, unblocking `async_start_conversation`
-7. The entity clears `_pending_announcement`, explicitly sets entity state to `listening`, and writes state
-8. Meanwhile the card has already entered STT mode (skipping wake word) — the pipeline state sync takes over from here
+2. HA calls `async_internal_start_conversation(preannounce=..., ...)` — our override captures `preannounce` in `_preannounce_pending` then delegates to the base class
+3. The base class resolves TTS and calls `async_start_conversation(announcement)` on the entity
+4. The entity stores the announcement in `_pending_announcement` with `"start_conversation": True` (and `"preannounce": false` when applicable) and calls `async_write_ha_state()`
+5. The card sees the `announcement` attribute with the `start_conversation` flag and begins playback
+6. When playback finishes, the card sends `voice_satellite/announce_finished` via WebSocket (same ACK as regular announcements)
+7. The `asyncio.Event` is set, unblocking `async_start_conversation`
+8. The entity clears `_pending_announcement`, resets `_preannounce_pending = True`, explicitly sets entity state to `listening`, and writes state
+9. Meanwhile the card has already entered STT mode (skipping wake word) — the pipeline state sync takes over from here
 
 #### `async_start_conversation` Implementation
 
@@ -366,6 +402,10 @@ async def async_start_conversation(self, announcement):
         "preannounce_media_id": getattr(announcement, "preannounce_media_id", None) or "",
         "start_conversation": True,
     }
+
+    # Include preannounce flag so the card knows whether to play a chime
+    if not self._preannounce_pending:
+        self._pending_announcement["preannounce"] = False
 
     self._announce_event = asyncio.Event()
     self.async_write_ha_state()
@@ -383,18 +423,19 @@ async def async_start_conversation(self, announcement):
     finally:
         self._pending_announcement = None
         self._announce_event = None
+        self._preannounce_pending = True
         self.async_write_ha_state()
 ```
 
 Key differences from `async_announce`:
 - The `_pending_announcement` dict includes `"start_conversation": True` — the card uses this flag to decide whether to enter STT mode after playback
 - After the ACK succeeds, the entity explicitly sets state to `listening` via `hass.states.async_set()` — this ensures the entity reflects the correct state immediately rather than waiting for the card's state sync
-- Uses the same `announce_finished` ACK path (§6.4) and the same `ANNOUNCE_TIMEOUT`
+- Uses the same `announce_finished` ACK path (§6.5) and the same `ANNOUNCE_TIMEOUT`
 
 #### Card-Side Behavior
 
 When the card sees `start_conversation: true` on an announcement:
-1. Plays the chime and TTS announcement normally
+1. Plays the chime and TTS announcement normally (unless `preannounce === false`)
 2. On completion: sends ACK, clears announcement UI immediately (no display delay)
 3. Shows the pipeline blur overlay and calls `pipeline.restartContinue(null)` to enter STT mode with a fresh conversation (no `conversation_id`)
 4. Pipeline processes the user's response normally through the configured conversation agent
@@ -413,7 +454,7 @@ _attr_supported_features = (
 
 This matches the feature set of official HA voice satellites like Voice PE.
 
-### 6.6 Ask Question
+### 6.7 Ask Question
 
 `assist_satellite.ask_question` (HA 2025.7+) is a variant of announcements that speaks a question, captures the user's voice response via STT, and matches it against predefined answer templates using [hassil](https://github.com/home-assistant/hassil) sentence matching. The result is returned to the calling automation.
 
@@ -485,17 +526,18 @@ The handler:
 
 #### State Management
 
-Five state variables coordinate the async flow:
+Six state variables coordinate the async flow (plus `_preannounce_pending` shared across all announcement types):
 
 | Variable | Type | Purpose |
 |---|---|---|
+| `_preannounce_pending` | `bool` | Captured from `async_internal_announce`/`async_internal_start_conversation` overrides; included in announcement attributes so the card can skip the chime. Reset to `True` in finally blocks. |
 | `_ask_question_pending` | `bool` | Tells `async_announce` to add `ask_question: true` flag |
 | `_question_event` | `asyncio.Event` | Signaled when card sends transcribed text |
 | `_question_answer_text` | `str` | The transcribed text from the card |
 | `_question_match_event` | `asyncio.Event` | Signaled when hassil matching completes |
 | `_question_match_result` | `dict` | `{matched: bool, id: str|null}` for the WS handler |
 
-All are cleaned up in the `finally` block of `async_internal_ask_question`.
+All ask_question variables are cleaned up in the `finally` block of `async_internal_ask_question`. `_preannounce_pending` is reset in the finally blocks of `async_announce` and `async_start_conversation`.
 
 #### Complete `async_internal_ask_question` Implementation
 
@@ -900,7 +942,7 @@ Single constant. The domain must match the folder name under `custom_components/
 - `AssistSatelliteEntityFeature.ANNOUNCE` — Feature flag enabling the `assist_satellite.announce` action
 - `AssistSatelliteEntityFeature.START_CONVERSATION` — Feature flag enabling the `assist_satellite.start_conversation` action
 - `AssistSatelliteConfiguration` — Returned by `async_get_configuration()` (wake word config)
-- `AssistSatelliteAnnouncement` — Passed to `async_announce()` and `async_start_conversation()` with `.message`, `.media_id`, and optionally `.preannounce_media_id`
+- `AssistSatelliteAnnouncement` — Passed to `async_announce()` and `async_start_conversation()` with `.message`, `.media_id`, and optionally `.preannounce_media_id`. Note: the `preannounce` boolean is NOT included in this object — it is consumed by the base class's `async_internal_announce`/`async_internal_start_conversation`. Our overrides capture it before delegation.
 - `AssistSatelliteAnswer` (HA 2025.7+) — Returned by `async_internal_ask_question()` with `.id`, `.sentence`, `.slots`. Conditionally imported; `None` if unavailable.
 
 ### 11.2 `hassil` (bundled with HA)
@@ -999,16 +1041,20 @@ Use this checklist to verify a complete implementation:
 - [ ] All events set `_last_timer_event` and call `async_write_ha_state()`
 
 ### Announcements
+- [ ] `async_internal_announce` override captures `preannounce` in `_preannounce_pending` before delegating to base class
 - [ ] `async_announce` stores announcement in `_pending_announcement` with monotonic `_announce_id`
+- [ ] `async_announce` includes `"preannounce": false` when `_preannounce_pending` is `False`
 - [ ] Creates `asyncio.Event` and waits with 120s timeout
-- [ ] `finally` block always clears `_pending_announcement` and `_announce_event`
+- [ ] `finally` block always clears `_pending_announcement`, `_announce_event`, and resets `_preannounce_pending = True`
 - [ ] `announce_finished` validates `announce_id` before setting event
 
 ### Start Conversation
+- [ ] `async_internal_start_conversation` override captures `preannounce` in `_preannounce_pending` before delegating to base class
 - [ ] `async_start_conversation` stores announcement with `"start_conversation": True`
+- [ ] `async_start_conversation` includes `"preannounce": false` when `_preannounce_pending` is `False`
 - [ ] Reuses same ACK flow as `async_announce` (same `announce_finished` callback)
 - [ ] On successful ACK, explicitly sets entity state to `listening` via `hass.states.async_set()`
-- [ ] `finally` block clears `_pending_announcement` and `_announce_event`
+- [ ] `finally` block clears `_pending_announcement`, `_announce_event`, and resets `_preannounce_pending = True`
 
 ### Ask Question
 - [ ] `async_internal_ask_question` delegates TTS to base class via `self.async_internal_announce()`
