@@ -15,6 +15,7 @@ The [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-
 
 - **Timers don't work** - HA tells the LLM "this device is not able to start timers"
 - **No announcements** - you can't push TTS messages to a specific browser
+- **No conversations** - automations can't proactively ask the user a question and listen for a response
 - **No per-device automations** - HA doesn't know which browser is talking
 
 This integration solves that by creating a virtual Assist Satellite entity for each browser.
@@ -24,6 +25,7 @@ This integration solves that by creating a virtual Assist Satellite entity for e
 - Creates an `assist_satellite.*` entity per browser with a proper device identity
 - **Timers** - Registers as a timer handler so the LLM gets access to `HassStartTimer`, and exposes active timer state as entity attributes for the card to display countdown pills
 - **Announcements** - Implements `assist_satellite.announce` so you can push TTS messages to specific browsers from automations and scripts
+- **Start Conversation** - Implements `assist_satellite.start_conversation` so automations can speak a prompt and then listen for the user's voice response
 - **State sync** - Reflects real-time pipeline state (`idle`, `listening`, `processing`, `responding`) on the entity, enabling automations that react to voice activity
 
 ## Installation
@@ -76,6 +78,22 @@ data:
 
 The announcement blocks until the card confirms playback is complete (or a 120-second timeout expires), so you can chain actions that depend on the user hearing the message.
 
+## Start Conversation Support
+
+The integration implements the `assist_satellite.start_conversation` action, allowing automations to speak a prompt and then listen for the user's voice response. After the announcement plays, the card automatically enters listening mode (skipping wake word detection) so the user can respond immediately.
+
+Example automation:
+
+```yaml
+action: assist_satellite.start_conversation
+target:
+  entity_id: assist_satellite.kitchen_tablet
+data:
+  start_message: "The front door has been unlocked for 10 minutes. Should I lock it?"
+```
+
+This enables interactive automations where Home Assistant proactively asks the user a question and acts on their response. The satellite's configured pipeline must use a conversation agent that supports conversations (e.g., OpenAI, Google Generative AI).
+
 ## Satellite State Sync
 
 The Voice Satellite Card syncs its pipeline state back to the entity in real time. This means the entity accurately reflects what the satellite is doing:
@@ -121,7 +139,7 @@ Example template to check for active timers:
 ## Requirements
 
 - Home Assistant 2025.1.2 or later
-- [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) v3.0.0 or later
+- [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) v3.0.5 or later (for start conversation support; v3.0.0+ for timers and announcements)
 
 ## License
 

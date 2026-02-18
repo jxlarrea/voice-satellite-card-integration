@@ -1,6 +1,6 @@
 # Voice Satellite Card Integration — Design Document
 
-Current version: 1.0.0
+Current version: 1.1.0
 
 ## 1. Overview
 
@@ -10,6 +10,7 @@ Each config entry creates one `assist_satellite.*` entity backed by a device in 
 
 - Registers as a **timer handler** so the LLM gets access to `HassStartTimer`, `HassUpdateTimer`, `HassCancelTimer`
 - Implements **`assist_satellite.announce`** so automations can push TTS to specific browsers
+- Implements **`assist_satellite.start_conversation`** so automations can speak a prompt and then listen for the user's voice response
 - Accepts **pipeline state updates** from the card via WebSocket, reflecting real-time state (`idle`, `listening`, `processing`, `responding`) on the entity
 - Exposes **entity attributes** (`active_timers`, `last_timer_event`, `announcement`) that the card reads to render timer pills and announcement bubbles
 
@@ -116,10 +117,11 @@ Entities are stored in `hass.data[DOMAIN][entry.entry_id]`. The WebSocket handle
 
 - Registration as an Assist Satellite device
 - The `assist_satellite.announce` action (calls `async_announce`)
+- The `assist_satellite.start_conversation` action (calls `async_start_conversation`)
 - Pipeline event routing (calls `on_pipeline_event`)
 - Wake word configuration (calls `async_get_configuration`)
 
-The entity declares `AssistSatelliteEntityFeature.ANNOUNCE` as a supported feature.
+The entity declares `AssistSatelliteEntityFeature.ANNOUNCE | AssistSatelliteEntityFeature.START_CONVERSATION` as supported features (value 3).
 
 ### 4.2 Device Info
 
@@ -133,7 +135,7 @@ def device_info(self):
         "name": self._satellite_name,
         "manufacturer": "Voice Satellite Card Integration",
         "model": "Browser Satellite",
-        "sw_version": "1.0.0",
+        "sw_version": "1.1.0",
     }
 ```
 
@@ -334,6 +336,82 @@ def announce_finished(self, announce_id):
 
 Stale ACKs (wrong `announce_id`) are silently ignored with a debug log.
 
+### 6.5 Start Conversation
+
+`assist_satellite.start_conversation` is a variant of announcements that triggers listening after playback. The base class calls `async_start_conversation(announcement)` on the entity.
+
+#### Flow
+
+1. An automation calls `assist_satellite.start_conversation` targeting this entity
+2. HA calls `async_start_conversation(announcement)` on the entity
+3. The entity stores the announcement in `_pending_announcement` with `"start_conversation": True` and calls `async_write_ha_state()`
+4. The card sees the `announcement` attribute with the `start_conversation` flag and begins playback
+5. When playback finishes, the card sends `voice_satellite/announce_finished` via WebSocket (same ACK as regular announcements)
+6. The `asyncio.Event` is set, unblocking `async_start_conversation`
+7. The entity clears `_pending_announcement`, explicitly sets entity state to `listening`, and writes state
+8. Meanwhile the card has already entered STT mode (skipping wake word) — the pipeline state sync takes over from here
+
+#### `async_start_conversation` Implementation
+
+```python
+async def async_start_conversation(self, announcement):
+    self._announce_id += 1
+    announce_id = self._announce_id
+
+    self._pending_announcement = {
+        "id": announce_id,
+        "message": announcement.message or "",
+        "media_id": announcement.media_id or "",
+        "preannounce_media_id": getattr(announcement, "preannounce_media_id", None) or "",
+        "start_conversation": True,
+    }
+
+    self._announce_event = asyncio.Event()
+    self.async_write_ha_state()
+
+    try:
+        await asyncio.wait_for(self._announce_event.wait(), timeout=ANNOUNCE_TIMEOUT)
+        # Card is now entering STT mode — set state to listening
+        self.hass.states.async_set(
+            self.entity_id,
+            "listening",
+            self.extra_state_attributes,
+        )
+    except asyncio.TimeoutError:
+        _LOGGER.warning("Start conversation #%d timed out after %ds", ...)
+    finally:
+        self._pending_announcement = None
+        self._announce_event = None
+        self.async_write_ha_state()
+```
+
+Key differences from `async_announce`:
+- The `_pending_announcement` dict includes `"start_conversation": True` — the card uses this flag to decide whether to enter STT mode after playback
+- After the ACK succeeds, the entity explicitly sets state to `listening` via `hass.states.async_set()` — this ensures the entity reflects the correct state immediately rather than waiting for the card's state sync
+- Uses the same `announce_finished` ACK path (§6.4) and the same `ANNOUNCE_TIMEOUT`
+
+#### Card-Side Behavior
+
+When the card sees `start_conversation: true` on an announcement:
+1. Plays the chime and TTS announcement normally
+2. On completion: sends ACK, clears announcement UI immediately (no display delay)
+3. Shows the pipeline blur overlay and calls `pipeline.restartContinue(null)` to enter STT mode with a fresh conversation (no `conversation_id`)
+4. Pipeline processes the user's response normally through the configured conversation agent
+
+#### Supported Features
+
+The entity declares both features:
+
+```python
+_attr_supported_features = (
+    AssistSatelliteEntityFeature.ANNOUNCE
+    | AssistSatelliteEntityFeature.START_CONVERSATION
+)
+# Value: 3
+```
+
+This matches the feature set of official HA voice satellites like Voice PE.
+
 ## 7. Pipeline State Synchronization
 
 ### 7.1 State Mapping
@@ -497,7 +575,7 @@ HA uses this file for the config flow UI. The `data_description` provides helper
     "documentation": "https://github.com/jxlarrea/voice-satellite-card-integration",
     "iot_class": "local_push",
     "issue_tracker": "https://github.com/jxlarrea/voice-satellite-card-integration/issues",
-    "version": "1.0.0"
+    "version": "1.1.0"
 }
 ```
 
@@ -534,8 +612,9 @@ Single constant. The domain must match the folder name under `custom_components/
 
 - `AssistSatelliteEntity` — Base class for satellite entities
 - `AssistSatelliteEntityFeature.ANNOUNCE` — Feature flag enabling the `assist_satellite.announce` action
+- `AssistSatelliteEntityFeature.START_CONVERSATION` — Feature flag enabling the `assist_satellite.start_conversation` action
 - `AssistSatelliteConfiguration` — Returned by `async_get_configuration()` (wake word config)
-- `AssistSatelliteAnnouncement` — Passed to `async_announce()` with `.message`, `.media_id`, and optionally `.preannounce_media_id`
+- `AssistSatelliteAnnouncement` — Passed to `async_announce()` and `async_start_conversation()` with `.message`, `.media_id`, and optionally `.preannounce_media_id`
 
 ### 11.2 `intent` Component (HA 2024.10+)
 
@@ -568,7 +647,7 @@ The card reads entity attributes via `hass.states` (polled in `set hass()` for a
 |---|---|---|
 | `active_timers` | `list[dict]` | Active timers with countdown data |
 | `last_timer_event` | `string \| null` | Last event type: `started`, `updated`, `cancelled`, `finished` |
-| `announcement` | `dict \| absent` | Present only during active announcement |
+| `announcement` | `dict \| absent` | Present only during active announcement; includes `start_conversation: true` for start_conversation requests |
 
 ### 12.3 Card Configuration
 
@@ -606,7 +685,7 @@ Use this checklist to verify a complete implementation:
 
 ### Entity
 - [ ] Extends `AssistSatelliteEntity`
-- [ ] `_attr_supported_features = AssistSatelliteEntityFeature.ANNOUNCE`
+- [ ] `_attr_supported_features = AssistSatelliteEntityFeature.ANNOUNCE | AssistSatelliteEntityFeature.START_CONVERSATION`
 - [ ] `_attr_has_entity_name = True`, `_attr_name = None`
 - [ ] `_attr_unique_id = entry.entry_id`
 - [ ] `device_info` with identifiers, name, manufacturer, model, sw_version
@@ -628,6 +707,12 @@ Use this checklist to verify a complete implementation:
 - [ ] Creates `asyncio.Event` and waits with 120s timeout
 - [ ] `finally` block always clears `_pending_announcement` and `_announce_event`
 - [ ] `announce_finished` validates `announce_id` before setting event
+
+### Start Conversation
+- [ ] `async_start_conversation` stores announcement with `"start_conversation": True`
+- [ ] Reuses same ACK flow as `async_announce` (same `announce_finished` callback)
+- [ ] On successful ACK, explicitly sets entity state to `listening` via `hass.states.async_set()`
+- [ ] `finally` block clears `_pending_announcement` and `_announce_event`
 
 ### State Sync
 - [ ] `_STATE_MAP` maps all card states to HA satellite states
