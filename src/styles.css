@@ -144,6 +144,18 @@
   word-wrap: break-word;
 }
 
+#voice-satellite-ui .vs-chat-container[data-bubble-style="chat"] .vs-chat-msg {
+  text-align: left;
+}
+
+#voice-satellite-ui .vs-chat-container[data-bubble-style="chat"] .vs-chat-msg.user {
+  align-self: flex-end;
+}
+
+#voice-satellite-ui .vs-chat-container[data-bubble-style="chat"] .vs-chat-msg.assistant {
+  align-self: flex-start;
+}
+
 /* Animations */
 @keyframes vs-chat-fade-in {
   0% {

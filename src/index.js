@@ -4,12 +4,10 @@
  */
 
 import { VERSION } from './constants.js';
-import { VoiceSatelliteCard } from './card.js';
+import { VoiceSatelliteCard } from './card';
 
-// Register custom elements
 customElements.define('voice-satellite-card', VoiceSatelliteCard);
 
-// Register with HA custom card registry
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'voice-satellite-card',
@@ -20,7 +18,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c VOICE-SATELLITE-CARD %c v' + VERSION + ' ',
+  `%c VOICE-SATELLITE-CARD %c v${VERSION} `,
   'color: white; background: #03a9f4; font-weight: bold;',
-  'color: #03a9f4; background: white; font-weight: bold;'
+  'color: #03a9f4; background: white; font-weight: bold;',
 );

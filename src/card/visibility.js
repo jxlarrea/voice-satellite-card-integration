@@ -5,7 +5,7 @@
  * resumes and restarts pipeline on show.
  */
 
-import { State } from './constants.js';
+import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
 
 export class VisibilityManager {
   constructor(card) {
@@ -22,18 +22,13 @@ export class VisibilityManager {
   }
 
   setup() {
-    var self = this;
-    this._handler = function () {
-      self._handleChange();
-    };
+    this._handler = () => this._handleChange();
     document.addEventListener('visibilitychange', this._handler);
   }
 
   // --- Private ---
 
   _handleChange() {
-    var self = this;
-
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
     }
@@ -41,21 +36,20 @@ export class VisibilityManager {
     if (document.hidden) {
       this._isPaused = true;
 
-      var interactingStates = [State.WAKE_WORD_DETECTED, State.STT, State.INTENT, State.TTS];
-      if (interactingStates.indexOf(this._card.currentState) !== -1) {
+      if (INTERACTING_STATES.includes(this._card.currentState)) {
         this._log.log('visibility', 'Tab hidden during interaction — cleaning up UI');
         this._card.chat.clear();
-        this._card.ui.hideBlurOverlay('pipeline');
+        this._card.ui.hideBlurOverlay(BlurReason.PIPELINE);
         this._card.pipeline.clearContinueState();
         if (this._card.tts.isPlaying) {
           this._card.tts.stop();
         }
       }
 
-      this._debounceTimer = setTimeout(function () {
-        self._log.log('visibility', 'Tab hidden — pausing mic');
-        self._pause();
-      }, 500);
+      this._debounceTimer = setTimeout(() => {
+        this._log.log('visibility', 'Tab hidden — pausing mic');
+        this._pause();
+      }, Timing.VISIBILITY_DEBOUNCE);
     } else {
       this._log.log('visibility', 'Tab visible — resuming');
       this._resume();
@@ -74,11 +68,10 @@ export class VisibilityManager {
 
     this._card.audio.resume();
 
-    var audio = this._card.audio;
-    var pipeline = this._card.pipeline;
+    const { audio, pipeline } = this._card;
 
     if (!audio.isStreaming && pipeline.isStreaming) {
-      audio.startSending(function () { return pipeline.binaryHandlerId; });
+      audio.startSending(() => pipeline.binaryHandlerId);
     }
 
     pipeline.resetForResume();

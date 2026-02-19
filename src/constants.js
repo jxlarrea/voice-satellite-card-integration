@@ -17,6 +17,45 @@ export const State = {
   ERROR: 'ERROR',
 };
 
+/** States that indicate an active user interaction */
+export const INTERACTING_STATES = [
+  State.WAKE_WORD_DETECTED,
+  State.STT,
+  State.INTENT,
+  State.TTS,
+];
+
+/** Pipeline errors that are expected and should not show error UI */
+export const EXPECTED_ERRORS = [
+  'timeout',
+  'wake-word-timeout',
+  'stt-no-text-recognized',
+  'duplicate_wake_up_detected',
+];
+
+/** Blur overlay reason identifiers */
+export const BlurReason = {
+  PIPELINE: 'pipeline',
+  TIMER: 'timer',
+  ANNOUNCEMENT: 'announcement',
+};
+
+/** Timing constants (ms unless noted) */
+export const Timing = {
+  DOUBLE_TAP_THRESHOLD: 400,
+  TIMER_CHIME_INTERVAL: 3000,
+  PILL_EXPIRE_ANIMATION: 400,
+  PLAYBACK_WATCHDOG: 30000,
+  RECONNECT_DELAY: 2000,
+  INTENT_ERROR_DISPLAY: 3000,
+  NO_MEDIA_DISPLAY: 3000,
+  ASK_QUESTION_CLEANUP: 2000,
+  MAX_RETRY_DELAY: 30000,
+  RETRY_BASE_DELAY: 5000,
+  VISIBILITY_DEBOUNCE: 500,
+  DISCONNECT_GRACE: 100,
+};
+
 export const DEFAULT_CONFIG = {
   // Behavior
   start_listening_on_load: true,
@@ -88,23 +127,20 @@ export const DEFAULT_CONFIG = {
   response_border_color: 'rgba(100, 200, 150, 0.5)',
   response_padding: 16,
   response_rounded: true,
+  bubble_style: 'centered',
+  bubble_container_width: 80,
 };
-
-export const EXPECTED_ERRORS = [
-  'timeout',
-  'wake-word-timeout',
-  'stt-no-text-recognized',
-  'duplicate_wake_up_detected',
-];
 
 /**
  * Build a seamless looping gradient by appending the first color
  * at the end so the animation wraps without a hard edge.
+ * @param {string} colorList - Comma-separated CSS color values
+ * @returns {string} CSS linear-gradient value
  */
 export function seamlessGradient(colorList) {
-  var colors = colorList.split(',').map(function (c) { return c.trim(); });
+  const colors = colorList.split(',').map((c) => c.trim());
   if (colors.length > 1 && colors[0] !== colors[colors.length - 1]) {
     colors.push(colors[0]);
   }
-  return 'linear-gradient(90deg, ' + colors.join(', ') + ')';
+  return `linear-gradient(90deg, ${colors.join(', ')})`;
 }
