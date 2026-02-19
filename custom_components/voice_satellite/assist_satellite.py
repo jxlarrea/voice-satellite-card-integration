@@ -109,7 +109,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             "name": self._satellite_name,
             "manufacturer": "Voice Satellite Card Integration",
             "model": "Browser Satellite",
-            "sw_version": "1.2.2",
+            "sw_version": "1.2.3",
         }
 
     @property
@@ -485,7 +485,10 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             self._question_event = None
             self._question_answer_text = None
             self._question_match_event = None
-            self._question_match_result = None
+            # NOTE: _question_match_result is intentionally NOT cleared here.
+            # The WebSocket handler may still need to read it after
+            # _question_match_event fires but before this finally runs.
+            # It will be overwritten on the next ask_question call.
             self.async_write_ha_state()
 
     def _match_answer(

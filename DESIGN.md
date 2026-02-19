@@ -1,6 +1,6 @@
 # Voice Satellite Card Integration — Design Document
 
-Current version: 1.2.2
+Current version: 1.2.3
 
 ## 1. Overview
 
@@ -537,7 +537,7 @@ Six state variables coordinate the async flow (plus `_preannounce_pending` share
 | `_question_match_event` | `asyncio.Event` | Signaled when hassil matching completes |
 | `_question_match_result` | `dict` | `{matched: bool, id: str|null}` for the WS handler |
 
-All ask_question variables are cleaned up in the `finally` block of `async_internal_ask_question`. `_preannounce_pending` is reset in the finally blocks of `async_announce` and `async_start_conversation`.
+All ask_question variables are cleaned up in the `finally` block of `async_internal_ask_question`, **except `_question_match_result`** which is intentionally preserved so the WebSocket handler can read it after `_question_match_event` fires. (The `finally` block runs in the same event loop tick as the return, potentially before the WS handler resumes from its `await`.) `_question_match_result` is overwritten on the next `ask_question` call. `_preannounce_pending` is reset in the finally blocks of `async_announce` and `async_start_conversation`.
 
 #### Complete `async_internal_ask_question` Implementation
 
@@ -617,7 +617,9 @@ async def async_internal_ask_question(
         self._question_event = None
         self._question_answer_text = None
         self._question_match_event = None
-        self._question_match_result = None
+        # NOTE: _question_match_result intentionally NOT cleared here.
+        # The WS handler may still need to read it after _question_match_event
+        # fires but before this finally block executes (asyncio scheduling race).
         self.async_write_ha_state()
 ```
 
@@ -1065,7 +1067,7 @@ Use this checklist to verify a complete implementation:
 - [ ] `_match_answer` builds hassil `Intents` from answers list and calls `recognize()`
 - [ ] Returns `AssistSatelliteAnswer(id, sentence, slots)` — `id=None` on no match
 - [ ] Hassil imported conditionally (`HAS_HASSIL` flag); raw sentence returned if unavailable
-- [ ] `finally` block cleans up all five state variables
+- [ ] `finally` block cleans up all state variables except `_question_match_result` (preserved for WS handler race)
 - [ ] WS handler grabs `_question_match_event` before triggering answer (avoids race)
 - [ ] WS handler reads `_question_match_result` immediately after event (before `finally` clears it)
 - [ ] WS handler returns `{ success, matched, id }` to card
