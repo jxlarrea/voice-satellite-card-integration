@@ -91,34 +91,40 @@ export class AskQuestionManager {
     const announceId = ann.id;
     const isRemote = this._card.config.tts_target && this._card.config.tts_target !== 'browser';
 
-    // Play wake chime to signal the user should speak
+    // Play wake chime to signal the user should speak.
+    // Delay STT pipeline start so the mic doesn't pick up the chime
+    // as speech (causes false VAD trigger → stt-no-text-recognized).
+    let chimeDelay = 0;
     if (!isRemote) {
       this._card.tts.playChime('wake');
+      chimeDelay = Timing.CHIME_SETTLE;
     }
 
     // Track whether an answer was submitted so the cleanup timeout
     // can release the server if STT never produced a result.
     this._answerSent = false;
 
-    pipeline.restartContinue(null, {
-      end_stage: 'stt',
-      onSttEnd: (text) => {
-        this._log.log(LOG, `STT result: "${text}"`);
-        this._answerSent = true;
-        this._processAnswer(announceId, text, isRemote);
-      },
-    });
+    this._chimeSettleTimeout = setTimeout(() => {
+      pipeline.restartContinue(null, {
+        end_stage: 'stt',
+        onSttEnd: (text) => {
+          this._log.log(LOG, `STT result: "${text}"`);
+          this._answerSent = true;
+          this._processAnswer(announceId, text, isRemote);
+        },
+      });
 
-    // Safety: if STT never produces a result (pipeline timeout, run-end
-    // without error, etc.), send an empty answer to release the server
-    // and clean up after a generous window.
-    this._sttSafetyTimeout = setTimeout(() => {
-      if (!this._answerSent) {
-        this._log.log(LOG, `No STT result for #${announceId} — sending empty answer to release server`);
-        this._answerSent = true;
-        this._processAnswer(announceId, '', isRemote);
-      }
-    }, Timing.ASK_QUESTION_STT_SAFETY);
+      // Safety: if STT never produces a result (pipeline timeout, run-end
+      // without error, etc.), send an empty answer to release the server
+      // and clean up after a generous window.
+      this._sttSafetyTimeout = setTimeout(() => {
+        if (!this._answerSent) {
+          this._log.log(LOG, `No STT result for #${announceId} — sending empty answer to release server`);
+          this._answerSent = true;
+          this._processAnswer(announceId, '', isRemote);
+        }
+      }, Timing.ASK_QUESTION_STT_SAFETY);
+    }, chimeDelay);
   }
 
   /**
@@ -128,7 +134,11 @@ export class AskQuestionManager {
    * triggers cleanup; the other is a no-op via the `cleaned` guard.
    */
   _processAnswer(announceId, text, isRemote) {
-    // Clear the STT safety timeout — we have a result (or explicit empty)
+    // Clear pending timers — we have a result (or explicit empty)
+    if (this._chimeSettleTimeout) {
+      clearTimeout(this._chimeSettleTimeout);
+      this._chimeSettleTimeout = null;
+    }
     if (this._sttSafetyTimeout) {
       clearTimeout(this._sttSafetyTimeout);
       this._sttSafetyTimeout = null;
