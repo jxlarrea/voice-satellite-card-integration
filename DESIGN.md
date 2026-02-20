@@ -6,6 +6,8 @@ Current version: 1.2.3
 
 This integration creates virtual Assist Satellite entities in Home Assistant for browsers running the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Without this integration, the browser has no device identity — it uses HA's pipeline API anonymously. This means HA cannot route timers, announcements, or per-device automations to it.
 
+**Cross-repo relationship:** This integration and the card are tightly coupled. The card reads entity attributes (timers, announcements) and sends WebSocket commands (ACK, state sync, question answers). Changes to the announcement attribute format, WebSocket command schemas, or async flow timing affect both repos. See the card's [DESIGN.md](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant/blob/master/DESIGN.md) §21 (Companion Integration) and §22 (Notification System) for the card-side implementation.
+
 Each config entry creates one `assist_satellite.*` entity backed by a device in the device registry. The entity:
 
 - Registers as a **timer handler** so the LLM gets access to `HassStartTimer`, `HassUpdateTimer`, `HassCancelTimer`
@@ -1013,7 +1015,41 @@ buy_me_a_coffee: jxlarrea
 github: jxlarrea
 ```
 
-## 14. Implementation Checklist
+## 15. Known Gotchas & Non-Obvious Traps
+
+### 15.1 `_question_match_result` Must Survive the `finally` Block
+After `_question_match_event.set()`, both the WS handler (awaiting the event) and the `finally` block of `async_internal_ask_question` are ready to run. The asyncio scheduler may run `finally` first, clearing `_question_match_result` before the WS handler reads it. Solution: `_question_match_result` is intentionally NOT cleared in `finally`. It's overwritten on the next `ask_question` call anyway.
+
+### 15.2 WS Handler Must Grab `_question_match_event` Before Triggering Answer
+The WS handler stores a local reference to `entity._question_match_event` BEFORE calling `entity.question_answered()`. This prevents a race where `question_answered` → `_question_event.set()` → `async_internal_ask_question` resumes → `finally` clears `_question_match_event` to `None` → WS handler tries to await `None`.
+
+### 15.3 Empty Sentence Handling
+When the card sends an empty sentence (STT timeout, no speech), the integration must still signal `_question_match_event` with `matched: False` so the WS handler doesn't hang. The `if not sentence:` check in `async_internal_ask_question` handles this path.
+
+### 15.4 `preannounce` Boolean Is NOT in `AssistSatelliteAnnouncement`
+The base class consumes `preannounce` internally to decide whether to resolve a default preannounce URL, but does NOT pass it through to the announcement object. That's why we override `async_internal_announce` and `async_internal_start_conversation` to capture it in `_preannounce_pending` before delegating.
+
+### 15.5 `ask_question` Piggybacks on `async_announce`
+`async_internal_ask_question` does NOT have its own TTS resolution. It calls `self.async_internal_announce()` which the base class knows how to resolve. The `_ask_question_pending` flag tells our `async_announce` override to add `"ask_question": True` to the announcement attributes. This is a deliberate architectural choice — avoids duplicating TTS resolution logic.
+
+### 15.6 `hass.states.async_set()` Bypasses Base Class
+`AssistSatelliteEntity` has no public state setter. We use `hass.states.async_set()` to force the state from external updates (card state sync, post-ACK listening state). This writes directly to HA's state machine but does NOT update the entity's internal `_attr_state`. This is fine because we never read the internal state — we always check `hass.states.get()`.
+
+### 15.7 `announce_id` Prevents Stale ACKs
+All announcement types (announce, start_conversation, ask_question) share the same monotonically increasing `_announce_id`. If a previous announcement times out and the card sends a late ACK, the `announce_id` check in `announce_finished` and `question_answered` silently ignores it.
+
+### 15.8 `device_entry` Not Available in `__init__`
+`self.device_entry` is only populated after `async_added_to_hass()`. Timer handler registration must happen there, not in the constructor.
+
+### 15.9 Cross-Repo Version Bumping
+The version appears in three places: `manifest.json` (`version`), `assist_satellite.py` (`sw_version` in `device_info`), and `DESIGN.md` header. All three must be updated together.
+
+### 15.10 No `homeassistant` Key in `manifest.json`
+HACS validation rejects it for custom integrations. Use `hacs.json` for the minimum HA version instead.
+
+---
+
+## 16. Implementation Checklist
 
 Use this checklist to verify a complete implementation:
 
