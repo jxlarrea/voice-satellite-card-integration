@@ -26,6 +26,8 @@ Home Assistant's built-in voice features require dedicated hardware like ESPHome
 
 Perfect for wall-mounted tablets, kiosk displays, or any browser-based Home Assistant setup.
 
+Check out this quick demo of the Voice Satellite Card! (Make sure your volume is up):
+
 https://github.com/user-attachments/assets/77dda388-330c-4544-84ea-0ead6cdaad17
 
 ## Important: Browser Requirements
