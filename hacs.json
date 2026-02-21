@@ -1,5 +1,5 @@
 {
   "name": "Voice Satellite Card Integration",
-  "homeassistant": "2025.1.2",
+  "homeassistant": "2025.2.1",
   "render_readme": true
 }

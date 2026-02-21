@@ -1,0 +1,76 @@
+name: Bug Report
+description: Report a bug with the Voice Satellite Card Integration
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Before submitting, please go through the checklist below to make sure the issue isn't a configuration problem.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites checklist
+      description: Please confirm you've checked all of these before opening an issue.
+      options:
+        - label: I am running **Home Assistant 2025.2.1** or later.
+          required: true
+        - label: I have added at least one device via **Settings > Devices & Services > Add Integration > Voice Satellite Card**.
+          required: true
+        - label: I have the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) **v4.0.0 or later** installed and configured.
+          required: true
+        - label: I have selected the correct `assist_satellite.*` entity in the Voice Satellite Card editor.
+          required: true
+        - label: My Assist pipeline has **Speech-to-Text** (e.g., Whisper) and **Text-to-Speech** (e.g., Piper) configured.
+          required: true
+        - label: I have confirmed my **Assist pipeline** works independently (e.g., via the Assist dialog in the HA sidebar).
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear description of what's happening.
+      placeholder: "Timers don't appear on the card after saying 'set a timer for 5 minutes'..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Please provide the following details.
+      value: |
+        - Home Assistant version:
+        - Voice Satellite Card Integration version:
+        - Voice Satellite Card version:
+        - Browser / app:
+        - Device (tablet model, phone, desktop):
+        - Assist pipeline (name or configuration):
+        - Conversation agent (e.g., HA default, OpenAI, Google Generative AI):
+    validations:
+      required: true
+
+  - type: textarea
+    id: ha-logs
+    attributes:
+      label: Home Assistant logs
+      description: |
+        Go to Settings > System > Logs and filter by "voice_satellite". If the issue involves pipelines, also filter by "assist_pipeline". Paste any relevant log entries here.
+      render: shell
+
+  - type: textarea
+    id: entity-state
+    attributes:
+      label: Entity state and attributes
+      description: |
+        Go to Developer Tools > States, find your `assist_satellite.*` entity, and paste its state and attributes here. This helps diagnose state sync, timer, and configuration issues.
+      render: yaml

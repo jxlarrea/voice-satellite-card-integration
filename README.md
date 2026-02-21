@@ -163,7 +163,7 @@ Example template to check for active timers:
 
 ## Requirements
 
-- Home Assistant 2025.1.2 or later
+- Home Assistant 2025.2.1 or later
 - [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) v4.0.0 or later
 
 ## License

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Voice Satellite Card Issues
+    url: https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant/issues
+    about: If your issue is with the card itself (UI, microphone, wake word detection), open it in the card repository instead
