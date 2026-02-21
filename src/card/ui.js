@@ -8,7 +8,7 @@
  */
 
 import STYLES from '../styles.css';
-import { seamlessGradient } from '../constants.js';
+import { seamlessGradient, Timing } from '../constants.js';
 import { applyBubbleStyle as _applyBubbleStyleFn } from '../shared/style-utils.js';
 import { formatTime } from '../shared/format.js';
 
@@ -125,6 +125,12 @@ export class UIManager {
   updateForState(state, serviceUnavailable, ttsPlaying) {
     if (!this._globalUI) return;
 
+    // Don't touch the bar while a notification is playing — it manages its own bar state
+    const notifPlaying = this._card.announcement.playing
+      || this._card.askQuestion.playing
+      || this._card.startConversation.playing;
+    if (notifPlaying) return;
+
     const states = {
       IDLE: { barVisible: false },
       CONNECTING: { barVisible: false },
@@ -217,20 +223,6 @@ export class UIManager {
     this._globalUI?.querySelector('.vs-rainbow-bar')?.classList.remove('visible');
   }
 
-  /**
-   * Flash the error bar with animation.
-   */
-  flashErrorBar() {
-    this.showErrorBar();
-    const bar = this._globalUI?.querySelector('.vs-rainbow-bar');
-    if (bar) {
-      bar.classList.add('error-flash');
-      bar.addEventListener('animationend', function handler() {
-        bar.classList.remove('error-flash');
-        bar.removeEventListener('animationend', handler);
-      });
-    }
-  }
 
   /**
    * Show the bar in speaking mode, returning whether it was already visible.
@@ -367,7 +359,7 @@ export class UIManager {
     const cfg = this._card.config;
     const barH = cfg.bar_height || 16;
     const gap = 12;
-    const pos = cfg.timer_position || 'bottom-right';
+    const pos = cfg.timer_position || 'top-right';
 
     this._timerContainer.style.top = 'auto';
     this._timerContainer.style.bottom = 'auto';
@@ -539,13 +531,11 @@ export class UIManager {
 
 // ─── Module-level helpers (no DOM, pure logic) ────────────────────
 
-const DOUBLE_TAP_THRESHOLD = 400;
-
 function _attachDoubleTap(el, callback) {
   let lastTap = 0;
   const handler = (e) => {
     const now = Date.now();
-    if (now - lastTap < DOUBLE_TAP_THRESHOLD && now - lastTap > 0) {
+    if (now - lastTap < Timing.DOUBLE_TAP_THRESHOLD && now - lastTap > 0) {
       e.preventDefault();
       e.stopPropagation();
       callback();

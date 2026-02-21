@@ -21,8 +21,10 @@ import { StartConversationManager } from '../start-conversation';
 import { getConfigForm } from '../editor';
 import { isEditorPreview, renderPreview } from '../editor/preview.js';
 import * as singleton from '../shared/singleton.js';
-import { setState, handleStartClick, startListening, onTTSComplete, handlePipelineMessage, startWakeSwitchKeepAlive, stopWakeSwitchKeepAlive } from './events.js';
-import { syncSatelliteState, updateInteractionState, turnOffWakeWordSwitch } from './comms.js';
+import { setState, handleStartClick, startListening, onTTSComplete, handlePipelineMessage } from './events.js';
+import { syncSatelliteState } from './comms.js';
+import { subscribeSatelliteEvents } from '../shared/satellite-subscription.js';
+import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
 
 export class VoiceSatelliteCard extends HTMLElement {
   constructor() {
@@ -96,6 +98,9 @@ export class VoiceSatelliteCard extends HTMLElement {
         renderPreview(this.shadowRoot, this._config);
         return;
       }
+
+      if (!this._config.satellite_entity) return;
+
       this._ui.ensureGlobalUI();
       this._visibility.setup();
 
@@ -112,6 +117,7 @@ export class VoiceSatelliteCard extends HTMLElement {
   }
 
   setConfig(config) {
+    const hadEntity = !!this._config.satellite_entity;
     this._config = Object.assign({}, DEFAULT_CONFIG, config);
     this._logger.debug = this._config.debug;
 
@@ -125,6 +131,21 @@ export class VoiceSatelliteCard extends HTMLElement {
 
     // Propagate config to active instance if this is a secondary card
     singleton.propagateConfig(this);
+
+    // If satellite entity was just configured, trigger startup
+    if (!hadEntity && this._config.satellite_entity && !this._hasStarted
+        && this._hass?.connection && !isEditorPreview(this)) {
+      this._connection = this._hass.connection;
+      this._ui.ensureGlobalUI();
+
+      if (this._config.start_listening_on_load) {
+        this._hasStarted = true;
+        startListening(this);
+      } else {
+        this._hasStarted = true;
+        this._ui.showStartButton();
+      }
+    }
   }
 
   set hass(hass) {
@@ -133,16 +154,16 @@ export class VoiceSatelliteCard extends HTMLElement {
     // Preview cards in the editor should never start or subscribe
     if (isEditorPreview(this)) return;
 
-    // Only update timer and notification managers on the active owner
+    // Only update subscriptions on the active owner
     if (singleton.isActive() && singleton.isOwner(this)) {
       this._timer.update();
-      this._announcement.update();
-      this._askQuestion.update();
-      this._startConversation.update();
+      // Retry satellite subscription if initial attempt in startListening() failed
+      subscribeSatelliteEvents(this, (event) => dispatchSatelliteEvent(this, event));
     }
 
     if (this._hasStarted) return;
     if (!hass?.connection) return;
+    if (!this._config.satellite_entity) return;
     if (singleton.isStarting()) return;
     if (singleton.isActive() && !singleton.isOwner(this)) return;
 
@@ -169,10 +190,6 @@ export class VoiceSatelliteCard extends HTMLElement {
   onStartClick() { handleStartClick(this); }
   onPipelineMessage(message) { handlePipelineMessage(this, message); }
   onTTSComplete(playbackFailed) { onTTSComplete(this, playbackFailed); }
-  turnOffWakeWordSwitch() { turnOffWakeWordSwitch(this); }
-  startWakeSwitchKeepAlive() { startWakeSwitchKeepAlive(this); }
-  stopWakeSwitchKeepAlive() { stopWakeSwitchKeepAlive(); }
-  updateInteractionState(state) { updateInteractionState(this, state); }
 
   // --- Private ---
 

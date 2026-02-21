@@ -6,6 +6,8 @@
  */
 
 import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
+import { hasPendingSatelliteEvent } from '../shared/satellite-notification.js';
+import { refreshSatelliteSubscription } from '../shared/satellite-subscription.js';
 
 export class VisibilityManager {
   constructor(card) {
@@ -36,9 +38,12 @@ export class VisibilityManager {
     if (document.hidden) {
       this._isPaused = true;
 
+      // Cancel any in-progress ask_question flow — its cleanup timer
+      // would otherwise fire after resume and double-restart the pipeline.
+      this._card.askQuestion.cancel();
+
       if (INTERACTING_STATES.includes(this._card.currentState)) {
         this._log.log('visibility', 'Tab hidden during interaction — cleaning up UI');
-        this._card.stopWakeSwitchKeepAlive();
         this._card.chat.clear();
         this._card.ui.hideBlurOverlay(BlurReason.PIPELINE);
         this._card.pipeline.clearContinueState();
@@ -61,21 +66,43 @@ export class VisibilityManager {
     this._isPaused = true;
     this._card.setState(State.PAUSED);
     this._card.audio.pause();
+    // Do NOT call pipeline.stop() here — the unawaited stop() creates a
+    // race where the server is still cancelling the old pipeline task when
+    // _resume() → restart(0) → start() creates a new subscription, causing
+    // async_accept_pipeline_from_satellite() to silently fail.
+    // restart(0) in _resume() handles the properly sequenced stop→start.
   }
 
-  _resume() {
+  async _resume() {
     if (!this._isPaused) return;
+
+    // Resume AudioContext first — browser suspends it in background tabs,
+    // and the worklet/processor can't produce audio until it's running.
+    // Keep _isPaused = true during this await so stale pipeline events
+    // from the still-active subscription are blocked by handlePipelineMessage.
+    await this._card.audio.resume();
+
+    // Now unpause and immediately enter restart — the synchronous path from
+    // here to restart(0) / hasPendingSatelliteEvent has no awaits, so no
+    // stale events can slip through the gap.
     this._isPaused = false;
 
-    this._card.audio.resume();
+    const { pipeline } = this._card;
+    pipeline.resetForResume();
 
-    const { audio, pipeline } = this._card;
-
-    if (!audio.isStreaming && pipeline.isStreaming) {
-      audio.startSending(() => pipeline.binaryHandlerId);
+    // If a satellite event (announcement/ask_question/start_conversation) was
+    // queued while the tab was hidden, skip the wake-word pipeline restart.
+    // The replayed event's flow will manage the pipeline (e.g. ask_question
+    // calls restartContinue after playback).
+    if (hasPendingSatelliteEvent()) {
+      this._log.log('visibility', 'Resuming — satellite event pending, deferring pipeline restart');
+      return;
     }
 
-    pipeline.resetForResume();
+    // Re-establish satellite subscription — the WebSocket may have silently
+    // reconnected while the tab was hidden, invalidating the old subscription.
+    refreshSatelliteSubscription();
+
     this._log.log('visibility', 'Resuming — restarting pipeline');
     pipeline.restart(0);
   }

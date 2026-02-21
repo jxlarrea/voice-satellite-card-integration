@@ -7,34 +7,12 @@
  * Uses ONLY public accessors on the card instance.
  */
 
-import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
-import { syncSatelliteState, updateInteractionState, turnOffWakeWordSwitch } from './comms.js';
+import { State, INTERACTING_STATES, BlurReason } from '../constants.js';
+import { syncSatelliteState } from './comms.js';
 import * as singleton from '../shared/singleton.js';
-
-// ─── Wake Switch Keep-Alive ─────────────────────────────────────────
-
-let _wakeSwitchIntervalId = null;
-
-/**
- * Start a repeating interval that turns off the wake word switch
- * every WAKE_SWITCH_INTERVAL ms while interactive.
- * Idempotent — no-op if already running.
- * @param {import('./index.js').VoiceSatelliteCard} card
- */
-export function startWakeSwitchKeepAlive(card) {
-  if (_wakeSwitchIntervalId) return;
-  turnOffWakeWordSwitch(card);
-  _wakeSwitchIntervalId = setInterval(() => turnOffWakeWordSwitch(card), Timing.WAKE_SWITCH_INTERVAL);
-}
-
-/**
- * Stop the wake switch keep-alive interval.
- */
-export function stopWakeSwitchKeepAlive() {
-  if (!_wakeSwitchIntervalId) return;
-  clearInterval(_wakeSwitchIntervalId);
-  _wakeSwitchIntervalId = null;
-}
+import { subscribeSatelliteEvents } from '../shared/satellite-subscription.js';
+import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
+import { getSwitchState } from '../shared/satellite-state.js';
 
 /**
  * Set card state and update UI.
@@ -46,14 +24,6 @@ export function setState(card, newState) {
   card.currentState = newState;
   card.logger.log('state', `${oldState} → ${newState}`);
   card.ui.updateForState(newState, card.pipeline.serviceUnavailable, card.tts.isPlaying);
-
-  if (INTERACTING_STATES.includes(newState)) {
-    turnOffWakeWordSwitch(card);
-  }
-
-  if (newState === State.WAKE_WORD_DETECTED) {
-    updateInteractionState(card, 'ACTIVE');
-  }
 
   // Don't sync back to idle/listening while TTS is still playing (barge-in restart)
   if (card.tts.isPlaying && (newState === State.LISTENING || newState === State.IDLE)) return;
@@ -95,9 +65,7 @@ export async function startListening(card) {
 
     // Subscribe notification managers now that we're the active owner
     card.timer.update();
-    card.announcement.update();
-    card.askQuestion.update();
-    card.startConversation.update();
+    subscribeSatelliteEvents(card, (event) => dispatchSatelliteEvent(card, event));
 
     // Setup double-tap after first successful start
     card.doubleTap.setup();
@@ -156,15 +124,13 @@ export function onTTSComplete(card, playbackFailed) {
 
   // Normal completion
   const isRemote = card.config.tts_target && card.config.tts_target !== 'browser';
-  if (card.config.chime_on_request_sent && !isRemote) {
+  if (getSwitchState(card.hass, card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
     card.tts.playChime('done');
   }
 
-  card.stopWakeSwitchKeepAlive();
   card.chat.clear();
   card.ui.hideBlurOverlay(BlurReason.PIPELINE);
   card.ui.updateForState(card.currentState, card.pipeline.serviceUnavailable, false);
-  updateInteractionState(card, 'IDLE');
   syncSatelliteState(card, 'IDLE');
 
   // Play any queued notifications
@@ -207,7 +173,7 @@ export function handlePipelineMessage(card, message) {
     case 'stt-end': card.pipeline.handleSttEnd(eventData); break;
     case 'intent-start': setState(card, State.INTENT); break;
     case 'intent-progress':
-      if (card.config.streaming_response) card.pipeline.handleIntentProgress(eventData);
+      card.pipeline.handleIntentProgress(eventData);
       break;
     case 'intent-end': card.pipeline.handleIntentEnd(eventData); break;
     case 'tts-start': setState(card, State.TTS); break;

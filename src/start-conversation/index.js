@@ -8,10 +8,6 @@
 
 import {
   initNotificationState,
-  subscribe,
-  unsubscribe,
-  processNotification,
-  claimNotification,
   dequeueNotification,
   playNotification,
   clearNotificationUI,
@@ -31,14 +27,6 @@ export class StartConversationManager {
   get card() { return this._card; }
   get log() { return this._log; }
 
-  update() {
-    subscribe(this, (attrs) => this._onStateChange(attrs), LOG);
-  }
-
-  destroy() {
-    unsubscribe(this);
-  }
-
   playQueued() {
     const ann = dequeueNotification(this);
     if (!ann) return;
@@ -47,17 +35,6 @@ export class StartConversationManager {
   }
 
   // --- Private ---
-
-  _onStateChange(attrs) {
-    const ann = processNotification(this, attrs, LOG);
-    if (!ann) return;
-
-    if (!ann.start_conversation) return;
-
-    claimNotification(ann.id);
-    this._log.log(LOG, `New start_conversation #${ann.id}: message="${ann.message || ''}" media="${ann.media_id || ''}"`);
-    this._play(ann);
-  }
 
   _play(ann) {
     playNotification(this, ann, (a) => this._onComplete(a), LOG);
@@ -76,7 +53,9 @@ export class StartConversationManager {
 
     const { pipeline } = this._card;
     if (pipeline) {
-      pipeline.restartContinue(null);
+      pipeline.restartContinue(null, {
+        extra_system_prompt: ann.extra_system_prompt || null,
+      });
     }
   }
 }

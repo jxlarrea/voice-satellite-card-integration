@@ -1,27 +1,26 @@
 /**
  * Voice Satellite Card — Timer Comms
  *
- * Service calls for timer cancellation.
+ * Cancel timers via the integration's WS command.
  *
  * Uses ONLY public accessors on the card instance.
  */
 
 /**
- * Cancel a timer via the conversation.process service.
+ * Cancel a timer via the voice_satellite/cancel_timer WS command.
  * @param {object} card - Card instance
- * @param {string} [timerName] - Optional timer name for targeted cancel
+ * @param {string} timerId - Timer ID to cancel
  */
-export function sendCancelTimer(card, timerName) {
-  if (!card.hass || !card.config.satellite_entity) return;
+export function sendCancelTimer(card, timerId) {
+  if (!card.connection || !card.config.satellite_entity || !timerId) return;
 
-  const cancelText = timerName ? `cancel the ${timerName}` : 'cancel the timer';
-
-  card.hass.callService('conversation', 'process', {
-    text: cancelText,
-    agent_id: 'conversation.home_assistant',
+  card.connection.sendMessagePromise({
+    type: 'voice_satellite/cancel_timer',
+    entity_id: card.config.satellite_entity,
+    timer_id: timerId,
   }).then(() => {
-    card.logger.log('timer', 'Cancel service called successfully');
+    card.logger.log('timer', `Cancel timer ${timerId} succeeded`);
   }).catch((err) => {
-    card.logger.error('timer', `Cancel service failed: ${err.message || JSON.stringify(err)}`);
+    card.logger.error('timer', `Cancel timer failed: ${err.message || JSON.stringify(err)}`);
   });
 }

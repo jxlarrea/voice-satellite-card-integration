@@ -78,7 +78,6 @@ export function showAlert(mgr) {
   mgr.log.log('timer', 'Showing finished alert');
 
   mgr.card.ui.showBlurOverlay(BlurReason.TIMER);
-  mgr.card.startWakeSwitchKeepAlive();
 
   mgr.card.ui.showTimerAlert(() => mgr.clearAlert());
 
@@ -99,7 +98,6 @@ export function showAlert(mgr) {
 export function clearAlert(mgr) {
   if (!mgr.alertActive) return;
   mgr.alertActive = false;
-  mgr.card.stopWakeSwitchKeepAlive();
 
   // Stop chime loop
   if (_chimeInterval) {

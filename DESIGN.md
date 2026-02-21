@@ -1,10 +1,14 @@
 # Voice Satellite Card — Design Document
 
+Current version: 4.0.0
+
 ## 1. Overview
 
-Voice Satellite Card is a custom Home Assistant Lovelace card that turns any browser into a voice-activated satellite. It captures microphone audio, sends it to Home Assistant's Assist pipeline over WebSocket, and plays back TTS responses — all without leaving the HA dashboard.
+Voice Satellite Card is a custom Home Assistant Lovelace card that turns any browser into a full-featured voice satellite with feature parity with physical devices like the Home Assistant Voice Preview Edition. It captures microphone audio, routes it through the **required** [Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration) to Home Assistant's Assist pipeline, and plays back TTS responses — all without leaving the HA dashboard.
 
-The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel into a single `voice-satellite-card.min.js` for deployment. The card is invisible (returns `getCardSize() = 0`). All visual feedback is rendered via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes.
+The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel into a single `voice-satellite-card.min.js` for deployment. The card is invisible (`getCardSize() = 0`). All visual feedback is rendered via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes.
+
+**Critical dependency:** The integration is mandatory. The card routes ALL pipeline communication through the integration's `voice_satellite/run_pipeline` WebSocket subscription. There is no anonymous/standalone pipeline mode.
 
 ---
 
@@ -13,31 +17,43 @@ The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel in
 ```mermaid
 graph TD
     A[Browser Microphone] --> B[Audio Processing]
-    B -->|Binary WebSocket| C[Home Assistant]
-    C --> D[Assist Pipeline]
-    D --> E[Pipeline Events]
+    B -->|Binary WebSocket| C[Integration: voice_satellite/run_pipeline]
+    C --> D[HA Assist Pipeline]
+    D --> E[Pipeline Events relayed to card]
     E --> F[Visual Feedback]
     E --> G[TTS Playback]
-    G -->|Restart| D
+    G -->|Restart| C
 
-    H[Companion Integration] -->|Entity Attributes| I[Card polls via set hass]
-    I --> J[TimerManager]
-    I --> K[AnnouncementManager]
-    I --> L[AskQuestionManager]
-    I --> M[StartConversationManager]
-    K -->|announce_finished WS| H
-    L -->|question_answered WS| H
+    H[Integration Entity] -->|subscribe_events WS| I[Satellite Subscription]
+    I --> J[AnnouncementManager]
+    I --> K[AskQuestionManager]
+    I --> L[StartConversationManager]
+
+    H -->|state_changed events| M[TimerManager]
+
+    J -->|announce_finished WS| H
+    K -->|question_answered WS| H
     F -->|update_state WS| H
-    H -->|Timers, Announcements| I
 ```
 
 1. The card acquires the browser microphone via `getUserMedia`.
 2. Audio is captured via AudioWorklet (or ScriptProcessor fallback), resampled to 16 kHz mono PCM, and sent as binary WebSocket frames every 100 ms.
-3. Home Assistant's `assist_pipeline/run` subscription routes the audio through wake word detection → speech-to-text → intent processing → text-to-speech.
-4. The card receives pipeline events, updates visual feedback (gradient bar, transcription/response bubbles), and plays the TTS audio via an `<audio>` element.
-5. When TTS begins playing, the pipeline is immediately restarted so it listens for the next wake word while audio plays (barge-in support). If the conversation agent signals `continue_conversation`, the card skips the wake word stage and restarts in STT mode for multi-turn dialogues.
+3. The integration's `voice_satellite/run_pipeline` subscription routes audio through the HA Assist pipeline (wake word → STT → intent → TTS) and relays events back to the card.
+4. The card receives pipeline events, updates visual feedback (gradient bar, transcription/response bubbles), and plays the TTS audio.
+5. When TTS playback begins, the pipeline is immediately restarted so it listens for the next wake word while audio plays (barge-in support). If the conversation agent signals `continue_conversation`, the card skips the wake word stage and restarts in STT mode for multi-turn dialogues.
 6. The cycle repeats indefinitely.
-7. When the optional **[companion integration](https://github.com/jxlarrea/voice-satellite-card-integration)** is configured, the card also polls entity attributes for timer and announcement state changes, syncs its pipeline state back to the integration entity via WebSocket, and sends announcement playback ACKs.
+
+### Integration Communication Channels
+
+| Channel | Direction | Purpose |
+|---------|-----------|---------|
+| `voice_satellite/run_pipeline` | Card → Integration → Card | Bridged pipeline: card sends audio, receives pipeline events |
+| `voice_satellite/subscribe_events` | Integration → Card | Push notifications: announcements, start_conversation, ask_question |
+| `voice_satellite/update_state` | Card → Integration | Sync card's pipeline state to the entity (idle/listening/processing/responding) |
+| `voice_satellite/announce_finished` | Card → Integration | ACK that announcement playback completed (unblocks integration's `async_announce`) |
+| `voice_satellite/question_answered` | Card → Integration | Submit STT transcription for hassil matching |
+| `voice_satellite/cancel_timer` | Card → Integration | Cancel a specific timer by ID |
+| `state_changed` (HA event bus) | Integration → Card | Timer state changes (active_timers attribute) |
 
 ---
 
@@ -58,8 +74,8 @@ voice-satellite-card/
 │   ├── card/                             ← Main card class + helpers
 │   │   ├── index.js                      ← VoiceSatelliteCard (thin orchestrator)
 │   │   ├── events.js                     ← State transitions, pipeline dispatch, TTS completion
-│   │   ├── comms.js                      ← Satellite state sync, interaction state, wake word switch
-│   │   ├── ui.js                         ← UIManager (overlay, bar, blur, start button, chat DOM)
+│   │   ├── comms.js                      ← Satellite state sync (voice_satellite/update_state)
+│   │   ├── ui.js                         ← UIManager (overlay, bar, blur, start button, chat, timer DOM)
 │   │   ├── chat.js                       ← ChatManager (bubbles, streaming fade)
 │   │   ├── double-tap.js                 ← DoubleTapHandler (cancel with touch dedup)
 │   │   └── visibility.js                 ← VisibilityManager (tab pause/resume)
@@ -76,18 +92,18 @@ voice-satellite-card/
 │   │   └── comms.js                      ← Remote media_player service calls
 │   │
 │   ├── pipeline/                         ← Assist pipeline lifecycle
-│   │   ├── index.js                      ← PipelineManager (start/stop/restart, idle timeout, retry)
+│   │   ├── index.js                      ← PipelineManager (start/stop/restart, mute polling, retry)
 │   │   ├── events.js                     ← Pipeline event handlers (run-start through error)
-│   │   └── comms.js                      ← Pipeline WS calls (subscribe, device ID, reconnect)
+│   │   └── comms.js                      ← subscribePipelineRun, setupReconnectListener
 │   │
 │   ├── timer/                            ← Timer countdown + alerts
 │   │   ├── index.js                      ← TimerManager (timer state, alert lifecycle)
 │   │   ├── events.js                     ← State change processing, dedup
 │   │   ├── ui.js                         ← Timer pills, alert overlay, countdown tick
-│   │   └── comms.js                      ← Timer cancel via conversation.process
+│   │   └── comms.js                      ← Timer cancel via voice_satellite/cancel_timer WS
 │   │
 │   ├── announcement/                     ← Simple announcements
-│   │   └── index.js                      ← AnnouncementManager (chime → media → ACK → clear)
+│   │   └── index.js                      ← AnnouncementManager (chime → media → ACK → restart)
 │   │
 │   ├── ask-question/                     ← Ask question (STT capture + match feedback)
 │   │   ├── index.js                      ← AskQuestionManager (prompt → STT → answer → feedback)
@@ -96,1043 +112,862 @@ voice-satellite-card/
 │   ├── start-conversation/               ← Start conversation (prompt → STT listening mode)
 │   │   └── index.js                      ← StartConversationManager (prompt → restartContinue)
 │   │
-│   ├── editor/                           ← Config editor + preview
-│   │   ├── index.js                      ← getConfigForm() schema assembler
-│   │   ├── bar.js                        ← Activity bar config section
-│   │   ├── behavior.js                   ← Behavior, mic, timeouts section
-│   │   ├── bubbles.js                    ← Transcription/response bubble section
-│   │   ├── media.js                      ← Volume, chimes, announcements section
-│   │   ├── timer.js                      ← Timer pill config section
-│   │   └── preview.js                    ← Editor preview renderer
+│   ├── shared/                           ← Cross-feature utilities
+│   │   ├── singleton.js                  ← Single-instance guarantee (window.__vsSingleton)
+│   │   ├── satellite-subscription.js     ← WS subscription for integration-pushed events
+│   │   ├── satellite-notification.js     ← Shared notification lifecycle (dispatch/queue/play/cleanup)
+│   │   ├── satellite-state.js            ← Pure entity lookups (getSatelliteAttr, getSwitchState)
+│   │   ├── notification-comms.js         ← Shared ACK WebSocket call
+│   │   ├── entity-subscription.js        ← HA state_changed subscription pattern
+│   │   ├── style-utils.js               ← 9-property bubble styling helper
+│   │   └── format.js                     ← Time formatting utility
 │   │
-│   └── shared/                           ← Cross-cutting utilities
-│       ├── singleton.js                  ← Single-instance guarantee (module-scoped via window)
-│       ├── satellite-notification.js     ← Shared lifecycle for announcement/ask-question/start-conversation
-│       ├── notification-comms.js         ← sendAck WS call (shared by all notification managers)
-│       ├── entity-subscription.js        ← Entity state_changed subscription + reconnect pattern
-│       ├── format.js                     ← Pure formatting (formatTime)
-│       └── style-utils.js               ← Shared bubble/pill styling (applyBubbleStyle)
+│   └── editor/                           ← Config editor + preview
+│       ├── index.js                      ← getConfigForm() schema assembler
+│       ├── behavior.js                   ← satellite_entity, debug, mic processing
+│       ├── media.js                      ← TTS target, volumes, announcement duration
+│       ├── timer.js                      ← Timer pill styling (11 fields)
+│       ├── bar.js                        ← Activity bar (position, height, gradient, blur)
+│       ├── bubbles.js                    ← Bubble style, transcription/response sections
+│       └── preview.js                    ← Static editor preview renderer
 │
-├── .github/
-│   ├── workflows/
-│   │   ├── release.yml                   ← Build + upload release assets on GitHub release
-│   │   └── validate.yml                  ← HACS validation (push, PR, daily cron)
-│   └── funding.yml                       ← Sponsor links (Buy Me a Coffee, GitHub Sponsors)
-├── voice-satellite-card.min.js           ← Built output (minified, committed for HACS)
-├── voice-satellite-card.js               ← Built output (readable, gitignored)
-├── voice-satellite-card.js.map           ← Source map (gitignored)
-├── package.json                          ← npm scripts: build, dev
-├── package-lock.json                     ← npm lockfile (committed)
-├── webpack.config.js                     ← Dual output (readable + minified)
-├── babel.config.js                       ← ES6+ target (modern browsers)
-├── hacs.json                             ← HACS metadata (name, filename, HA version)
-├── LICENSE                               ← MIT License
-├── .gitignore                            ← Ignores node_modules/, .js, .js.map (not .min.js)
-├── README.md                             ← User-facing docs, badges, installation, configuration
-└── DESIGN.md                             ← This file — architecture, implementation details
+├── webpack.config.js                     ← Webpack config (dev + minified builds)
+├── package.json                          ← Version source of truth
+├── voice-satellite-card.min.js           ← Production build (committed for HACS)
+├── voice-satellite-card.js               ← Debug build with source maps
+└── voice-satellite-card.js.map           ← Source map
 ```
 
-### 3.2 Layering Rules
+### 3.2 Layering Principles
 
-The codebase enforces strict layering:
+The codebase enforces strict separation of concerns:
 
-**1. Comms files are pure.** Every `comms.js` takes `card` as its first parameter and only uses public accessors (`card.config`, `card.hass`, `card.logger`, `card.connection`). Comms files return promises and never mutate manager state. All WebSocket `sendMessagePromise`, `callService`, and `connection.socket.send` calls live in comms files.
+1. **Pure helpers** (`shared/`) — No side effects, no state. Functions like `getSwitchState()`, `formatTime()`, `applyBubbleStyle()` are pure lookups or transformations.
 
-**2. Helper files use public accessors.** Event handlers and UI helpers within a module (e.g. `pipeline/events.js`, `timer/ui.js`) access their manager via public getters/setters (e.g. `mgr.card`, `mgr.log`, `mgr.binaryHandlerId`), never `mgr._privateField`.
+2. **Comms modules** (`*/comms.js`) — WebSocket calls and HA service calls. No DOM, no state, no timers. Each function takes explicit parameters and returns results or fires callbacks. All comms files document "Uses ONLY public accessors on the card instance."
 
-**3. Cross-module access uses the card.** Managers access each other through the card instance: `mgr.card.tts.isPlaying`, `mgr.card.ui.showBlurOverlay()`. No manager imports another manager directly.
+3. **Event modules** (`*/events.js`) — Transform pipeline/entity events into state changes and UI updates. Access manager state via the `mgr` parameter's public accessors. No WebSocket calls.
 
-**4. Audio operations live in `audio/`.** All `AudioContext`, oscillator, and `new Audio()` creation is in `audio/chime.js` and `audio/media-playback.js`. Other modules call these utilities via the card.
+4. **Manager classes** (`*/index.js`) — Own feature-specific state, wire up subscriptions, delegate to event/comms/UI helpers. All managers receive the card instance via constructor injection.
 
-**5. DOM operations live in `card/ui.js`.** All `document.body` manipulation, overlay creation, and element styling is in `UIManager`. Exception: `card/double-tap.js` and `card/visibility.js` register `document` event listeners (not DOM manipulation).
+5. **UIManager** (`card/ui.js`) — The **single owner** of all DOM manipulation. No other module creates, modifies, or removes DOM elements. Other modules request DOM changes through UIManager's public API (e.g., `addChatMessage()`, `showBlurOverlay()`, `syncTimerPills()`).
 
-**6. Formatting utilities live in `shared/`.** Pure functions like `formatTime()` and `applyBubbleStyle()` are in `shared/format.js` and `shared/style-utils.js`.
+6. **Card orchestrator** (`card/index.js`) — Thin composition root. Creates all managers, exposes public accessors, delegates lifecycle methods. Contains no business logic.
 
-### 3.3 Build System
+### 3.3 Singleton Pattern
 
-Webpack bundles all ES6 modules into a single file for HA custom card deployment. Babel transpiles only features unsupported by the last 2 versions of Chrome, Firefox, Safari, and Edge — native ES6+ (classes, arrow functions, async/await, const/let) passes through untranspiled for performance. CSS files are imported as raw strings via Webpack's `asset/source` type (no CSS extraction — the string is injected into the DOM at runtime by `UIManager`).
+Only one card instance can own the microphone and pipeline at a time. This is critical because:
+- A user may place the card on multiple dashboard views
+- HA recreates the custom element when switching views
+- Two active AudioContexts would conflict
 
-The version number is defined once in `package.json` and injected at build time via Webpack's `DefinePlugin` as `__VERSION__`, consumed by `constants.js`.
-
-**npm scripts:**
-
-- `npm run build` — produces both `voice-satellite-card.js` (readable, with source map) and `voice-satellite-card.min.js` (minified, no source map) in the repo root
-- `npm run dev` — builds and copies the readable version + source map to HA (`\\hassio\config\www\`)
-
-Only `voice-satellite-card.min.js` is committed to git. The readable version and source map are gitignored (local debugging only).
-
-**GitHub infrastructure:**
-
-- **Release workflow** (`.github/workflows/release.yml`): Triggers on GitHub release creation or manual `workflow_dispatch`. Checks out code, installs Node 20, runs `npm ci && npm run build`, then uploads `voice-satellite-card.min.js` as a release asset via `softprops/action-gh-release@v2`.
-- **Funding** (`.github/funding.yml`): Configures the "Sponsor" button with `buy_me_a_coffee: jxlarrea` and `github: jxlarrea`.
-- **HACS validation** (`.github/workflows/validate.yml`): Runs `hacs/action@main` with `category: plugin` on push, PR, daily cron, and manual dispatch. Only runs when `github.repository_owner == 'jxlarrea'`.
-- **HACS metadata** (`hacs.json`): `{ "name": "Voice Satellite Card", "render_readme": true, "filename": "voice-satellite-card.min.js", "homeassistant": "2025.1.2" }`.
-- **HACS compliance**: `voice-satellite-card.min.js` must remain committed to the default branch.
-
-### 3.4 Constants (`src/constants.js`)
-
-- `VERSION` — injected at build time via `__VERSION__` (Webpack DefinePlugin from `package.json` version)
-- `State` — enum: IDLE, CONNECTING, LISTENING, PAUSED, WAKE_WORD_DETECTED, STT, INTENT, TTS, ERROR
-- `INTERACTING_STATES` — array: [WAKE_WORD_DETECTED, STT, INTENT, TTS]
-- `EXPECTED_ERRORS` — array: `timeout`, `wake-word-timeout`, `stt-no-text-recognized`, `duplicate_wake_up_detected` (note: underscores, not dashes — HA API inconsistency)
-- `BlurReason` — enum: PIPELINE, TIMER, ANNOUNCEMENT
-- `Timing` — all timing constants in milliseconds: DOUBLE_TAP_THRESHOLD (400), TIMER_CHIME_INTERVAL (3000), PILL_EXPIRE_ANIMATION (400), PLAYBACK_WATCHDOG (30000), RECONNECT_DELAY (2000), INTENT_ERROR_DISPLAY (3000), NO_MEDIA_DISPLAY (3000), ASK_QUESTION_CLEANUP (2000), ASK_QUESTION_STT_SAFETY (30000), MAX_RETRY_DELAY (30000), RETRY_BASE_DELAY (5000), VISIBILITY_DEBOUNCE (500), DISCONNECT_GRACE (100), WAKE_SWITCH_INTERVAL (5000)
-- `DEFAULT_CONFIG` — full default configuration object with all card options
-- `seamlessGradient(colorList)` — takes a comma-separated color string, appends the first color to the end, returns a CSS `linear-gradient(90deg, ...)` string for seamless animation loops
-
-### 3.5 Composition Pattern
-
-The main `VoiceSatelliteCard` class (`card/index.js`) is a thin orchestrator. All functionality is delegated to manager instances created in the constructor:
-
-| Manager | Property | Module | Responsibility |
-|---------|----------|--------|---------------|
-| `Logger` | `card.logger` | `logger.js` | Debug-gated console logging |
-| `AudioManager` | `card.audio` | `audio/` | Mic capture, AudioWorklet/ScriptProcessor, resample, binary send |
-| `TtsManager` | `card.tts` | `tts/` | Browser/remote TTS playback, chimes, streaming TTS |
-| `PipelineManager` | `card.pipeline` | `pipeline/` | Pipeline lifecycle, event handling, idle timeout, error recovery |
-| `UIManager` | `card.ui` | `card/ui.js` | Global overlay, activity bar, blur, start button |
-| `ChatManager` | `card.chat` | `card/chat.js` | Chat bubbles, streaming fade |
-| `DoubleTapHandler` | `card.doubleTap` | `card/double-tap.js` | Double-tap cancel with touch/click dedup |
-| `VisibilityManager` | `card.visibility` | `card/visibility.js` | Tab visibility pause/resume |
-| `TimerManager` | `card.timer` | `timer/` | Timer countdown pills, alert chimes, voice/tap cancel |
-| `AnnouncementManager` | `card.announcement` | `announcement/` | TTS announcements with pre-chime, queue, ACK |
-| `AskQuestionManager` | `card.askQuestion` | `ask-question/` | Ask question: prompt → STT → answer → match feedback |
-| `StartConversationManager` | `card.startConversation` | `start-conversation/` | Start conversation: prompt → STT listening mode |
-
-Each manager receives the card instance via its constructor. The card exposes public getters (`config`, `connection`, `hass`, `currentState`, `logger`, etc.) that managers and helpers read.
-
-**Public accessor pattern:** The card and each manager expose public getters (and setters where mutation is needed) for all state used by helper files. For example, `PipelineManager` exposes `get/set binaryHandlerId`, `get/set shouldContinue`, `get/set serviceUnavailable`, etc. Helper files like `pipeline/events.js` use only these public accessors — never `mgr._privateField`.
-
-**Callback pattern:** Managers that need to notify the card use explicit callback methods:
-
-- `TtsManager._onComplete()` → `card.onTTSComplete(playbackFailed)` — playback finished
-- `DoubleTapHandler` → `card.pipeline.restart()`, `card.chat.clear()` — cancel interaction
-- `VisibilityManager` → `card.pipeline.restart()` — resume after tab switch
-
-**Card delegation methods:** The card exposes thin methods that delegate to `card/events.js` and `card/comms.js`:
-- `card.setState(state)` → `setState(card, state)` in events.js
-- `card.onTTSComplete(playbackFailed)` → `onTTSComplete(card, playbackFailed)` in events.js
-- `card.onStartClick()` → `handleStartClick(card)` in events.js
-- `card.onPipelineMessage(message)` → `handlePipelineMessage(card, message)` in events.js
-- `card.updateInteractionState(state)` → `updateInteractionState(card, state)` in comms.js
-- `card.turnOffWakeWordSwitch()` → `turnOffWakeWordSwitch(card)` in comms.js
-- `card.startWakeSwitchKeepAlive()` → `startWakeSwitchKeepAlive(card)` in events.js
-- `card.stopWakeSwitchKeepAlive()` → `stopWakeSwitchKeepAlive()` in events.js
-
-### 3.6 Card Lifecycle
-
-**Registration (`index.js`):**
+The singleton state lives on `window.__vsSingleton` (module scope falls back to window namespace so multiple script loads share state):
 
 ```javascript
-customElements.define('voice-satellite-card', VoiceSatelliteCard);
-window.customCards = window.customCards || [];
-window.customCards.push({ type: 'voice-satellite-card', name: 'Voice Satellite Card', ... });
-console.info('%c VOICE-SATELLITE-CARD %c v' + VERSION + ' ', ...);
+window.__vsSingleton = {
+  instance: null,    // The owning card reference
+  active: false,     // Whether any instance is active
+  starting: false,   // Startup lock (prevents race conditions)
+};
 ```
 
-**Constructor:** Creates all manager instances. Initial state is `IDLE`. The card renders a hidden Shadow DOM element.
+Key operations:
+- `claim(card)` — called after successful mic + pipeline start
+- `isOwner(card)` — returns true if no instance is active OR the given card is the owner
+- `isActive()` — returns true only after `claim()` succeeds
+- `isStarting()` / `setStarting(val)` — startup lock flag, prevents race conditions when multiple cards try to start simultaneously (e.g., view switch during startup)
+- `propagateConfig(card)` — when a secondary card calls `setConfig()`, the config is forwarded to the active instance so live config changes take effect
 
-**`set hass(hass)`:** Called by HA when connection is available. On the active claimed owner (`singleton.isActive() && singleton.isOwner(this)`), calls `update()` on all four notification managers (timer, announcement, ask-question, start-conversation). First call only (guarded by `_hasStarted`): stores connection, ensures global UI, then either starts listening or shows start button. **Critical:** The `isActive()` check prevents subscription spam — before `singleton.claim()` succeeds, `isOwner()` returns true for all cards (since `instance` is null), so `isActive()` gates subscriptions to only fire after a card has successfully started.
+**Gotcha:** Before `claim()`, `isOwner()` returns true for all cards (since `instance` is null). The `isActive()` check gates subscriptions so they only fire after a card has successfully started.
 
-**`setConfig(config)`:** Merges user config with `DEFAULT_CONFIG`. Updates logger debug flag. Calls `ui.applyStyles()` if overlay exists. Propagates config to active instance via `singleton.propagateConfig()`.
+### 3.5 Logger (`logger.js`)
 
-**`connectedCallback()`:** Renders Shadow DOM, ensures global UI, sets up visibility handler. If no instance is active and hass is available, starts listening. Uses `requestAnimationFrame` to defer editor preview detection.
+Centralized logging controlled by `config.debug`. All managers receive a reference to the shared Logger instance from the card.
 
-**`disconnectedCallback()`:** Uses `Timing.DISCONNECT_GRACE` (100ms) delay to distinguish view switches from real disconnects.
+- `log(category, msg, data?)` — Gated by `_debug` flag. Silent in production unless debug is enabled.
+- `error(category, msg, data?)` — Always logs (not gated). Errors are never suppressed.
+- Console output format: `[VS][category] message`
+- The `debug` setter is updated by `setConfig()` whenever the config changes.
 
-**`startListening()` sequence (card/events.js):**
-1. Guards via singleton (`isActive`, `isStarting`)
-2. Sets state to CONNECTING
-3. `await audio.startMicrophone()`
-4. `await pipeline.start()`
-5. `singleton.claim(card)` — marks this instance as active
-6. Hides start button, sets up double-tap handler
-7. On failure: shows start button for mic errors, or retries with backoff for pipeline errors
+### 3.4 Global UI
 
-**`handleStartClick()` (card/events.js):** Calls `audio.ensureAudioContextForGesture()` within user gesture, then `startListening()`.
-
-### 3.7 Event Routing
-
-`handlePipelineMessage()` in `card/events.js` is the central event dispatcher. It checks guards (`visibility.isPaused`, `pipeline.isRestarting`), then routes by `message.type`:
-
-| Event | Handler |
-|-------|---------|
-| `run-start` | `pipeline.handleRunStart(eventData)` |
-| `wake_word-start` | `pipeline.handleWakeWordStart()` |
-| `wake_word-end` | `pipeline.handleWakeWordEnd(eventData)` |
-| `stt-start` | `setState(card, State.STT)` |
-| `stt-vad-start` / `stt-vad-end` | Log only |
-| `stt-end` | `pipeline.handleSttEnd(eventData)` |
-| `intent-start` | `setState(card, State.INTENT)` |
-| `intent-progress` | `pipeline.handleIntentProgress(eventData)` (if `streaming_response` enabled) |
-| `intent-end` | `pipeline.handleIntentEnd(eventData)` |
-| `tts-start` | `setState(card, State.TTS)` |
-| `tts-end` | `pipeline.handleTtsEnd(eventData)` |
-| `run-end` | `pipeline.handleRunEnd()` |
-| `error` | `pipeline.handleError(errorData)` |
-
-### 3.8 TTS Complete Callback
-
-`onTTSComplete(card, playbackFailed)` in `card/events.js`:
-
-1. **Barge-in check:** If current state is WAKE_WORD_DETECTED, STT, or INTENT — skip cleanup. TTS excluded from guard.
-2. **Continue conversation:** If `!playbackFailed` and `shouldContinue` and `continueConversationId` — keep UI, call `restartContinue(conversationId)`.
-3. **Normal completion:** Stop wake switch keep-alive, done chime (browser only), clear chat, hide blur, update interaction state to IDLE, sync satellite state, then `playQueued()` on all three notification managers.
-
-### 3.9 Satellite State Synchronization
-
-Via `syncSatelliteState()` in `card/comms.js`. Sends `voice_satellite/update_state` WS command.
-
-**State strings:** The card sends raw state strings (`IDLE`, `LISTENING`, `STT`, `INTENT`, `TTS`, etc.) directly. The integration maps them to HA satellite states (`idle`, `listening`, `processing`, `responding`) server-side.
-
-**Dedup:** `card.lastSyncedSatelliteState` prevents redundant WS calls. **Barge-in guard:** Sync to IDLE/LISTENING suppressed while `tts.isPlaying`.
-
-### 3.10 Response Text Extraction
-
-`extractResponseText()` in `pipeline/events.js` — 4-level fallback: `speech.plain.speech` → `speech.speech` → `plain` → raw string.
-
-### 3.11 Deferred Run-End
-
-When `run-end` arrives while TTS is playing, `pendingRunEnd = true`. Resolved when `onTTSComplete()` handles cleanup. `finishRunEnd()` clears flag, stops wake switch keep-alive, clears chat, hides blur, sets state to IDLE, then restarts pipeline (unless `serviceUnavailable` is true, in which case retry is already scheduled).
-
----
-
-## 4. State Machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> CONNECTING
-    CONNECTING --> LISTENING
-    LISTENING --> WAKE_WORD_DETECTED
-    LISTENING --> PAUSED : Tab hidden
-    PAUSED --> LISTENING : Tab visible
-    WAKE_WORD_DETECTED --> STT
-    STT --> INTENT
-    INTENT --> TTS
-    TTS --> LISTENING : Restart for barge-in
-    STT --> STT : Continue conversation (skip wake word)
-    CONNECTING --> ERROR
-    LISTENING --> ERROR
-    STT --> ERROR
-    INTENT --> ERROR
-    ERROR --> LISTENING : Backoff & restart
-```
-
-| State | Description |
-|-------|-------------|
-| `IDLE` | Not connected, waiting to start |
-| `CONNECTING` | Acquiring microphone, subscribing to pipeline |
-| `LISTENING` | Pipeline active, listening for wake word. No visible bar. |
-| `PAUSED` | Tab hidden, microphone tracks disabled, audio send stopped |
-| `WAKE_WORD_DETECTED` | Wake word heard. Bar visible. Blur overlay shown. |
-| `STT` | Speech-to-text in progress. Bar continues "listening" animation. |
-| `INTENT` | Processing user intent. Bar "processing" (fast) animation. |
-| `TTS` | TTS audio playing. Bar "speaking" animation. |
-| `ERROR` | Unexpected error. Red error bar. Retry with backoff. |
-
----
-
-## 5. User Interface
-
-### 5.1 Global UI Overlay
-
-All UI elements inside `<div id="voice-satellite-ui">` appended to `document.body`. Required because HA destroys/recreates card elements on view switches.
+The card renders nothing in its own Shadow DOM (just a hidden `<div>`). All visible UI lives in a single `#voice-satellite-ui` element appended to `document.body`:
 
 ```html
 <div id="voice-satellite-ui">
   <div class="vs-blur-overlay"></div>
-  <button class="vs-start-btn"><svg>...</svg></button>
+  <button class="vs-start-btn"><!-- SVG mic icon --></button>
   <div class="vs-chat-container"></div>
   <div class="vs-rainbow-bar"></div>
 </div>
 ```
 
-CSS injected once into `<head>` as `<style id="voice-satellite-styles">`. Z-index: blur=9999, bar=10000, button/chat=10001.
+Timer pills live in a separate `#voice-satellite-timers` container, also on `document.body`.
 
-### 5.2 Pointer Events — Critical
-
-Hidden overlay elements MUST have `pointer-events: none`. Switch to `pointer-events: auto` only with `.visible` class.
-
-### 5.3 Blur Overlay
-
-Full-screen backdrop with `backdrop-filter: blur()`. Always `pointer-events: none`.
-
-**Reference counting:** `showBlurOverlay(reason)` / `hideBlurOverlay(reason)` — only hidden when all reasons cleared. Reasons: `BlurReason.PIPELINE`, `BlurReason.TIMER`, `BlurReason.ANNOUNCEMENT`.
-
-### 5.4 Chat Container
-
-Managed by `ChatManager` (`card/chat.js`). Flex column above gradient bar.
-
-**Methods:** `addUser(text)`, `addAssistant(text)`, `updateResponse(text)` (streaming fade), `clear()`.
-
-**Legacy wrappers:** `showTranscription(text)` → `addUser()`. `showResponse(text)` → sets `textContent` directly on `streamEl` (no fade).
-
-**Streaming fade:** Last 24 chars wrapped in `<span>` with decreasing opacity. Final text via `textContent` (clean).
-
-**Styling:** `applyBubbleStyle()` from `shared/style-utils.js` applies 9-property pattern (font size/family/color, bold, italic, background, border, padding, rounded).
-
-### 5.5 Start Button
-
-56×56px floating mic button. Shown on mic failure. `_pendingStartButtonReason` handles pre-overlay calls.
-
-### 5.6 Key UIManager Methods
-
-Beyond state management, `UIManager` provides methods used by the notification system:
-
-- `showBarSpeaking()` — saves current bar visibility, shows bar with speaking animation. Returns previous visibility state.
-- `restoreBar(wasVisible)` — restores bar to pre-notification state.
-- `addChatMessage(text, type)` — adds a styled bubble (type: `'announcement'` or `'assistant'`). Used by notifications for message display. Passive announcements use `'announcement'` (centered); interactive notifications (ask_question, start_conversation) use `'assistant'` (follows chat layout).
-- `clearAnnouncementBubbles()` — removes only announcement-type bubbles (not user/assistant chat).
-- `setAnnouncementMode(on)` — toggles `.announcement-mode` CSS class on the chat container. When active, the container is vertically and horizontally centered on the viewport instead of anchored to the bottom. Only used for passive announcements; interactive notifications (ask_question, start_conversation) use normal chat positioning.
-- `showTimerAlert(onDismiss)` — shows full-screen timer alert overlay with dismiss callback.
-- `flashErrorBar()` — shows red error bar, adds `error-flash` CSS class (3× blink animation), auto-removes on `animationend`.
+This design ensures the UI persists when the user navigates between dashboard views — HA destroys and recreates custom elements on navigation, but the global overlay remains.
 
 ---
 
-## 6. Gradient Bar
+## 4. Entry Point
 
-### 6.1 Bar States
-
-| State | Visible | Speed |
-|-------|---------|-------|
-| IDLE, CONNECTING, LISTENING, PAUSED | No | — |
-| WAKE_WORD_DETECTED, STT | Yes | 3s |
-| INTENT | Yes | 0.5s |
-| TTS | Yes | 2s |
-| ERROR | Yes | 2s, red |
-
-### 6.2 Error Mode
-
-Red gradient stays visible via `pipeline.serviceUnavailable`. Intent errors auto-hide after `Timing.INTENT_ERROR_DISPLAY` (3s).
-
-### 6.3 TTS Bar Persistence
-
-`ui.updateForState(state, serviceUnavailable, ttsPlaying)` — refuses to hide when `ttsPlaying` is true.
-
-### 6.4 CSS
-
-`background-size: 200% 100%` with `vs-gradient-flow` keyframes. `seamlessGradient()` appends first color for seamless loop.
-
----
-
-## 7. Chimes
-
-All chimes generated programmatically via Web Audio API oscillator in `audio/chime.js`. No audio files.
-
-### 7.1 Chime Types
-
-| Constant | Trigger | Notes |
-|----------|---------|-------|
-| `CHIME_WAKE` | `wake_word-end` (valid wake word) | Sine, C5→E5→G5 (523→659→784 Hz) ascending |
-| `CHIME_DONE` | TTS playback complete | Sine, G5→E5 (784→659 Hz) descending |
-| `CHIME_ERROR` | Unexpected pipeline/intent error | Square wave, 300→200 Hz |
-| `CHIME_ANNOUNCE` | Pre-announcement ding-dong | Sine, G5→D5 (784→587 Hz) |
-| `CHIME_ALERT` | Timer finished | Sine, A5→E5→A5 (880→660→880 Hz) three-tone repeating |
-
-### 7.2 Volume
-
-Scaled to max 0.5: `(config.chime_volume / 100) * 0.5`. Error chime additionally reduced to 30%.
-
-### 7.3 Implementation
-
-Two playback functions in `audio/chime.js`, selected by pattern `type`:
-
-**`playChime(card, pattern, log)`** — for `type: 'single'` patterns (WAKE, DONE, ERROR). Creates one oscillator, schedules frequency steps via `setValueAtTime()`, uses exponential gain ramp envelope. Called by `TtsManager.playChime(type)` which maps string names ('wake', 'done', 'error') to pattern constants.
-
-**`playMultiNoteChime(card, pattern, options)`** — for `type: 'multi'` patterns (ANNOUNCE, ALERT). Creates a separate oscillator per note with explicit `start`/`end` timing. Supports `onDone` callback (used by announcement pre-chime to chain into main media playback).
-
-**`getOrCreateContext(card)`** — reuses AudioManager's existing `AudioContext` if available and not closed (resumes if suspended), otherwise creates a new one. Returns `{ ctx, owned }` so callers know whether to close it.
-
-### 7.4 Configuration
-
-`chime_on_wake_word` enables wake chime. `chime_on_request_sent` enables done chime. Error chime respects `chime_on_wake_word`. Chimes always play locally (browser), never routed to remote media players.
-
----
-
-## 8. Error Handling
-
-### 8.1 Expected Errors
-
-Normal operational events — immediate restart, no error chime, no red bar:
-
-| Code | Meaning |
-|------|---------|
-| `timeout` | Pipeline-level idle timeout (from HA server) |
-| `wake-word-timeout` | Wake word detection timed out |
-| `stt-no-text-recognized` | User spoke but no text recognized |
-| `duplicate_wake_up_detected` | Wake word already being processed (underscores, not dashes) |
-
-**Interaction-aware cleanup:** If user was mid-interaction (`INTERACTING_STATES`), stops wake switch keep-alive, transitions to IDLE, clears chat/blur, plays done chime before restarting.
-
-### 8.2 Unexpected Errors
-
-All other error codes: stop wake switch keep-alive (if interacting), error chime (if interacting), red error bar, `serviceUnavailable = true`, retry with backoff.
-
-### 8.3 Intent Errors
-
-`intent-end` with `response_type: "error"` — red bar (auto-hides after 3s), error chime, `suppressTTS = true`.
-
-### 8.4 Wake Word Service Unavailable
-
-`wake_word-end` with empty `wake_word_output` — error bar, `serviceUnavailable = true`, backoff restart. Recovery mechanism: `handleWakeWordStart()` checks if `serviceUnavailable` is true. If so, starts a 2-second confirmation timer (`Timing.RECONNECT_DELAY`). If `serviceUnavailable` is still true when the timer fires, the service has recovered — clears error bar, resets retry count. This avoids false recovery on transient `wake_word-start` events.
-
-### 8.5 Ask Question Error
-
-If STT-only pipeline errors during ask-question, `handleError` checks `askQuestionCallback` — invokes with empty string, returns early.
-
----
-
-## 9. Service Recovery & Retry
-
-### 9.1 Retry Backoff
-
-Linear: `Math.min(Timing.RETRY_BASE_DELAY * retryCount, Timing.MAX_RETRY_DELAY)` → 5s, 10s, ..., 30s cap. Reset on recovery.
-
-### 9.2 Pipeline Idle Timeout
-
-`pipeline_idle_timeout` (default 300s) restarts pipeline while idle to refresh TTS tokens. Defers if mid-interaction or TTS playing.
-
-### 9.3 Pipeline Response Timeout
-
-`pipeline_timeout` (default 60s) sent to HA as run config `timeout`. Per-run, distinct from idle timeout.
-
-### 9.4 Tab Visibility
-
-**Hidden:** `isPaused` set immediately (blocks events), interaction UI cleaned up (including `stopWakeSwitchKeepAlive`), then after `Timing.VISIBILITY_DEBOUNCE` (500ms) audio paused → PAUSED.
-
-**Visible:** `audio.resume()`, pipeline state reset (`pipeline.resetForResume()`), `pipeline.restart(0)` — always fresh start.
-
-### 9.5 Concurrent Restart Prevention
-
-`pipeline.isRestarting` flag serializes concurrent restart attempts. Set at `restart()` entry, cleared before `start()`. `handleRunEnd()` also checks and skips.
-
-### 9.6 Home Assistant Reconnection
-
-On `'ready'` event:
-
-**PipelineManager:** `setupReconnectListener()` in `pipeline/comms.js` → `resetRetryState()`, clear error bar, restart after `Timing.RECONNECT_DELAY` (2s).
-
-**Notification Managers:** `entity-subscription.js` re-subscribes to `state_changed` with singleton guard (`card.isOwner`).
-
----
-
-## 10. WebSocket Communication
-
-### 10.1 Connection
-
-Uses HA's existing `hass.connection`. Binary audio via `hass.connection.socket`. Card's `connection` getter falls back to `_hass.connection` if `_connection` is null.
-
-### 10.2 Pipeline Subscription
-
-`subscribePipelineRun()` in `pipeline/comms.js`:
+`src/index.js` registers the custom element and announces the card to HA's card picker:
 
 ```javascript
-connection.subscribeMessage(onMessage, {
-  type: 'assist_pipeline/run',
-  start_stage: 'wake_word',  // or 'stt' for continue conversation
-  end_stage: 'tts',          // or 'stt' for ask-question
-  input: { sample_rate: 16000, timeout: 0 },
-  pipeline: pipelineId,
-  timeout: config.pipeline_timeout,
-  device_id: deviceId,       // resolved from satellite_entity for timer support
-});
+customElements.define('voice-satellite-card', VoiceSatelliteCard);
+window.customCards.push({ type: 'voice-satellite-card', ... });
 ```
 
-**`input.timeout: 0` is critical.** Omitted → HA defaults to 3s → `wake-word-timeout` errors. `timeout: 0` = listen indefinitely. Omitted for STT start stage (server VAD handles silence).
-
-**`device_id` resolution:** `resolveDeviceId()` in `pipeline/comms.js` looks up the satellite entity's `device_id` via HA's entity registry. Required for timer support — without it, HA cannot route timer events to the correct device.
-
-**Post-subscription:** After `subscribePipelineRun()` returns, `pipeline.start()` calls `audio.startSending(() => this._binaryHandlerId)` to begin sending mic audio, sets `_isStreaming = true`, and starts the idle timeout. The `subscribePipelineRun` callback routes events to `card.onPipelineMessage(message)`.
-
-### 10.3 Pipeline Event Format
-
-**Events delivered DIRECTLY — NOT wrapped in `{ type: "event", event: {...} }`.**
-
-```javascript
-{ type: "run-start", data: { runner_data: { stt_binary_handler_id: 1 } }, timestamp: "..." }
-```
-
-Read `message.type` and `message.data` directly. Do NOT access `message.event`.
-
-### 10.4 Pipeline Events Reference
-
-| Event | Key Data Fields |
-|-------|----------------|
-| `run-start` | `data.runner_data.stt_binary_handler_id`; optionally `data.tts_output.url` + `stream_response: true` |
-| `wake_word-end` | `data.wake_word_output.wake_word_id` (empty object = service unavailable) |
-| `stt-end` | `data.stt_output.text` |
-| `intent-progress` | `data.chat_log_delta.content` (text); `data.tts_start_streaming: true` (early TTS) |
-| `intent-end` | `data.intent_output.response.speech.plain.speech`; `response_type`; `continue_conversation`; `conversation_id` |
-| `tts-end` | `data.tts_output.url` or `data.tts_output.url_path` |
-| `error` | `data.code`, `data.message` |
-
-### 10.5 Binary Audio Transmission
-
-`sendBinaryAudio()` in `audio/comms.js`. First byte = `stt_binary_handler_id`, then 16-bit PCM. Checks `socket.readyState === WebSocket.OPEN`.
-
-### 10.6 Comms Files Summary
-
-| File | Functions |
-|------|-----------|
-| `card/comms.js` | `syncSatelliteState`, `updateInteractionState`, `turnOffWakeWordSwitch` |
-| `pipeline/comms.js` | `resolveDeviceId`, `listPipelines`, `subscribePipelineRun`, `setupReconnectListener` |
-| `audio/comms.js` | `sendBinaryAudio` |
-| `tts/comms.js` | `playRemote`, `stopRemote` |
-| `timer/comms.js` | `sendCancelTimer` |
-| `ask-question/comms.js` | `sendAnswer` |
-| `shared/notification-comms.js` | `sendAck` |
-
-Every comms function takes `card` as first parameter, uses only public accessors.
+A styled console log shows the card version on load (`__VERSION__` is injected at build time from `package.json` via Webpack's DefinePlugin).
 
 ---
 
-## 11. Microphone
+## 5. Card Orchestrator (`card/index.js`)
 
-### 11.1 Audio Capture Chain
+`VoiceSatelliteCard` extends `HTMLElement` and composes 11 managers:
+
+| Manager | Purpose |
+|---------|---------|
+| `AudioManager` | Microphone, AudioWorklet, send interval |
+| `TtsManager` | TTS playback (browser + remote), chime facade |
+| `PipelineManager` | Pipeline lifecycle (start/stop/restart/retry/mute) |
+| `UIManager` | All DOM manipulation |
+| `ChatManager` | Chat bubble state, streaming text fade |
+| `DoubleTapHandler` | Double-tap to cancel interactions |
+| `VisibilityManager` | Tab pause/resume |
+| `TimerManager` | Timer entity subscription + pills + alerts |
+| `AnnouncementManager` | Announcement playback + ACK |
+| `AskQuestionManager` | Question → STT → answer → match feedback |
+| `StartConversationManager` | Prompt → STT listening mode |
+
+### 5.1 Lifecycle
+
+**`connectedCallback()`** — Called when HA inserts the element:
+1. Clears any pending disconnect timeout
+2. Renders the hidden Shadow DOM container
+3. If this is an editor preview, renders the static preview and returns
+4. Ensures the global UI exists
+5. Sets up visibility change listener
+6. If no singleton is active and we have a connection, starts listening
+
+**`disconnectedCallback()`** — Called when HA removes the element (e.g., view navigation):
+- Sets a 100ms grace period (`DISCONNECT_GRACE`) before tearing down. This prevents the pipeline from restarting when the user simply switches views.
+
+**`set hass(hass)`** — Called by HA when state updates arrive:
+1. Editor previews return immediately
+2. If this is the active owner: updates TimerManager and retries satellite subscription if needed
+3. If not yet started: acquires connection, ensures global UI, starts listening
+
+**`setConfig(config)`** — Called when the user saves config in the editor:
+1. Captures whether satellite_entity was previously empty
+2. Merges config with defaults
+3. Updates logger debug flag
+4. Applies styles to the global UI
+5. Updates editor preview if in preview context
+6. Propagates config to the active singleton instance
+7. **Config reactivity:** If satellite_entity was just configured (empty → value), triggers startup without requiring a page reload
+
+**Gotcha — Config reactivity:** When a user adds a satellite entity in the editor and saves, `set hass` may have already returned early (before `_hasStarted` is set) because `satellite_entity` was empty at the time. `setConfig` detects this transition and triggers startup directly.
+
+### 5.2 Event Delegation
+
+The card delegates all event handling to free functions in `card/events.js`:
+
+- `setState(card, newState)` — Updates card state, triggers UIManager update, syncs state to integration (with barge-in guard: skips idle/listening sync while TTS is playing)
+- `startListening(card)` — Claims singleton, starts mic + pipeline, subscribes to satellite events, sets up double-tap
+- `handleStartClick(card)` — Ensures AudioContext on gesture, then calls `startListening`
+- `onTTSComplete(card, playbackFailed)` — Handles post-TTS cleanup: continue conversation, done chime, clear UI, play queued notifications
+- `handlePipelineMessage(card, message)` — Dispatches pipeline events by type to PipelineManager handlers (with guards for paused/restarting)
+
+---
+
+## 6. Audio System (`audio/`)
+
+### 6.1 AudioManager
+
+Manages the microphone lifecycle:
+
+1. **Acquisition** — `startMicrophone()` creates an AudioContext (16 kHz requested), gets `getUserMedia` with configurable constraints (noise suppression, echo cancellation, auto gain control, voice isolation).
+
+2. **Capture** — Tries AudioWorklet first (inline processor via Blob URL), falls back to ScriptProcessor (2048 buffer). Both push `Float32Array` chunks to `audioBuffer`.
+
+3. **Send loop** — `startSending(binaryHandlerIdGetter)` starts a 100ms `setInterval` that:
+   - Combines all buffered chunks into one `Float32Array`
+   - Resamples to 16 kHz if the browser's actual sample rate differs (linear interpolation)
+   - Converts to 16-bit PCM (`Int16Array`)
+   - Sends as binary WebSocket frame with the handler ID byte prefix
+
+4. **Pause/Resume** — On tab hide: disables audio tracks and stops sending. On tab show: flushes stale audio buffer, re-enables tracks, resumes AudioContext if suspended.
+
+**Gotcha — AudioWorklet inline code:** The worklet processor is defined as an inline string, converted to a Blob URL, loaded as a module, then the URL is immediately revoked. This avoids CORS issues with external worklet files in HA's WebView.
+
+### 6.2 Binary Audio Protocol
+
+Audio is sent over the existing HA WebSocket connection as binary frames:
 
 ```
-getUserMedia → MediaStreamSource → AudioWorklet (or ScriptProcessor) → Float32 buffer → resample → Int16 PCM → binary WebSocket
+[handler_id: 1 byte][pcm_data: N bytes of Int16Array]
 ```
 
-Setup in `audio/processing.js` (worklet/processor creation, resample, PCM conversion). Buffer management and send interval in `audio/index.js`. Binary WebSocket transmission in `audio/comms.js`. The flow per 100ms tick: `audio/index.js` calls `sendAudioBuffer()` in `processing.js`, which combines buffers, resamples, converts to PCM, then calls `sendBinaryAudio()` in `comms.js`.
+The `handler_id` byte is obtained from the init event of `voice_satellite/run_pipeline`. HA's WebSocket implementation routes the binary data to the registered handler.
 
-### 11.2 Audio Format
+### 6.3 Chime System
 
-| Parameter | Value |
-|-----------|-------|
-| Sample Rate | 16,000 Hz (resampled if browser provides different rate) |
-| Channels | 1 (mono) |
-| Bit Depth | 16-bit signed PCM |
-| Chunk Size | 2048 samples per ScriptProcessor, 128 per AudioWorklet frame |
-| Send Interval | 100ms |
+Five predefined chime patterns synthesized via Web Audio API oscillators:
 
-### 11.3 Audio Constraints
+| Chime | Pattern | Used For |
+|-------|---------|----------|
+| `CHIME_WAKE` | 3-note ascending sine (C5→E5→G5) | Wake word detected |
+| `CHIME_DONE` | 2-note descending sine (G5→E5) | Interaction complete |
+| `CHIME_ERROR` | 2-note descending square (quiet) | Error / unmatched answer |
+| `CHIME_ANNOUNCE` | 2-note ding-dong sine (G5→D5) | Pre-announcement |
+| `CHIME_ALERT` | 3-note rising sine (A5→E5→A5) | Timer finished (loops every 3s) |
+
+Single-note chimes (`playChime`) use one oscillator with frequency steps. Multi-note chimes (`playMultiNoteChime`) create separate oscillators per note with individual envelopes.
+
+Volume scaled to max 0.5: `(config.chime_volume / 100) * 0.5`. Error chime additionally reduced to 30%.
+
+### 6.4 Media Playback
+
+`media-playback.js` provides two utilities:
+- `buildMediaUrl(path)` — Normalizes a URL path: full URLs pass through, root-relative paths are prefixed with `window.location.origin`
+- `playMediaUrl(url, volume, callbacks)` — Creates an `<audio>` element, wires `onended`/`onerror` callbacks, returns the element for external stop
+
+---
+
+## 7. TTS Playback (`tts/`)
+
+### 7.1 TtsManager
+
+Handles two playback targets:
+
+**Browser playback** — Creates an HTML Audio element via `playMediaUrl()`. Includes a 30-second watchdog timer that forces completion if the `onended` event never fires (workaround for HA Companion App WebView quirks).
+
+**Remote playback** — Calls `media_player.play_media` on the configured `tts_target` entity. Uses a 2-second delay before reporting completion (estimation, since there's no feedback from the media player).
+
+### 7.2 Streaming TTS
+
+If the pipeline's `run-start` event includes `tts_output.stream_response: true`, the TTS URL is stored. When `intent-progress` fires with `tts_start_streaming: true`, playback begins immediately — before the full TTS audio is generated. This reduces perceived latency. No pipeline restart at this point — text chunks are still arriving.
+
+### 7.3 Chime Facade
+
+`TtsManager.playChime(type)` maps `'wake'`/`'error'`/`'done'` to the corresponding chime pattern and delegates to `audio/chime.js`. This keeps chime logic centralized while letting all code paths call `tts.playChime()`.
+
+### 7.4 TTS Stop Safety
+
+When stopping TTS playback (`tts.stop()`), `onended` and `onerror` handlers are nulled BEFORE calling `pause()`. Otherwise the pause triggers `onended`, which calls `_onComplete()`, which can trigger continue-conversation or cleanup incorrectly (ghost events).
+
+---
+
+## 8. Pipeline System (`pipeline/`)
+
+### 8.1 PipelineManager
+
+The pipeline manager handles the full lifecycle of the bridged pipeline:
+
+**Starting (`start()`):**
+1. Checks mute state — if the mute switch is on, shows error bar and polls every 2 seconds until unmuted
+2. Cleans up any previous subscription
+3. Sets up the reconnect listener
+4. Subscribes to `voice_satellite/run_pipeline` via the integration
+5. Waits for the synthetic `init` event that carries the binary handler ID
+6. Starts audio sending
+
+**Stopping (`stop()`):**
+- Stops audio sending, clears mute poll timer, unsubscribes from the pipeline
+
+**Restarting (`restart(delay)`):**
+- Guards against concurrent restarts via `_isRestarting` flag
+- Stops, waits `delay` ms, then starts again
+- On start failure: shows error bar, sets `serviceUnavailable`, retries with backoff
+
+**Continue conversation (`restartContinue(conversationId, opts)`):**
+- Stops and restarts with `start_stage: 'stt'` (skipping wake word)
+- Optionally sets `askQuestionCallback` for STT-only mode
+- Optionally passes `extra_system_prompt` for start_conversation
+
+### 8.2 Mute Polling
+
+When the mute switch is on, the pipeline doesn't start. Instead, `start()` shows an error bar and schedules a retry every 2 seconds:
 
 ```javascript
-{
-  sampleRate: 16000,
-  channelCount: 1,
-  echoCancellation: config.echo_cancellation,
-  noiseSuppression: config.noise_suppression,
-  autoGainControl: config.auto_gain_control,
-  // Chrome-only voice isolation via advanced constraints
-  advanced: config.voice_isolation ? [{ voiceIsolation: true }] : undefined
+if (getSwitchState(hass, entity, 'mute') === true) {
+  this._muteCheckId = setTimeout(() => this.start(), MUTE_POLL_INTERVAL);
+  return;
 }
 ```
 
-### 11.4 AudioWorklet
+When the mute switch is turned off, the next poll starts the pipeline normally.
 
-Preferred capture method. Inline processor created as Blob URL in `audio/processing.js`. Falls back to ScriptProcessor if unavailable.
+### 8.3 Stale Event Filtering
 
-### 11.5 Resampling
+The bridged pipeline can receive events from a previous pipeline run that hasn't fully torn down on the server. The manager uses three flags to filter stale events:
 
-Linear interpolation in `audio/processing.js` when browser sample rate ≠ 16 kHz.
+- `_runStartReceived` — Set to `true` on `run-start`. All events before the first `run-start` for a given subscription are ignored.
+- `_wakeWordPhase` — Set `true` on `wake_word-start`, `false` on valid `wake_word-end`. A `run-end` during wake word phase (without error) is stale.
+- `_errorReceived` — Set `true` on `error`. Allows `run-end` to proceed even during wake word phase if an error preceded it.
 
-### 11.6 PCM Conversion
+**Gotcha — Empty wake_word-end:** When the pipeline is stopped/restarted, the server sends a `wake_word-end` with empty `wake_word_output`. This is not a real wake word detection — the manager ignores it to avoid entering a retry loop.
 
-Float32 (-1.0 to +1.0) to Int16: `sample < 0 ? sample * 0x8000 : sample * 0x7FFF`.
+### 8.4 Retry Backoff
 
-### 11.7 Send Interval
+On failure, `calculateRetryDelay()` uses linear backoff:
+- `delay = min(RETRY_BASE_DELAY × retryCount, MAX_RETRY_DELAY)`
+- Base: 5000ms, max: 30000ms
+- Reset on successful `wake_word-start` or reconnection
 
-`audio.startSending(binaryHandlerIdGetter)` starts a 100ms interval calling `sendAudioBuffer()` in `audio/processing.js`. The getter function (not a static value) allows `binaryHandlerId` to change across pipeline restarts. `audio.stopSending()` clears the interval. `audio.isStreaming` returns `true` when the interval is active.
+### 8.5 Pipeline Events
 
-`sendAudioBuffer()` combines buffered Float32 chunks, resamples if needed, converts to Int16 PCM, then calls `sendBinaryAudio()` in `audio/comms.js` for WebSocket transmission.
+Events flow from `voice_satellite/run_pipeline` → `card.onPipelineMessage()` → `handlePipelineMessage()` → individual handlers on PipelineManager:
 
-### 11.8 Pause/Resume
+| Event | Handler | Action |
+|-------|---------|--------|
+| `run-start` | `handleRunStart` | Store streaming TTS URL, set state (LISTENING or STT for continue) |
+| `wake_word-start` | `handleWakeWordStart` | Track recovery from service unavailable |
+| `wake_word-end` | `handleWakeWordEnd` | Play wake chime (if enabled), show blur, enter WAKE_WORD_DETECTED |
+| `stt-start` | (inline) | Set state STT |
+| `stt-end` | `handleSttEnd` | Show transcription bubble, invoke askQuestionCallback if set |
+| `intent-start` | (inline) | Set state INTENT |
+| `intent-progress` | `handleIntentProgress` | Stream response text, start streaming TTS |
+| `intent-end` | `handleIntentEnd` | Show final response, handle continue_conversation, handle errors |
+| `tts-start` | (inline) | Set state TTS |
+| `tts-end` | `handleTtsEnd` | Play TTS audio (if not already streaming), restart pipeline |
+| `run-end` | `handleRunEnd` | Clean up: clear chat, hide blur, restart (or defer if TTS playing) |
+| `error` | `handleError` | Expected errors: restart silently. Unexpected: error bar + backoff retry |
 
-`audio.pause()` disables all audio tracks and stops the send interval. `audio.resume()` re-enables tracks. On visibility resume, if the pipeline is streaming but audio is not, `startSending()` is restarted with a fresh getter.
+### 8.6 Wake Sound Switch
 
----
+Before playing the wake chime, `handleWakeWordEnd` checks the integration's `wake_sound` switch via `getSwitchState()`. This function looks up the switch entity through HA's entity registry (finding the switch with `translation_key: 'wake_sound'` on the same device as the satellite entity).
 
-## 12. Browser Microphone Restrictions
+The done chime after TTS playback follows the same pattern.
 
-### 12.1 The Problem
+**Gotcha — getSwitchState lookup:** The function uses `hass.entities` (HA frontend entity registry cache) to find sibling switch entities by `device_id` + `translation_key`. This is more reliable than reading `extra_state_attributes` on the satellite entity, which can be stale if the state_changed listener wasn't set up in time.
 
-1. **HTTPS Required:** `getUserMedia` only works in secure contexts.
-2. **User Gesture Required:** First call must occur within a user-initiated event.
+### 8.7 Deferred Run-End
 
-### 12.2 The Solution
-
-When `startListening()` fails with mic permission errors, the start button appears. The click handler provides the required user gesture via `audio.ensureAudioContextForGesture()`.
-
-### 12.3 AudioContext Suspension
-
-Mobile browsers create `AudioContext` in `suspended` state. The card calls `audioContext.resume()` inside `audio._ensureAudioContextRunning()`.
-
-### 12.4 Fully Kiosk Browser Exception
-
-Does NOT have the user gesture restriction when properly configured — auto-starts without interaction.
-
----
-
-## 13. Singleton Instance Coordination
-
-### 13.1 Singleton Module (`shared/singleton.js`)
-
-Module-scoped state via `window.__vsSingleton` (shared across bundle loads):
-
-| Function | Purpose |
-|----------|---------|
-| `isOwner(card)` | Whether the given card is (or can be) the owner |
-| `getInstance()` | The current active card instance |
-| `isActive()` | Whether any instance is active |
-| `isStarting()` | Whether a startup is in progress |
-| `setStarting(val)` | Mark startup in progress |
-| `claim(card)` | Claim ownership after successful start |
-| `propagateConfig(card)` | Forward config changes to active instance |
-
-### 13.2 Notification Dedup
-
-Module-scoped variables (not window globals):
-
-| Variable | Location | Purpose |
-|----------|----------|---------|
-| `_lastAnnounceId` | `shared/satellite-notification.js` | Monotonic ID — first manager to claim wins |
-| `_lastTimerJson` | `timer/events.js` | JSON string comparison prevents re-processing |
-
-### 13.3 Entity Subscription Pattern
-
-`shared/entity-subscription.js` provides `subscribeToEntity()` — subscribes to `state_changed` events, immediate state check, reconnect listener. The three notification managers (announcement, ask-question, start-conversation) use it via `shared/satellite-notification.js`. **TimerManager uses `entity-subscription.js` directly** because timers have their own processing and dedup logic separate from the notification lifecycle.
+When `run-end` arrives while TTS is playing, `pendingRunEnd = true`. The cleanup is deferred. When `onTTSComplete()` eventually fires, it handles the full cleanup. `finishRunEnd()` clears chat, hides blur, sets state to IDLE, then restarts pipeline (unless `serviceUnavailable` is true, in which case retry is already scheduled).
 
 ---
 
-## 14. Configuration Reference
+## 9. Timer System (`timer/`)
 
-### Behavior
+### 9.1 TimerManager
+
+Timers are managed server-side by HA's intent system. The integration registers as a timer handler; HA routes `HassStartTimer`/`HassUpdateTimer`/`HassCancelTimer` intents to it. The integration stores active timers in the satellite entity's `active_timers` attribute.
+
+The card watches the satellite entity's state via `subscribeToEntity()` (HA's `state_changed` event bus). When the `active_timers` attribute changes:
+
+1. **processStateChange** — JSON-based dedup prevents duplicate processing. Compares current timer IDs with known IDs to detect additions and removals.
+2. **syncTimers** — Creates/updates timer objects with server-side `started_at` (epoch seconds) for accurate elapsed time calculation.
+3. **Tick** — A 1-second `setInterval` updates `secondsLeft` for each timer and refreshes pill displays.
+4. **Alert** — When timers are removed with `last_timer_event: "finished"`, shows a full-screen alert with looping chime.
+
+### 9.2 Timer Cancellation
+
+Timers can be cancelled two ways:
+- **Voice:** "Cancel the timer" → HA's intent system processes it normally
+- **Double-tap:** Double-tapping a timer pill sends `voice_satellite/cancel_timer` to the integration, which calls `timer_manager.cancel_timer(timer_id)` on HA's intent system. The pill is removed immediately (optimistic UI) while the server-side cancel propagates.
+
+### 9.3 Timer UI
+
+Timer pills render in a separate `#voice-satellite-timers` container positioned based on `timer_position` config (top-left, top-right, bottom-left, bottom-right). Each pill shows:
+- Timer icon (⏱)
+- Countdown in HH:MM:SS format
+- Progress bar (percentage of total time remaining)
+
+Timer alert: Full-screen overlay centered on viewport, repeating `CHIME_ALERT` every 3 seconds, with blur overlay (`BlurReason.TIMER`). Auto-dismiss after `timer_finished_duration` seconds (0 = manual dismiss only via double-tap).
+
+---
+
+## 10. Notification System
+
+Three notification features share a common lifecycle defined in `shared/satellite-notification.js`:
+
+### 10.1 Event Flow
+
+1. **Integration pushes event** via `voice_satellite/subscribe_events` subscription
+2. **`dispatchSatelliteEvent()`** routes to the correct manager based on flags:
+   - `ask_question: true` → AskQuestionManager
+   - `start_conversation: true` or `type === "start_conversation"` → StartConversationManager
+   - Otherwise → AnnouncementManager
+3. **Pipeline-busy queuing** — If the card is in an active interaction or TTS is playing, the notification is queued. Queued notifications play after `onTTSComplete()` calls `playQueued()`.
+4. **Hidden-tab queuing** — If the tab is hidden, events are queued and replayed when the tab becomes visible. Only the latest event is kept.
+5. **Dedup** — Monotonic announce IDs prevent duplicate processing.
+
+### 10.2 Playback Orchestration (`playNotification`)
+
+All three managers use the same playback flow:
+
+1. Show blur overlay (`BlurReason.ANNOUNCEMENT`)
+2. Show rainbow bar in speaking mode
+3. Set announcement mode for passive notifications (centers chat container on viewport)
+4. Play pre-announcement chime (or custom media if `preannounce_media_id` provided)
+5. Show message as chat bubble (passive: `'announcement'` type centered; interactive: `'assistant'` type follows chat layout)
+6. Play main media
+7. Call manager-specific `_onComplete` handler
+
+### 10.3 AnnouncementManager
+
+After playback:
+1. ACK to integration (`announce_finished`)
+2. Restart pipeline (HA cancels the running pipeline when triggering announcements)
+3. After configurable delay (`announcement_display_duration`): play done chime, clear UI
+
+### 10.4 StartConversationManager
+
+After playback:
+1. ACK to integration
+2. Clear announcement UI
+3. Show pipeline blur overlay
+4. `restartContinue(null, { extra_system_prompt })` — Restarts pipeline in STT mode, skipping wake word, with the automation's system prompt
+
+### 10.5 AskQuestionManager
+
+After playback:
+1. ACK to integration (signals question was played)
+2. Switch from centered announcement mode to interactive mode
+3. Play wake chime (delayed 500ms for chime settle — prevents false VAD trigger from mic picking up the chime)
+4. `restartContinue(null, { end_stage: 'stt', onSttEnd })` — STT-only pipeline
+5. On STT result: send answer via `voice_satellite/question_answered`
+6. Integration matches against hassil templates, returns `{ matched, id }`
+7. Play done chime (matched) or error chime + flash bar (unmatched)
+8. Cleanup with safety timeouts
+
+**Cancel flow:** `cancel()` handles mid-flow cancellation (triggered by double-tap or tab hide):
+- Clears all pending timeouts (chime settle, STT safety, cleanup)
+- Sends empty answer to release the integration's server-side `_question_event`
+- Hides the ANNOUNCEMENT blur overlay
+
+**STT safety timeout:** If the STT pipeline never produces a result (timeout, error, etc.), a 30-second safety timer sends an empty answer to release the integration's blocking event. The `_answerSent` flag prevents double-submission.
+
+---
+
+## 11. Satellite Subscription (`shared/satellite-subscription.js`)
+
+A single WebSocket subscription to `voice_satellite/subscribe_events` delivers all notification events:
+
+```javascript
+connection.subscribeMessage(onEvent, {
+  type: 'voice_satellite/subscribe_events',
+  entity_id: config.satellite_entity,
+});
+```
+
+The subscription is:
+- **Idempotent** — No-op if already subscribed
+- **Owner-only** — Only the singleton owner subscribes
+- **Reconnect-aware** — Re-subscribes on the connection's `ready` event
+- **Refreshable** — `refreshSatelliteSubscription()` tears down and re-establishes (called on tab resume to recover from stale connections)
+
+---
+
+## 12. Entity Subscription (`shared/entity-subscription.js`)
+
+A reusable pattern for watching HA entity state changes. Used by TimerManager to monitor `active_timers`:
+
+```javascript
+subscribeToEntity(manager, connection, entityId, onAttrs, logTag);
+```
+
+Features:
+- Subscribes to `state_changed` events filtered by entity_id
+- Performs immediate state check on subscribe (catches existing state)
+- Re-subscribes on connection `ready` event
+- Cleanup via `unsubscribeEntity(manager)`
+
+---
+
+## 13. Satellite State Helpers (`shared/satellite-state.js`)
+
+Two pure lookup functions used across all managers:
+
+### `getSatelliteAttr(hass, entityId, name)`
+Reads an attribute from the satellite entity's HA state cache.
+
+### `getSwitchState(hass, satelliteId, translationKey)`
+Reads a sibling switch entity's state. The lookup strategy:
+1. **Primary:** Search `hass.entities` (frontend entity registry cache) for a switch with matching `device_id` and `translation_key` on the `voice_satellite` platform. Read its state from `hass.states`.
+2. **Fallback:** Read `extra_state_attributes` on the satellite entity (may be stale).
+
+Used for:
+- `mute` switch — Blocks pipeline start when on
+- `wake_sound` switch — Controls chime playback (wake, done chimes)
+
+---
+
+## 14. Visibility Management (`card/visibility.js`)
+
+Handles browser tab show/hide transitions:
+
+### Tab Hidden
+1. Cancel any in-progress ask_question flow (prevents cleanup timers firing after resume)
+2. If in an active interaction: clear chat, hide blur, clear continue state, stop TTS
+3. After 500ms debounce: set state PAUSED, disable audio tracks
+
+**Gotcha — No `pipeline.stop()` on hide:** Calling `stop()` creates a race condition where the server is still cancelling the old pipeline when `resume()` starts a new one, causing `async_accept_pipeline_from_satellite()` to silently fail. The `restart(0)` call in `_resume()` handles the properly sequenced stop→start.
+
+### Tab Visible
+1. Resume AudioContext (browser suspends it in background)
+2. Clear `_isPaused` flag synchronously (no stale events can slip through the gap)
+3. Reset pipeline state via `resetForResume()`
+4. If a satellite event was queued while hidden: let the replayed event's flow manage the pipeline
+5. Otherwise: refresh satellite subscription and restart pipeline
+
+---
+
+## 15. Double-Tap Handler (`card/double-tap.js`)
+
+Listens on `document` for touch/click events. On double-tap (within 400ms threshold):
+
+**Priority order:**
+1. **Timer alert active** → Dismiss alert
+2. **Notification playing** → ACK each active notification, stop audio, clear UI, cancel ask_question's server-side event, restart pipeline
+3. **Active interaction** → Stop TTS, cancel ask_question, clear continue state, set IDLE, clear chat/blur, play done chime, restart pipeline
+
+Touch/click deduplication prevents double-firing on touch devices (touchstart fires before click).
+
+---
+
+## 16. Chat System (`card/chat.js`)
+
+Manages chat message state. All DOM operations delegate to UIManager.
+
+**Bubble types:**
+- `user` — Transcription bubble (styled with `transcription_*` config)
+- `assistant` — Response bubble (styled with `response_*` config)
+- `announcement` — Notification message (uses `response_*` styling, always centered)
+
+**Streaming text fade:** During `intent-progress` streaming, the last 24 characters fade from opaque to transparent using per-character `<span>` elements with decreasing opacity. When the final text arrives in `intent-end`, the full text replaces the faded version.
+
+**Layout modes:**
+- `chat` — User bubbles right-aligned, assistant left-aligned
+- `centered` — All bubbles centered
+
+**Gotcha — `streamEl` must be cleared between turns:** If not reset in `handleIntentEnd` and continue-conversation transitions, streaming text appends to the previous turn's bubble.
+
+---
+
+## 17. UI Manager (`card/ui.js`)
+
+Single owner of all DOM manipulation. Key responsibilities:
+
+### Blur Overlay (Reference-Counted)
+Multiple features can request the blur overlay simultaneously (pipeline, timer, announcement). Uses a `_blurReasons` object to track active reasons. The overlay hides only when all reasons are cleared. Forgetting to clear a reason leaves a permanent blur.
+
+### Rainbow Bar
+State-driven animation speeds:
+- `listening` — 3s flow (slow)
+- `processing` — 0.5s flow (fast)
+- `speaking` — 2s flow (medium)
+- `error-mode` — Red gradient, 2s flow
+- `error-flash` — 3x flash animation (ask_question unmatched answer)
+
+### Start Button
+Floating mic button with pulse animation. Shows on initial load, microphone permission denied, microphone not found, or generic mic error.
+
+### Chat Container
+Fixed position, centered horizontally. Bottom offset accounts for bar height. `announcement-mode` class centers vertically (for passive announcements). Notification system manages the toggle between announcement mode and normal mode.
+
+### Timer DOM
+Timer pills, alert overlay, progress bar updates, expired pill animations — all coordinated by TimerManager but executed by UIManager.
+
+---
+
+## 18. State Machine
+
+The card tracks its state via a string enum:
+
+```
+IDLE → CONNECTING → LISTENING → WAKE_WORD_DETECTED → STT → INTENT → TTS → IDLE
+                                                                          ↓
+                                                                    (continue conversation)
+                                                                          ↓
+                                                                    STT → INTENT → TTS
+```
+
+| State | Meaning | Bar |
+|-------|---------|-----|
+| `IDLE` | Waiting / inactive | Hidden |
+| `CONNECTING` | Starting mic + pipeline | Hidden |
+| `LISTENING` | Pipeline running, waiting for wake word | Hidden |
+| `PAUSED` | Tab hidden | Hidden |
+| `WAKE_WORD_DETECTED` | Wake word heard, now capturing speech | Visible (slow) |
+| `STT` | Capturing speech | Visible (slow) |
+| `INTENT` | Processing intent / generating response | Visible (fast) |
+| `TTS` | Playing response audio | Visible (medium) |
+| `ERROR` | Error state | Hidden |
+
+State changes are synced to the integration entity via `voice_satellite/update_state`. The integration maps card states to HA satellite states:
+
+| Card State | HA State |
+|-----------|----------|
+| IDLE, CONNECTING, LISTENING, PAUSED, ERROR | `idle` |
+| WAKE_WORD_DETECTED, STT | `listening` |
+| INTENT | `processing` |
+| TTS | `responding` |
+
+---
+
+## 19. Configuration
+
+### 19.1 Config Defaults
+
+`DEFAULT_CONFIG` in `constants.js` defines all configuration keys with their defaults:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `start_listening_on_load` | boolean | `true` | Auto-start on page load |
-| `pipeline_id` | string | `''` | Pipeline ID (empty = preferred/first) |
-| `wake_word_switch` | string | `''` | Entity to turn OFF on wake word |
-| `state_entity` | string | `''` | `input_text` entity to track interaction state |
-| `satellite_entity` | string | `''` | `assist_satellite` entity from companion integration |
-| `pipeline_timeout` | number | `60` | Server-side: max seconds per pipeline run |
-| `pipeline_idle_timeout` | number | `300` | Client-side: seconds before silent pipeline restart |
-| `continue_conversation` | boolean | `true` | Multi-turn dialogue support |
-| `double_tap_cancel` | boolean | `true` | Double-tap to cancel interaction |
-| `chime_on_wake_word` | boolean | `true` | Play wake chime |
-| `chime_on_request_sent` | boolean | `true` | Play done chime after TTS |
-| `chime_volume` | number | `100` | Chime volume 0-100 |
-| `tts_volume` | number | `100` | TTS playback volume 0-100 (browser only) |
-| `tts_target` | string | `''` | TTS output: empty = browser, or `media_player.*` |
-| `streaming_response` | boolean | `true` | Stream response text progressively |
-| `debug` | boolean | `false` | Structured console logging |
-
-### Microphone
-
-| Key | Type | Default |
-|-----|------|---------|
-| `noise_suppression` | boolean | `true` |
-| `echo_cancellation` | boolean | `true` |
-| `auto_gain_control` | boolean | `true` |
-| `voice_isolation` | boolean | `false` |
-
-### Activity Bar
-
-`bar_position` (bottom/top), `bar_height` (2-40, default 16), `bar_gradient` (rainbow), `background_blur` (true), `background_blur_intensity` (0-20, default 5).
-
-### Bubble Layout
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `bubble_style` | string | `'chat'` | `'centered'` (all bubbles centered) or `'chat'` (user right, assistant left) |
-| `bubble_container_width` | number | `85` | Width of the bubble area as percentage (40-100). Useful for large screens. |
-
-### Bubble Styling
-
-9-property pattern via `shared/style-utils.js`: `show_*`, `*_font_size` (20), `*_font_family` ('inherit'), `*_font_color`, `*_font_bold` (true), `*_font_italic` (false), `*_background`, `*_border_color`, `*_padding` (16), `*_rounded` (true). Applied to transcription (`transcription_*`), response (`response_*`), and timer (`timer_*`) prefixes.
-
-### Timer
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `timer_position` | string | `'bottom-right'` | Pill position: `top-left`, `top-right`, `bottom-left`, `bottom-right` |
+| **Behavior** ||||
+| `satellite_entity` | string | `''` | **Required.** Integration satellite entity ID (e.g., `assist_satellite.kitchen_tablet`) |
+| `start_listening_on_load` | bool | `true` | Auto-start pipeline on page load (internal, not in editor) |
+| `double_tap_cancel` | bool | `true` | Enable double-tap to cancel (internal, not in editor) |
+| `debug` | bool | `false` | Enable debug logging to browser console |
+| `chime_volume` | number | `100` | Chime volume (0–100) |
+| `tts_volume` | number | `100` | TTS playback volume (0–100) |
+| `tts_target` | string | `''` | Remote media_player entity for TTS (empty = browser playback) |
+| **Microphone Processing** ||||
+| `noise_suppression` | bool | `true` | WebRTC noise suppression |
+| `echo_cancellation` | bool | `true` | WebRTC echo cancellation |
+| `auto_gain_control` | bool | `true` | WebRTC auto gain control |
+| `voice_isolation` | bool | `false` | Experimental voice isolation (not supported on all browsers) |
+| **Timer Pill** ||||
+| `timer_position` | string | `'top-right'` | Pill container position: `top-left`, `top-right`, `bottom-left`, `bottom-right` |
+| `timer_font_size` | number | `20` | Font size in px |
+| `timer_font_family` | string | `'inherit'` | Font family |
+| `timer_font_color` | string | `'#444444'` | Text color |
+| `timer_font_bold` | bool | `true` | Bold text |
+| `timer_font_italic` | bool | `false` | Italic text |
+| `timer_background` | string | `'#ffffff'` | Pill background color |
+| `timer_border_color` | string | `'rgba(100, 200, 150, 0.5)'` | Pill border color |
+| `timer_padding` | number | `16` | Pill padding in px |
+| `timer_rounded` | bool | `true` | Rounded corners |
 | `timer_finished_duration` | number | `60` | Seconds to show finished alert (0 = manual dismiss only) |
+| **Announcements** ||||
+| `announcement_display_duration` | number | `5` | Seconds to display announcement text after playback |
+| **Activity Bar** ||||
+| `bar_position` | string | `'bottom'` | Bar position: `top` or `bottom` |
+| `bar_height` | number | `16` | Bar height in px |
+| `bar_gradient` | string | *(rainbow)* | Comma-separated CSS colors for the animated gradient |
+| `background_blur` | bool | `true` | Enable blur overlay behind UI |
+| `background_blur_intensity` | number | `5` | Blur intensity in px |
+| **Transcription Bubble** ||||
+| `transcription_font_size` | number | `20` | Font size in px |
+| `transcription_font_family` | string | `'inherit'` | Font family |
+| `transcription_font_color` | string | `'#444444'` | Text color |
+| `transcription_font_bold` | bool | `true` | Bold text |
+| `transcription_font_italic` | bool | `false` | Italic text |
+| `transcription_background` | string | `'#ffffff'` | Background color |
+| `transcription_border_color` | string | `'rgba(0, 180, 255, 0.5)'` | Border color |
+| `transcription_padding` | number | `16` | Padding in px |
+| `transcription_rounded` | bool | `true` | Rounded corners |
+| **Response Bubble** ||||
+| `show_response` | bool | `true` | Show assistant response bubble |
+| `response_font_size` | number | `20` | Font size in px |
+| `response_font_family` | string | `'inherit'` | Font family |
+| `response_font_color` | string | `'#444444'` | Text color |
+| `response_font_bold` | bool | `true` | Bold text |
+| `response_font_italic` | bool | `false` | Italic text |
+| `response_background` | string | `'#ffffff'` | Background color |
+| `response_border_color` | string | `'rgba(100, 200, 150, 0.5)'` | Border color |
+| `response_padding` | number | `16` | Padding in px |
+| `response_rounded` | bool | `true` | Rounded corners |
+| **Layout** ||||
+| `bubble_style` | string | `'chat'` | Bubble layout style: `chat` (left/right aligned) or `centered` |
+| `bubble_container_width` | number | `85` | Chat container width as % of viewport |
 
-### Announcements
+### 19.2 Editor
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `announcement_display_duration` | number | `5` | Seconds to display announcement bubble after playback |
+The editor uses HA's `ha-form` schema system. Each section is defined in its own file:
 
----
+| File | Section |
+|------|---------|
+| `behavior.js` | Satellite entity selector (required), debug toggle, mic processing expandable |
+| `media.js` | TTS target, volumes, announcement duration |
+| `timer.js` | Timer pill expandable (11 style fields) |
+| `bar.js` | Activity bar expandable (position, height, gradient, blur) |
+| `bubbles.js` | Bubble style, container width, transcription expandable, response expandable |
 
-## 15. TTS Playback
+The editor assembler (`editor/index.js`) concatenates all schemas and merges label/helper maps into `getConfigForm()`.
 
-### 15.1 URL Construction
+### 19.3 Preview
 
-`buildMediaUrl()` in `audio/media-playback.js`. Relative paths prefixed with `window.location.origin`. Absolute URLs pass through.
+`editor/preview.js` renders a static preview inside the card's Shadow DOM when it detects it's inside HA's card editor (via ancestor element detection: `HUI-CARD-PREVIEW` or `HUI-CARD[preview]` or any tag containing "PREVIEW").
 
-### 15.2 Browser Playback (Default)
+The preview shows:
+- Checkered transparency background (light/dark mode aware)
+- Rainbow bar with animation
+- Sample chat bubbles ("What's the temperature outside?" / "It's currently 75°F and sunny.")
+- Timer pill with mock countdown (00:04:32)
 
-`playMediaUrl()` in `audio/media-playback.js` creates HTML `Audio` element.
-
-**Barge-in restart:** In `handleTtsEnd()` (`pipeline/events.js`), after calling `tts.play(url)`, `pipeline.restart(0)` is called immediately in the same handler. This starts a new pipeline subscription that listens for the next wake word while TTS audio plays in the background.
-
-**Watchdog:** `Timing.PLAYBACK_WATCHDOG` (30s) forces `_onComplete()` if no audio events fire. Cleared on normal completion, error, or `stop()`.
-
-**Autoplay failure:** `_onComplete(true)` with `playbackFailed` flag when `play()` rejects, causing `onTTSComplete` to skip continue-conversation.
-
-### 15.3 Streaming TTS
-
-1. `run-start` provides URL with `stream_response: true` → `tts.storeStreamingUrl()`
-2. `intent-progress` with `tts_start_streaming: true` → immediate `tts.play(tts.streamingUrl)`
-3. `tts-end` → sees `tts.isPlaying` already true, skips duplicate playback
-
-**Critical:** No pipeline restart at `tts_start_streaming` — text chunks still arriving.
-
-### 15.3.1 Streaming Text Flow
-
-Separate from streaming TTS audio. When `streaming_response` is enabled:
-
-1. `intent-progress` events carry `chat_log_delta.content` text chunks
-2. First chunk `{ chat_log_delta: { role: "assistant" } }` is skipped (no `content` string)
-3. `handleIntentProgress()` appends each chunk to `chat.streamedResponse` accumulator
-4. `chat.updateResponse(text)` renders with streaming fade effect (last 24 chars faded)
-5. `handleIntentEnd()` calls `chat.showResponse(finalText)` (sets clean `textContent`), then resets `chat.streamedResponse = ''` and `chat.streamEl = null`
-
-The `streamEl` property holds the current assistant message DOM element — created on first chunk, reused for subsequent chunks, cleared on intent-end and continue-conversation transitions.
-
-### 15.4 Remote Playback
-
-`playRemote()` in `tts/comms.js` calls `media_player.play_media`. UI hidden after `REMOTE_COMPLETION_DELAY` (2s). Done chime skipped. Barge-in calls `stopRemote()`.
-
-### 15.5 The `tts.isPlaying` Flag
-
-Tracks TTS activity regardless of target. Used by `ui.updateForState()`, `handleRunEnd()`, `handleWakeWordEnd()`, idle timeout.
-
-### 15.6 `tts.stop()`
-
-Sets `_playing = false`. Clears watchdog and end timer. Browser: nulls `onended`/`onerror` (ghost prevention), pauses, clears src. Remote: calls `stopRemote()`.
-
----
-
-## 16. Continue Conversation
-
-### 16.1 Flow
-
-1. `handleIntentEnd()` stores `shouldContinue = true` and `continueConversationId`
-2. `onTTSComplete()` checks → clears state, resets `chat.streamEl`, calls `restartContinue(conversationId)`
-3. `restartContinue()` stops pipeline, sets `continueMode = true`, starts with `start_stage: 'stt'` + `conversation_id`
-4. `handleRunStart()` checks `continueMode` → sets state to STT instead of LISTENING
-
-**`restartContinue(conversationId, opts = {})`** — dual-purpose method:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `conversationId` | `string\|null` | — | Conversation ID for multi-turn. `null` for fresh conversation (start_conversation, ask_question). |
-| `opts.end_stage` | `string` | `'tts'` | Pipeline end stage. `'stt'` for ask-question (STT-only pipeline). |
-| `opts.onSttEnd` | `function\|null` | `null` | Callback for STT-only pipelines. Stored as `_askQuestionCallback`. Called by `handleSttEnd()` and `handleError()` with the transcribed text (or empty string on error). |
-
-When `onSttEnd` is provided, `handleSttEnd()` calls the callback instead of continuing to intent/TTS. `handleError()` also checks for the callback and invokes it with `''` so the caller always gets a result.
-
-### 16.2 Cleanup
-
-Continue state cleared in all paths: barge-in, expected errors, tab hidden, `restartContinue()` failure.
+All preview elements respect the current config for live style updates.
 
 ---
 
-## 17. Double-Tap to Cancel
+## 20. Build System
 
-`DoubleTapHandler` (`card/double-tap.js`) — `touchstart` and `click` on `document`. Two taps within `Timing.DOUBLE_TAP_THRESHOLD` (400ms). Touch/click dedup via `_lastTapWasTouch`.
+### 20.1 Dependencies
 
-**Actions:** Stop TTS → stop wake switch keep-alive → clear continue state → set IDLE → clear chat → hide blur → update interaction state → play done chime → restart pipeline.
+```json
+{
+  "@babel/core": "^7.24.0",
+  "@babel/preset-env": "^7.24.0",
+  "babel-loader": "^9.1.3",
+  "webpack": "^5.90.0",
+  "webpack-cli": "^5.1.4"
+}
+```
 
-**Timer alert:** Double-tap during alert → dismisses (checked before interaction cancel).
+All are devDependencies. There are no runtime dependencies — the card is a self-contained single-file bundle.
 
----
+### 20.2 Build Pipeline
 
-## 18. Interaction State Tracking
+**Webpack** bundles all ES6 modules into two outputs:
+- `voice-satellite-card.js` — Unminified with source maps (debugging)
+- `voice-satellite-card.min.js` — Minified production build (committed for HACS)
 
-`state_entity` → `input_text` entity: `ACTIVE` on wake word, `IDLE` on TTS complete or cancel. Stays `ACTIVE` during multi-turn. Managed by `updateInteractionState()` in `card/comms.js`.
+**Babel** transpiles ES6+ features for broader browser support.
 
----
+**CSS** is imported as a raw string via Webpack's `asset/source` rule and injected into the document head at runtime by UIManager.
 
-## 19. Structured Logging
+**Version** is defined only in `package.json` and injected via `DefinePlugin` as `__VERSION__`.
 
-`Logger` class. Format: `[VS][category] message`. `logger.log()` checks `_debug` internally. `logger.error()` always logs.
+Build command: `npm run build`
 
-Categories: `state`, `lifecycle`, `mic`, `pipeline`, `event`, `error`, `recovery`, `tts`, `ui`, `switch`, `visibility`, `editor`, `timer`, `announce`, `ask-question`, `start-conversation`.
+### 20.3 `seamlessGradient` Utility
 
----
+The gradient bar animation uses `background-position` keyframes that move from `0% 50%` to `200% 50%`. For the animation to loop seamlessly, the gradient must wrap without a hard edge. The `seamlessGradient()` function in `constants.js` handles this by appending the first color to the end of the color list:
 
-## 20. Visual Editor
+```javascript
+// Input:  "red, green, blue"
+// Output: "linear-gradient(90deg, red, green, blue, red)"
+```
 
-### 20.1 Schema-Based Editor
-
-`editor/index.js` assembles schema from section files (`bar.js`, `behavior.js`, `bubbles.js`, `media.js`, `timer.js`). HA renders using native selectors.
-
-**Top-level fields:** `pipeline_id`, `satellite_entity`, `state_entity`, `wake_word_switch`, `continue_conversation`, `debug`.
-
-**Hidden (YAML-only):** `start_listening_on_load`, `double_tap_cancel`.
-
-**Expandable sections:** Volume & Chimes, Microphone Processing, Timeouts, Activity Bar, Transcription Bubble, Response Bubble, Timer Pill (requires integration), Announcements (requires integration).
-
-### 20.2 Editor Preview
-
-`editor/preview.js` — `isEditorPreview()` walks DOM for `hui-card-preview`. Renders 300px preview with bar, blur, checkered background, sample bubbles, timer pill preview. Updates live on config changes.
-
----
-
-## 21. Companion Integration
-
-### 21.1 Communication
-
-**Card → Integration (WebSocket):**
-
-| Command | Purpose |
-|---------|---------|
-| `voice_satellite/announce_finished` | ACK announcement playback |
-| `voice_satellite/question_answered` | Submit answer (returns match result) |
-| `voice_satellite/update_state` | Sync pipeline state |
-
-**Integration → Card (Entity attributes):**
-
-| Attribute | Type | Purpose |
-|-----------|------|---------|
-| `active_timers` | `list[dict]` | Timers: id, name, total_seconds, started_at |
-| `last_timer_event` | `string` | Event type: started, cancelled, finished |
-| `announcement` | `dict` | Pending notification (announcement/ask-question/start-conversation) |
-
-### 21.2 Wake Word Switch (Screensaver Keep-Alive)
-
-The `wake_word_switch` config option specifies a toggleable entity (`switch`, `input_boolean`, `light`, etc.) to keep off during interactive sessions. This prevents screensavers (e.g. Fully Kiosk Browser) from activating while the user is mid-conversation.
-
-**Single turn-off call:** `turnOffWakeWordSwitch(card)` in `card/comms.js` — calls `homeassistant.turn_off` service. A pure comms function.
-
-**Keep-alive interval:** `startWakeSwitchKeepAlive(card)` / `stopWakeSwitchKeepAlive()` in `card/events.js` — manages a repeating interval (`Timing.WAKE_SWITCH_INTERVAL`, 5s) that continuously calls `turnOffWakeWordSwitch`. Module-scoped `_wakeSwitchIntervalId` tracks the interval. `startWakeSwitchKeepAlive` is idempotent (no-op if already running) and fires an immediate call before starting the interval. `stopWakeSwitchKeepAlive` is also idempotent.
-
-**Immediate calls on state transitions:** `setState()` in `card/events.js` fires `turnOffWakeWordSwitch(card)` on every transition into an `INTERACTING_STATES` state (WAKE_WORD_DETECTED, STT, INTENT, TTS). This ensures the screensaver is turned off immediately at each pipeline step, independent of the keep-alive interval.
-
-**Entry points** (start keep-alive interval):
-
-| Trigger | Location |
-|---------|----------|
-| Wake word detected | `handleWakeWordEnd()` in `pipeline/events.js` |
-| Notification playback | `playNotification()` in `shared/satellite-notification.js` |
-| Timer alert | `showAlert()` in `timer/ui.js` |
-
-**Exit points** (stop keep-alive interval):
-
-| Trigger | Location |
-|---------|----------|
-| TTS normal completion | `onTTSComplete()` in `card/events.js` |
-| Double-tap cancel | `DoubleTapHandler` in `card/double-tap.js` |
-| Tab hidden during interaction | `VisibilityManager._handleChange()` in `card/visibility.js` |
-| Expected pipeline error during interaction | `handleError()` in `pipeline/events.js` |
-| Unexpected pipeline error during interaction | `handleError()` in `pipeline/events.js` |
-| Timer alert dismissed | `clearAlert()` in `timer/ui.js` |
-| Ask-question answer cleanup | `_processAnswer()` in `ask-question/index.js` |
-| Deferred run-end (safety net) | `finishRunEnd()` in `pipeline/index.js` |
+Without the duplicated first color, the animation would snap from the last color back to the first on each loop iteration.
 
 ---
 
-## 22. Notification System
+## 21. Timing Constants
 
-### 22.1 Shared Lifecycle (`shared/satellite-notification.js`)
+All timing values are centralized in `constants.js`:
 
-All three notification features share a common lifecycle:
-
-1. **Subscribe** to `state_changed` events via `entity-subscription.js`
-2. **Process** with dedup (`_lastAnnounceId`) and pipeline-busy queuing
-3. **Claim** the notification ID so other managers skip it
-4. **Play** notification: blur → wake switch keep-alive → bar → announcement mode (passive only) → preannounce chime/media → main media → message bubble → onComplete
-5. **ACK** via `sendAck()` in `notification-comms.js`
-6. **Clear** UI via `clearNotificationUI()` (also disables announcement mode)
-
-**Passive vs. Interactive notifications:** The shared lifecycle distinguishes passive announcements from interactive notifications (ask_question, start_conversation). Passive announcements enable **announcement mode** (centered viewport positioning via `.announcement-mode` CSS class) and use `'announcement'` bubble type (centered text). Interactive notifications skip announcement mode and use `'assistant'` bubble type (follows configured chat layout — left-aligned in "Chat" style).
-
-State fields initialized by `initNotificationState(mgr)` as public properties directly on the manager instance: `playing`, `currentAudio`, `clearTimeoutId`, `barWasVisible`, `queued`. Subscription state (`_subscribed`, `_unsubscribe`, `_entityId`, `_reconnectListener`) is managed by `entity-subscription.js` using underscore-prefixed properties set directly on the manager.
-
-All notification managers expose `get card()` and `get log()` getters so that `satellite-notification.js` and `entity-subscription.js` can access the card and logger via public accessors.
-
-**Critical:** `satellite-notification.subscribe()` checks `mgr._subscribed` (the property set by `entity-subscription.js`), NOT a separate public `subscribed` field. This ensures the dedup guard uses the same property that `subscribeToEntity()` sets to `true` and `unsubscribeEntity()` resets to `false`.
-
-### 22.2 Announcements (`announcement/index.js`)
-
-After playback + ACK: auto-clears after `announcement_display_duration` seconds (default 5).
-
-### 22.3 Ask Question (`ask-question/index.js`)
-
-After playback + ACK:
-1. Disables announcement mode (switches to interactive chat positioning)
-2. Wake chime (browser only)
-3. STT-only mode via `pipeline.restartContinue(null, { end_stage: 'stt', onSttEnd: callback })`
-4. Question bubble stays visible during STT (rendered as `'assistant'` type)
-5. `sendAnswer()` in `ask-question/comms.js` → `voice_satellite/question_answered` → `{ success, matched, id }`
-6. Done chime on match, error chime + `flashErrorBar()` on no match
-7. 2s cleanup timer (immediate, not after WS round-trip) — stops wake switch keep-alive, clears notification UI, clears chat, hides blur, restarts pipeline
-8. `askQuestionHandled` flag prevents `handleRunEnd` UI cleanup
-
-**STT Safety Timeout:** A 30s safety timeout (`Timing.ASK_QUESTION_STT_SAFETY`) ensures the server is released if STT never produces a result (no speech detected, pipeline dies, run-end without error, etc.). Tracked by `_answerSent` flag — if still `false` when the timer fires, an empty answer is sent via `_processAnswer(announceId, '', isRemote)`, which triggers `sendAnswer` with an empty sentence. The server receives this and unblocks `async_internal_ask_question`. The safety timeout is cleared if a real answer comes through first.
-
-### 22.4 Start Conversation (`start-conversation/index.js`)
-
-After playback + ACK: clears announcement UI, shows pipeline blur, `pipeline.restartContinue(null)` for full pipeline (STT → Intent → TTS).
-
-### 22.5 Pipeline Busy Queuing
-
-Notifications stored in `queued` when interaction active. `onTTSComplete()` calls `playQueued()` on all three managers.
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `DOUBLE_TAP_THRESHOLD` | 400ms | Max interval between taps for double-tap |
+| `TIMER_CHIME_INTERVAL` | 3000ms | Interval between alert chime loops |
+| `PILL_EXPIRE_ANIMATION` | 400ms | Timer pill fade-out animation duration |
+| `PLAYBACK_WATCHDOG` | 30000ms | Force-complete TTS if `onended` never fires |
+| `RECONNECT_DELAY` | 2000ms | Delay before restarting pipeline after reconnect |
+| `INTENT_ERROR_DISPLAY` | 3000ms | How long to show error bar for intent errors |
+| `NO_MEDIA_DISPLAY` | 3000ms | Delay before completing text-only announcements |
+| `ASK_QUESTION_CLEANUP` | 2000ms | Safety timeout for sendAnswer promise |
+| `ASK_QUESTION_STT_SAFETY` | 30000ms | Safety timeout if STT never produces a result |
+| `MAX_RETRY_DELAY` | 30000ms | Maximum backoff delay |
+| `RETRY_BASE_DELAY` | 5000ms | Base delay for linear backoff |
+| `VISIBILITY_DEBOUNCE` | 500ms | Debounce before pausing on tab hide |
+| `DISCONNECT_GRACE` | 100ms | Grace period before teardown on disconnect |
+| `CHIME_SETTLE` | 500ms | Delay after wake chime before starting STT |
 
 ---
 
-## 23. Timers
+## 22. Error Handling
 
-### 23.1 Entity Contract
+### Expected Pipeline Errors
 
-`active_timers`: list of `{ id, name, total_seconds, started_at, start_hours, start_minutes, start_seconds }`. `last_timer_event`: string.
+These errors are normal and trigger a silent restart:
+- `timeout` — Pipeline inactivity timeout
+- `wake-word-timeout` — Wake word detection timeout
+- `stt-no-text-recognized` — VAD ended but no speech detected
+- `duplicate_wake_up_detected` — Multiple wake word detections (note: underscores, not dashes — HA API inconsistency)
 
-### 23.2 Client Side
+If the card was in an interacting state, UI is cleaned up and done chime plays before restart.
 
-**TimerManager** (`timer/index.js`) subscribes via `entity-subscription.js`.
+### Unexpected Pipeline Errors
 
-**State processing** (`timer/events.js`): Dedup via `_lastTimerJson`. Detects finished timers by diffing `knownTimerIds`.
+All other errors: show error bar (red gradient), play error chime, set `serviceUnavailable = true`, retry with linear backoff.
 
-**Timer pills** (`timer/ui.js`): Positioned pills, multiple stack, updated every second. Format: `HH:MM:SS` via `shared/format.js`.
+### Service Recovery
 
-**Timer alert** (`timer/ui.js`): Full-screen overlay, repeating `CHIME_ALERT` at `Timing.TIMER_CHIME_INTERVAL` (3s), blur `BlurReason.TIMER`, wake switch keep-alive started. `clearAlert()` stops the keep-alive. Auto-dismiss after `timer_finished_duration` (0 = manual only).
+When `wake_word-start` fires after a period of `serviceUnavailable`, a 2-second recovery timer starts. If still `serviceUnavailable` when it fires: clear error bar, reset retry count. This prevents premature recovery clearing from transient events.
 
-**Timer cancel** (`timer/comms.js`): `sendCancelTimer(card, timerName)` via `conversation.process` with built-in HA agent. Visual removal is optimistic.
+### Connection Recovery
 
----
-
-## 25. Known Gotchas & Non-Obvious Traps
-
-This section captures hard-won lessons from debugging. Read these before making changes.
-
-### 25.1 Pipeline Event Format
-HA's `subscribeMessage` delivers events DIRECTLY as `{ type: "run-start", data: {...} }`. They are NOT wrapped in `{ type: "event", event: {...} }` like other HA subscriptions. Access `message.type` and `message.data`, never `message.event`.
-
-### 25.2 `input.timeout: 0` for Wake Word
-If you omit `input.timeout` from the pipeline subscription, HA defaults to 3 seconds and fires `wake-word-timeout` errors constantly. Set it to `0` for indefinite listening. But for STT start stage, omit `input.timeout` entirely — server-side VAD handles silence detection.
-
-### 25.3 `duplicate_wake_up_detected` Uses Underscores
-All other HA error codes use dashes (`stt-no-text-recognized`, `wake-word-timeout`). This one uses underscores. The `EXPECTED_ERRORS` array must match exactly.
-
-### 25.4 Ask Question ACK Timing
-The card sends the ACK (`announce_finished`) BEFORE entering STT mode, not after. The integration uses the ACK to know TTS playback is done and then waits for the `question_answered` WS call. If ACK came after STT, the integration would time out waiting for the announce to finish.
-
-### 25.5 Ask Question Match Result Race
-The integration's `async_internal_ask_question` has a `finally` block that clears state. The `_question_match_result` is intentionally NOT cleared there because of an asyncio scheduling race: after `_question_match_event.set()` fires, both the WS handler (awaiting the event) and the `finally` block are ready to run. The scheduler might run `finally` first, clearing the result before the WS handler reads it. See integration DESIGN.md §6.7 for full details.
-
-### 25.6 Passive vs. Interactive Notification Positioning
-Passive announcements center on viewport (`.announcement-mode` CSS class). Interactive notifications (ask_question, start_conversation) must NOT use announcement mode — they follow the configured chat layout. The `isPassive` check (`!ann.ask_question && !ann.start_conversation`) in `satellite-notification.js` controls both positioning and bubble type.
-
-### 25.7 Bubble Types for Notifications
-Passive announcements use `'announcement'` type (centered, `alignSelf: center`). Interactive notifications use `'assistant'` type (follows `bubble_style` config — left-aligned in chat mode). Using the wrong type causes jarring layout shifts.
-
-### 25.8 STT Safety Timeout for Server Release
-If the card's STT pipeline ends without producing a result (no speech, pipeline dies, `run-end` without error), the server is left waiting on `_question_event` indefinitely. The 30s `ASK_QUESTION_STT_SAFETY` timeout sends an empty answer to release it. The `_answerSent` flag prevents double-submission if both the STT callback and safety timeout fire.
-
-### 25.9 TTS Ghost Events
-When stopping TTS playback (`tts.stop()`), null `onended` and `onerror` handlers BEFORE calling `pause()`. Otherwise the pause triggers `onended`, which calls `_onComplete()`, which can trigger continue-conversation or cleanup incorrectly.
-
-### 25.10 Blur Reference Counting
-`showBlurOverlay` / `hideBlurOverlay` use reason-based reference counting (`BlurReason.PIPELINE`, `TIMER`, `ANNOUNCEMENT`). The blur is only hidden when ALL reasons are cleared. Forgetting to hide a reason leaves a permanent blur overlay.
-
-### 25.11 Singleton `isActive()` vs `isOwner()`
-Before `singleton.claim()`, `isOwner()` returns true for all card instances (since the stored instance is null). The `isActive()` check gates subscriptions so they only fire after a card has successfully started. Without this, every card instance in the DOM would subscribe to entity changes independently.
-
-### 25.12 `streamEl` Must Be Cleared Between Turns
-`chat.streamEl` holds the current assistant message DOM element for streaming text. If not cleared between turns (in `handleIntentEnd` and continue-conversation transitions), streaming text appends to the previous turn's bubble.
-
-### 25.13 Cross-Repo Version Bumping
-The integration version appears in three places: `manifest.json` (`version`), `assist_satellite.py` (`sw_version` in `device_info`), and `DESIGN.md` header. All three must be updated together. The card version is in `package.json` only (injected at build time via Webpack `DefinePlugin`).
+The `setupReconnectListener` listens for the connection's `ready` event (HA reconnect). On reconnect: reset retry state, clear error bar, restart pipeline after 2-second delay (or defer if tab is paused).
 
 ---
 
-## 26. Implementation Checklist
+## 23. Cross-Repo Gotchas
+
+These are the non-obvious coupling points between the card and the integration:
+
+1. **Pipeline event relay** — The integration's `on_pipeline_event()` relays HA pipeline events to the card via `connection.send_event()`. The card expects the same event format as HA's `assist_pipeline/run` but receives it through a different WS subscription (`voice_satellite/run_pipeline`).
+
+2. **Init event** — The `voice_satellite/run_pipeline` handler sends a synthetic `{ type: "init", handler_id: N }` event before the real pipeline events. This is how the card gets the binary handler ID for audio transmission. The card blocks on this event before starting audio.
+
+3. **Stale event filtering (both sides)** — The integration gates on `_pipeline_run_started` (blocks events before run-start). The card uses `_runStartReceived`, `_wakeWordPhase`, and `_errorReceived` to filter events from overlapping pipeline runs.
+
+4. **Pipeline stop protocol** — When replacing a pipeline run, the integration sends an empty bytes stop signal to the audio queue. It waits for the old task to exit naturally (3s timeout), only force-cancelling as a last resort. Immediate cancellation would race with the stop signal and leave orphaned HA pipeline tasks.
+
+5. **Announcement blocking** — `async_announce()` blocks until the card sends `announce_finished`. If the card disconnects, `unregister_satellite_subscription()` releases the blocking event to prevent indefinite hangs.
+
+6. **Ask question two-phase flow:**
+   - Phase 1: Announcement playback (reuses `async_announce` flow)
+   - Phase 2: STT capture (card sends `question_answered`, integration matches with hassil)
+   - The `question_answered` WS handler waits for `_question_match_event` to get the hassil result before responding to the card
+   - **Race condition:** `_question_match_result` is intentionally NOT cleared in the `finally` block because the asyncio scheduler might run `finally` before the WS handler reads the result
+
+7. **Timer attribute immutability** — The integration creates new lists (not in-place mutation) for `_active_timers` on every change. In-place mutation would share the reference with the previously written state, causing HA to suppress the `state_changed` event (old == new).
+
+8. **Screensaver keep-alive** — The integration sends `homeassistant.turn_off` every 5 seconds to the configured screensaver entity while the satellite is non-idle. This keeps the screen on during interactions.
+
+9. **State sync ordering** — The card skips syncing `idle`/`listening` states while TTS is playing (barge-in scenario). This prevents the integration from showing `idle` while the user is still hearing the response.
+
+---
+
+## 24. Implementation Checklist
 
 When recreating or modifying this card, verify:
 
 **Architecture:**
 - [ ] All comms files take `card` as first parameter, use only public accessors
-- [ ] Helper files (events.js, ui.js, processing.js) use public getters/setters, never `mgr._field`
+- [ ] Helper files use public getters/setters, never `mgr._privateField`
 - [ ] All WebSocket/service calls isolated in comms files
 - [ ] All audio creation (AudioContext, Audio, oscillators) in `audio/` module
 - [ ] All DOM manipulation in `card/ui.js`
-- [ ] Imports to folder modules use bare paths (`'../audio'` not `'../audio/index.js'`)
 
 **Pipeline:**
-- [ ] Messages read `message.type` / `message.data` directly (NOT `message.event`)
-- [ ] `input.timeout: 0` for wake word, omitted for STT
-- [ ] Streaming reads `chat_log_delta.content`, first chunk `{ role: "assistant" }` skipped
+- [ ] Pipeline communicates through `voice_satellite/run_pipeline`, not `assist_pipeline/run`
+- [ ] Init event provides binary handler ID (not `runner_data.stt_binary_handler_id`)
+- [ ] No idle timeout — server manages pipeline lifecycle
+- [ ] Stale event filtering: `_runStartReceived`, `_wakeWordPhase`, `_errorReceived`
+- [ ] Empty `wake_word-end` (no `wake_word_id`) is ignored (pipeline restart artifact)
 - [ ] `isRestarting` flag prevents concurrent restarts
-- [ ] `restart()` clears idle timeout at entry, awaits `stop()` before new subscription
-- [ ] `handleRunEnd()` checks `isRestarting` and `askQuestionHandled`
-- [ ] `resetRetryState()` encapsulates 4-field retry reset
-- [ ] Reconnect: `resetRetryState()` then restart after `Timing.RECONNECT_DELAY`
-- [ ] Error logging: `(e?.message || JSON.stringify(e))`
+- [ ] Mute switch blocks pipeline start with 2s polling
 
 **TTS:**
 - [ ] `handleTtsEnd()` calls `tts.play()` then `pipeline.restart(0)` for barge-in
-- [ ] `updateForState()` keeps bar visible while `tts.isPlaying`
-- [ ] Done chime in `onTTSComplete()`, not `handleIntentEnd()`
-- [ ] Done chime suppressed during barge-in, continue conversation, remote TTS
-- [ ] `stop()` nulls `onended`/`onerror` before pausing
+- [ ] `stop()` nulls `onended`/`onerror` before pausing (ghost event prevention)
 - [ ] Watchdog (30s) forces completion if no audio events
-- [ ] `_onComplete(true)` on `play()` reject, skips continue-conversation
-- [ ] Barge-in guard excludes `State.TTS`
-- [ ] `streamingUrl` reset on every `run-start`
-- [ ] No restart at `tts_start_streaming` (text still streaming)
-- [ ] `handleTtsEnd()` skips if `isPlaying` already true
-- [ ] `isPlaying` flag for all TTS checks (not `_currentAudio`)
-
-**UI:**
-- [ ] Hidden elements have `pointer-events: none`
-- [ ] Chat container: `display: none` default, `flex` when `.visible`
-- [ ] Chat positioned with `bottom`, not `top`
-- [ ] `chat.streamEl` cleared between turns
-- [ ] `chat.clear()` resets `streamedResponse`
-- [ ] `chat._escapeHtml()` for streaming fade innerHTML
-- [ ] Blur uses reference counting with reason strings
-
-**Singleton:**
-- [ ] `window.__vsSingleton` for cross-bundle state
-- [ ] `disconnectedCallback` 100ms delay for view switch detection
-- [ ] `_lastAnnounceId` and `_lastTimerJson` are module-scoped (not window)
-
-**Timers:**
-- [ ] Subscribe via `entity-subscription.js`, not polling
-- [ ] `formatTime()` from `shared/format.js`
-- [ ] Cancel via `sendCancelTimer()` using `conversation.process`
-- [ ] `timer_finished_duration: 0` = manual dismiss only
+- [ ] Done chime controlled by `wake_sound` switch, suppressed for remote TTS
+- [ ] Streaming TTS: no restart at `tts_start_streaming`, skip duplicate at `tts-end`
 
 **Notifications:**
 - [ ] All three managers use `satellite-notification.js` lifecycle
-- [ ] ACK via `sendAck()` in `notification-comms.js` (takes `card`)
-- [ ] Queue behind active pipeline, `playQueued()` on all three managers
-- [ ] Passive announcements enable announcement mode (centered positioning); interactive notifications (ask_question, start_conversation) do not
-- [ ] Passive announcements use `'announcement'` bubble type; interactive notifications use `'assistant'` bubble type
-- [ ] `clearNotificationUI()` disables announcement mode
-- [ ] Ask-question `askQuestionHandled` prevents `handleRunEnd` cleanup
-- [ ] Ask-question disables announcement mode before entering STT
-- [ ] Ask-question STT safety timeout (30s) sends empty answer to release server if no speech detected
-- [ ] Ask-question `_answerSent` flag prevents double-submit from both STT callback and safety timeout
-- [ ] Ask-question cleanup starts immediately (2s, not after WS)
-- [ ] Start-conversation clears UI before entering STT mode
+- [ ] Events delivered via `voice_satellite/subscribe_events` (not entity attributes)
+- [ ] Pipeline-busy queuing, played via `playQueued()` on TTS complete
+- [ ] Hidden-tab queuing with visibility replay
+- [ ] Passive announcements: centered (`announcement-mode`), `'announcement'` bubble type
+- [ ] Interactive notifications: normal chat layout, `'assistant'` bubble type
+- [ ] Ask-question: ACK before STT, chime settle delay, STT safety timeout, `_answerSent` guard
+- [ ] Ask-question: `askQuestionHandled` prevents `handleRunEnd` cleanup
+- [ ] Start-conversation: clears UI before entering STT mode with `extra_system_prompt`
 
-**Wake Switch Keep-Alive:**
-- [ ] `turnOffWakeWordSwitch()` in `card/comms.js` (pure service call)
-- [ ] `startWakeSwitchKeepAlive()` / `stopWakeSwitchKeepAlive()` in `card/events.js` (interval lifecycle)
-- [ ] Module-scoped `_wakeSwitchIntervalId` (not on card or window)
-- [ ] `startWakeSwitchKeepAlive` is idempotent, fires immediate call then starts interval
-- [ ] `stopWakeSwitchKeepAlive` is idempotent
-- [ ] `setState()` calls `turnOffWakeWordSwitch` immediately on every `INTERACTING_STATES` transition
-- [ ] Keep-alive started at: wake word detected, notification playback, timer alert
-- [ ] Keep-alive stopped at: TTS complete, double-tap cancel, tab hidden, expected/unexpected errors, timer dismiss, ask-question cleanup, finishRunEnd
+**Singleton & UI:**
+- [ ] `window.__vsSingleton` for cross-bundle state (`instance`, `active`, `starting`)
+- [ ] `isStarting()`/`setStarting()` startup lock prevents concurrent start races
+- [ ] `disconnectedCallback` 100ms grace period for view switch detection
+- [ ] Config propagated to active instance via `propagateConfig`
+- [ ] Config reactivity: startup triggered when satellite_entity goes from empty to set
+- [ ] Blur uses reference counting with `BlurReason` strings
+- [ ] `chat.streamEl` cleared between conversation turns
 
-**Browser:**
-- [ ] `voice_isolation` uses `advanced` constraint array
-- [ ] `audio/comms.js` checks `socket.readyState === OPEN`
-- [ ] `duplicate_wake_up_detected` uses underscores
-- [ ] `startListening()` retries pipeline errors, start button only for mic errors
-- [ ] Tab hidden sets `isPaused` immediately before debounce
-- [ ] Visibility resume resets pipeline via `resetForResume()` before restart
-- [ ] Double-tap deduplicates `touchstart`/`click` via `_lastTapWasTouch`
-- [ ] Double-tap sets IDLE before clearing UI
-- [ ] `state_entity` updates only on WAKE_WORD_DETECTED (ACTIVE) and completion/cancel (IDLE)
-- [ ] `state_entity` stays ACTIVE during continue conversation
-- [ ] `onTTSComplete()` calls `playQueued()` on all three notification managers after cleanup
+**Version:**
+- [ ] Card version in `package.json` only (injected via DefinePlugin)
+- [ ] Integration version in 3 places: `manifest.json`, `assist_satellite.py` (sw_version), `DESIGN.md` header

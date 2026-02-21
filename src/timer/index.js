@@ -14,11 +14,10 @@
  */
 
 import { subscribeToEntity, unsubscribeEntity } from '../shared/entity-subscription.js';
-import { isOwner } from '../shared/singleton.js';
 import { processStateChange, resetTimerDedup } from './events.js';
 import { sendCancelTimer } from './comms.js';
 import {
-  ensureContainer, applyPosition, removeContainer,
+  removeContainer,
   removePill, syncDOM, tick, showAlert, clearAlert,
 } from './ui.js';
 
@@ -167,8 +166,7 @@ export class TimerManager {
   cancelTimer(timerId) {
     this._log.log('timer', `Cancelling timer: ${timerId}`);
 
-    const timer = this._timers.find((t) => t.id === timerId);
-    sendCancelTimer(this._card, timer?.name);
+    sendCancelTimer(this._card, timerId);
 
     // Remove pill with animation immediately for responsive UI
     removePill(this, timerId);

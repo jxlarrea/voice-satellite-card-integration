@@ -1,6 +1,6 @@
 # <img width="48" height="48" alt="icon" src="https://github.com/user-attachments/assets/dc2d3715-335b-4cf4-865f-31d622f8d2e7" /> Voice Satellite Card for Home Assistant
 
-Transform any browser into a voice-activated satellite for Home Assistant's Assist. This custom card captures microphone audio and streams it to your Assist pipeline for wake word detection, speech recognition, and voice responses - turning tablets, wall-mounted displays, or any device with a microphone into a hands-free voice assistant.
+Transform any browser into a full-featured voice satellite for Home Assistant's Assist. Combined with the **required** [Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration), this card gives your browser-based devices true satellite identity — with feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/), including wake word detection, timers, announcements, conversations, and more.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jxlarrea&repository=Voice-Satellite-Card-for-Home-Assistant)
 [![version](https://shields.io/github/v/release/jxlarrea/Voice-Satellite-Card-for-Home-Assistant?style=for-the-badge)](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant/releases)
@@ -13,16 +13,19 @@ Transform any browser into a voice-activated satellite for Home Assistant's Assi
 
 ## Why This Card?
 
-Home Assistant's built-in voice features require dedicated hardware like ESPHome devices or specific voice assistant hardware. But what if you already have a tablet mounted on your wall running the Home Assistant dashboard?
+Home Assistant's built-in voice features require dedicated hardware like ESPHome devices or the Home Assistant Voice Preview Edition. But what if you already have a tablet mounted on your wall running the Home Assistant dashboard?
 
 **Voice Satellite Card** solves this by:
 
+- **Turning your browser into a real satellite** - Registered as a proper `assist_satellite` device in Home Assistant, with the same capabilities as hardware satellites.
 - **Using your browser's microphone** - No additional hardware needed.
 - **Supporting wake words** - Say "OK Nabu" or your custom wake word to activate.
 - **Playing TTS responses** - Hear responses directly from your device or a remote media player.
+- **Providing voice-activated timers** - Set, update, and cancel timers with on-screen countdown pills.
+- **Receiving announcements** - Push TTS messages to specific devices from automations.
+- **Supporting interactive conversations** - Automations can proactively ask questions and listen for responses.
+- **Providing visual feedback** - Gradient bar shows current state, with transcription and response bubbles.
 - **Working on any device** - Tablets, phones, computers, kiosks.
-- **Providing visual feedback** - Gradient bar shows current state.
-- **Showing transcriptions** - See what was understood on screen.
 
 Perfect for wall-mounted tablets, kiosk displays, or any browser-based Home Assistant setup.
 
@@ -46,42 +49,51 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 
 ```mermaid
 graph TD
-    A[🎤 Browser Mic] -->|16kHz PCM| B[Home Assistant]
-    B --> C[Wake Word Detection]
-    C --> D[Speech-to-Text]
-    D --> E[Conversation Agent]
-    E --> F[Text-to-Speech]
-    F -->|Audio URL| G[🔊 TTS Playback]
-    G -->|Restart| C
+    A[🎤 Browser Mic] -->|16kHz PCM| B[Voice Satellite Card Integration]
+    B -->|Bridged Pipeline| C[Home Assistant Assist Pipeline]
+    C --> D[Wake Word Detection]
+    D --> E[Speech-to-Text]
+    E --> F[Conversation Agent]
+    F --> G[Text-to-Speech]
+    G -->|Audio URL| H[🔊 TTS Playback]
+    H -->|Restart| D
 ```
 
 ## Features
 
-- **Wake Word Detection** - Uses Home Assistant's already configured wake word detection (like Wyoming openWakeWord) for server-side processing.
+- **Wake Word Detection** - Uses Home Assistant's configured wake word detection (like Wyoming openWakeWord or microWakeWord) for server-side processing.
 - **Works Across Views** - Pipeline stays active when switching dashboard views.
 - **Auto-Start** - Automatically begins listening on page load (with fallback button).
 - **Visual Feedback** - Customizable gradient activity bar shows listening/processing/speaking states.
-- **Transcription Display** - Shows what was understood in a styled bubble.
+- **Transcription & Response Display** - Shows what was understood and the assistant's response in styled bubbles with real-time streaming.
 - **Continue Conversation** - When the assistant asks a follow-up question, the card automatically listens for a response without requiring the wake word again. Conversation history is displayed in a chat-style interface.
-- **Timers** - Voice-activated timers with on-screen countdown pills, alert chimes, and cancel via double-tap or voice. Requires the [companion integration](https://github.com/jxlarrea/voice-satellite-card-integration).
-- **Announcements** - Receive `assist_satellite.announce` service calls with pre-announcement chimes and TTS playback. Queues behind active conversations. Requires the [companion integration](https://github.com/jxlarrea/voice-satellite-card-integration).
-- **Start Conversation** - Receive `assist_satellite.start_conversation` calls that speak a prompt then automatically listen for the user's response. Requires the [companion integration](https://github.com/jxlarrea/voice-satellite-card-integration).
-- **Ask Question** - Receive `assist_satellite.ask_question` calls that speak a question, capture the user's voice response, and match it against predefined answers using hassil sentence templates. Returns structured results (matched answer ID and extracted slots) to the calling automation. Includes audio and visual feedback — done chime for matched answers, error chime with flashing red bar for unmatched responses. Requires the [companion integration](https://github.com/jxlarrea/voice-satellite-card-integration).
-- **Screensaver Control** - Optionally turn off Fully Kiosk screensaver when wake word is detected.
+- **Timers** - Voice-activated timers with on-screen countdown pills, alert chimes, and cancel via double-tap or voice.
+- **Announcements** - Receive `assist_satellite.announce` service calls with pre-announcement chimes and TTS playback. Queues behind active conversations.
+- **Start Conversation** - Receive `assist_satellite.start_conversation` calls that speak a prompt then automatically listen for the user's response.
+- **Ask Question** - Receive `assist_satellite.ask_question` calls that speak a question, capture the user's voice response, and match it against predefined answers using hassil sentence templates. Returns structured results to the calling automation.
+- **Mute Switch** - Mute/unmute the satellite from the Home Assistant UI or automations.
+- **Wake Sound Switch** - Enable/disable chime sounds from the Home Assistant UI.
+- **Screensaver Control** - Automatically dismisses a configured screensaver entity when a voice interaction begins.
+- **Pipeline & VAD Selection** - Choose which Assist pipeline and VAD sensitivity to use per satellite from the Home Assistant device page.
 - **Configurable Chimes** - Audio feedback for wake word detection and request completion.
-- **State Tracking** - Expose the card's interaction state (`ACTIVE`/`IDLE`) to a Home Assistant entity for per-device automations.
 
 ## Prerequisites
 
-Before using this card, ensure you have Home Assistant with the [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/) fully set up. A configured Assist Pipeline consists of:
+Before using this card, you need:
+
+### 1. Voice Satellite Card Integration (Required)
+
+Install the **[Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration)** — a separate custom component that registers your browser as an `assist_satellite` device in Home Assistant. The card will not function without it.
+
+### 2. Assist Pipeline
+
+Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/) with:
    - Wake word detection (e.g., [openWakeWord](https://www.home-assistant.io/voice_control/install_wake_word_add_on/), [microWakeWord](https://www.home-assistant.io/integrations/micro_wake_word/))
    - Speech-to-Text ([Whisper](https://www.home-assistant.io/integrations/whisper/), OpenAI, etc.)
    - Conversation agent ([Home Assistant](https://www.home-assistant.io/integrations/conversation/), OpenAI, Qwen, etc.)
    - Text-to-Speech ([Piper](https://www.home-assistant.io/integrations/piper/), Kokoro, etc.)
 
 > **Important:** Your wake word service must be **available to Home Assistant as a Wyoming integration** (either as an add-on or an external Wyoming instance) AND **enabled in your Assist pipeline**. The wake word option is hidden by default in the pipeline settings — go to **Settings → Voice assistants**, select your pipeline, click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown. If no wake word option appears, your wake word service is not installed or not detected by Home Assistant.
-
-For Timers and Announcements, the [Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration) is also required.
 
 ## Installation
 
@@ -110,51 +122,33 @@ Or you can also search it manually:
 
 ### Basic Setup
 
-Add the card to any dashboard view:
+1. Install the [Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration) and set up a satellite device
+2. Add the card to any dashboard view and select your satellite entity:
 
 ```yaml
 type: custom:voice-satellite-card
+satellite_entity: assist_satellite.living_room_tablet
 ```
 
-That's it! The card will use your default Assist pipeline and start listening automatically.
+The card will start listening automatically using your configured pipeline.
 
-### Full Configuration
+### Visual Editor
+
+All options are available in the visual card editor with a live preview that updates as you change settings.
+
+### Full Configuration Reference
 
 ```yaml
 type: custom:voice-satellite-card
 
 # Behavior
-pipeline_id: ''                    # Pipeline ID (empty = default pipeline)
-satellite_entity: ''               # assist_satellite entity from companion integration
-                                   # Enables timers and announcements
-state_entity: ''                   # input_text entity to track interaction state (ACTIVE/IDLE)
-                                   # e.g., 'input_text.voice_satellite_living_room'
-wake_word_switch: ''               # Switch to turn OFF when wake word detected
-                                   # e.g., 'switch.tablet_screensaver'
-pipeline_timeout: 60               # Server-side: max seconds for pipeline response (0 = no timeout)
-pipeline_idle_timeout: 300         # Client-side: seconds before pipeline restarts to keep TTS fresh (default 5 min)
-continue_conversation: true        # Continue listening after assistant asks a follow-up question
-chime_on_wake_word: true           # Play chime when wake word detected
-chime_on_request_sent: true        # Play chime after request processed
+satellite_entity: ''               # (Required) assist_satellite entity from the integration
+tts_target: ''                     # TTS output device (empty = browser, or media_player entity ID)
 chime_volume: 100                  # Chime volume (0-100)
 tts_volume: 100                    # TTS playback volume (0-100)
-tts_target: ''                     # TTS output device (empty = browser, or media_player entity ID)
 debug: false                       # Show debug info in browser console
 
-# Timers (requires companion integration)
-timer_position: top-right          # 'top-left', 'top-right', 'bottom-left', 'bottom-right'
-timer_font_size: 24                # Font size in pixels
-timer_font_family: inherit         # CSS font family
-timer_font_color: '#333333'
-timer_font_bold: true
-timer_font_italic: false
-timer_background: '#ffffff'
-timer_border_color: 'rgba(0, 180, 255, 0.5)'
-timer_padding: 12                  # Padding in pixels
-timer_rounded: true                # Rounded corners
-timer_finished_duration: 60        # Seconds to show finished timer alert (0 = until dismissed)
-
-# Announcements (requires companion integration)
+# Announcements
 announcement_display_duration: 5   # Seconds to show announcement bubble after playback
 
 # Microphone Processing
@@ -167,20 +161,19 @@ voice_isolation: false             # AI-based voice isolation (Chrome only)
 bar_position: bottom               # 'bottom' or 'top'
 bar_height: 16                     # Height in pixels (2-40)
 bar_gradient: '#FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC'
-background_blur: true               # Blurs the background when active
-background_blur_intensity: 5        # Blur effect intensity
+background_blur: true              # Blurs the background when active
+background_blur_intensity: 5       # Blur effect intensity
 
 # Appearance - Bubble Style
 bubble_style: chat                 # 'centered' (bubbles centered) or 'chat' (user right, assistant left)
 bubble_container_width: 85         # Width of the bubble area as percentage (40-100)
 
 # Appearance - Transcription Bubble (User Speech)
-show_transcription: true           # Show/hide the transcription bubble
 transcription_font_size: 20        # Font size in pixels
 transcription_font_family: inherit # CSS font family
 transcription_font_color: '#444444'
-transcription_font_bold: true      # Bold text
-transcription_font_italic: false   # Italic text
+transcription_font_bold: true
+transcription_font_italic: false
 transcription_background: '#ffffff'
 transcription_border_color: 'rgba(0, 180, 255, 0.5)'
 transcription_padding: 16          # Padding in pixels
@@ -188,21 +181,29 @@ transcription_rounded: true        # Rounded corners
 
 # Appearance - Response Bubble (Assistant Speech)
 show_response: true                # Show/hide the response bubble
-streaming_response: true          # Stream text response in real-time
 response_font_size: 20             # Font size in pixels
 response_font_family: inherit      # CSS font family
 response_font_color: '#444444'
-response_font_bold: true           # Bold text
-response_font_italic: false        # Italic text
+response_font_bold: true
+response_font_italic: false
 response_background: '#ffffff'
 response_border_color: 'rgba(100, 200, 150, 0.5)'
 response_padding: 16               # Padding in pixels
 response_rounded: true             # Rounded corners
+
+# Appearance - Timer Pill
+timer_position: top-right          # 'top-left', 'top-right', 'bottom-left', 'bottom-right'
+timer_font_size: 20                # Font size in pixels
+timer_font_family: inherit         # CSS font family
+timer_font_color: '#444444'
+timer_font_bold: true
+timer_font_italic: false
+timer_background: '#ffffff'
+timer_border_color: 'rgba(100, 200, 150, 0.5)'
+timer_padding: 16                  # Padding in pixels
+timer_rounded: true                # Rounded corners
+timer_finished_duration: 60        # Seconds to show finished timer alert (0 = until dismissed)
 ```
-
-### Visual Editor
-
-All options are also available in the visual card editor with a live preview that updates as you change settings.
 
 ## Usage
 
@@ -228,108 +229,9 @@ stateDiagram-v2
     note right of Speaking : Bar visible, medium flow
 ```
 
-### Screensaver Control
-
-The `wake_word_switch` option is designed for Fully Kiosk Browser's screensaver. When the screensaver is active, the screen is dimmed but the microphone remains active (unlike turning the screen fully off).
-
-```yaml
-wake_word_switch: switch.tablet_screensaver
-```
-
-When the wake word is detected, this switch will be turned OFF, which exits the screensaver and wakes up the display for the interaction.
-
-**Important:** In Fully Kiosk, do NOT use the screen on/off switch for this purpose. If the screen turns off completely, the microphone will stop working. Instead, use the screensaver switch which keeps the screen dimmed but the microphone active.
-
-### State Tracking for Per-Device Automations
-
-If you run the card on multiple devices (e.g., a living room tablet and a bedroom tablet), you can use the `state_entity` option to track each device's interaction state independently. This lets you create automations specific to each device, such as muting a TV when a nearby tablet hears the wake word.
-
-The card updates the entity with two values:
-
-| Value | Meaning |
-|-------|---------|
-| `ACTIVE` | Wake word was detected — an interaction is in progress |
-| `IDLE` | Interaction has fully ended (TTS finished, conversation complete, or cancelled via double-tap) |
-
-The entity stays `ACTIVE` throughout multi-turn conversations (continue conversation mode), so automations won't trigger repeatedly between follow-up questions.
-
-**Setup:**
-
-1. Create an `input_text` helper for each device in Settings → Devices & Services → Helpers:
-   - Name: `Voice Satellite Living Room`
-   - Entity ID: `input_text.voice_satellite_living_room`
-
-2. Add the entity to the card config:
-
-```yaml
-type: custom:voice-satellite-card
-state_entity: input_text.voice_satellite_living_room
-```
-
-3. Create automations based on the entity state:
-
-```yaml
-# Mute the living room TV when voice interaction starts
-alias: Mute Living Room TV When Tablet is ACTIVE
-description: ""
-triggers:
-  - trigger: state
-    entity_id:
-      - input_text.voice_satellite_living_room
-    to:
-      - ACTIVE
-conditions: []
-actions:
-  - action: media_player.volume_mute
-    metadata: {}
-    target:
-      entity_id: media_player.living_room_tv
-    data:
-      is_volume_muted: true
-mode: single
-```
-
-```yaml
-# Unmute the living room TV after voice interaction ends
-alias: Unmute Living Room TV When Tablet is IDLE
-description: ""
-triggers:
-  - trigger: state
-    entity_id:
-      - input_text.voice_satellite_living_room
-    to:
-      - IDLE
-conditions: []
-actions:
-  - action: media_player.volume_mute
-    metadata: {}
-    target:
-      entity_id: media_player.living_room_tv
-    data:
-      is_volume_muted: false
-mode: single
-```
-
-## [Companion Integration](https://github.com/jxlarrea/voice-satellite-card-integration) (Optional)
-
-Some features require the **[Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration)**, a separate custom component that registers your card as an `assist_satellite` entity in Home Assistant. This enables features that need server-side coordination:
-
-| Feature | Card Only | With Integration |
-|---------|-----------|-----------------|
-| Voice pipeline (wake word → STT → TTS) | ✅ | ✅ |
-| Transcription & response bubbles | ✅ | ✅ |
-| Continue conversation | ✅ | ✅ |
-| Visual feedback (activity bar, blur) | ✅ | ✅ |
-| Chimes | ✅ | ✅ |
-| State tracking | ✅ | ✅ |
-| **Timers** | ❌ | ✅ |
-| **Announcements** | ❌ | ✅ |
-| **Start Conversation** | ❌ | ✅ |
-| **Ask Question** | ❌ | ✅ |
-
 ### Timers
 
-With the integration configured, voice-activated timers work out of the box:
+Voice-activated timers work out of the box:
 
 - **Start**: "Set a 5 minute timer" or "Set a pizza timer for 10 minutes"
 - **Display**: Timer pills appear on screen with a live countdown
@@ -340,7 +242,7 @@ Timer appearance (position, font, colors, alert duration) is fully customizable 
 
 ### Announcements
 
-The integration enables `assist_satellite.announce` support, letting you send TTS announcements to specific tablets:
+Push TTS announcements to specific devices from automations:
 
 ```yaml
 action: assist_satellite.announce
@@ -356,7 +258,7 @@ The display duration is configurable in the card editor under **Announcements**.
 
 ### Start Conversation
 
-The integration enables `assist_satellite.start_conversation` support, letting automations proactively ask a question and listen for the user's response:
+Automations can proactively speak a prompt and listen for the user's response:
 
 ```yaml
 action: assist_satellite.start_conversation
@@ -364,13 +266,14 @@ target:
   entity_id: assist_satellite.living_room_tablet
 data:
   start_message: "The garage door has been open for 30 minutes. Should I close it?"
+  extra_system_prompt: "The user was asked about the garage door. If they confirm, call the close_cover service on cover.garage_door."
 ```
 
 After the announcement plays, the card automatically enters listening mode (skipping wake word detection) so the user can respond immediately. The response is processed through the configured conversation agent as a normal voice interaction.
 
 ### Ask Question
 
-The integration enables `assist_satellite.ask_question` support, letting automations ask a question, capture the user's voice response, and match it against predefined answers:
+Automations can ask a question, capture the user's voice response, and match it against predefined answers:
 
 ```yaml
 action: assist_satellite.ask_question
@@ -412,8 +315,7 @@ Sentence templates support optional words in `[brackets]` and wildcards in `{bra
 
 1. **Verify your wake word service is running:** Check that your wake word engine (e.g., openWakeWord, microWakeWord) is available to Home Assistant — either as an add-on (**Settings → Add-ons**) or as a Wyoming integration (**Settings → Devices & Services**).
 2. **Verify wake word detection is enabled in your pipeline:** Go to **Settings → Voice assistants**, select your pipeline, and check that a wake word is selected. **This setting is hidden by default** — click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown.
-3. **Check the correct pipeline is selected:** If you have multiple pipelines, make sure the card is using the one with wake word detection. Set `pipeline_id` in the card config, or ensure the correct pipeline is set as the default.
-4. Enable `debug: true` in the card config to see pipeline events in the browser console (F12).
+3. Enable `debug: true` in the card config to see pipeline events in the browser console (F12).
 
 ### No audio response
 

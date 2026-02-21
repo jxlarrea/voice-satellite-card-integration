@@ -27,7 +27,6 @@ export class AudioManager {
   get card() { return this._card; }
   get log() { return this._log; }
   get audioContext() { return this._audioContext; }
-  get isStreaming() { return !!this._sendInterval; }
   get workletNode() { return this._workletNode; }
   set workletNode(val) { this._workletNode = val; }
   get scriptProcessor() { return this._scriptProcessor; }
@@ -127,10 +126,21 @@ export class AudioManager {
     });
   }
 
-  resume() {
+  async resume() {
+    // Discard stale audio accumulated during the hidden period — the worklet
+    // may have kept running (producing silence) while the tab was in the
+    // background.  Sending this to the server would clog the wake word engine.
+    this._audioBuffer = [];
+
     this._mediaStream?.getAudioTracks().forEach((track) => {
       track.enabled = true;
     });
+    // Browser suspends AudioContext when tab is in background —
+    // worklet/processor stops producing audio until we resume it.
+    if (this._audioContext?.state === 'suspended') {
+      this._log.log('mic', 'Resuming suspended AudioContext');
+      await this._audioContext.resume();
+    }
   }
 
   async ensureAudioContextForGesture() {

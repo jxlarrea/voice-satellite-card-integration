@@ -22,14 +22,9 @@ export class ChatManager {
   get streamedResponse() { return this._streamedResponse; }
   set streamedResponse(val) { this._streamedResponse = val; }
 
-  // --- Legacy API wrappers ---
-
   showTranscription(text) {
-    if (!this._card.config.show_transcription) return;
     this.addUser(text);
   }
-
-  hideTranscription() { /* No-op: messages persist until clear() */ }
 
   showResponse(text) {
     if (!this._card.config.show_response) return;
@@ -48,8 +43,6 @@ export class ChatManager {
       this._updateStreaming(text);
     }
   }
-
-  hideResponse() { /* No-op: messages persist until clear() */ }
 
   // --- Core Methods ---
 

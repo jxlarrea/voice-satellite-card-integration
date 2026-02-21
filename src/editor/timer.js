@@ -4,7 +4,7 @@
 
 export const timerSchema = [
   {
-    type: 'expandable', name: '', title: 'Timer Pill (requires integration)', flatten: true,
+    type: 'expandable', name: '', title: 'Timer Pill', flatten: true,
     schema: [
       {
         name: 'timer_position',

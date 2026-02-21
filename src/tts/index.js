@@ -102,10 +102,6 @@ export class TtsManager {
     stopRemote(this._card);
   }
 
-  resetStreamingUrl() {
-    this._streamingUrl = null;
-  }
-
   /**
    * @param {object} eventData - run-start event data containing tts_output
    */

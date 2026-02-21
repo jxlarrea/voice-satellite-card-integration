@@ -19,7 +19,6 @@ export const bubblesSchema = [
   {
     type: 'expandable', name: '', title: 'Transcription Bubble', flatten: true,
     schema: [
-      { name: 'show_transcription', selector: { boolean: {} } },
       {
         type: 'grid', name: '', flatten: true,
         schema: [
@@ -52,7 +51,6 @@ export const bubblesSchema = [
     type: 'expandable', name: '', title: 'Response Bubble', flatten: true,
     schema: [
       { name: 'show_response', selector: { boolean: {} } },
-      { name: 'streaming_response', selector: { boolean: {} } },
       {
         type: 'grid', name: '', flatten: true,
         schema: [
@@ -84,7 +82,6 @@ export const bubblesSchema = [
 export const bubblesLabels = {
   bubble_style: 'Bubble layout',
   bubble_container_width: 'Container width',
-  show_transcription: 'Show transcription',
   transcription_font_size: 'Font size',
   transcription_font_family: 'Font family',
   transcription_font_color: 'Font color',
@@ -95,7 +92,6 @@ export const bubblesLabels = {
   transcription_border_color: 'Border color',
   transcription_padding: 'Padding',
   show_response: 'Show response',
-  streaming_response: 'Streaming response',
   response_font_size: 'Font size',
   response_font_family: 'Font family',
   response_font_color: 'Font color',

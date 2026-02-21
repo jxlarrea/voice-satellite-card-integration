@@ -5,13 +5,16 @@
  */
 
 import { State, INTERACTING_STATES, EXPECTED_ERRORS, BlurReason, Timing } from '../constants.js';
+import { getSwitchState } from '../shared/satellite-state.js';
 
-/** @param {import('./index.js').PipelineManager} mgr */
+/**
+ * Run-start: binaryHandlerId is already set from the init event.
+ * Server-side run-start doesn't include runner_data — only pipeline,
+ * language, conversation_id, satellite_id, and tts_output.
+ * @param {import('./index.js').PipelineManager} mgr
+ */
 export function handleRunStart(mgr, eventData) {
-  mgr.binaryHandlerId = eventData.runner_data.stt_binary_handler_id;
-  mgr.resetIdleTimeout();
-
-  // Store streaming TTS URL
+  // Store streaming TTS URL (tts_output is at the top level)
   mgr.card.tts.storeStreamingUrl(eventData);
 
   if (mgr.continueMode) {
@@ -43,7 +46,10 @@ export function handleWakeWordStart(mgr) {
   }
 }
 
-/** @param {import('./index.js').PipelineManager} mgr */
+/**
+ * Wake-word-end: respects the integration's wake_sound switch.
+ * @param {import('./index.js').PipelineManager} mgr
+ */
 export function handleWakeWordEnd(mgr, eventData) {
   const wakeOutput = eventData.wake_word_output;
   if (!wakeOutput || Object.keys(wakeOutput).length === 0) {
@@ -85,12 +91,12 @@ export function handleWakeWordEnd(mgr, eventData) {
   mgr.continueConversationId = null;
 
   mgr.card.setState(State.WAKE_WORD_DETECTED);
-  mgr.resetIdleTimeout();
 
-  if (mgr.card.config.chime_on_wake_word) {
+  // Check the integration's wake_sound switch (default: on)
+  const playChime = getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false;
+  if (playChime) {
     tts.playChime('wake');
   }
-  mgr.card.startWakeSwitchKeepAlive();
   mgr.card.ui.showBlurOverlay(BlurReason.PIPELINE);
 }
 
@@ -143,7 +149,7 @@ export function handleIntentEnd(mgr, eventData) {
     mgr.log.error('error', `Intent error: ${errorText}`);
 
     mgr.card.ui.showErrorBar();
-    if (mgr.card.config.chime_on_wake_word) {
+    if (getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false) {
       mgr.card.tts.playChime('error');
     }
 
@@ -167,15 +173,13 @@ export function handleIntentEnd(mgr, eventData) {
 
   mgr.shouldContinue = false;
   mgr.continueConversationId = null;
-  if (mgr.card.config.continue_conversation) {
-    try {
-      if (eventData.intent_output.continue_conversation === true) {
-        mgr.shouldContinue = true;
-        mgr.continueConversationId = eventData.intent_output.conversation_id || null;
-        mgr.log.log('pipeline', `Continue conversation requested — id: ${mgr.continueConversationId}`);
-      }
-    } catch (_) { /* ignore */ }
-  }
+  try {
+    if (eventData.intent_output.continue_conversation === true) {
+      mgr.shouldContinue = true;
+      mgr.continueConversationId = eventData.intent_output.conversation_id || null;
+      mgr.log.log('pipeline', `Continue conversation requested — id: ${mgr.continueConversationId}`);
+    }
+  } catch (_) { /* ignore */ }
 
   mgr.card.chat.streamedResponse = '';
   mgr.card.chat.streamEl = null;
@@ -258,14 +262,13 @@ export function handleError(mgr, errorData) {
 
     if (INTERACTING_STATES.includes(mgr.card.currentState)) {
       mgr.log.log('ui', 'Cleaning up interaction UI after expected error');
-      mgr.card.stopWakeSwitchKeepAlive();
       mgr.card.setState(State.IDLE);
       mgr.card.chat.clear();
       mgr.card.ui.hideBlurOverlay(BlurReason.PIPELINE);
       mgr.shouldContinue = false;
       mgr.continueConversationId = null;
       const isRemote = mgr.card.config.tts_target && mgr.card.config.tts_target !== 'browser';
-      if (mgr.card.config.chime_on_request_sent && !isRemote) {
+      if (getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
         mgr.card.tts.playChime('done');
       }
     }
@@ -277,10 +280,9 @@ export function handleError(mgr, errorData) {
   mgr.log.error('error', `Unexpected: ${errorCode} — ${errorMessage}`);
 
   const wasInteracting = INTERACTING_STATES.includes(mgr.card.currentState);
-  if (wasInteracting) mgr.card.stopWakeSwitchKeepAlive();
   mgr.binaryHandlerId = null;
 
-  if (wasInteracting && mgr.card.config.chime_on_wake_word) {
+  if (wasInteracting && getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false) {
     mgr.card.tts.playChime('error');
   }
   mgr.card.ui.showErrorBar();
@@ -297,7 +299,7 @@ export function handleError(mgr, errorData) {
  * @param {object} eventData
  * @returns {string|null}
  */
-export function extractResponseText(mgr, eventData) {
+function extractResponseText(mgr, eventData) {
   try {
     const text = eventData.intent_output.response.speech.plain.speech;
     if (text) return text;

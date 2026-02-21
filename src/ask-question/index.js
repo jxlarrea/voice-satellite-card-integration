@@ -8,10 +8,6 @@
 
 import {
   initNotificationState,
-  subscribe,
-  unsubscribe,
-  processNotification,
-  claimNotification,
   dequeueNotification,
   playNotification,
   clearNotificationUI,
@@ -32,12 +28,32 @@ export class AskQuestionManager {
   get card() { return this._card; }
   get log() { return this._log; }
 
-  update() {
-    subscribe(this, (attrs) => this._onStateChange(attrs), LOG);
-  }
+  /**
+   * Cancel an in-progress ask_question flow (playback or STT).
+   * Clears timers, sends empty answer to release the server,
+   * and hides the ANNOUNCEMENT blur that playNotification added.
+   */
+  cancel() {
+    if (this._chimeSettleTimeout) {
+      clearTimeout(this._chimeSettleTimeout);
+      this._chimeSettleTimeout = null;
+    }
+    if (this._sttSafetyTimeout) {
+      clearTimeout(this._sttSafetyTimeout);
+      this._sttSafetyTimeout = null;
+    }
+    if (this._cleanupTimeout) {
+      clearTimeout(this._cleanupTimeout);
+      this._cleanupTimeout = null;
+    }
 
-  destroy() {
-    unsubscribe(this);
+    // Release server's _question_event if we haven't sent an answer yet
+    if (this.currentAnnounceId && !this._answerSent) {
+      this._answerSent = true;
+      sendAnswer(this._card, this.currentAnnounceId, '', 'double-tap');
+    }
+
+    this._card.ui.hideBlurOverlay(BlurReason.ANNOUNCEMENT);
   }
 
   playQueued() {
@@ -48,17 +64,6 @@ export class AskQuestionManager {
   }
 
   // --- Private ---
-
-  _onStateChange(attrs) {
-    const ann = processNotification(this, attrs, LOG);
-    if (!ann) return;
-
-    if (!ann.ask_question) return;
-
-    claimNotification(ann.id);
-    this._log.log(LOG, `New ask_question #${ann.id}: message="${ann.message || ''}" media="${ann.media_id || ''}"`);
-    this._play(ann);
-  }
 
   _play(ann) {
     playNotification(this, ann, (a) => this._onComplete(a), LOG);
@@ -151,7 +156,7 @@ export class AskQuestionManager {
     const cleanup = () => {
       if (cleaned) return;
       cleaned = true;
-      this._card.stopWakeSwitchKeepAlive();
+      this._cleanupTimeout = null;
       if (matchedResult !== null && !matchedResult) {
         this._card.ui.clearErrorBar();
       }
@@ -162,7 +167,7 @@ export class AskQuestionManager {
     };
 
     // Safety timeout — if sendAnswer takes too long, clean up anyway
-    setTimeout(cleanup, Timing.ASK_QUESTION_CLEANUP);
+    this._cleanupTimeout = setTimeout(cleanup, Timing.ASK_QUESTION_CLEANUP);
 
     sendAnswer(this._card, announceId, text, LOG).then((result) => {
       const matched = result?.matched;

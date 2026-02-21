@@ -1,8 +1,8 @@
 /**
  * Voice Satellite Card — Satellite Notification Base
  *
- * Shared lifecycle for features triggered by satellite entity state:
- * entity subscription, dedup, pipeline-busy queuing, playback orchestration.
+ * Shared lifecycle for satellite-pushed notification features:
+ * event dispatch, pipeline-busy queuing, playback orchestration.
  *
  * DOM operations delegate to UIManager.
  * Audio operations delegate to audio/chime and audio/media-playback.
@@ -10,67 +10,86 @@
  * Each manager provides its own onComplete handler.
  */
 
-import { subscribeToEntity, unsubscribeEntity } from './entity-subscription.js';
-import { isOwner } from './singleton.js';
 import { playMultiNoteChime, CHIME_ANNOUNCE } from '../audio/chime.js';
 import { buildMediaUrl, playMediaUrl } from '../audio/media-playback.js';
 import { BlurReason, Timing } from '../constants.js';
 
 let _lastAnnounceId = 0;
 
-// ─── Entity Subscription ───────────────────────────────────────────
+// ─── Hidden-tab event queue ──────────────────────────────────────
+
+let _pendingEvent = null;
+let _pendingCard = null;
+let _visibilityListenerAdded = false;
 
 /**
- * Subscribe to the satellite entity's announcement attribute.
- * @param {object} mgr - Manager instance
- * @param {Function} onNotification - Called with (attrs) on state change
- * @param {string} logPrefix
+ * Whether a satellite event is queued for replay when the tab becomes visible.
+ * Used by VisibilityManager to skip its own pipeline restart — the replayed
+ * event's flow will manage the pipeline instead.
  */
-export function subscribe(mgr, onNotification, logPrefix) {
-  const { config, connection } = mgr.card;
-  if (!config.satellite_entity) return;
-  if (!isOwner(mgr.card)) return;
-  if (mgr._subscribed) return;
-  if (!connection) return;
-
-  subscribeToEntity(
-    mgr, connection, config.satellite_entity,
-    onNotification, logPrefix,
-  );
+export function hasPendingSatelliteEvent() {
+  return _pendingEvent !== null;
 }
 
-/**
- * Unsubscribe from entity updates.
- * @param {object} mgr
- */
-export function unsubscribe(mgr) {
-  unsubscribeEntity(mgr);
+function _onVisibilityChange() {
+  if (document.visibilityState !== 'visible') return;
+  if (!_pendingEvent || !_pendingCard) return;
+
+  const card = _pendingCard;
+  const event = _pendingEvent;
+  _pendingEvent = null;
+  _pendingCard = null;
+
+  card.logger.log('satellite-notify', `Tab visible — replaying queued event #${event.data.id}`);
+  dispatchSatelliteEvent(card, event);
 }
 
-// ─── Dedup & Queuing ───────────────────────────────────────────────
+// ─── Satellite Event Dispatch ─────────────────────────────────────
 
 /**
- * Process an incoming notification, handling dedup and queuing.
- * Does NOT claim the dedup ID — caller must call claimNotification()
- * after confirming the notification belongs to this manager.
+ * Dispatch a satellite event to the appropriate notification manager.
+ * Called by the single satellite subscription with the raw event payload.
  *
- * @param {object} mgr
- * @param {object} attrs - Entity attributes
- * @param {string} logPrefix
- * @returns {object|null} Announcement to play, or null
+ * @param {object} card - Card instance
+ * @param {object} event - {type: "announcement"|"start_conversation", data: {...}}
  */
-export function processNotification(mgr, attrs, logPrefix) {
-  if (!attrs.announcement) return null;
+export function dispatchSatelliteEvent(card, event) {
+  const { type, data } = event;
+  if (!data || !data.id) return;
 
-  const ann = attrs.announcement;
-  if (!ann.id) return null;
+  // Queue events while the tab is hidden — audio can't play and UI state
+  // gets corrupted.  Only keep the latest event (newer replaces older).
+  // When the tab becomes visible, the queued event is replayed.
+  if (document.visibilityState === 'hidden') {
+    card.logger.log('satellite-notify', `Event #${data.id} queued — tab hidden`);
+    _pendingEvent = event;
+    _pendingCard = card;
+    if (!_visibilityListenerAdded) {
+      _visibilityListenerAdded = true;
+      document.addEventListener('visibilitychange', _onVisibilityChange);
+    }
+    return;
+  }
 
-  
-  if (ann.id <= _lastAnnounceId) return null;
+  const ann = { ...data };
+
+  // Route to the correct manager based on event type / flags
+  if (ann.ask_question) {
+    _deliverToManager(card.askQuestion, ann, 'ask-question');
+  } else if (type === 'start_conversation' || ann.start_conversation) {
+    _deliverToManager(card.startConversation, ann, 'start-conversation');
+  } else {
+    _deliverToManager(card.announcement, ann, 'announce');
+  }
+}
+
+function _deliverToManager(mgr, ann, logPrefix) {
+  // Dedup check (monotonic IDs — safety net for duplicate events)
+  if (ann.id <= _lastAnnounceId) return;
 
   if (mgr.playing) {
-    mgr.log.log(logPrefix, `Notification #${ann.id} ignored - already playing`);
-    return null;
+    mgr.log.log(logPrefix, `Notification #${ann.id} ignored — already playing`);
+    return;
   }
 
   const cardState = mgr.card.currentState;
@@ -79,22 +98,19 @@ export function processNotification(mgr, attrs, logPrefix) {
   if (pipelineBusy || mgr.card.tts.isPlaying) {
     if (!mgr.queued || mgr.queued.id !== ann.id) {
       mgr.queued = ann;
-      mgr.log.log(logPrefix, `Notification #${ann.id} queued - pipeline busy (${cardState})`);
+      mgr.log.log(logPrefix, `Notification #${ann.id} queued — pipeline busy (${cardState})`);
     }
-    return null;
+    return;
   }
 
   mgr.queued = null;
-  return ann;
+  _lastAnnounceId = ann.id;
+
+  mgr.log.log(logPrefix, `New ${logPrefix} #${ann.id}: message="${ann.message || ''}" media="${ann.media_id || ''}"`);
+  playNotification(mgr, ann, (a) => mgr._onComplete(a), logPrefix);
 }
 
-/**
- * Claim a notification ID so other managers won't process it.
- * @param {number} id
- */
-export function claimNotification(id) {
-  _lastAnnounceId = id;
-}
+// ─── Dedup & Queuing ─────────────────────────────────────────────
 
 /**
  * Try to play a queued notification.
@@ -113,7 +129,7 @@ export function dequeueNotification(mgr) {
   return ann;
 }
 
-// ─── Playback Orchestration ────────────────────────────────────────
+// ─── Playback Orchestration ──────────────────────────────────────
 
 /**
  * Full playback: blur → bar → preannounce → main media → onComplete.
@@ -126,10 +142,10 @@ export function dequeueNotification(mgr) {
  */
 export function playNotification(mgr, ann, onComplete, logPrefix) {
   mgr.playing = true;
+  mgr.currentAnnounceId = ann.id;
 
   // UI: blur overlay + wake screen + bar
   mgr.card.ui.showBlurOverlay(BlurReason.ANNOUNCEMENT);
-  mgr.card.startWakeSwitchKeepAlive();
   mgr.barWasVisible = mgr.card.ui.showBarSpeaking();
 
   // Only center on screen for passive announcements (not ask_question or start_conversation)
@@ -180,7 +196,7 @@ function _playMain(mgr, ann, onComplete, logPrefix) {
   }
 }
 
-// ─── Cleanup ───────────────────────────────────────────────────────
+// ─── Cleanup ─────────────────────────────────────────────────────
 
 /**
  * Clear notification UI: bubbles, blur, bar restore.
@@ -198,7 +214,7 @@ export function clearNotificationUI(mgr) {
   mgr.card.ui.restoreBar(mgr.barWasVisible);
 }
 
-// ─── Audio Helper ──────────────────────────────────────────────────
+// ─── Audio Helper ────────────────────────────────────────────────
 
 /**
  * Play a media URL with volume from config.
@@ -224,7 +240,7 @@ export function playMediaFor(mgr, urlPath, logPrefix, onDone) {
   });
 }
 
-// ─── Common State Init ─────────────────────────────────────────────
+// ─── Common State Init ───────────────────────────────────────────
 
 /**
  * Initialize shared notification state on a manager instance.
@@ -233,6 +249,7 @@ export function playMediaFor(mgr, urlPath, logPrefix, onDone) {
 export function initNotificationState(mgr) {
   mgr.playing = false;
   mgr.currentAudio = null;
+  mgr.currentAnnounceId = null;
   mgr.clearTimeoutId = null;
   mgr.barWasVisible = false;
   mgr.queued = null;

@@ -56,24 +56,15 @@ export const Timing = {
   VISIBILITY_DEBOUNCE: 500,
   DISCONNECT_GRACE: 100,
   CHIME_SETTLE: 500,
-  WAKE_SWITCH_INTERVAL: 5000,
 };
 
 export const DEFAULT_CONFIG = {
   // Behavior
   start_listening_on_load: true,
-  wake_word_switch: '',
-  state_entity: '',
   satellite_entity: '',
-  pipeline_id: '',
-  pipeline_timeout: 60,
-  pipeline_idle_timeout: 300,
-  chime_on_wake_word: true,
-  chime_on_request_sent: true,
   chime_volume: 100,
   tts_volume: 100,
   tts_target: '',
-  continue_conversation: true,
   double_tap_cancel: true,
   debug: false,
 
@@ -84,7 +75,7 @@ export const DEFAULT_CONFIG = {
   voice_isolation: false,
 
   // Timer Pill
-  timer_position: 'bottom-right',
+  timer_position: 'top-right',
   timer_font_size: 20,
   timer_font_family: 'inherit',
   timer_font_color: '#444444',
@@ -107,7 +98,6 @@ export const DEFAULT_CONFIG = {
   background_blur_intensity: 5,
 
   // Transcription Bubble
-  show_transcription: true,
   transcription_font_size: 20,
   transcription_font_family: 'inherit',
   transcription_font_color: '#444444',
@@ -120,7 +110,6 @@ export const DEFAULT_CONFIG = {
 
   // Response Bubble
   show_response: true,
-  streaming_response: true,
   response_font_size: 20,
   response_font_family: 'inherit',
   response_font_color: '#444444',

@@ -7,15 +7,12 @@
 
 import {
   initNotificationState,
-  subscribe,
-  unsubscribe,
-  processNotification,
-  claimNotification,
   dequeueNotification,
   playNotification,
   clearNotificationUI,
 } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
+import { getSwitchState } from '../shared/satellite-state.js';
 
 const LOG = 'announce';
 
@@ -29,14 +26,6 @@ export class AnnouncementManager {
   get card() { return this._card; }
   get log() { return this._log; }
 
-  update() {
-    subscribe(this, (attrs) => this._onStateChange(attrs), LOG);
-  }
-
-  destroy() {
-    unsubscribe(this);
-  }
-
   playQueued() {
     const ann = dequeueNotification(this);
     if (!ann) return;
@@ -45,18 +34,6 @@ export class AnnouncementManager {
   }
 
   // --- Private ---
-
-  _onStateChange(attrs) {
-    const ann = processNotification(this, attrs, LOG);
-    if (!ann) return;
-
-    // Only handle simple announcements (no ask_question or start_conversation)
-    if (ann.ask_question || ann.start_conversation) return;
-
-    claimNotification(ann.id);
-    this._log.log(LOG, `New announcement #${ann.id}: message="${ann.message || ''}" media="${ann.media_id || ''}"`);
-    this._play(ann);
-  }
 
   _play(ann) {
     playNotification(this, ann, (a) => this._onComplete(a), LOG);
@@ -69,7 +46,18 @@ export class AnnouncementManager {
 
     sendAck(this._card, ann.id, LOG);
 
+    // HA's base class cancels the active pipeline when triggering an
+    // announcement (async_internal_announce → _cancel_running_pipeline).
+    // Restart immediately so wake word detection resumes.
+    this._card.pipeline.restart(0);
+
     const clearDelay = (this._card.config.announcement_display_duration || 5) * 1000;
-    this.clearTimeoutId = setTimeout(() => clearNotificationUI(this), clearDelay);
+    this.clearTimeoutId = setTimeout(() => {
+      const isRemote = this._card.config.tts_target && this._card.config.tts_target !== 'browser';
+      if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+        this._card.tts.playChime('done');
+      }
+      clearNotificationUI(this);
+    }, clearDelay);
   }
 }

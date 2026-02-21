@@ -14,19 +14,12 @@ export const mediaSchema = [
           { name: 'tts_volume', selector: { number: { min: 0, max: 100, step: 1, unit_of_measurement: '%', mode: 'slider' } } },
         ],
       },
-      {
-        type: 'grid', name: '', flatten: true,
-        schema: [
-          { name: 'chime_on_wake_word', selector: { boolean: {} } },
-          { name: 'chime_on_request_sent', selector: { boolean: {} } },
-        ],
-      },
     ],
   },
 
   // Announcements
   {
-    type: 'expandable', name: '', title: 'Announcements (requires integration)', flatten: true,
+    type: 'expandable', name: '', title: 'Announcements', flatten: true,
     schema: [
       { name: 'announcement_display_duration', selector: { number: { min: 1, max: 60, step: 1, unit_of_measurement: 's', mode: 'slider' } } },
     ],
@@ -37,8 +30,6 @@ export const mediaLabels = {
   tts_target: 'TTS output device',
   chime_volume: 'Chime volume',
   tts_volume: 'TTS volume',
-  chime_on_wake_word: 'Chime on wake word',
-  chime_on_request_sent: 'Chime on request sent',
   announcement_display_duration: 'Announcement display duration',
 };
 

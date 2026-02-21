@@ -25,11 +25,6 @@ export function isOwner(card) {
   return !state.instance || state.instance === card;
 }
 
-/** @returns {object|null} The current active card instance */
-export function getInstance() {
-  return state.instance;
-}
-
 /** @returns {boolean} Whether any instance is active */
 export function isActive() {
   return state.active;

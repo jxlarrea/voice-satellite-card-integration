@@ -44,7 +44,7 @@ export function renderPreview(shadowRoot, config) {
         position: relative;
         overflow: hidden;
         border-radius: var(--ha-card-border-radius, 12px);
-        min-height: 280px;
+        min-height: 380px;
       }
       .preview-background {
         position: absolute;
@@ -80,11 +80,11 @@ export function renderPreview(shadowRoot, config) {
       .preview-container {
         position: relative;
         width: 100%;
-        min-height: 280px;
+        min-height: 380px;
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
-        justify-content: center;
+        justify-content: flex-end;
         padding: 24px 16px;
       }
       .preview-blur {
@@ -196,12 +196,8 @@ export function renderPreview(shadowRoot, config) {
 
   // Transcription bubble
   const userMsg = shadowRoot.querySelector('.preview-msg.user');
-  if (cfg.show_transcription) {
-    userMsg.textContent = "What's the temperature outside?";
-    applyBubbleStyle(userMsg, cfg, 'transcription');
-  } else {
-    userMsg.style.display = 'none';
-  }
+  userMsg.textContent = "What's the temperature outside?";
+  applyBubbleStyle(userMsg, cfg, 'transcription');
 
   // Response bubble
   const assistantMsg = shadowRoot.querySelector('.preview-msg.assistant');
@@ -237,24 +233,20 @@ export function renderPreview(shadowRoot, config) {
     chat.style.marginTop = `${cfg.bar_height + 8}px`;
   }
 
-  // Timer pill — only shown when satellite_entity is configured
+  // Timer pill
   const timerPill = shadowRoot.querySelector('.preview-timer');
-  if (!cfg.satellite_entity) {
-    timerPill.style.display = 'none';
-  } else {
-    applyBubbleStyle(timerPill, cfg, 'timer');
+  applyBubbleStyle(timerPill, cfg, 'timer');
 
-    const timerProgress = shadowRoot.querySelector('.preview-timer-progress');
-    const progressColor = cfg.timer_border_color || 'rgba(100, 200, 150, 0.5)';
-    timerProgress.style.background = progressColor;
-    timerProgress.style.width = '65%';
+  const timerProgress = shadowRoot.querySelector('.preview-timer-progress');
+  const progressColor = cfg.timer_border_color || 'rgba(100, 200, 150, 0.5)';
+  timerProgress.style.background = progressColor;
+  timerProgress.style.width = '65%';
 
-    // Timer position
-    const gap = 8;
-    const pos = cfg.timer_position || 'bottom-right';
-    timerPill.style.top = pos.startsWith('top') ? `${cfg.bar_height + gap + 4}px` : 'auto';
-    timerPill.style.bottom = pos.startsWith('top') ? 'auto' : `${cfg.bar_height + gap + 4}px`;
-    timerPill.style.left = pos.includes('left') ? `${gap}px` : 'auto';
-    timerPill.style.right = pos.includes('left') ? 'auto' : `${gap}px`;
-  }
+  // Timer position
+  const gap = 8;
+  const pos = cfg.timer_position || 'top-right';
+  timerPill.style.top = pos.startsWith('top') ? `${cfg.bar_height + gap + 4}px` : 'auto';
+  timerPill.style.bottom = pos.startsWith('top') ? 'auto' : `${cfg.bar_height + gap + 4}px`;
+  timerPill.style.left = pos.includes('left') ? `${gap}px` : 'auto';
+  timerPill.style.right = pos.includes('left') ? 'auto' : `${gap}px`;
 }

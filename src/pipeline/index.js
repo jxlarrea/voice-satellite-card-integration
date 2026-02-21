@@ -1,17 +1,30 @@
 /**
  * Voice Satellite Card — PipelineManager
  *
- * Manages the HA Assist pipeline lifecycle: starting, stopping, restarting,
- * idle timeouts, error recovery with linear backoff, and continue conversation.
+ * Manages the HA Assist pipeline lifecycle via the integration's
+ * voice_satellite/run_pipeline subscription.
+ *
+ * Handles starting, stopping, restarting, error recovery with
+ * linear backoff, continue conversation, mute state polling,
+ * and stale event filtering.
  */
 
 import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
-import { resolveDeviceId, listPipelines, subscribePipelineRun, setupReconnectListener } from './comms.js';
+import { getSwitchState } from '../shared/satellite-state.js';
+import { subscribePipelineRun, setupReconnectListener } from './comms.js';
 import {
-  handleRunStart, handleWakeWordStart, handleWakeWordEnd,
-  handleSttEnd, handleIntentProgress, handleIntentEnd,
-  handleTtsEnd, handleRunEnd, handleError,
+  handleRunStart,
+  handleWakeWordStart,
+  handleWakeWordEnd,
+  handleSttEnd,
+  handleIntentProgress,
+  handleIntentEnd,
+  handleTtsEnd,
+  handleRunEnd,
+  handleError,
 } from './events.js';
+
+const MUTE_POLL_INTERVAL = 2000;
 
 export class PipelineManager {
   constructor(card) {
@@ -24,7 +37,6 @@ export class PipelineManager {
     this._serviceUnavailable = false;
     this._restartTimeout = null;
     this._isRestarting = false;
-    this._idleTimeoutId = null;
     this._pendingRunEnd = false;
     this._recoveryTimeout = null;
     this._suppressTTS = false;
@@ -36,6 +48,11 @@ export class PipelineManager {
     this._askQuestionCallback = null;
     this._askQuestionHandled = false;
     this._reconnectRef = { listener: null };
+
+    this._muteCheckId = null;
+    this._runStartReceived = false;
+    this._wakeWordPhase = false;
+    this._errorReceived = false;
   }
 
   // --- Public accessors ---
@@ -53,7 +70,6 @@ export class PipelineManager {
   set continueConversationId(val) { this._continueConversationId = val; }
   get continueMode() { return this._continueMode; }
   set continueMode(val) { this._continueMode = val; }
-  get isStreaming() { return this._isStreaming; }
   get retryCount() { return this._retryCount; }
   set retryCount(val) { this._retryCount = val; }
   get pendingRunEnd() { return this._pendingRunEnd; }
@@ -73,77 +89,102 @@ export class PipelineManager {
 
   async start(options) {
     const opts = options || {};
-    const { connection } = this._card;
+    const { connection, config } = this._card;
 
     if (!connection) {
       throw new Error('No Home Assistant connection available');
     }
+    if (!config.satellite_entity) {
+      throw new Error('No satellite_entity configured');
+    }
+
+    // Clear any pending mute poll
+    if (this._muteCheckId) {
+      clearTimeout(this._muteCheckId);
+      this._muteCheckId = null;
+    }
+
+    // Check mute state — if muted, show visual and poll for unmute
+    if (getSwitchState(this._card.hass, config.satellite_entity, 'mute') === true) {
+      this._log.log('pipeline', 'Satellite muted — pipeline blocked');
+      this._card.ui.showErrorBar();
+      this._muteCheckId = setTimeout(() => {
+        this._muteCheckId = null;
+        this.start(opts).catch(() => {});
+      }, MUTE_POLL_INTERVAL);
+      return;
+    }
+
+    // Clear error bar in case we were previously muted
+    this._card.ui.clearErrorBar();
+
+    // Defensive cleanup — stop any previous subscription before starting
+    if (this._unsubscribe) {
+      this._log.log('pipeline', 'Cleaning up previous subscription');
+      try { await this._unsubscribe(); } catch (_) { /* cleanup */ }
+      this._unsubscribe = null;
+    }
+    this._binaryHandlerId = null;
 
     setupReconnectListener(this._card, this, connection, this._reconnectRef);
 
-    const pipelines = await listPipelines(connection);
-
-    this._log.log('pipeline', 'Available: ' + pipelines.pipelines.map((p) =>
-      `${p.name} (${p.id})${p.preferred ? ' [preferred]' : ''}`
-    ).join(', '));
-
-    const { config } = this._card;
-    let pipelineId = config.pipeline_id;
-    if (!pipelineId) {
-      const preferred = pipelines.pipelines.find((p) => p.preferred);
-      pipelineId = preferred ? preferred.id : pipelines.pipelines[0].id;
-    }
-
-    this._log.log('pipeline', `Starting pipeline: ${pipelineId}`);
-
-    const startStage = opts.start_stage || 'wake_word';
-    const endStage = opts.end_stage || 'tts';
     const runConfig = {
-      type: 'assist_pipeline/run',
-      start_stage: startStage,
-      end_stage: endStage,
-      input: {
-        sample_rate: 16000,
-        timeout: startStage === 'wake_word' ? 0 : undefined,
-      },
-      pipeline: pipelineId,
-      timeout: config.pipeline_timeout,
+      start_stage: opts.start_stage || 'wake_word',
+      end_stage: opts.end_stage || 'tts',
+      sample_rate: 16000,
     };
 
     if (opts.conversation_id) {
       runConfig.conversation_id = opts.conversation_id;
     }
 
-    // Resolve device_id from satellite entity for timer support
-    this._log.log('pipeline', 'Resolving device_id...');
-    const deviceId = await resolveDeviceId(this._card);
-    if (deviceId) {
-      runConfig.device_id = deviceId;
-    } else {
-      this._log.log('pipeline', 'No device_id resolved (satellite_entity not configured or lookup failed)');
+    if (opts.extra_system_prompt) {
+      runConfig.extra_system_prompt = opts.extra_system_prompt;
     }
 
-    if (runConfig.input.timeout === undefined) {
-      delete runConfig.input.timeout;
-    }
+    // Reset run-start tracking — used to detect stale run-end events
+    this._runStartReceived = false;
 
-    this._log.log('pipeline', `Run config: ${JSON.stringify(runConfig)}`);
-    this._log.log('pipeline', 'Subscribing to pipeline...');
+    this._log.log('pipeline', `Starting pipeline: ${JSON.stringify(runConfig)}`);
+
+    // Wait for the init event (which carries the binary handler ID) before
+    // starting audio.  subscribeMessage resolves on the WS "result" message,
+    // but the init event arrives as a separate WS frame afterwards.
+    let resolveInit;
+    const initPromise = new Promise((resolve) => { resolveInit = resolve; });
 
     this._unsubscribe = await subscribePipelineRun(
       connection,
+      config.satellite_entity,
       runConfig,
-      (message) => this._card.onPipelineMessage(message),
+      (message) => {
+        // Synthetic init event carries the WS binary handler ID
+        if (message.type === 'init') {
+          this._binaryHandlerId = message.handler_id;
+          this._log.log('pipeline', `Init — handler ID: ${message.handler_id}`);
+          resolveInit();
+          return;
+        }
+
+        this._card.onPipelineMessage(message);
+      },
     );
 
-    this._log.log('pipeline', 'Subscribed, waiting for run-start...');
+    this._log.log('pipeline', 'Pipeline subscribed, waiting for init event...');
 
-    // Start sending audio
+    // Block until the init event arrives with the binary handler ID
+    await initPromise;
+
+    this._log.log('pipeline', `Handler ID confirmed: ${this._binaryHandlerId} — starting audio`);
+
+    // Start sending audio now that handler ID is guaranteed to be set
     const { audio } = this._card;
     audio.startSending(() => this._binaryHandlerId);
 
     this._isStreaming = true;
-    this.startIdleTimeout();
+    // No idle timeout — the server manages pipeline lifecycle and sends
+    // run-end/error events when the run completes.
+    // The reconnect handler covers WebSocket drops.
   }
 
   async stop() {
@@ -151,12 +192,15 @@ export class PipelineManager {
     this._binaryHandlerId = null;
     this._isStreaming = false;
 
+    if (this._muteCheckId) {
+      clearTimeout(this._muteCheckId);
+      this._muteCheckId = null;
+    }
+
     if (this._unsubscribe) {
       try { await this._unsubscribe(); } catch (_) { /* cleanup */ }
       this._unsubscribe = null;
     }
-
-    this.clearIdleTimeout();
   }
 
   restart(delay) {
@@ -170,8 +214,6 @@ export class PipelineManager {
       clearTimeout(this._restartTimeout);
       this._restartTimeout = null;
     }
-
-    this.clearIdleTimeout();
 
     this.stop().then(() => {
       this._restartTimeout = setTimeout(() => {
@@ -196,7 +238,6 @@ export class PipelineManager {
       return;
     }
     this._isRestarting = true;
-    this.clearIdleTimeout();
 
     // Store ask_question callback if provided
     this._askQuestionCallback = opts.onSttEnd || null;
@@ -204,11 +245,15 @@ export class PipelineManager {
     this.stop().then(() => {
       this._isRestarting = false;
       this._continueMode = true;
-      this.start({
+      const startOpts = {
         start_stage: 'stt',
         end_stage: opts.end_stage || 'tts',
         conversation_id: conversationId,
-      }).catch((e) => {
+      };
+      if (opts.extra_system_prompt) {
+        startOpts.extra_system_prompt = opts.extra_system_prompt;
+      }
+      this.start(startOpts).catch((e) => {
         this._log.error('pipeline', `Continue conversation failed: ${e?.message || JSON.stringify(e)}`);
         this._askQuestionCallback = null;
         this._card.chat.clear();
@@ -218,23 +263,67 @@ export class PipelineManager {
     });
   }
 
-  // --- Event Handlers (delegated to events.js) ---
+  // --- Event Handlers (with stale event filtering) ---
 
-  handleRunStart(data) { handleRunStart(this, data); }
-  handleWakeWordStart() { handleWakeWordStart(this); }
-  handleWakeWordEnd(data) { handleWakeWordEnd(this, data); }
+  handleRunStart(data) {
+    this._runStartReceived = true;
+    this._wakeWordPhase = false;
+    this._errorReceived = false;
+    handleRunStart(this, data);
+  }
+
+  handleWakeWordStart() {
+    this._wakeWordPhase = true;
+    handleWakeWordStart(this);
+  }
+
+  handleWakeWordEnd(data) {
+    if (!this._runStartReceived) {
+      this._log.log('pipeline', 'Ignoring stale wake_word-end (no run-start received for this subscription)');
+      return;
+    }
+    // Empty wake_word_output means the pipeline's audio stream was stopped
+    // (restart/stop signal). This is expected on every pipeline restart —
+    // not a real error. Suppress it to avoid entering a retry loop.
+    const output = data?.wake_word_output;
+    if (!output || !output.wake_word_id) {
+      this._log.log('pipeline', 'Ignoring empty wake_word-end (pipeline stopped during restart)');
+      return;
+    }
+    this._wakeWordPhase = false;
+    handleWakeWordEnd(this, data);
+  }
+
   handleSttEnd(data) { handleSttEnd(this, data); }
   handleIntentProgress(data) { handleIntentProgress(this, data); }
   handleIntentEnd(data) { handleIntentEnd(this, data); }
   handleTtsEnd(data) { handleTtsEnd(this, data); }
-  handleRunEnd() { handleRunEnd(this); }
-  handleError(data) { handleError(this, data); }
+
+  handleRunEnd() {
+    if (!this._runStartReceived) {
+      this._log.log('pipeline', 'Ignoring stale run-end (no run-start received for this subscription)');
+      return;
+    }
+    // A run-end during wake_word phase (before valid wake_word-end) without
+    // a preceding error is always from a stale/killed pipeline — suppress it
+    // to prevent finishRunEnd → restart(0) from killing the active pipeline.
+    if (this._wakeWordPhase && !this._errorReceived) {
+      this._log.log('pipeline', 'Ignoring stale run-end (still in wake_word phase, no error)');
+      return;
+    }
+    handleRunEnd(this);
+  }
+
+  handleError(data) {
+    if (!this._runStartReceived) {
+      this._log.log('pipeline', 'Ignoring stale error (no run-start received for this subscription)');
+      return;
+    }
+    this._errorReceived = true;
+    handleError(this, data);
+  }
 
   // --- Public Helpers ---
-
-  finishPendingRunEnd() {
-    if (this._pendingRunEnd) this.finishRunEnd();
-  }
 
   clearContinueState() {
     this._shouldContinue = false;
@@ -269,7 +358,6 @@ export class PipelineManager {
 
   finishRunEnd() {
     this._pendingRunEnd = false;
-    this._card.stopWakeSwitchKeepAlive();
     this._card.chat.clear();
     this._card.ui.hideBlurOverlay(BlurReason.PIPELINE);
     this._card.setState(State.IDLE);
@@ -286,36 +374,5 @@ export class PipelineManager {
     const delay = Math.min(Timing.RETRY_BASE_DELAY * this._retryCount, Timing.MAX_RETRY_DELAY);
     this._log.log('pipeline', `Retry in ${delay}ms (attempt #${this._retryCount})`);
     return delay;
-  }
-
-  startIdleTimeout() {
-    this.clearIdleTimeout();
-    if (this._card.config.pipeline_idle_timeout <= 0) return;
-
-    this._idleTimeoutId = setTimeout(() => {
-      if (INTERACTING_STATES.includes(this._card.currentState)) {
-        this._log.log('pipeline', 'Idle timeout fired but interaction in progress — deferring');
-        this.resetIdleTimeout();
-        return;
-      }
-      if (this._card.tts.isPlaying) {
-        this._log.log('pipeline', 'Idle timeout fired but TTS playing — deferring');
-        this.resetIdleTimeout();
-        return;
-      }
-      this._log.log('pipeline', 'Idle timeout — restarting');
-      this.restart(0);
-    }, this._card.config.pipeline_idle_timeout * 1000);
-  }
-
-  clearIdleTimeout() {
-    if (this._idleTimeoutId) {
-      clearTimeout(this._idleTimeoutId);
-      this._idleTimeoutId = null;
-    }
-  }
-
-  resetIdleTimeout() {
-    this.startIdleTimeout();
   }
 }

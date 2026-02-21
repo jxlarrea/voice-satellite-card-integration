@@ -6,6 +6,9 @@
  */
 
 import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
+import { clearNotificationUI } from '../shared/satellite-notification.js';
+import { sendAck } from '../shared/notification-comms.js';
+import { getSwitchState } from '../shared/satellite-state.js';
 
 export class DoubleTapHandler {
   constructor(card) {
@@ -23,8 +26,13 @@ export class DoubleTapHandler {
 
       const isActive = INTERACTING_STATES.includes(this._card.currentState) || this._card.tts.isPlaying;
       const isTimerAlert = this._card.timer.isAlertActive;
+      const isNotification = this._card.announcement.playing
+        || this._card.askQuestion.playing
+        || this._card.startConversation.playing
+        || this._card.announcement.clearTimeoutId
+        || this._card.startConversation.clearTimeoutId;
 
-      if (!isActive && !isTimerAlert) return;
+      if (!isActive && !isTimerAlert && !isNotification) return;
 
       // Touch/click deduplication
       if (e.type === 'click' && this._lastTapWasTouch) return;
@@ -43,21 +51,43 @@ export class DoubleTapHandler {
           return;
         }
 
+        if (isNotification) {
+          this._log.log('ui', 'Double-tap detected — dismissing notification');
+          for (const mgr of [this._card.announcement, this._card.askQuestion, this._card.startConversation]) {
+            if (!mgr.playing && !mgr.clearTimeoutId) continue;
+            if (mgr.currentAnnounceId) {
+              sendAck(this._card, mgr.currentAnnounceId, 'double-tap');
+            }
+            if (mgr.currentAudio) {
+              mgr.currentAudio.pause();
+              mgr.currentAudio = null;
+            }
+            mgr.playing = false;
+            mgr.currentAnnounceId = null;
+            clearNotificationUI(mgr);
+          }
+          // Release server-side _question_event if ask_question was playing
+          this._card.askQuestion.cancel();
+          this._card.pipeline.restart(0);
+          return;
+        }
+
         this._log.log('ui', 'Double-tap detected — cancelling interaction');
 
         if (this._card.tts.isPlaying) {
           this._card.tts.stop();
         }
 
-        this._card.stopWakeSwitchKeepAlive();
+        // Clean up ask_question STT mode (timers, server release, ANNOUNCEMENT blur)
+        this._card.askQuestion.cancel();
+
         this._card.pipeline.clearContinueState();
         this._card.setState(State.IDLE);
         this._card.chat.clear();
         this._card.ui.hideBlurOverlay(BlurReason.PIPELINE);
-        this._card.updateInteractionState('IDLE');
 
         const isRemote = this._card.config.tts_target && this._card.config.tts_target !== 'browser';
-        if (this._card.config.chime_on_request_sent && !isRemote) {
+        if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
           this._card.tts.playChime('done');
         }
 
