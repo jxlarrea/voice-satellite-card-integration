@@ -1,6 +1,6 @@
 # Voice Satellite Card — Design Document
 
-Current version: 4.0.2
+Current version: 4.0.4
 
 ## 1. Overview
 
@@ -373,7 +373,8 @@ The pipeline manager handles the full lifecycle of the bridged pipeline:
 3. Sets up the reconnect listener
 4. Subscribes to `voice_satellite/run_pipeline` via the integration
 5. Waits for the synthetic `init` event that carries the binary handler ID
-6. Starts audio sending
+6. Discards stale audio buffer (prevents chime residue from reaching VAD)
+7. Starts audio sending
 
 **Stopping (`stop()`):**
 - Stops audio sending, clears mute poll timer, unsubscribes from the pipeline
@@ -443,7 +444,11 @@ Before playing the wake chime, `handleWakeWordEnd` checks the integration's `wak
 
 The done chime after TTS playback follows the same pattern.
 
-**Chime audio muting:** When the wake chime is enabled, `handleWakeWordEnd` stops sending audio to the server before playing the chime, then resumes after the chime duration + 50ms margin. This prevents the chime sound from leaking into the microphone (echo cancellation isn't perfect on all devices) and being misinterpreted by VAD as speech — which would cause VAD to close STT prematurely, especially with short wake words like "Alexa". The buffer is flushed on resume to discard any chime-contaminated audio.
+**Chime audio muting:** Echo cancellation isn't perfect on all devices, so chime audio can leak into the microphone and be misinterpreted by VAD as speech — causing VAD to close STT prematurely. Two complementary protections exist:
+
+1. **Active-pipeline chime guard** (`handleWakeWordEnd`): Stops sending audio before playing the wake chime, resumes after chime duration + 50ms, and flushes the buffer on resume. This covers chimes that play while the pipeline is actively streaming audio to the server.
+
+2. **Pipeline-start buffer discard** (`start()`): Clears the audio buffer immediately before `startSending()` on every pipeline start. The mic worklet keeps buffering audio even when no pipeline is active, so stale audio (including chime residue from ask_question/start_conversation flows) would otherwise be sent to the server as soon as the new pipeline begins. This covers chimes that play *between* pipeline runs (e.g., the wake chime in `_enterSttMode` before `restartContinue`).
 
 **Gotcha — getSwitchState lookup:** The function uses `hass.entities` (HA frontend entity registry cache) to find sibling switch entities by `device_id` + `translation_key`. This is more reliable than reading `extra_state_attributes` on the satellite entity, which can be stale if the state_changed listener wasn't set up in time.
 
