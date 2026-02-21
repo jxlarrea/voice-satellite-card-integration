@@ -27,10 +27,35 @@ from homeassistant.components.media_source import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class MediaPlayerExtraData(ExtraStoredData):
+    """Extra stored data for persisting volume across reboots."""
+
+    def __init__(self, volume_level: float, is_volume_muted: bool) -> None:
+        """Initialize extra data."""
+        self.volume_level = volume_level
+        self.is_volume_muted = is_volume_muted
+
+    def as_dict(self) -> dict[str, Any]:
+        """Serialize to dict."""
+        return {
+            "volume_level": self.volume_level,
+            "is_volume_muted": self.is_volume_muted,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MediaPlayerExtraData:
+        """Deserialize from dict."""
+        return cls(
+            volume_level=data.get("volume_level", 1.0),
+            is_volume_muted=data.get("is_volume_muted", False),
+        )
 
 
 async def async_setup_entry(
@@ -47,7 +72,7 @@ async def async_setup_entry(
     hass.data[DOMAIN][f"{entry.entry_id}_media_player"] = entity
 
 
-class VoiceSatelliteMediaPlayer(MediaPlayerEntity):
+class VoiceSatelliteMediaPlayer(MediaPlayerEntity, RestoreEntity):
     """A media player representing a browser satellite's audio output."""
 
     _attr_has_entity_name = True
@@ -70,10 +95,27 @@ class VoiceSatelliteMediaPlayer(MediaPlayerEntity):
         self._attr_unique_id = f"{entry.entry_id}_media_player"
 
         self._attr_state = MediaPlayerState.IDLE
-        self._attr_volume_level = 0.5
+        self._attr_volume_level = 1.0
         self._attr_is_volume_muted = False
         self._attr_media_content_id: str | None = None
         self._attr_media_content_type: str | None = None
+
+    @property
+    def extra_restore_state_data(self) -> MediaPlayerExtraData:
+        """Return extra data to persist across reboots."""
+        return MediaPlayerExtraData(
+            self._attr_volume_level,
+            self._attr_is_volume_muted,
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Restore volume and mute state on startup."""
+        await super().async_added_to_hass()
+        extra_data = await self.async_get_last_extra_data()
+        if extra_data:
+            data = MediaPlayerExtraData.from_dict(extra_data.as_dict())
+            self._attr_volume_level = data.volume_level
+            self._attr_is_volume_muted = data.is_volume_muted
 
     @property
     def available(self) -> bool:

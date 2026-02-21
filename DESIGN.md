@@ -1010,7 +1010,46 @@ _attr_supported_features = (
 
 States: `MediaPlayerState.IDLE`, `PLAYING`, `PAUSED`.
 
-Volume: `_volume_level` (0–1 float), `_is_volume_muted` (bool).
+Volume: `_attr_volume_level` (0–1 float, default 1.0), `_attr_is_volume_muted` (bool, default False).
+
+### 13A.2.1 Volume Persistence via `ExtraStoredData`
+
+The entity extends `RestoreEntity` and uses `ExtraStoredData` to persist volume and mute state across HA reboots.
+
+**Why not `async_get_last_state().attributes`?** During HA shutdown, the WebSocket connection drops before `RestoreEntity` saves state. This makes the entity go unavailable, and HA saves the state as `"unavailable"` with empty attributes — losing the volume level. `ExtraStoredData` is stored independently of entity state, using a separate storage mechanism that reads from the Python object's properties rather than the HA state machine.
+
+**Implementation:**
+
+```python
+class MediaPlayerExtraData(ExtraStoredData):
+    def __init__(self, volume_level: float, is_volume_muted: bool):
+        self.volume_level = volume_level
+        self.is_volume_muted = is_volume_muted
+
+    def as_dict(self) -> dict:
+        return {"volume_level": self.volume_level, "is_volume_muted": self.is_volume_muted}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> MediaPlayerExtraData:
+        return cls(volume_level=data.get("volume_level", 1.0),
+                   is_volume_muted=data.get("is_volume_muted", False))
+```
+
+The entity provides `extra_restore_state_data` (read at save time from the entity's Python attributes) and restores via `async_get_last_extra_data()` in `async_added_to_hass`:
+
+```python
+@property
+def extra_restore_state_data(self) -> MediaPlayerExtraData:
+    return MediaPlayerExtraData(self._attr_volume_level, self._attr_is_volume_muted)
+
+async def async_added_to_hass(self):
+    await super().async_added_to_hass()
+    extra_data = await self.async_get_last_extra_data()
+    if extra_data:
+        data = MediaPlayerExtraData.from_dict(extra_data.as_dict())
+        self._attr_volume_level = data.volume_level
+        self._attr_is_volume_muted = data.is_volume_muted
+```
 
 ### 13A.3 Service Methods
 
@@ -1322,11 +1361,15 @@ JSON has no distinct float type — `1` and `1.0` are identical. When JavaScript
 
 The `ws_media_player_event` handler iterates `hass.data[DOMAIN]` and uses `hasattr(ent, 'update_playback_state')` to identify media player entities (as opposed to satellite entities). This avoids needing a separate lookup dict and works because only `VoiceSatelliteMediaPlayer` has this method.
 
-### 16.24 Availability Is Driven by `subscribe_events`, Not `run_pipeline`
+### 16.24 Media Player Volume Requires `ExtraStoredData`, Not `RestoreEntity` Attributes
+
+During HA shutdown, the WebSocket connection drops before `RestoreEntity` saves final state. The entity becomes unavailable, and HA persists `"unavailable"` state with empty attributes — losing volume/mute data. `ExtraStoredData` stores volume and mute state independently via `extra_restore_state_data` (reads from Python attributes, not the HA state machine), so the values survive regardless of availability state at shutdown time. See §13A.2.1.
+
+### 16.25 Availability Is Driven by `subscribe_events`, Not `run_pipeline`
 
 The entity's `available` property checks `_satellite_subscribers` (from `subscribe_events`), not the `run_pipeline` connection. The `subscribe_events` subscription is the persistent control channel maintained for the card's entire lifetime, while `run_pipeline` is transient and recreated on each wake word cycle. Using the pipeline connection would cause rapid available/unavailable flapping between pipeline runs.
 
-### 16.25 Media Player Availability Propagation
+### 16.26 Media Player Availability Propagation
 
 When the satellite's subscriber list changes, `_update_media_player_availability()` directly calls `async_write_ha_state()` on the media player entity. Without this, the media player would only re-evaluate its `available` property on its next state write, leaving it stale (showing available when the satellite is actually unavailable).
 
@@ -1567,7 +1610,7 @@ SCREENSAVER_INTERVAL = 5  # seconds
 - [ ] Both use `EntityCategory.CONFIG`
 
 ### Media Player Entity
-- [ ] `VoiceSatelliteMediaPlayer` extends `MediaPlayerEntity`
+- [ ] `VoiceSatelliteMediaPlayer` extends `MediaPlayerEntity` + `RestoreEntity`
 - [ ] Supported features: PLAY_MEDIA, PLAY, PAUSE, STOP, VOLUME_SET, VOLUME_MUTE, BROWSE_MEDIA, MEDIA_ANNOUNCE
 - [ ] Service methods push commands to card via `_push_satellite_event("media_player", ...)`
 - [ ] `async_play_media` resolves `media-source://` URIs via `async_resolve_media()`
@@ -1577,6 +1620,10 @@ SCREENSAVER_INTERVAL = 5  # seconds
 - [ ] Stored in `hass.data[DOMAIN][f"{entry.entry_id}_media_player"]`
 - [ ] `available` property delegates to satellite entity's `available`
 - [ ] Same `device_info` identifiers as other entities
+- [ ] Default volume 1.0 (100%), default mute False
+- [ ] `ExtraStoredData` (`MediaPlayerExtraData`) persists volume/mute across reboots
+- [ ] `extra_restore_state_data` property returns current volume/mute for save
+- [ ] `async_added_to_hass` restores volume/mute via `async_get_last_extra_data()`
 
 ### Screensaver Keep-Alive
 - [ ] `_start_screensaver_keepalive`: immediate turn_off + periodic interval

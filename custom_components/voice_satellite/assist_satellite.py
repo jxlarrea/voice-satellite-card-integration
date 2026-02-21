@@ -127,7 +127,14 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
     @property
     def available(self) -> bool:
-        """Entity is available only when a card is connected via subscribe_events."""
+        """Entity is available only when a card is connected via subscribe_events.
+
+        During HA shutdown, report as available so RestoreEntity saves
+        state with full attributes (volume, timers, etc.) instead of
+        an empty 'unavailable' state.
+        """
+        if self.hass.is_stopping:
+            return True
         return len(self._satellite_subscribers) > 0
 
     @property
@@ -138,7 +145,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             "name": self._satellite_name,
             "manufacturer": "Voice Satellite Card Integration",
             "model": "Browser Satellite",
-            "sw_version": "2.1.0",
+            "sw_version": "2.2.0",
         }
 
     @property
