@@ -13,6 +13,8 @@ body:
       label: Prerequisites checklist
       description: Please confirm you've checked all of these before opening an issue.
       options:
+        - label: I have installed the required [Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration).
+          required: true
         - label: I am running **Home Assistant 2025.2.1** or later.
           required: true
         - label: I am accessing Home Assistant over **HTTPS** (or localhost). Microphone access requires a secure context.
