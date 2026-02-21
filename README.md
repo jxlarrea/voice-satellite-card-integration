@@ -1,7 +1,6 @@
 # <img width="48" height="48" alt="icon" src="https://github.com/user-attachments/assets/31b4a789-bae3-4428-a543-85063f17109c" /> Voice Satellite Card Integration
 
-
-Companion integration for the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Registers browsers as proper Assist Satellite devices in Home Assistant.
+Required integration for the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Registers browsers as proper Assist Satellite devices in Home Assistant, giving them full feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/).
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
 [![version](https://shields.io/github/v/release/jxlarrea/voice-satellite-card-integration?style=for-the-badge)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
@@ -12,27 +11,17 @@ Companion integration for the [Voice Satellite Card](https://github.com/jxlarrea
 
 ## Why?
 
-The [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) runs in your browser and uses HA's Assist Pipeline API to process voice commands. However, because the browser isn't a registered satellite device, Home Assistant doesn't give it a device identity. This means:
+The [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) runs in your browser and uses Home Assistant's Assist Pipeline to process voice commands. However, without this integration the browser has no device identity in Home Assistant, which means:
 
 - **Timers don't work** - HA tells the LLM "this device is not able to start timers"
 - **No announcements** - you can't push TTS messages to a specific browser
 - **No conversations** - automations can't proactively ask the user a question and listen for a response
+- **No per-device configuration** - no way to select pipeline, VAD sensitivity, or manage mute/chime settings per device
 - **No per-device automations** - HA doesn't know which browser is talking
 
-This integration solves that by creating a virtual Assist Satellite entity for each browser.
-
-## What it does
-
-- Creates an `assist_satellite.*` entity per browser with a proper device identity
-- **Timers** - Registers as a timer handler so the LLM gets access to `HassStartTimer`, and exposes active timer state as entity attributes for the card to display countdown pills
-- **Announcements** - Implements `assist_satellite.announce` so you can push TTS messages to specific browsers from automations and scripts
-- **Start Conversation** - Implements `assist_satellite.start_conversation` so automations can speak a prompt and then listen for the user's voice response
-- **Ask Question** - Implements `assist_satellite.ask_question` so automations can ask a question, capture the user's voice response, and match it against predefined answers using hassil sentence templates
-- **State sync** - Reflects real-time pipeline state (`idle`, `listening`, `processing`, `responding`) on the entity, enabling automations that react to voice activity
+This integration solves all of that by creating a virtual Assist Satellite device for each browser.
 
 ## Installation
-
-> **Note:** This is a companion integration for the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). You need to install the card as well for this integration to be useful.
 
 ### HACS (Recommended)
 
@@ -49,20 +38,14 @@ This integration solves that by creating a virtual Assist Satellite entity for e
 
 1. Go to **Settings → Devices & Services → Add Integration**
 2. Search for **Voice Satellite Card**
-3. Enter a name for the device (e.g. "Kitchen Tablet")
-4. Repeat for each device that runs the Voice Satellite Card
+3. Enter a name for the device (e.g., "Kitchen Tablet")
+4. Repeat for each device that runs the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant)
 
-Each entry creates an `assist_satellite.*` entity. Use this entity in your Voice Satellite Card configuration:
-
-```yaml
-type: custom:voice-satellite-card
-satellite_entity: assist_satellite.kitchen_tablet
-# ... other card options
-```
+Each entry creates a full satellite device. Select the `assist_satellite.*` entity in the Voice Satellite Card editor to connect them.
 
 ## Timer Support
 
-Once configured, you can say "set a timer for 5 minutes" through the Voice Satellite Card and it will work. The integration registers as a timer handler for the device, which tells HA's intent system (and any connected LLM) that this satellite supports timers. The integration handles the full timer lifecycle - start, update, cancel, and finish - and exposes active timers as entity attributes that the card reads to display countdown pills.
+Once configured, you can say "set a timer for 5 minutes" through the Voice Satellite Card and it will work. The integration registers as a timer handler for the device, which tells HA's intent system (and any connected LLM) that this satellite supports timers. The integration handles the full timer lifecycle — start, update, cancel, and finish — and exposes active timers as entity attributes that the card reads to display countdown pills.
 
 ## Announcement Support
 
@@ -92,6 +75,7 @@ target:
   entity_id: assist_satellite.kitchen_tablet
 data:
   start_message: "The front door has been unlocked for 10 minutes. Should I lock it?"
+  extra_system_prompt: "The user was asked about the front door. If they confirm, call the lock service on lock.front_door."
 ```
 
 This enables interactive automations where Home Assistant proactively asks the user a question and acts on their response. The satellite's configured pipeline must use a conversation agent that supports conversations (e.g., OpenAI, Google Generative AI).
@@ -145,7 +129,7 @@ The Voice Satellite Card syncs its pipeline state back to the entity in real tim
 | `processing` | Processing the user's intent |
 | `responding` | Speaking a TTS response |
 
-You can use this in automations - for example, muting a TV when the nearby satellite starts listening:
+You can use this in automations — for example, muting a TV when the nearby satellite starts listening:
 
 ```yaml
 trigger:
@@ -168,7 +152,8 @@ The satellite entity exposes the following attributes for use in templates and a
 |-----------|------|-------------|
 | `active_timers` | list | Active timer objects, each with `id`, `name`, `total_seconds`, `started_at` |
 | `last_timer_event` | string | Last timer event type: `started`, `updated`, `cancelled`, or `finished` |
-| `announcement` | dict | Present only during active announcement playback, with `id`, `message`, `media_id` |
+| `muted` | boolean | Current mute switch state |
+| `wake_sound` | boolean | Current wake sound switch state |
 
 Example template to check for active timers:
 
@@ -179,7 +164,7 @@ Example template to check for active timers:
 ## Requirements
 
 - Home Assistant 2025.1.2 or later
-- [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) v3.1.0 or later (for ask question support; v3.0.5+ for start conversation; v3.0.0+ for timers and announcements)
+- [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) v4.0.0 or later
 
 ## License
 

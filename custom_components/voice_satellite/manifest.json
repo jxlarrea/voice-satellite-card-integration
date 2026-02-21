@@ -3,9 +3,9 @@
   "name": "Voice Satellite Card Integration",
   "codeowners": ["@jxlarrea"],
   "config_flow": true,
-  "dependencies": ["assist_satellite", "intent"],
+  "dependencies": ["assist_pipeline", "assist_satellite", "intent"],
   "documentation": "https://github.com/jxlarrea/voice-satellite-card-integration",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/jxlarrea/voice-satellite-card-integration/issues",
-  "version": "1.2.3"
+  "version": "2.0.0"
 }
