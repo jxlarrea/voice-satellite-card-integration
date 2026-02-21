@@ -21,7 +21,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.SELECT, Platform.SWITCH]
+PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER, Platform.SELECT, Platform.SWITCH]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -60,6 +60,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except ValueError:
         pass
 
+    try:
+        websocket_api.async_register_command(hass, ws_media_player_event)
+    except ValueError:
+        pass
+
     return True
 
 
@@ -68,6 +73,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     result = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if result:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data[DOMAIN].pop(f"{entry.entry_id}_media_player", None)
     return result
 
 
@@ -236,6 +242,19 @@ async def ws_run_pipeline(
     # and CancelledError always wins, leaving orphaned PipelineInput tasks.
     # Instead: send stop signal → wait for natural exit → cancel only on timeout.
     if entity._pipeline_audio_queue is not None:
+        old_conn = entity._pipeline_connection
+        old_msg_id = entity._pipeline_msg_id
+        if old_conn is not None and old_conn is not connection:
+            _LOGGER.warning(
+                "Pipeline for '%s' displaced by a different browser connection "
+                "— the previous browser will stop receiving wake word events. "
+                "Each browser must use its own satellite entity.",
+                entity._satellite_name,
+            )
+            try:
+                old_conn.send_event(old_msg_id, {"type": "displaced"})
+            except Exception:
+                pass  # old connection may already be dead
         entity._pipeline_audio_queue.put_nowait(b"")
 
     old_task = entity._pipeline_task
@@ -388,3 +407,41 @@ async def ws_cancel_timer(
         connection.send_error(
             msg["id"], "cancel_failed", str(err)
         )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "voice_satellite/media_player_event",
+        vol.Required("entity_id"): str,
+        vol.Required("state"): str,
+        vol.Optional("volume"): vol.Coerce(float),
+        vol.Optional("media_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_media_player_event(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Handle media player state updates from the card."""
+    entity_id = msg["entity_id"]
+    state = msg["state"]
+    volume = msg.get("volume")
+    media_id = msg.get("media_id")
+
+    # Find the media player entity
+    entity = None
+    for key, ent in hass.data.get(DOMAIN, {}).items():
+        if hasattr(ent, "update_playback_state") and ent.entity_id == entity_id:
+            entity = ent
+            break
+
+    if entity is None:
+        connection.send_error(
+            msg["id"], "not_found", f"Media player entity {entity_id} not found"
+        )
+        return
+
+    entity.update_playback_state(state, volume=volume, media_id=media_id)
+    connection.send_result(msg["id"], {"success": True})

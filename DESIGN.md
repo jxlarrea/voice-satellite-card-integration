@@ -1,7 +1,5 @@
 # Voice Satellite Card Integration — Design Document
 
-Current version: 2.0.0
-
 ## 1. Overview
 
 This integration creates virtual Assist Satellite entities in Home Assistant for browsers running the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Each config entry produces one `assist_satellite.*` entity backed by a device in the device registry, along with supporting select and switch entities.
@@ -16,6 +14,8 @@ This integration creates virtual Assist Satellite entities in Home Assistant for
 | Announcements | `assist_satellite.announce` action → pushed to card via WS subscription |
 | Start conversation | `assist_satellite.start_conversation` action → prompt + listen |
 | Ask question | `assist_satellite.ask_question` action → prompt + STT + hassil matching |
+| Media player | `media_player` entity → volume control, `tts.speak` / `play_media` targeting, media browsing |
+| Entity availability | Entity is `unavailable` when no card is connected; becomes available on `subscribe_events` |
 | Pipeline state sync | Card → integration state updates → entity reflects `idle`/`listening`/`processing`/`responding` |
 | Bridged pipeline | Card audio → integration → HA pipeline → events back to card |
 | Per-device automations | Entity state changes trigger automations |
@@ -32,10 +32,11 @@ See the card's [DESIGN.md](https://github.com/jxlarrea/Voice-Satellite-Card-for-
 voice-satellite-card-integration/
 ├── custom_components/
 │   └── voice_satellite/
-│       ├── __init__.py          # Entry setup, 6 WebSocket command registrations
+│       ├── __init__.py          # Entry setup, 7 WebSocket command registrations
 │       ├── assist_satellite.py  # VoiceSatelliteEntity (core entity)
 │       ├── config_flow.py       # Single-step config flow
 │       ├── const.py             # DOMAIN, SCREENSAVER_INTERVAL constants
+│       ├── media_player.py      # VoiceSatelliteMediaPlayer (media player entity)
 │       ├── select.py            # Pipeline, VAD sensitivity, screensaver selects
 │       ├── switch.py            # Wake sound, mute switches
 │       ├── manifest.json        # Integration manifest
@@ -69,32 +70,34 @@ The resulting entity ID will be `assist_satellite.<slugified_name>`.
 
 `async_setup_entry` does two things:
 
-1. **Forward platform setup** — Calls `async_forward_entry_setups(entry, PLATFORMS)` where `PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.SELECT, Platform.SWITCH]`. This triggers setup in `assist_satellite.py`, `select.py`, and `switch.py`.
-2. **Register WebSocket commands** — Registers all 6 WS commands. Uses try/except around each registration because multiple config entries share the same command types (only the first registration succeeds, subsequent ones raise `ValueError`).
+1. **Forward platform setup** — Calls `async_forward_entry_setups(entry, PLATFORMS)` where `PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.SELECT, Platform.SWITCH, Platform.MEDIA_PLAYER]`. This triggers setup in `assist_satellite.py`, `select.py`, `switch.py`, and `media_player.py`.
+2. **Register WebSocket commands** — Registers all 7 WS commands. Uses try/except around each registration because multiple config entries share the same command types (only the first registration succeeds, subsequent ones raise `ValueError`).
 
-The 6 WebSocket commands:
+The 7 WebSocket commands:
 - `voice_satellite/announce_finished`
 - `voice_satellite/update_state`
 - `voice_satellite/question_answered`
 - `voice_satellite/run_pipeline`
 - `voice_satellite/subscribe_events`
 - `voice_satellite/cancel_timer`
+- `voice_satellite/media_player_event`
 
 ### 3.3 Entry Unload
 
-Unloads platforms and removes the entity reference from `hass.data[DOMAIN]`:
+Unloads platforms and removes entity references from `hass.data[DOMAIN]`:
 
 ```python
 async def async_unload_entry(hass, entry):
     result = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if result:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data[DOMAIN].pop(f"{entry.entry_id}_media_player", None)
     return result
 ```
 
 ### 3.4 Entity Storage
 
-Entities are stored in `hass.data[DOMAIN][entry.entry_id]`. All WebSocket handlers iterate this dict to find entities by `entity_id`. This lookup is necessary because WS commands are global (not per-entity), so the handler must locate the correct entity instance.
+Satellite entities are stored in `hass.data[DOMAIN][entry.entry_id]`. Media player entities are stored in `hass.data[DOMAIN][f"{entry.entry_id}_media_player"]`. All WebSocket handlers iterate this dict to find entities by `entity_id`. This lookup is necessary because WS commands are global (not per-entity), so the handler must locate the correct entity instance.
 
 ```python
 entity = None
@@ -140,7 +143,7 @@ def device_info(self):
         "name": self._satellite_name,
         "manufacturer": "Voice Satellite Card Integration",
         "model": "Browser Satellite",
-        "sw_version": "2.0.0",
+        "sw_version": "<version>",
     }
 ```
 
@@ -185,7 +188,25 @@ def extra_state_attributes(self):
 
 **Important:** Announcements are NOT in entity attributes. They are pushed directly to the card via the satellite event subscription (§10).
 
-### 4.5 Pipeline/VAD Entity ID Properties
+### 4.5 Entity Availability
+
+The entity overrides the `available` property to reflect whether a card is actually connected:
+
+```python
+@property
+def available(self) -> bool:
+    return len(self._satellite_subscribers) > 0
+```
+
+When no browser has an active `subscribe_events` subscription, the entity shows as **unavailable** in HA. This means:
+
+- The entity state becomes `unavailable` in the UI and state machine
+- Automations targeting the entity (announce, start_conversation, etc.) fail immediately instead of hanging until timeout
+- The media_player entity on the same device also becomes unavailable (it delegates to the satellite's `available` property)
+
+Availability updates are triggered in `register_satellite_subscription` (first subscriber → available) and `unregister_satellite_subscription` (last subscriber removed → unavailable). Both also call `_update_media_player_availability()` to propagate the change to the child media_player entity.
+
+### 4.6 Pipeline/VAD Entity ID Properties
 
 The entity provides lookup properties for the related select entities:
 
@@ -648,7 +669,7 @@ The method checks `self.state == mapped` before writing. The card may send rapid
 
 ### 10.1 Overview
 
-The card maintains a persistent WS subscription via `voice_satellite/subscribe_events`. The integration pushes notification events (announcements, start_conversation, ask_question) directly to the card through this subscription, rather than writing to entity attributes.
+The card maintains a persistent WS subscription via `voice_satellite/subscribe_events`. The integration pushes notification events (announcements, start_conversation, ask_question) and media player commands directly to the card through this subscription, rather than writing to entity attributes.
 
 ### 10.2 Subscriber Management
 
@@ -656,7 +677,11 @@ The card maintains a persistent WS subscription via `voice_satellite/subscribe_e
 # Registration
 @callback
 def register_satellite_subscription(self, connection, msg_id):
+    was_empty = not self._satellite_subscribers
     self._satellite_subscribers.append((connection, msg_id))
+    if was_empty:
+        self.async_write_ha_state()          # satellite → available
+        self._update_media_player_availability()  # media_player → available
 
 # Unregistration
 @callback
@@ -665,9 +690,12 @@ def unregister_satellite_subscription(self, connection, msg_id):
         (c, m) for c, m in self._satellite_subscribers
         if not (c is connection and m == msg_id)
     ]
+    if not self._satellite_subscribers:
+        self.async_write_ha_state()          # satellite → unavailable
+        self._update_media_player_availability()  # media_player → unavailable
 ```
 
-Subscribers are stored as `list[tuple[ActiveConnection, int]]`.
+Subscribers are stored as `list[tuple[ActiveConnection, int]]`. The first subscriber arriving makes the entity available; the last one leaving makes it unavailable (see §4.5).
 
 ### 10.3 Event Push
 
@@ -959,6 +987,94 @@ def _on_switch_state_change(self, _event):
     self.async_write_ha_state()
 ```
 
+## 13A. Media Player Entity (`media_player.py`)
+
+### 13A.1 Overview
+
+`VoiceSatelliteMediaPlayer` extends `MediaPlayerEntity` and provides a media player entity for each satellite device. This enables volume control, `tts.speak` targeting, `media_player.play_media` from automations, and media library browsing — matching the Voice PE's media player capabilities.
+
+### 13A.2 Features & State
+
+```python
+_attr_supported_features = (
+    MediaPlayerEntityFeature.PLAY_MEDIA
+    | MediaPlayerEntityFeature.PLAY
+    | MediaPlayerEntityFeature.PAUSE
+    | MediaPlayerEntityFeature.STOP
+    | MediaPlayerEntityFeature.VOLUME_SET
+    | MediaPlayerEntityFeature.VOLUME_MUTE
+    | MediaPlayerEntityFeature.BROWSE_MEDIA
+    | MediaPlayerEntityFeature.MEDIA_ANNOUNCE
+)
+```
+
+States: `MediaPlayerState.IDLE`, `PLAYING`, `PAUSED`.
+
+Volume: `_volume_level` (0–1 float), `_is_volume_muted` (bool).
+
+### 13A.3 Service Methods
+
+All methods push commands to the card via the satellite entity's `_push_satellite_event("media_player", payload)`:
+
+| Method | Command pushed | Extra fields |
+|--------|---------------|-------------|
+| `async_play_media(media_type, media_id, **kwargs)` | `play` | `media_id`, `media_type`, `announce`, `volume` |
+| `async_media_pause()` | `pause` | — |
+| `async_media_play()` | `resume` | — |
+| `async_media_stop()` | `stop` | — |
+| `async_set_volume_level(volume)` | `volume_set` | `volume` |
+| `async_mute_volume(mute)` | `volume_mute` | `mute` |
+
+**Media source resolution:** `async_play_media` resolves `media-source://` URIs to playable paths using `async_resolve_media()` from `homeassistant.components.media_source`. This handles local media, TTS proxy URLs, and other HA media sources.
+
+**Announce flag:** When `kwargs[ATTR_MEDIA_ANNOUNCE]` is true, the command includes `announce: true`.
+
+### 13A.4 Media Library Browsing
+
+`async_browse_media()` delegates to `async_browse_media()` from `homeassistant.components.media_source` to provide the HA media library browser. This allows users to browse local media, TTS samples, etc. from the media player's UI.
+
+### 13A.5 State Callback
+
+`update_playback_state(state, volume=None, media_id=None)` is called by the `ws_media_player_event` WS handler when the card reports state changes:
+
+```python
+@callback
+def update_playback_state(self, state, volume=None, media_id=None):
+    self._state = STATE_MAP.get(state, MediaPlayerState.IDLE)
+    if volume is not None:
+        self._volume_level = volume
+    if media_id:
+        self._media_id = media_id
+    self.async_write_ha_state()
+```
+
+### 13A.6 Satellite Entity Lookup
+
+The media player uses a lazy-lookup pattern to find the satellite entity for pushing commands:
+
+```python
+def _get_satellite(self):
+    return self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
+```
+
+If no satellite entity is found (not yet loaded, or disconnected), the method logs a warning and returns without pushing the command.
+
+This same lookup is used for the `available` property — the media player delegates availability to the satellite entity:
+
+```python
+@property
+def available(self) -> bool:
+    satellite = self._get_satellite_entity()
+    return satellite.available if satellite else False
+```
+
+### 13A.7 Entity Registration
+
+- **Unique ID:** `f"{entry.entry_id}_media_player"`
+- **Translation key:** `_attr_translation_key = "media_player"`
+- **Device:** Same `device_info` identifiers as other entities (`(DOMAIN, entry.entry_id)`)
+- **Storage:** `hass.data[DOMAIN][f"{entry.entry_id}_media_player"]` for WS handler lookup
+
 ## 14. Screensaver Keep-Alive System
 
 ### 14.1 Purpose
@@ -996,7 +1112,7 @@ def _start_screensaver_keepalive(self):
 
 ## 15. WebSocket Commands
 
-All 6 WebSocket commands follow the same patterns:
+All 7 WebSocket commands follow the same patterns:
 - Decorated with `@websocket_api.websocket_command(schema)` and `@websocket_api.async_response`
 - Entity lookup iterates `hass.data[DOMAIN]` by `entity_id`
 - Returns error if entity not found
@@ -1072,6 +1188,7 @@ The handler coordinates with the entity's hassil matching via `_question_match_e
 **Events sent back:**
 - `{"type": "announcement", "data": {...}}` — play announcement
 - `{"type": "start_conversation", "data": {...}}` — play prompt, then listen
+- `{"type": "media_player", "data": {...}}` — media player command (play, pause, stop, volume, etc.)
 
 The subscription remains active until the card disconnects or explicitly unsubscribes.
 
@@ -1087,6 +1204,23 @@ The subscription remains active until the card disconnects or explicitly unsubsc
 **Response:** `{"success": true}` or error if timer manager unavailable or cancel fails.
 
 Uses `TimerManager.cancel_timer(timer_id)` from `homeassistant.components.intent`. Imports are lazy (at call time) to avoid circular imports.
+
+### 15.7 `voice_satellite/media_player_event`
+
+**Direction:** Card → Integration
+
+| Field | Type | Description |
+|---|---|---|
+| `entity_id` | `str` | Media player entity ID |
+| `state` | `str` | Playback state: `"playing"`, `"paused"`, `"idle"` |
+| `volume` | `float?` | Optional current volume level (0–1) |
+| `media_id` | `str?` | Optional current media ID |
+
+**Response:** `{"success": true}`
+
+The handler looks up the media player entity via `hass.data[DOMAIN]` (checking for `update_playback_state` attribute) and calls `entity.update_playback_state(state, volume, media_id)`.
+
+**Volume validation:** Uses `vol.Coerce(float)` instead of `float` for the volume field because JSON has no float type — JavaScript may send `1` (integer) instead of `1.0`.
 
 ## 16. Known Gotchas & Non-Obvious Traps
 
@@ -1152,7 +1286,7 @@ When the last satellite subscriber disconnects, pending `async_announce` and `as
 
 ### 16.16 Cross-Repo Version Bumping
 
-The version appears in three places: `manifest.json` (`version`), `assist_satellite.py` (`sw_version` in `device_info`), and `DESIGN.md` header. All three must be updated together.
+The integration version appears in two places: `manifest.json` (`version`) and `assist_satellite.py` (`sw_version` in `device_info`). Both must be updated together. The card version is in `package.json` only.
 
 ### 16.17 No `homeassistant` Key in `manifest.json`
 
@@ -1179,6 +1313,22 @@ The entity uses two different mechanisms to update state, each for a different s
 ### 16.21 Unique ID Separator Mismatch Between Framework and Custom Entities
 
 Framework-inherited select entities use **dashes** in their unique IDs while custom entities use **underscores** (see §12.5). Entity registry lookups in the satellite entity (`pipeline_entity_id`, `vad_sensitivity_entity_id`, `_get_screensaver_entity_id`) must use the correct separator for each. Getting this wrong returns `None` silently.
+
+### 16.22 JSON Integer/Float Ambiguity in WS Volume
+
+JSON has no distinct float type — `1` and `1.0` are identical. When JavaScript sends volume `1` (integer), Python receives `int(1)`, which fails Voluptuous `float` validation. The `media_player_event` WS schema uses `vol.Coerce(float)` instead of `float` to handle this.
+
+### 16.23 Media Player Entity Lookup in WS Handler
+
+The `ws_media_player_event` handler iterates `hass.data[DOMAIN]` and uses `hasattr(ent, 'update_playback_state')` to identify media player entities (as opposed to satellite entities). This avoids needing a separate lookup dict and works because only `VoiceSatelliteMediaPlayer` has this method.
+
+### 16.24 Availability Is Driven by `subscribe_events`, Not `run_pipeline`
+
+The entity's `available` property checks `_satellite_subscribers` (from `subscribe_events`), not the `run_pipeline` connection. The `subscribe_events` subscription is the persistent control channel maintained for the card's entire lifetime, while `run_pipeline` is transient and recreated on each wake word cycle. Using the pipeline connection would cause rapid available/unavailable flapping between pipeline runs.
+
+### 16.25 Media Player Availability Propagation
+
+When the satellite's subscriber list changes, `_update_media_player_availability()` directly calls `async_write_ha_state()` on the media player entity. Without this, the media player would only re-evaluate its `available` property on its next state write, leaving it stale (showing available when the satellite is actually unavailable).
 
 ## 17. HA API Dependencies
 
@@ -1219,7 +1369,17 @@ Framework-inherited select entities use **dashes** in their unique IDs while cus
 - `connection.async_register_binary_handler(callback)` — Register binary audio handler, returns `(handler_id, unregister)`
 - `connection.subscriptions[msg_id] = unsub` — Register unsubscribe callback
 
-### 17.6 Event Helpers
+### 17.6 `media_player` / `media_source` Components
+
+- `MediaPlayerEntity` — Base class for media player entities
+- `MediaPlayerEntityFeature` — Feature flags (PLAY_MEDIA, PLAY, PAUSE, STOP, VOLUME_SET, VOLUME_MUTE, BROWSE_MEDIA, MEDIA_ANNOUNCE)
+- `MediaPlayerState` — State enum (IDLE, PLAYING, PAUSED)
+- `MediaType` — Media type constants
+- `async_resolve_media(hass, media_content_id, entity_id)` — Resolve `media-source://` URIs to playable paths
+- `async_browse_media(hass, media_content_type, media_content_id)` — Browse HA media library
+- `BrowseMedia` — Media browsing response object
+
+### 17.7 Event Helpers
 
 - `async_track_state_change_event(hass, entity_ids, callback)` — Track state changes for switch → satellite propagation
 - `async_track_time_interval(hass, callback, interval)` — Periodic screensaver keep-alive
@@ -1236,6 +1396,7 @@ Framework-inherited select entities use **dashes** in their unique IDs while cus
 | `voice_satellite/update_state` | `{entity_id, state}` | Sync pipeline state |
 | `voice_satellite/question_answered` | `{entity_id, announce_id, sentence}` | Send ask_question STT result |
 | `voice_satellite/cancel_timer` | `{entity_id, timer_id}` | Cancel a timer |
+| `voice_satellite/media_player_event` | `{entity_id, state, volume?, media_id?}` | Report media player playback state |
 | Binary frames | `[handler_id][PCM data]` | Audio for pipeline |
 
 ### 18.2 Integration → Card (WS Events)
@@ -1252,6 +1413,7 @@ Framework-inherited select entities use **dashes** in their unique IDs while cus
 | `error` | `{...}` | `run_pipeline` subscription |
 | `announcement` | `{id, message, media_id, preannounce_media_id, preannounce?, ask_question?}` | `subscribe_events` subscription |
 | `start_conversation` | `{id, message, media_id, preannounce_media_id, start_conversation, preannounce?, extra_system_prompt?}` | `subscribe_events` subscription |
+| `media_player` | `{command, media_id?, volume?, mute?, ...}` | `subscribe_events` subscription |
 
 ### 18.3 Integration → Card (Entity Attributes)
 
@@ -1267,7 +1429,7 @@ Framework-inherited select entities use **dashes** in their unique IDs while cus
 HA uses this file for config flow UI and entity names:
 
 - Config flow: title, description, input labels, description text, abort messages
-- Entity names: Translation keys for select entities ("Assistant", "Finished speaking detection", "Screensaver entity") and switch entities ("Wake sound", "Mute")
+- Entity names: Translation keys for select entities ("Assistant", "Finished speaking detection", "Screensaver entity"), switch entities ("Wake sound", "Mute"), and media player entity ("Media Player")
 - Select states: Translation keys for pipeline select ("Preferred") and VAD sensitivity ("Default", "Relaxed", "Aggressive")
 
 ## 20. Configuration Files
@@ -1284,7 +1446,7 @@ HA uses this file for config flow UI and entity names:
     "documentation": "...",
     "iot_class": "local_push",
     "issue_tracker": "...",
-    "version": "2.0.0"
+    "version": "<version>"
 }
 ```
 
@@ -1330,6 +1492,7 @@ SCREENSAVER_INTERVAL = 5  # seconds
 - [ ] Timer handler registered in `async_added_to_hass` via `intent.async_register_timer_handler`
 - [ ] Timer handler wrapped in `async_on_remove()`
 - [ ] Switch state change tracking via `async_track_state_change_event`
+- [ ] `available` property returns `True` only when `_satellite_subscribers` is non-empty
 - [ ] `async_get_configuration` returns empty wake word config
 - [ ] `async_set_configuration` is a no-op
 - [ ] `async_will_remove_from_hass`: pipeline stop, release blocking events, clear subscribers, stop keepalive
@@ -1387,6 +1550,8 @@ SCREENSAVER_INTERVAL = 5  # seconds
 - [ ] `register_satellite_subscription` / `unregister_satellite_subscription`
 - [ ] `_push_satellite_event`: push to all subscribers, remove dead ones
 - [ ] Unsubscribe releases blocking events when no subscribers remain
+- [ ] First subscriber triggers `async_write_ha_state()` + `_update_media_player_availability()` (entity → available)
+- [ ] Last subscriber removed triggers `async_write_ha_state()` + `_update_media_player_availability()` (entity → unavailable)
 
 ### Select Entities
 - [ ] Pipeline select (extends `AssistPipelineSelect`) — constructor takes 3 args: `(hass, DOMAIN, entry_id)`
@@ -1401,6 +1566,18 @@ SCREENSAVER_INTERVAL = 5  # seconds
 - [ ] Mute switch (default off, `RestoreEntity`)
 - [ ] Both use `EntityCategory.CONFIG`
 
+### Media Player Entity
+- [ ] `VoiceSatelliteMediaPlayer` extends `MediaPlayerEntity`
+- [ ] Supported features: PLAY_MEDIA, PLAY, PAUSE, STOP, VOLUME_SET, VOLUME_MUTE, BROWSE_MEDIA, MEDIA_ANNOUNCE
+- [ ] Service methods push commands to card via `_push_satellite_event("media_player", ...)`
+- [ ] `async_play_media` resolves `media-source://` URIs via `async_resolve_media()`
+- [ ] `async_browse_media` delegates to HA media source browser
+- [ ] `update_playback_state` callback for WS handler state updates
+- [ ] Unique ID: `f"{entry.entry_id}_media_player"`
+- [ ] Stored in `hass.data[DOMAIN][f"{entry.entry_id}_media_player"]`
+- [ ] `available` property delegates to satellite entity's `available`
+- [ ] Same `device_info` identifiers as other entities
+
 ### Screensaver Keep-Alive
 - [ ] `_start_screensaver_keepalive`: immediate turn_off + periodic interval
 - [ ] `_stop_screensaver_keepalive`: cancel interval
@@ -1409,18 +1586,20 @@ SCREENSAVER_INTERVAL = 5  # seconds
 - [ ] Re-start in ask_question between phases
 
 ### WebSocket Commands
-- [ ] 6 commands: announce_finished, update_state, question_answered, run_pipeline, subscribe_events, cancel_timer
+- [ ] 7 commands: announce_finished, update_state, question_answered, run_pipeline, subscribe_events, cancel_timer, media_player_event
 - [ ] Entity lookup iterates `hass.data[DOMAIN]` by `entity_id`
 - [ ] Registration wrapped in try/except for idempotency
+- [ ] `media_player_event` uses `vol.Coerce(float)` for volume field (JSON integer/float ambiguity)
 
 ### Integration Setup
-- [ ] `async_setup_entry` forwards to ASSIST_SATELLITE + SELECT + SWITCH platforms
-- [ ] `async_setup_entry` registers all 6 WebSocket commands
-- [ ] `async_unload_entry` unloads platforms and removes entity from `hass.data`
-- [ ] Entity stored in `hass.data[DOMAIN][entry.entry_id]`
+- [ ] `async_setup_entry` forwards to ASSIST_SATELLITE + SELECT + SWITCH + MEDIA_PLAYER platforms
+- [ ] `async_setup_entry` registers all 7 WebSocket commands
+- [ ] `async_unload_entry` unloads platforms and removes entity + media_player from `hass.data`
+- [ ] Satellite entity stored in `hass.data[DOMAIN][entry.entry_id]`
+- [ ] Media player entity stored in `hass.data[DOMAIN][f"{entry.entry_id}_media_player"]`
 
 ### Infrastructure
 - [ ] `manifest.json` with 3 dependencies: `assist_pipeline`, `assist_satellite`, `intent`
 - [ ] No `homeassistant` key in `manifest.json`
 - [ ] `hacs.json` with minimum HA version
-- [ ] Version in 3 places: `manifest.json`, `assist_satellite.py` (`sw_version`), `DESIGN.md` header
+- [ ] Integration version in 2 places: `manifest.json`, `assist_satellite.py` (`sw_version`)

@@ -43,6 +43,11 @@
       "mute": {
         "name": "Mute"
       }
+    },
+    "media_player": {
+      "media_player": {
+        "name": "Media Player"
+      }
     }
   }
 }

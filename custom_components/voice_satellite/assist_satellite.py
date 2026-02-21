@@ -126,6 +126,11 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._screensaver_unsub = None
 
     @property
+    def available(self) -> bool:
+        """Entity is available only when a card is connected via subscribe_events."""
+        return len(self._satellite_subscribers) > 0
+
+    @property
     def device_info(self) -> dict[str, Any]:
         """Return device info to create a device registry entry."""
         return {
@@ -133,7 +138,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             "name": self._satellite_name,
             "manufacturer": "Voice Satellite Card Integration",
             "model": "Browser Satellite",
-            "sw_version": "2.0.0",
+            "sw_version": "2.1.0",
         }
 
     @property
@@ -913,6 +918,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self, connection, msg_id: int
     ) -> None:
         """Register a WS subscriber for satellite events."""
+        was_empty = not self._satellite_subscribers
         self._satellite_subscribers.append((connection, msg_id))
         _LOGGER.debug(
             "Satellite subscription registered for '%s' (msg_id=%d, total=%d)",
@@ -920,6 +926,10 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             msg_id,
             len(self._satellite_subscribers),
         )
+        # First subscriber → entity becomes available
+        if was_empty:
+            self.async_write_ha_state()
+            self._update_media_player_availability()
 
     @callback
     def unregister_satellite_subscription(
@@ -937,9 +947,12 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             len(self._satellite_subscribers),
         )
 
-        # If no subscribers remain, release any pending blocking events
-        # so the entity isn't stuck waiting for a card that disconnected.
+        # If no subscribers remain, entity becomes unavailable.
+        # Also release any pending blocking events so the entity
+        # isn't stuck waiting for a card that disconnected.
         if not self._satellite_subscribers:
+            self.async_write_ha_state()
+            self._update_media_player_availability()
             if self._announce_event is not None:
                 _LOGGER.debug(
                     "No subscribers left — releasing pending announcement for '%s'",
@@ -979,6 +992,15 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             self._satellite_subscribers = [
                 s for s in self._satellite_subscribers if s not in dead
             ]
+
+    @callback
+    def _update_media_player_availability(self) -> None:
+        """Notify the media_player entity to re-evaluate its availability."""
+        mp = self.hass.data.get(DOMAIN, {}).get(
+            f"{self._entry.entry_id}_media_player"
+        )
+        if mp is not None:
+            mp.async_write_ha_state()
 
     @callback
     def _handle_timer_event(

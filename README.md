@@ -16,6 +16,8 @@ The [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-
 - **Timers don't work** - HA tells the LLM "this device is not able to start timers"
 - **No announcements** - you can't push TTS messages to a specific browser
 - **No conversations** - automations can't proactively ask the user a question and listen for a response
+- **No media player** - you can't target the browser with `tts.speak` or `media_player.play_media`
+- **No volume control** - no way to adjust audio volume from the HA UI
 - **No per-device configuration** - no way to select pipeline, VAD sensitivity, or manage mute/chime settings per device
 - **No per-device automations** - HA doesn't know which browser is talking
 
@@ -118,6 +120,38 @@ Sentence templates use [hassil](https://github.com/home-assistant/hassil) syntax
 
 The card provides audio and visual feedback: a done chime on successful match, or an error chime with a flashing red gradient bar when the response doesn't match any answer.
 
+## Media Player
+
+Each satellite device includes a `media_player` entity that provides volume control and audio playback capabilities — matching the behavior of the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/).
+
+**Volume control:** The media player's volume slider controls all satellite audio — chimes, TTS responses, announcements, and media playback. Volume changes apply in real time to any currently-playing audio.
+
+**Playback state:** The entity reflects the satellite's actual audio state. It shows "Playing" whenever any sound is active (chimes, TTS, announcements, or direct media playback), and returns to "Idle" when audio finishes.
+
+**TTS targeting:** You can use the satellite as a `tts.speak` target in automations:
+
+```yaml
+action: tts.speak
+target:
+  entity_id: tts.piper
+data:
+  media_player_entity_id: media_player.kitchen_tablet_media_player
+  message: "The laundry is done!"
+```
+
+**Media playback:** Play audio files from automations using `media_player.play_media`:
+
+```yaml
+action: media_player.play_media
+target:
+  entity_id: media_player.kitchen_tablet_media_player
+data:
+  media_content_id: media-source://media_source/local/doorbell.mp3
+  media_content_type: music
+```
+
+The entity supports play, pause, resume, stop, volume set, and volume mute — all controllable from the HA UI or automations. It also supports browsing the HA media library.
+
 ## Satellite State Sync
 
 The Voice Satellite Card syncs its pipeline state back to the entity in real time. This means the entity accurately reflects what the satellite is doing:
@@ -164,7 +198,7 @@ Example template to check for active timers:
 ## Requirements
 
 - Home Assistant 2025.2.1 or later
-- [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) v4.0.0 or later
+- [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) v4.1.0 or later
 
 ## License
 
