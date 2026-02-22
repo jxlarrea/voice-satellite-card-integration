@@ -20,7 +20,7 @@ export class MediaPlayerManager {
     this._audio = null;
     this._playing = false;
     this._paused = false;
-    this._volume = 0.5;
+    this._volume = 1.0;
     this._muted = false;
     this._mediaId = null;
     this._volumeSynced = false;
@@ -344,7 +344,7 @@ export class MediaPlayerManager {
       state,
     };
 
-    if (this._volume !== undefined) {
+    if (this._volumeSynced && this._volume !== undefined) {
       msg.volume = this._volume;
     }
     if (this._mediaId && state !== 'idle') {
