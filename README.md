@@ -3,7 +3,7 @@
 Required integration for the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Registers browsers as proper Assist Satellite devices in Home Assistant, giving them full feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/).
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
-[![version](https://shields.io/github/v/release/jxlarrea/voice-satellite-card-integration?style=for-the-badge)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
+[![version](https://shields.io/github/v/release/jxlarrea/voice-satellite-card-integration?style=for-the-badge&color=red)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
 [![Stars](https://img.shields.io/github/stars/jxlarrea/voice-satellite-card-integration?style=for-the-badge&color=yellow)](https://github.com/jxlarrea/voice-satellite-card-integration/stargazers)
 [![Build](https://img.shields.io/github/actions/workflow/status/jxlarrea/voice-satellite-card-integration/hacs.yml?style=for-the-badge&label=Build)](https://github.com/jxlarrea/voice-satellite-card-integration/actions/workflows/hacs.yml)
 
