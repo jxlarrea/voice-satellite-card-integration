@@ -187,6 +187,32 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             s = self.hass.states.get(wake_eid)
             attrs["wake_sound"] = s.state == "on" if s else True
 
+        # Expose TTS output select entity_id for the card
+        tts_select_eid = registry.async_get_entity_id(
+            "select", DOMAIN, f"{self._entry.entry_id}_tts_output"
+        )
+        if tts_select_eid:
+            s = self.hass.states.get(tts_select_eid)
+            if s and s.state not in ("Browser", "unknown", "unavailable"):
+                attrs["tts_target"] = s.attributes.get("entity_id", "")
+            else:
+                attrs["tts_target"] = ""
+
+        # Expose announcement display duration for the card
+        ann_dur_eid = registry.async_get_entity_id(
+            "number", DOMAIN,
+            f"{self._entry.entry_id}_announcement_display_duration"
+        )
+        if ann_dur_eid:
+            s = self.hass.states.get(ann_dur_eid)
+            if s and s.state not in ("unknown", "unavailable"):
+                try:
+                    attrs["announcement_display_duration"] = int(
+                        float(s.state)
+                    )
+                except (ValueError, TypeError):
+                    pass
+
         return attrs
 
     async def async_added_to_hass(self) -> None:
@@ -204,21 +230,32 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             )
         )
 
-        # When mute/wake_sound switches change, re-write our state so
+        # When sibling entities change, re-write our state so
         # extra_state_attributes are re-evaluated and the card sees updates.
         registry = er.async_get(self.hass)
-        switch_eids = []
+        tracked_eids = []
         for suffix in ("_mute", "_wake_sound"):
             eid = registry.async_get_entity_id(
                 "switch", DOMAIN, f"{self._entry.entry_id}{suffix}"
             )
             if eid:
-                switch_eids.append(eid)
-        if switch_eids:
+                tracked_eids.append(eid)
+        tts_eid = registry.async_get_entity_id(
+            "select", DOMAIN, f"{self._entry.entry_id}_tts_output"
+        )
+        if tts_eid:
+            tracked_eids.append(tts_eid)
+        ann_dur_eid = registry.async_get_entity_id(
+            "number", DOMAIN,
+            f"{self._entry.entry_id}_announcement_display_duration"
+        )
+        if ann_dur_eid:
+            tracked_eids.append(ann_dur_eid)
+        if tracked_eids:
             self.async_on_remove(
                 async_track_state_change_event(
                     self.hass,
-                    switch_eids,
+                    tracked_eids,
                     self._on_switch_state_change,
                 )
             )

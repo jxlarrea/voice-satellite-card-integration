@@ -32,6 +32,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 SCREENSAVER_DISABLED = "Disabled"
+TTS_OUTPUT_BROWSER = "Browser"
 
 
 async def async_setup_entry(
@@ -44,6 +45,7 @@ async def async_setup_entry(
         VoiceSatellitePipelineSelect(hass, entry),
         VoiceSatelliteVadSensitivitySelect(hass, entry),
         VoiceSatelliteScreensaverSelect(hass, entry),
+        VoiceSatelliteTTSOutputSelect(hass, entry),
     ]
     async_add_entities(entities)
 
@@ -211,6 +213,125 @@ class VoiceSatelliteScreensaverSelect(SelectEntity, RestoreEntity):
     async def async_select_option(self, option: str) -> None:
         """Handle option selection — resolve friendly name to entity_id."""
         if option == SCREENSAVER_DISABLED:
+            self._selected_entity_id = None
+        else:
+            _, name_to_eid = self._build_mapping()
+            self._selected_entity_id = name_to_eid.get(option)
+        self.async_write_ha_state()
+
+
+class VoiceSatelliteTTSOutputSelect(SelectEntity, RestoreEntity):
+    """Select entity for choosing a media player for TTS output.
+
+    Displays friendly names in the dropdown but stores the entity_id
+    internally and exposes it via extra_state_attributes for the card.
+    Default is "Browser" (card plays audio locally via Web Audio).
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "tts_output"
+    _attr_icon = "mdi:speaker"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialize the TTS output select entity."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_tts_output"
+        self._selected_entity_id: str | None = None
+        self._mapping_cache: tuple[dict[str, str], dict[str, str]] | None = None
+        self._cache_time: float = 0
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info — same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    _CACHE_TTL = 30  # seconds
+
+    def _build_mapping(self) -> tuple[dict[str, str], dict[str, str]]:
+        """Build display-name <-> entity-id mappings (cached for 30s)."""
+        now = time.monotonic()
+        if (
+            self._mapping_cache is not None
+            and self.hass
+            and self.hass.is_running
+            and (now - self._cache_time) < self._CACHE_TTL
+        ):
+            return self._mapping_cache
+        eid_to_name: dict[str, str] = {}
+        name_to_eid: dict[str, str] = {}
+        if self.hass:
+            registry = er.async_get(self.hass)
+            seen: set[str] = set()
+            entries: list[tuple[str, str]] = []
+            for eid in self.hass.states.async_entity_ids("media_player"):
+                # Skip our own integration's media player entity
+                entry = registry.async_get(eid)
+                if entry and entry.platform == DOMAIN:
+                    continue
+                state = self.hass.states.get(eid)
+                friendly = (
+                    state.attributes.get("friendly_name", eid)
+                    if state
+                    else eid
+                )
+                if entry:
+                    label = entry.platform.replace("_", " ").title()
+                    name = f"{label}: {friendly}"
+                else:
+                    name = friendly
+                entries.append((eid, name))
+            for eid, name in sorted(entries, key=lambda e: e[1].casefold()):
+                if name in seen:
+                    name = f"{name} ({eid})"
+                seen.add(name)
+                eid_to_name[eid] = name
+                name_to_eid[name] = eid
+        self._mapping_cache = (eid_to_name, name_to_eid)
+        self._cache_time = now
+        return self._mapping_cache
+
+    @property
+    def options(self) -> list[str]:
+        """Return available options — friendly names of media_player entities."""
+        eid_to_name, _ = self._build_mapping()
+        opts: list[str] = [TTS_OUTPUT_BROWSER]
+        opts.extend(eid_to_name.values())
+        if self._selected_entity_id and self._selected_entity_id not in eid_to_name:
+            opts.append(self._selected_entity_id)
+        return opts
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the friendly name of the selected entity, or Browser."""
+        if not self._selected_entity_id:
+            return TTS_OUTPUT_BROWSER
+        eid_to_name, _ = self._build_mapping()
+        return eid_to_name.get(self._selected_entity_id, self._selected_entity_id)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Expose the selected entity_id for the card to read."""
+        if self._selected_entity_id:
+            return {"entity_id": self._selected_entity_id}
+        return None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous selection on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in (
+            "unknown", "unavailable", TTS_OUTPUT_BROWSER,
+        ):
+            entity_id = last_state.attributes.get("entity_id")
+            if entity_id:
+                self._selected_entity_id = entity_id
+
+    async def async_select_option(self, option: str) -> None:
+        """Handle option selection — resolve friendly name to entity_id."""
+        if option == TTS_OUTPUT_BROWSER:
             self._selected_entity_id = None
         else:
             _, name_to_eid = self._build_mapping()

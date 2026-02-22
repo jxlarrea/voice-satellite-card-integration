@@ -34,6 +34,14 @@
       },
       "screensaver": {
         "name": "Screensaver entity"
+      },
+      "tts_output": {
+        "name": "TTS output"
+      }
+    },
+    "number": {
+      "announcement_display_duration": {
+        "name": "Announcement display duration"
       }
     },
     "switch": {
@@ -42,6 +50,11 @@
       },
       "mute": {
         "name": "Mute"
+      }
+    },
+    "media_player": {
+      "media_player": {
+        "name": "Media Player"
       }
     }
   }
