@@ -25,7 +25,8 @@ Home Assistant's built-in voice features require dedicated hardware like ESPHome
 - **Providing voice-activated timers** - Set, update, and cancel timers with on-screen countdown pills.
 - **Receiving announcements** - Push TTS messages to specific devices from automations.
 - **Supporting interactive conversations** - Automations can proactively ask questions and listen for responses.
-- **Providing visual feedback** - Gradient bar shows current state, with transcription and response bubbles.
+- **Providing visual feedback** - Themed gradient bar shows current state, with transcription and response text.
+- **Skin system** - Choose between built-in skins (Default, Alexa, Google Home) that theme the entire UI.
 - **Working on any device** - Tablets, phones, computers, kiosks.
 
 Perfect for wall-mounted tablets, kiosk displays, or any browser-based Home Assistant setup.
@@ -51,19 +52,16 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 - **Wake Word Detection** - Uses Home Assistant's configured wake word detection (like Wyoming openWakeWord or microWakeWord) for server-side processing.
 - **Works Across Views** - Pipeline stays active when switching dashboard views.
 - **Auto-Start** - Automatically begins listening on page load (with fallback button).
-- **Visual Feedback** - Customizable gradient activity bar shows listening/processing/speaking states.
-- **Transcription & Response Display** - Shows what was understood and the assistant's response in styled bubbles with real-time streaming.
-- **Continue Conversation** - When the assistant asks a follow-up question, the card automatically listens for a response without requiring the wake word again. Conversation history is displayed in a chat-style interface.
+- **Visual Feedback** - Themed gradient activity bar shows listening/processing/speaking states with optional reactive audio-level animation.
+- **Skins** - Built-in skins (Default, Alexa, Google Home) that theme the activity bar, text display, timers, and overlay. Customizable with CSS overrides.
+- **Transcription & Response Display** - Shows what was understood and the assistant's response with real-time streaming.
+- **Continue Conversation** - When the assistant asks a follow-up question, the card automatically listens for a response without requiring the wake word again. Conversation history is displayed on screen.
 - **Timers** - Voice-activated timers with on-screen countdown pills, alert chimes, and cancel via double-tap or voice.
 - **Announcements** - Receive `assist_satellite.announce` service calls with pre-announcement chimes and TTS playback. Queues behind active conversations.
 - **Start Conversation** - Receive `assist_satellite.start_conversation` calls that speak a prompt then automatically listen for the user's response.
 - **Ask Question** - Receive `assist_satellite.ask_question` calls that speak a question, capture the user's voice response, and match it against predefined answers using hassil sentence templates. Returns structured results to the calling automation.
-- **Mute Switch** - Mute/unmute the satellite from the Home Assistant UI or automations.
-- **Wake Sound Switch** - Enable/disable chime sounds from the Home Assistant UI.
 - **Screensaver Control** - Automatically dismisses a configured screensaver entity when a voice interaction begins.
-- **Pipeline & VAD Selection** - Choose which Assist pipeline and VAD sensitivity to use per satellite from the Home Assistant device page.
 - **Media Player Entity** - Each satellite exposes a `media_player` entity. Volume is controlled via the entity's volume slider in HA and applies to all audio (chimes, TTS, announcements). Supports `tts.speak` and `media_player.play_media` targeting from automations.
-- **Configurable Chimes** - Audio feedback for wake word detection and request completion.
 
 ## Prerequisites
 
@@ -131,65 +129,23 @@ type: custom:voice-satellite-card
 
 # Behavior
 satellite_entity: ''               # (Required) assist_satellite entity from the integration
-tts_target: ''                     # TTS output device (empty = browser, or media_player entity ID)
 debug: false                       # Show debug info in browser console
 
-# Announcements
-announcement_display_duration: 5   # Seconds to show announcement bubble after playback
+# Appearance
+skin: default                      # 'default', 'alexa', or 'google-home'
+reactive_bar: true                 # Activity bar reacts to audio levels
+text_scale: 100                    # Scale all text 50-200%
+background_opacity: 100            # Override skin's default overlay opacity (0-100%)
+custom_css: ''                     # CSS overrides applied on top of the selected skin
 
 # Microphone Processing
 noise_suppression: true            # Enable noise suppression
 echo_cancellation: true            # Enable echo cancellation
 auto_gain_control: true            # Enable automatic gain control
 voice_isolation: false             # AI-based voice isolation (Chrome only)
-
-# Appearance - Activity Bar
-bar_position: bottom               # 'bottom' or 'top'
-bar_height: 16                     # Height in pixels (2-40)
-bar_gradient: '#FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC'
-background_blur: true              # Blurs the background when active
-background_blur_intensity: 5       # Blur effect intensity
-
-# Appearance - Bubble Style
-bubble_style: chat                 # 'centered' (bubbles centered) or 'chat' (user right, assistant left)
-bubble_container_width: 85         # Width of the bubble area as percentage (40-100)
-
-# Appearance - Transcription Bubble (User Speech)
-transcription_font_size: 20        # Font size in pixels
-transcription_font_family: inherit # CSS font family
-transcription_font_color: '#444444'
-transcription_font_bold: true
-transcription_font_italic: false
-transcription_background: '#ffffff'
-transcription_border_color: 'rgba(0, 180, 255, 0.5)'
-transcription_padding: 16          # Padding in pixels
-transcription_rounded: true        # Rounded corners
-
-# Appearance - Response Bubble (Assistant Speech)
-show_response: true                # Show/hide the response bubble
-response_font_size: 20             # Font size in pixels
-response_font_family: inherit      # CSS font family
-response_font_color: '#444444'
-response_font_bold: true
-response_font_italic: false
-response_background: '#ffffff'
-response_border_color: 'rgba(100, 200, 150, 0.5)'
-response_padding: 16               # Padding in pixels
-response_rounded: true             # Rounded corners
-
-# Appearance - Timer Pill
-timer_position: top-right          # 'top-left', 'top-right', 'bottom-left', 'bottom-right'
-timer_font_size: 20                # Font size in pixels
-timer_font_family: inherit         # CSS font family
-timer_font_color: '#444444'
-timer_font_bold: true
-timer_font_italic: false
-timer_background: '#ffffff'
-timer_border_color: 'rgba(100, 200, 150, 0.5)'
-timer_padding: 16                  # Padding in pixels
-timer_rounded: true                # Rounded corners
-timer_finished_duration: 60        # Seconds to show finished timer alert (0 = until dismissed)
 ```
+
+> **Note:** Settings like TTS output, screensaver entity, and announcement display duration are now configured per-device in the [Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration). All visual styling (bar, bubbles, timers) is handled by the selected skin.
 
 ## Usage
 
@@ -197,16 +153,30 @@ timer_finished_duration: 60        # Seconds to show finished timer alert (0 = u
 
 The card will automatically request microphone access and begin listening when loaded. If the browser blocks auto-start due to restrictions, a floating microphone button will appear — click it to start.
 
+### Voice Interaction
+
+Once running, the satellite continuously listens for your configured wake word. When detected:
+
+1. A **wake chime** plays (if enabled) and the activity bar appears
+2. **Speak your command** — the card streams audio to your STT engine and displays the transcription in real time
+3. The assistant **processes your intent** and the bar animates while thinking
+4. The **TTS response plays** and the response text appears on screen
+5. The bar fades and the satellite returns to **wake word listening**
+
+If the assistant asks a follow-up question or you want to continue the conversation, the card automatically re-enters listening mode without requiring the wake word again, allowing a natural back-and-forth exchange. This requires a conversation agent that supports multi-turn conversations, such as OpenAI, Google Generative AI, Anthropic, or Ollama. The built-in Home Assistant conversation agent does not support follow-up conversations.
+
 ### Visual States
 
-The gradient bar indicates the current pipeline state:
+The activity bar (styled by the selected skin) indicates the current pipeline state:
 
-| State | Gradient Bar |
+| State | Activity Bar |
 |-------|-------------|
-| **Listening** | Hidden |
-| **Wake Word Detected** | Visible, slow flow |
-| **Processing** | Visible, fast flow |
-| **Speaking** | Visible, medium flow |
+| **Listening** | Hidden (waiting for wake word) |
+| **Wake Word Detected** | Visible, slow animation |
+| **Processing** | Visible, fast animation |
+| **Speaking** | Visible, medium animation |
+
+When **Reactive activity bar** is enabled, the bar also responds to real-time mic input and audio output levels.
 
 ### Timers
 
@@ -217,7 +187,7 @@ Voice-activated timers work out of the box:
 - **Alert**: When a timer finishes, an alert chime plays and the pill flashes
 - **Cancel**: Double-tap the timer pill to cancel, or say "Cancel the timer"
 
-Timer appearance (position, font, colors, alert duration) is fully customizable in the card editor under **Timer Pill**.
+Timer appearance is controlled by the selected skin.
 
 ### Announcements
 
@@ -233,7 +203,7 @@ data:
 
 Announcements include a pre-announcement chime (ding-dong), play the TTS message, and show the text on screen. If a voice interaction is in progress, the announcement queues and plays after the conversation ends.
 
-The display duration is configurable in the card editor under **Announcements**.
+The display duration is configurable in the integration's device settings (see [Voice Satellite Card Integration](https://github.com/jxlarrea/voice-satellite-card-integration)).
 
 ### Start Conversation
 
@@ -308,6 +278,38 @@ After the question plays, a wake chime signals the user to speak. The card enter
 
 Sentence templates support optional words in `[brackets]` and wildcards in `{braces}` for capturing variable parts of the response (e.g., `"play {genre} music"` captures the genre).
 
+## Skins
+
+The card includes a skin system that themes the entire UI — activity bar, text display, timers, and background overlay. Select a skin in the card editor under **Appearance**.
+
+### Built-in Skins
+
+| Skin | Description |
+|------|-------------|
+| **Default** | Rainbow gradient bar, bordered text containers, clean look |
+| **Alexa** | Cyan glow bar, dark overlay, centered bold text, Echo-inspired design |
+| **Google Home** | Four-color Google gradient bar, left-aligned text, light overlay, Nest-inspired design |
+
+### Appearance Options
+
+| Option | Description |
+|--------|-------------|
+| **Skin** | Select a built-in skin |
+| **Reactive activity bar** | Bar animates in response to mic and audio levels. Disable on slow devices to save resources |
+| **Text Scale** | Scale all text (transcriptions, responses, timers) from 50% to 200% |
+| **Background Opacity** | Override the skin's default overlay opacity (0–100%) |
+| **Custom CSS** | Advanced: CSS rules applied on top of the selected skin for fine-tuning colors, fonts, sizes, etc. |
+
+### Custom CSS
+
+Each skin defines CSS classes for all UI elements. Use the **Custom CSS** field to override any skin style. For example, to change the font family across all elements:
+
+```css
+#voice-satellite-ui {
+  font-family: "Comic Sans MS", cursive;
+}
+```
+
 ## Troubleshooting
 
 ### Nothing happens when I tap the microphone
@@ -340,7 +342,7 @@ Without this setting, the card will still function (wake word detection, speech-
 
 ### Card not visible
 
-This is intentional. The card itself is invisible and only shows the gradient bar and transcription bubble when active. Add it to any view and it will work in the background.
+This is intentional. The card itself is invisible and only shows the gradient bar and transcription text when active. Add it to any view and it will work in the background.
 
 ## Contributing
 
