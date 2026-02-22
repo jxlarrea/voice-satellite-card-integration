@@ -47,6 +47,22 @@ This integration solves all of that by creating a virtual Assist Satellite devic
 
 Each entry creates a full satellite device. Select the `assist_satellite.*` entity in the Voice Satellite Card editor to connect them.
 
+## Device Settings
+
+Each satellite device exposes configuration entities on its device page in Home Assistant (**Settings → Devices & Services → Voice Satellite Card → [device]**):
+
+| Entity | Type | Description |
+|--------|------|-------------|
+| **Assist pipeline** | Select | Choose which Assist pipeline to use for this satellite |
+| **Finished speaking detection** | Select | VAD sensitivity — how aggressively to detect end of speech |
+| **TTS Output** | Select | Where to play TTS audio: "Browser" (default) plays audio locally, or select any `media_player` entity to route TTS to an external speaker |
+| **Screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
+| **Announcement display duration** | Number | How long (1–60 seconds) to show the announcement bubble on screen after playback completes |
+| **Mute** | Switch | Mute/unmute the satellite — when muted, wake word detection is paused |
+| **Wake sound** | Switch | Enable/disable chime sounds (wake, done, error) |
+
+All settings persist across restarts.
+
 ## Timer Support
 
 Once configured, you can say "set a timer for 5 minutes" through the Voice Satellite Card and it will work. The integration registers as a timer handler for the device, which tells HA's intent system (and any connected LLM) that this satellite supports timers. The integration handles the full timer lifecycle — start, update, cancel, and finish — and exposes active timers as entity attributes that the card reads to display countdown pills.

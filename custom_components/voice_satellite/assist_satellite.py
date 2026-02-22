@@ -145,7 +145,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             "name": self._satellite_name,
             "manufacturer": "Voice Satellite Card Integration",
             "model": "Browser Satellite",
-            "sw_version": "2.2.0",
+            "sw_version": "2.3.0",
         }
 
     @property
