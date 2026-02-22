@@ -283,7 +283,7 @@ export function handleError(mgr, errorData) {
       mgr.card.ui.hideBlurOverlay(BlurReason.PIPELINE);
       mgr.shouldContinue = false;
       mgr.continueConversationId = null;
-      const isRemote = mgr.card.config.tts_target && mgr.card.config.tts_target !== 'browser';
+      const isRemote = !!mgr.card.ttsTarget;
       if (getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
         mgr.card.tts.playChime('done');
       }

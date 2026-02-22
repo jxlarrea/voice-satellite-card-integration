@@ -27,7 +27,6 @@ export class ChatManager {
   }
 
   showResponse(text) {
-    if (!this._card.config.show_response) return;
     if (this._streamEl) {
       this._card.ui.updateChatText(this._streamEl, text);
     } else {
@@ -36,7 +35,6 @@ export class ChatManager {
   }
 
   updateResponse(text) {
-    if (!this._card.config.show_response) return;
     if (!this._streamEl) {
       this.addAssistant(text);
     } else {

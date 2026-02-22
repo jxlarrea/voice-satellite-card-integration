@@ -5,7 +5,7 @@
  * and audio stream send control.
  */
 
-import { setupAudioWorklet, setupScriptProcessor, sendAudioBuffer } from './processing.js';
+import { setupAudioWorklet, sendAudioBuffer } from './processing.js';
 
 export class AudioManager {
   constructor(card) {
@@ -16,7 +16,6 @@ export class AudioManager {
     this._mediaStream = null;
     this._sourceNode = null;
     this._workletNode = null;
-    this._scriptProcessor = null;
     this._audioBuffer = [];
     this._sendInterval = null;
     this._actualSampleRate = 16000;
@@ -29,8 +28,6 @@ export class AudioManager {
   get audioContext() { return this._audioContext; }
   get workletNode() { return this._workletNode; }
   set workletNode(val) { this._workletNode = val; }
-  get scriptProcessor() { return this._scriptProcessor; }
-  set scriptProcessor(val) { this._scriptProcessor = val; }
   get audioBuffer() { return this._audioBuffer; }
   set audioBuffer(val) { this._audioBuffer = val; }
   get actualSampleRate() { return this._actualSampleRate; }
@@ -71,14 +68,13 @@ export class AudioManager {
     this._actualSampleRate = this._audioContext.sampleRate;
     this._log.log('mic', `Actual sample rate: ${this._actualSampleRate}`);
 
-    try {
-      await setupAudioWorklet(this, this._sourceNode);
-      this._log.log('mic', 'Audio capture via AudioWorklet');
-    } catch (e) {
-      this._log.log('mic', `AudioWorklet unavailable (${e.message}), using ScriptProcessor`);
-      setupScriptProcessor(this, this._sourceNode);
-      this._log.log('mic', 'Audio capture via ScriptProcessor');
+    // Tap mic into analyser for reactive bar (parallel connection — doesn't disrupt pipeline)
+    if (this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false) {
+      this._card.analyser.attachMic(this._sourceNode, this._audioContext);
     }
+
+    await setupAudioWorklet(this, this._sourceNode);
+    this._log.log('mic', 'Audio capture via AudioWorklet');
   }
 
   stopMicrophone() {
@@ -87,11 +83,8 @@ export class AudioManager {
       this._workletNode.disconnect();
       this._workletNode = null;
     }
-    if (this._scriptProcessor) {
-      this._scriptProcessor.disconnect();
-      this._scriptProcessor = null;
-    }
     if (this._sourceNode) {
+      this._card.analyser.detachMic(this._sourceNode);
       this._sourceNode.disconnect();
       this._sourceNode = null;
     }

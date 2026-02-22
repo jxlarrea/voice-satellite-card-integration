@@ -7,9 +7,7 @@
  * and error flash animations.
  */
 
-import STYLES from '../styles.css';
-import { seamlessGradient, Timing } from '../constants.js';
-import { applyBubbleStyle as _applyBubbleStyleFn } from '../shared/style-utils.js';
+import { Timing } from '../constants.js';
 import { formatTime } from '../shared/format.js';
 
 export class UIManager {
@@ -37,6 +35,7 @@ export class UIManager {
 
     if (existing) {
       this._globalUI = existing;
+      this.applyStyles();
       this._flushPendingStartButton();
       return;
     }
@@ -54,8 +53,10 @@ export class UIManager {
     document.body.appendChild(ui);
     this._globalUI = ui;
 
-    this._injectGlobalStyles();
-    this.applyStyles();
+    this._injectSkinCSS();
+    this._applyCustomCSS();
+    this._applyTextScale();
+    this._applyBackgroundOpacity();
 
     ui.querySelector('.vs-start-btn').addEventListener('click', () => {
       this._card.onStartClick();
@@ -72,52 +73,10 @@ export class UIManager {
 
   applyStyles() {
     if (!this._globalUI) return;
-    const cfg = this._card.config;
-
-    const bar = this._globalUI.querySelector('.vs-rainbow-bar');
-    bar.style.height = `${cfg.bar_height}px`;
-    bar.style[cfg.bar_position === 'top' ? 'top' : 'bottom'] = '0';
-    bar.style[cfg.bar_position === 'top' ? 'bottom' : 'top'] = 'auto';
-    bar.style.background = seamlessGradient(cfg.bar_gradient);
-    bar.style.backgroundSize = '200% 100%';
-
-    const blur = this._globalUI.querySelector('.vs-blur-overlay');
-    if (cfg.background_blur) {
-      blur.style.backdropFilter = `blur(${cfg.background_blur_intensity}px)`;
-      blur.style.webkitBackdropFilter = `blur(${cfg.background_blur_intensity}px)`;
-    } else {
-      blur.style.backdropFilter = 'none';
-      blur.style.webkitBackdropFilter = 'none';
-    }
-
-    const bubbleGap = 12;
-    const barH = cfg.bar_height || 6;
-    const chat = this._globalUI.querySelector('.vs-chat-container');
-    if (cfg.bar_position === 'bottom') {
-      chat.style.bottom = `${barH + bubbleGap}px`;
-      chat.style.top = 'auto';
-    } else {
-      chat.style.bottom = `${bubbleGap}px`;
-      chat.style.top = 'auto';
-    }
-
-    // Bubble layout style
-    const isChatStyle = cfg.bubble_style === 'chat';
-    chat.style.alignItems = isChatStyle ? 'flex-start' : 'center';
-    chat.style.width = `${cfg.bubble_container_width || 80}%`;
-    chat.style.maxWidth = `${cfg.bubble_container_width || 80}%`;
-
-    // Apply alignment class for chat-style bubbles
-    chat.setAttribute('data-bubble-style', cfg.bubble_style || 'centered');
-  }
-
-  /**
-   * Apply bubble styling to an element based on config prefix.
-   * @param {HTMLElement} el
-   * @param {string} prefix - Config key prefix (e.g. 'timer', 'transcription', 'response')
-   */
-  applyBubbleStyle(el, prefix) {
-    _applyBubbleStyleFn(el, this._card.config, prefix);
+    this._injectSkinCSS();
+    this._applyCustomCSS();
+    this._applyTextScale();
+    this._applyBackgroundOpacity();
   }
 
   // ─── State-Driven Bar Updates ─────────────────────────────────────
@@ -150,14 +109,26 @@ export class UIManager {
 
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
 
+    const reactive = this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false;
+
     if (config.barVisible) {
       if (bar.classList.contains('error-mode')) this.clearErrorBar();
       bar.classList.add('visible');
-      bar.classList.remove('connecting', 'listening', 'processing', 'speaking');
-      if (config.animation) bar.classList.add(config.animation);
+      bar.classList.remove('connecting', 'listening', 'processing', 'speaking', 'reactive');
+      if (config.animation) {
+        bar.classList.add(config.animation);
+      }
+      if (reactive) {
+        bar.classList.add('reactive');
+        this._globalUI.classList.add('reactive-mode');
+        this._card.analyser.reconnectMic();
+        this._card.analyser.start(bar);
+      }
     } else {
       if (bar.classList.contains('error-mode')) this.clearErrorBar();
-      bar.classList.remove('visible', 'connecting', 'listening', 'processing', 'speaking');
+      bar.classList.remove('visible', 'connecting', 'listening', 'processing', 'speaking', 'reactive');
+      this._globalUI.classList.remove('reactive-mode');
+      if (reactive) this._card.analyser.stop();
     }
   }
 
@@ -186,7 +157,7 @@ export class UIManager {
   // ─── Blur Overlay (reference-counted) ─────────────────────────────
 
   showBlurOverlay(reason) {
-    if (!this._globalUI || !this._card.config.background_blur) return;
+    if (!this._globalUI) return;
     this._blurReasons[reason || 'default'] = true;
     this._globalUI.querySelector('.vs-blur-overlay').classList.add('visible');
   }
@@ -207,16 +178,12 @@ export class UIManager {
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     bar.classList.remove('connecting', 'listening', 'processing', 'speaking');
     bar.classList.add('visible', 'error-mode');
-    bar.style.background = 'linear-gradient(90deg, #ff4444, #ff6666, #cc2222, #ff4444, #ff6666, #cc2222, #ff4444)';
-    bar.style.backgroundSize = '200% 100%';
   }
 
   clearErrorBar() {
     if (!this._globalUI) return;
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     bar.classList.remove('error-mode');
-    bar.style.background = seamlessGradient(this._card.config.bar_gradient);
-    bar.style.backgroundSize = '200% 100%';
   }
 
   hideBar() {
@@ -233,7 +200,13 @@ export class UIManager {
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     if (!bar) return false;
     const wasVisible = bar.classList.contains('visible');
+    const reactive = this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false;
     bar.classList.add('visible', 'speaking');
+    if (reactive) {
+      bar.classList.add('reactive');
+      this._globalUI.classList.add('reactive-mode');
+      this._card.analyser.start(bar);
+    }
     return wasVisible;
   }
 
@@ -245,7 +218,9 @@ export class UIManager {
     if (!this._globalUI) return;
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     if (!bar) return;
-    bar.classList.remove('speaking');
+    bar.classList.remove('speaking', 'reactive');
+    this._globalUI.classList.remove('reactive-mode');
+    if (this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false) this._card.analyser.stop();
     if (!wasVisible) {
       bar.classList.remove('visible');
     }
@@ -267,15 +242,6 @@ export class UIManager {
     const msg = document.createElement('div');
     msg.className = `vs-chat-msg ${type}`;
     msg.textContent = text;
-
-    const styleMap = { user: 'transcription', assistant: 'response', announcement: 'response' };
-    this.applyBubbleStyle(msg, styleMap[type] || 'response');
-
-    // Announcements are non-interactive — always centered
-    if (type === 'announcement') {
-      msg.style.alignSelf = 'center';
-      msg.style.textAlign = 'center';
-    }
 
     container.appendChild(msg);
     return msg;
@@ -348,37 +314,6 @@ export class UIManager {
     container.className = 'vs-timer-container';
     document.body.appendChild(container);
     this._timerContainer = container;
-    this.applyTimerPosition();
-  }
-
-  /**
-   * Position the timer container based on config.
-   */
-  applyTimerPosition() {
-    if (!this._timerContainer) return;
-    const cfg = this._card.config;
-    const barH = cfg.bar_height || 16;
-    const gap = 12;
-    const pos = cfg.timer_position || 'top-right';
-
-    this._timerContainer.style.top = 'auto';
-    this._timerContainer.style.bottom = 'auto';
-    this._timerContainer.style.left = 'auto';
-    this._timerContainer.style.right = 'auto';
-
-    if (pos.startsWith('top')) {
-      const offset = cfg.bar_position === 'top' ? barH + gap : gap;
-      this._timerContainer.style.top = `${offset}px`;
-    } else {
-      const offset = cfg.bar_position === 'bottom' ? barH + gap : gap;
-      this._timerContainer.style.bottom = `${offset}px`;
-    }
-
-    if (pos.includes('left')) {
-      this._timerContainer.style.left = `${gap}px`;
-    } else {
-      this._timerContainer.style.right = `${gap}px`;
-    }
   }
 
   /**
@@ -403,12 +338,9 @@ export class UIManager {
     const pill = document.createElement('div');
     pill.className = 'vs-timer-pill';
     pill.setAttribute('data-timer-id', timer.id);
-    this.applyBubbleStyle(pill, 'timer');
-
-    const progressColor = this._card.config.timer_border_color || 'rgba(100, 200, 150, 0.5)';
 
     pill.innerHTML =
-      `<div class="vs-timer-progress" style="width:${pct}%;background:${progressColor};opacity:0.3"></div>` +
+      `<div class="vs-timer-progress" style="width:${pct}%"></div>` +
       '<div class="vs-timer-content">' +
         '<span class="vs-timer-icon">⏱</span>' +
         `<span class="vs-timer-time">${formatTime(timer.secondsLeft)}</span>` +
@@ -488,7 +420,6 @@ export class UIManager {
   showTimerAlert(onDoubleTap) {
     this._timerAlertEl = document.createElement('div');
     this._timerAlertEl.className = 'vs-timer-alert';
-    this.applyBubbleStyle(this._timerAlertEl, 'timer');
 
     this._timerAlertEl.innerHTML =
       '<span class="vs-timer-icon">⏱</span>' +
@@ -513,12 +444,48 @@ export class UIManager {
 
   // ─── Private ──────────────────────────────────────────────────────
 
-  _injectGlobalStyles() {
-    if (document.getElementById('voice-satellite-styles')) return;
-    const style = document.createElement('style');
-    style.id = 'voice-satellite-styles';
-    style.textContent = STYLES;
-    document.head.appendChild(style);
+  _injectSkinCSS() {
+    const skin = this._card._activeSkin;
+    if (!skin?.css) return;
+    let el = document.getElementById('voice-satellite-styles');
+    if (!el) {
+      el = document.createElement('style');
+      el.id = 'voice-satellite-styles';
+      document.head.appendChild(el);
+    }
+    el.textContent = skin.css;
+  }
+
+  _applyTextScale() {
+    const scale = (this._card.config.text_scale || 100) / 100;
+    document.documentElement.style.setProperty('--vs-text-scale', scale);
+  }
+
+  _applyBackgroundOpacity() {
+    const overlay = this._globalUI?.querySelector('.vs-blur-overlay');
+    if (!overlay) return;
+    const skin = this._card._activeSkin;
+    const c = skin?.overlayColor;
+    if (c) {
+      const skinDefault = Math.round((skin.defaultOpacity ?? 1) * 100);
+      const alpha = (this._card.config.background_opacity ?? skinDefault) / 100;
+      overlay.style.background = `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
+    }
+  }
+
+  _applyCustomCSS() {
+    const css = this._card.config.custom_css || '';
+    let el = document.getElementById('voice-satellite-custom-css');
+    if (!css) {
+      if (el) el.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement('style');
+      el.id = 'voice-satellite-custom-css';
+      document.head.appendChild(el);
+    }
+    el.textContent = css;
   }
 
   _flushPendingStartButton() {

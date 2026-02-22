@@ -1,0 +1,60 @@
+/* Google Home Skin — Editor Preview Overrides */
+
+.preview-container {
+  font-family: "Google Sans", Roboto, Noto, sans-serif;
+}
+
+.preview-blur {
+  background: rgba(255, 255, 255, 0.75);
+}
+.preview-bar {
+  left: 20%;
+  right: 20%;
+  bottom: 24px;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #4285F4, #4285F4 25%, #EA4335 25%, #EA4335 50%, #FBBC05 50%, #FBBC05 75%, #34A853 75%, #34A853);
+  background-size: 200% 100%;
+}
+.preview-chat {
+  align-items: flex-start;
+}
+.preview-msg {
+  box-shadow: none;
+}
+.preview-msg.user {
+  font-size: 32px;
+  color: rgba(32, 33, 36, 0.5);
+  background: none;
+  border: none;
+  padding: 4px 0;
+  border-radius: 0;
+  align-self: flex-start;
+  text-align: left;
+}
+.preview-msg.assistant {
+  font-size: 36px;
+  color: #202124;
+  font-weight: 400;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  border-radius: 0;
+  align-self: flex-start;
+  text-align: left;
+}
+.preview-timer {
+  color: #3c4043;
+  background: #ffffff;
+  border: none;
+  border-radius: 18px;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.15), 0 4px 8px rgba(60, 64, 67, 0.1);
+}
+.preview-timer-progress {
+  background: rgba(66, 133, 244, 0.15);
+  opacity: 1;
+}
+
+.preview-label {
+  color: rgba(0, 0, 0, 0.35);
+}

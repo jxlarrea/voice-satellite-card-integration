@@ -1,0 +1,403 @@
+/* Alexa Skin */
+
+/* Font */
+#voice-satellite-ui {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Blur Overlay — darker, heavier blur for Alexa's dark aesthetic */
+#voice-satellite-ui .vs-blur-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+#voice-satellite-ui .vs-blur-overlay.visible {
+  opacity: 1;
+}
+
+/* Start Button — cyan Alexa accent */
+#voice-satellite-ui .vs-start-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #00CAFF;
+  border: none;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 202, 255, 0.4);
+  z-index: 10001;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+#voice-satellite-ui .vs-start-btn.visible {
+  display: flex;
+  animation: alexa-btn-pulse 2.5s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-start-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 24px rgba(0, 202, 255, 0.6);
+  animation: none;
+}
+
+#voice-satellite-ui .vs-start-btn svg {
+  width: 28px;
+  height: 28px;
+  fill: white;
+}
+
+@keyframes alexa-btn-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 4px 16px rgba(0, 202, 255, 0.4);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 6px 28px rgba(0, 202, 255, 0.7);
+  }
+}
+
+/* Bottom Glow — full-width bar with strong glow */
+#voice-satellite-ui .vs-rainbow-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(90deg, #00CAFF, #00E5FF, #00CAFF);
+  background-size: 200% 100%;
+  box-shadow: 0 0 20px 6px rgba(0, 202, 255, 0.5), 0 0 40px 12px rgba(0, 202, 255, 0.2);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  z-index: 10000;
+  pointer-events: none;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.visible {
+  opacity: 1;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.connecting {
+  animation: alexa-breathe 2s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.listening {
+  animation: alexa-glow 2s ease-in-out infinite, alexa-shimmer 3s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.processing {
+  animation: alexa-glow 0.6s ease-in-out infinite, alexa-shimmer 1s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.speaking {
+  animation: alexa-speak 1.5s ease-in-out infinite, alexa-shimmer 4s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.error-mode {
+  background: #FF3B30;
+  box-shadow: 0 0 20px 5px rgba(255, 59, 48, 0.5);
+  animation: alexa-glow-red 1.5s ease-in-out infinite;
+  opacity: 1;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.error-flash {
+  animation: alexa-error-flash 0.15s ease-in-out 3;
+}
+
+/* Reactive Bar — audio-driven glow, speed varies by state */
+#voice-satellite-ui .vs-rainbow-bar.reactive {
+  transition: box-shadow 0.05s linear;
+  box-shadow:
+    0 0 calc(10px + 35px * var(--vs-audio-level, 0)) calc(3px + 10px * var(--vs-audio-level, 0)) rgba(0, 202, 255, calc(0.3 + 0.5 * var(--vs-audio-level, 0))),
+    0 0 calc(16px + 40px * var(--vs-audio-level, 0)) calc(5px + 14px * var(--vs-audio-level, 0)) rgba(0, 202, 255, calc(0.1 + 0.25 * var(--vs-audio-level, 0)));
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.listening {
+  animation: alexa-shimmer 3s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.processing {
+  animation: alexa-shimmer 1s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.speaking {
+  animation: alexa-shimmer 4s linear infinite;
+}
+
+@keyframes alexa-breathe {
+  0%, 100% {
+    opacity: 0.3;
+    box-shadow: 0 0 12px 4px rgba(0, 202, 255, 0.2);
+  }
+  50% {
+    opacity: 0.7;
+    box-shadow: 0 0 24px 8px rgba(0, 202, 255, 0.5);
+  }
+}
+
+@keyframes alexa-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px 6px rgba(0, 202, 255, 0.5), 0 0 40px 12px rgba(0, 202, 255, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 40px 14px rgba(0, 202, 255, 0.8), 0 0 60px 20px rgba(0, 202, 255, 0.3);
+  }
+}
+
+@keyframes alexa-speak {
+  0%, 100% {
+    box-shadow: 0 0 16px 5px rgba(0, 202, 255, 0.5), 0 0 30px 10px rgba(0, 202, 255, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 30px 10px rgba(0, 202, 255, 0.7), 0 0 50px 16px rgba(0, 202, 255, 0.3);
+  }
+}
+
+@keyframes alexa-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes alexa-glow-red {
+  0%, 100% {
+    box-shadow: 0 0 15px 3px rgba(255, 59, 48, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 30px 8px rgba(255, 59, 48, 0.7);
+  }
+}
+
+@keyframes alexa-error-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Chat Container */
+#voice-satellite-ui .vs-chat-container {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 76px;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 85%;
+  width: 85%;
+  z-index: 10001;
+  pointer-events: none;
+  overflow: visible;
+}
+
+#voice-satellite-ui .vs-chat-container.visible {
+  display: flex;
+  pointer-events: auto;
+}
+
+#voice-satellite-ui.reactive-mode .vs-chat-container {
+  bottom: 90px;
+}
+
+#voice-satellite-ui .vs-chat-container.announcement-mode {
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%);
+}
+
+/* Chat Messages — clean text on dark background, no bubbles */
+#voice-satellite-ui .vs-chat-msg {
+  max-width: 85%;
+  opacity: 0;
+  animation: alexa-fade-in 0.35s ease forwards;
+  word-wrap: break-word;
+  background: none;
+  border: none;
+  box-shadow: none;
+  font-size: calc(36px * var(--vs-text-scale, 1));
+  font-weight: normal;
+  font-style: normal;
+  padding: 4px 0;
+  border-radius: 0;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+#voice-satellite-ui .vs-chat-msg.user {
+  font-size: calc(32px * var(--vs-text-scale, 1));
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 300;
+  align-self: center;
+  text-align: center;
+}
+
+#voice-satellite-ui .vs-chat-msg.assistant {
+  font-size: calc(42px * var(--vs-text-scale, 1));
+  color: #FFFFFF;
+  font-weight: bold;
+  align-self: center;
+  text-align: center;
+}
+
+#voice-satellite-ui .vs-chat-msg.announcement {
+  font-size: calc(42px * var(--vs-text-scale, 1));
+  color: #FFFFFF;
+  font-weight: bold;
+  align-self: center;
+  text-align: center;
+}
+
+/* Animations */
+@keyframes alexa-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Timer Container — top-right */
+.vs-timer-container {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10001;
+  pointer-events: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Timer Pills — dark with cyan accent */
+.vs-timer-pill {
+  position: relative;
+  overflow: hidden;
+  font-size: calc(34px * var(--vs-text-scale, 1));
+  color: #FFFFFF;
+  font-weight: bold;
+  font-style: normal;
+  background: rgba(10, 22, 40, 0.9);
+  border: 2px solid rgba(0, 202, 255, 0.35);
+  padding: 14px 18px;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  animation: alexa-timer-fade-in 0.3s ease forwards;
+  pointer-events: auto;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.vs-timer-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(0, 202, 255, 0.25);
+  opacity: 1;
+  transition: width 1s linear;
+  pointer-events: none;
+}
+
+.vs-timer-content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vs-timer-icon {
+  flex-shrink: 0;
+}
+
+.vs-timer-time {
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.vs-timer-pill.vs-timer-expired {
+  animation: alexa-timer-fade-out 0.4s ease forwards;
+}
+
+/* Timer Finished Alert — dark with cyan glow */
+.vs-timer-alert {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: calc(34px * var(--vs-text-scale, 1));
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #FFFFFF;
+  font-weight: bold;
+  font-style: normal;
+  background: rgba(10, 22, 40, 0.95);
+  border: 2px solid rgba(0, 202, 255, 0.4);
+  padding: 18px 24px;
+  border-radius: 16px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4), 0 0 20px rgba(0, 202, 255, 0.2);
+  z-index: 10002;
+  animation: alexa-alert-pulse 1.5s ease-in-out infinite;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.vs-timer-alert .vs-timer-icon {
+  font-size: 1.5em;
+}
+
+.vs-timer-alert .vs-timer-time {
+  font-size: 1.2em;
+}
+
+@keyframes alexa-timer-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes alexa-timer-fade-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes alexa-alert-pulse {
+  0%, 100% {
+    transform: translate(-50%, -50%) scale(1);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4), 0 0 20px rgba(0, 202, 255, 0.2);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.03);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4), 0 0 30px rgba(0, 202, 255, 0.4);
+  }
+}

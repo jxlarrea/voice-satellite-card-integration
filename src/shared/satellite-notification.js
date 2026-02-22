@@ -255,18 +255,23 @@ export function playMediaFor(mgr, urlPath, logPrefix, onDone) {
     onEnd: () => {
       mgr.log.log(logPrefix, 'Media playback complete');
       mgr.currentAudio = null;
+      mgr.card.analyser.detachAudio();
       mgr.card.mediaPlayer.notifyAudioEnd('notification');
       onDone?.();
     },
     onError: (e) => {
       mgr.log.error(logPrefix, `Media playback error: ${e}`);
       mgr.currentAudio = null;
+      mgr.card.analyser.detachAudio();
       mgr.card.mediaPlayer.notifyAudioEnd('notification');
       onDone?.();
     },
     onStart: () => {
       mgr.log.log(logPrefix, 'Media playback started');
       mgr.card.mediaPlayer.notifyAudioStart('notification');
+      if (mgr.card._activeSkin?.reactiveBar && mgr.card.config.reactive_bar !== false && mgr.currentAudio) {
+        mgr.card.analyser.attachAudio(mgr.currentAudio, mgr.card.audio.audioContext);
+      }
     },
   });
 }

@@ -94,11 +94,16 @@ export class AskQuestionManager {
     if (!pipeline) return;
 
     const announceId = ann.id;
-    const isRemote = this._card.config.tts_target && this._card.config.tts_target !== 'browser';
+    const isRemote = !!this._card.ttsTarget;
 
     // Play wake chime to signal the user should speak.
     // Delay STT pipeline start so the mic doesn't pick up the chime
     // as speech (causes false VAD trigger → stt-no-text-recognized).
+    // Reconnect mic to the analyser for reactive bar during STT.
+    // attachAudio disconnected it during announcement playback, and
+    // updateForState won't run while playing is true.
+    this._card.analyser.reconnectMic();
+
     let chimeDelay = 0;
     if (!isRemote) {
       this._card.tts.playChime('wake');

@@ -15,16 +15,6 @@ import { BlurReason, Timing } from '../constants.js';
 // --- Container ---
 
 /** @param {import('./index.js').TimerManager} mgr */
-export function ensureContainer(mgr) {
-  mgr.card.ui.ensureTimerContainer();
-}
-
-/** @param {import('./index.js').TimerManager} mgr */
-export function applyPosition(mgr) {
-  mgr.card.ui.applyTimerPosition();
-}
-
-/** @param {import('./index.js').TimerManager} mgr */
 export function removeContainer(mgr) {
   mgr.card.ui.removeTimerContainer();
 }
@@ -86,8 +76,8 @@ export function showAlert(mgr) {
   if (_chimeInterval) clearInterval(_chimeInterval);
   _chimeInterval = setInterval(() => playAlertChime(mgr), Timing.TIMER_CHIME_INTERVAL);
 
-  // Auto-dismiss after configured duration (0 = never)
-  const duration = mgr.card.config.timer_finished_duration;
+  // Auto-dismiss after 60 seconds
+  const duration = 60;
   if (duration > 0) {
     if (_dismissTimeout) clearTimeout(_dismissTimeout);
     _dismissTimeout = setTimeout(() => mgr.clearAlert(), duration * 1000);

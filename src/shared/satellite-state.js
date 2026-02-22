@@ -20,6 +20,50 @@ export function getSatelliteAttr(hass, entityId, name) {
 }
 
 /**
+ * Read a select entity's resolved entity_id attribute from the entity registry.
+ * @param {object} hass - HA frontend object
+ * @param {string} satelliteId - Satellite entity ID
+ * @param {string} translationKey - Select translation_key (e.g. 'tts_output')
+ * @returns {string|undefined} The entity_id attribute value, or undefined if not found
+ */
+export function getSelectEntityId(hass, satelliteId, translationKey) {
+  if (!hass?.entities || !satelliteId) return undefined;
+  const satellite = hass.entities[satelliteId];
+  if (!satellite?.device_id) return undefined;
+  for (const [eid, entry] of Object.entries(hass.entities)) {
+    if (entry.device_id === satellite.device_id &&
+        entry.platform === 'voice_satellite' &&
+        entry.translation_key === translationKey) {
+      return hass.states[eid]?.attributes?.entity_id || '';
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Read a number entity's numeric value from the entity registry.
+ * @param {object} hass - HA frontend object
+ * @param {string} satelliteId - Satellite entity ID
+ * @param {string} translationKey - Number translation_key
+ * @param {number} defaultValue - Fallback if not found
+ * @returns {number} The numeric value, or defaultValue if not found
+ */
+export function getNumberState(hass, satelliteId, translationKey, defaultValue) {
+  if (!hass?.entities || !satelliteId) return defaultValue;
+  const satellite = hass.entities[satelliteId];
+  if (!satellite?.device_id) return defaultValue;
+  for (const [eid, entry] of Object.entries(hass.entities)) {
+    if (entry.device_id === satellite.device_id &&
+        entry.platform === 'voice_satellite' &&
+        entry.translation_key === translationKey) {
+      const val = parseFloat(hass.states[eid]?.state);
+      return isNaN(val) ? defaultValue : val;
+    }
+  }
+  return defaultValue;
+}
+
+/**
  * Read a switch entity's on/off state directly from the entity registry
  * and state cache, bypassing satellite extra_state_attributes (which can
  * be stale if the state-change listener wasn't set up in time).

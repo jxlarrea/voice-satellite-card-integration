@@ -22,8 +22,6 @@ export class DoubleTapHandler {
 
   setup() {
     this._handler = (e) => {
-      if (!this._card.config.double_tap_cancel) return;
-
       const isActive = INTERACTING_STATES.includes(this._card.currentState) || this._card.tts.isPlaying;
       const isTimerAlert = this._card.timer.isAlertActive;
       const isNotification = this._card.announcement.playing
@@ -86,7 +84,7 @@ export class DoubleTapHandler {
         this._card.chat.clear();
         this._card.ui.hideBlurOverlay(BlurReason.PIPELINE);
 
-        const isRemote = this._card.config.tts_target && this._card.config.tts_target !== 'browser';
+        const isRemote = !!this._card.ttsTarget;
         if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
           this._card.tts.playChime('done');
         }

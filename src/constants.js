@@ -60,10 +60,7 @@ export const Timing = {
 
 export const DEFAULT_CONFIG = {
   // Behavior
-  start_listening_on_load: true,
   satellite_entity: '',
-  tts_target: '',
-  double_tap_cancel: true,
   debug: false,
 
   // Microphone Processing
@@ -72,65 +69,9 @@ export const DEFAULT_CONFIG = {
   auto_gain_control: true,
   voice_isolation: false,
 
-  // Timer Pill
-  timer_position: 'top-right',
-  timer_font_size: 20,
-  timer_font_family: 'inherit',
-  timer_font_color: '#444444',
-  timer_font_bold: true,
-  timer_font_italic: false,
-  timer_background: '#ffffff',
-  timer_border_color: 'rgba(100, 200, 150, 0.5)',
-  timer_padding: 16,
-  timer_rounded: true,
-  timer_finished_duration: 60,
-
-  // Announcements
-  announcement_display_duration: 5,
-
-  // Rainbow Bar
-  bar_position: 'bottom',
-  bar_height: 16,
-  bar_gradient: '#FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC',
-  background_blur: true,
-  background_blur_intensity: 5,
-
-  // Transcription Bubble
-  transcription_font_size: 20,
-  transcription_font_family: 'inherit',
-  transcription_font_color: '#444444',
-  transcription_font_bold: true,
-  transcription_font_italic: false,
-  transcription_background: '#ffffff',
-  transcription_border_color: 'rgba(0, 180, 255, 0.5)',
-  transcription_padding: 16,
-  transcription_rounded: true,
-
-  // Response Bubble
-  show_response: true,
-  response_font_size: 20,
-  response_font_family: 'inherit',
-  response_font_color: '#444444',
-  response_font_bold: true,
-  response_font_italic: false,
-  response_background: '#ffffff',
-  response_border_color: 'rgba(100, 200, 150, 0.5)',
-  response_padding: 16,
-  response_rounded: true,
-  bubble_style: 'chat',
-  bubble_container_width: 85,
+  // Skin
+  skin: 'default',
+  custom_css: '',
+  text_scale: 100,
+  reactive_bar: true,
 };
-
-/**
- * Build a seamless looping gradient by appending the first color
- * at the end so the animation wraps without a hard edge.
- * @param {string} colorList - Comma-separated CSS color values
- * @returns {string} CSS linear-gradient value
- */
-export function seamlessGradient(colorList) {
-  const colors = colorList.split(',').map((c) => c.trim());
-  if (colors.length > 1 && colors[0] !== colors[colors.length - 1]) {
-    colors.push(colors[0]);
-  }
-  return `linear-gradient(90deg, ${colors.join(', ')})`;
-}

@@ -128,7 +128,7 @@ export function onTTSComplete(card, playbackFailed) {
   }
 
   // Normal completion
-  const isRemote = card.config.tts_target && card.config.tts_target !== 'browser';
+  const isRemote = !!card.ttsTarget;
   if (getSwitchState(card.hass, card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
     card.tts.playChime('done');
   }

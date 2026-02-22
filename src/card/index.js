@@ -6,8 +6,10 @@
  */
 
 import { State, DEFAULT_CONFIG, Timing } from '../constants.js';
+import { getSkin } from '../skins/index.js';
 import { Logger } from '../logger.js';
 import { AudioManager } from '../audio';
+import { AnalyserManager } from '../audio/analyser.js';
 import { TtsManager } from '../tts';
 import { PipelineManager } from '../pipeline';
 import { UIManager } from './ui.js';
@@ -24,6 +26,7 @@ import { isEditorPreview, renderPreview } from '../editor/preview.js';
 import * as singleton from '../shared/singleton.js';
 import { setState, handleStartClick, startListening, onTTSComplete, handlePipelineMessage } from './events.js';
 import { syncSatelliteState } from './comms.js';
+import { getSelectEntityId, getNumberState } from '../shared/satellite-state.js';
 import { subscribeSatelliteEvents } from '../shared/satellite-subscription.js';
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
 
@@ -45,6 +48,7 @@ export class VoiceSatelliteCard extends HTMLElement {
 
     // Composition — managers
     this._audio = new AudioManager(this);
+    this._analyser = new AnalyserManager(this);
     this._tts = new TtsManager(this);
     this._pipeline = new PipelineManager(this);
     this._ui = new UIManager(this);
@@ -62,6 +66,7 @@ export class VoiceSatelliteCard extends HTMLElement {
 
   get logger() { return this._logger; }
   get audio() { return this._audio; }
+  get analyser() { return this._analyser; }
   get tts() { return this._tts; }
   get pipeline() { return this._pipeline; }
   get ui() { return this._ui; }
@@ -86,6 +91,12 @@ export class VoiceSatelliteCard extends HTMLElement {
     return this._connection;
   }
   get hass() { return this._hass; }
+  get ttsTarget() {
+    return getSelectEntityId(this._hass, this._config.satellite_entity, 'tts_output') || '';
+  }
+  get announcementDisplayDuration() {
+    return getNumberState(this._hass, this._config.satellite_entity, 'announcement_display_duration', 3.5);
+  }
 
   // --- HTMLElement Lifecycle ---
 
@@ -121,11 +132,26 @@ export class VoiceSatelliteCard extends HTMLElement {
 
   setConfig(config) {
     const hadEntity = !!this._config.satellite_entity;
+
+    const skin = getSkin(config.skin || 'default');
     this._config = Object.assign({}, DEFAULT_CONFIG, config);
+    this._activeSkin = skin;
     this._logger.debug = this._config.debug;
 
     if (this._ui.element) {
       this._ui.applyStyles();
+
+      // If reactive bar was just enabled and mic is already running, attach analyser
+      const reactive = skin.reactiveBar && this._config.reactive_bar !== false;
+      if (reactive && this._audio._sourceNode && this._audio._audioContext) {
+        this._analyser.attachMic(this._audio._sourceNode, this._audio._audioContext);
+      } else if (!reactive) {
+        if (this._audio._sourceNode) this._analyser.detachMic(this._audio._sourceNode);
+        this._analyser.stop();
+      }
+
+      // Re-evaluate reactive bar state after config change
+      this._ui.updateForState(this._state, this._pipeline?.serviceUnavailable, this._tts?.isPlaying);
     }
 
     if (this.shadowRoot && isEditorPreview(this)) {
@@ -141,13 +167,8 @@ export class VoiceSatelliteCard extends HTMLElement {
       this._connection = this._hass.connection;
       this._ui.ensureGlobalUI();
 
-      if (this._config.start_listening_on_load) {
-        this._hasStarted = true;
-        startListening(this);
-      } else {
-        this._hasStarted = true;
-        this._ui.showStartButton();
-      }
+      this._hasStarted = true;
+      startListening(this);
     }
   }
 
@@ -160,6 +181,7 @@ export class VoiceSatelliteCard extends HTMLElement {
     // Only update subscriptions on the active owner
     if (singleton.isActive() && singleton.isOwner(this)) {
       this._timer.update();
+      this._tts.checkRemotePlayback(hass);
       // Retry satellite subscription if initial attempt in startListening() failed
       subscribeSatelliteEvents(this, (event) => dispatchSatelliteEvent(this, event));
     }
@@ -173,19 +195,14 @@ export class VoiceSatelliteCard extends HTMLElement {
     this._connection = hass.connection;
     this._ui.ensureGlobalUI();
 
-    if (this._config.start_listening_on_load) {
-      this._hasStarted = true;
-      startListening(this);
-    } else {
-      this._hasStarted = true;
-      this._ui.showStartButton();
-    }
+    this._hasStarted = true;
+    startListening(this);
   }
 
   getCardSize() { return 0; }
 
   static getConfigForm() { return getConfigForm(); }
-  static getStubConfig() { return { start_listening_on_load: true }; }
+  static getStubConfig() { return { skin: 'default', text_scale: 100 }; }
 
   // --- Delegated methods (public API for managers) ---
 

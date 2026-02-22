@@ -12,7 +12,7 @@
  * @returns {Promise<void>}
  */
 export function playRemote(card, url) {
-  const entityId = card.config.tts_target;
+  const entityId = card.ttsTarget;
 
   card.logger.log('tts', `Playing on remote: ${entityId} URL: ${url}`);
 
@@ -30,10 +30,10 @@ export function playRemote(card, url) {
  * @param {object} card - Card instance
  */
 export function stopRemote(card) {
-  if (!card.config.tts_target || card.config.tts_target === 'browser' || !card.hass) return;
+  if (!card.ttsTarget || !card.hass) return;
 
   card.hass.callService('media_player', 'media_stop', {
-    entity_id: card.config.tts_target,
+    entity_id: card.ttsTarget,
   }).catch((e) => {
     card.logger.error('tts', `Remote stop failed: ${e}`);
   });

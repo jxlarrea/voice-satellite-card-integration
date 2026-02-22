@@ -50,7 +50,7 @@ export class AnnouncementManager {
     // Restart immediately so wake word detection resumes.
     this._card.pipeline.restart(0);
 
-    const clearDelay = (this._card.config.announcement_display_duration || 5) * 1000;
+    const clearDelay = (this._card.announcementDisplayDuration || 3.5) * 1000;
     this.clearTimeoutId = setTimeout(() => {
       clearNotificationUI(this);
       this.playing = false;
@@ -63,7 +63,7 @@ export class AnnouncementManager {
         return;
       }
 
-      const isRemote = this._card.config.tts_target && this._card.config.tts_target !== 'browser';
+      const isRemote = !!this._card.ttsTarget;
       if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
         this._card.tts.playChime('done');
       }

@@ -5,24 +5,27 @@
  * into the schema returned by getConfigForm().
  */
 
-import { behaviorSchema, behaviorLabels, behaviorHelpers } from './behavior.js';
-import { mediaSchema, mediaLabels, mediaHelpers } from './media.js';
-import { timerSchema, timerLabels, timerHelpers } from './timer.js';
-import { barSchema, barLabels, barHelpers } from './bar.js';
-import { bubblesSchema, bubblesLabels, bubblesHelpers } from './bubbles.js';
+import { DEFAULT_CONFIG } from '../constants.js';
+import { behaviorSchema, microphoneSchema, debugSchema, behaviorLabels, behaviorHelpers } from './behavior.js';
+import { skinSchema, skinLabels, skinHelpers } from './skin.js';
 
-const allLabels = Object.assign({}, behaviorLabels, mediaLabels, timerLabels, barLabels, bubblesLabels);
-const allHelpers = Object.assign({}, behaviorHelpers, mediaHelpers, timerHelpers, barHelpers, bubblesHelpers);
+const allLabels = Object.assign({}, behaviorLabels, skinLabels);
+const allHelpers = Object.assign({}, behaviorHelpers, skinHelpers);
 
 export function getConfigForm() {
   return {
     schema: [
       ...behaviorSchema,
-      ...mediaSchema,
-      ...timerSchema,
-      ...barSchema,
-      ...bubblesSchema,
+      ...skinSchema,
+      ...microphoneSchema,
+      ...debugSchema,
     ],
+    assertConfig(config) {
+      const editor = this;
+      Promise.resolve().then(() => {
+        editor._config = Object.assign({}, DEFAULT_CONFIG, config);
+      });
+    },
     computeLabel(schema) {
       return allLabels[schema.name] || undefined;
     },

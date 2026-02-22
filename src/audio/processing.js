@@ -36,22 +36,12 @@ export async function setupAudioWorklet(mgr, sourceNode) {
     mgr.audioBuffer.push(new Float32Array(e.data));
   };
   sourceNode.connect(mgr.workletNode);
-  mgr.workletNode.connect(mgr.audioContext.destination);
-}
-
-/**
- * Set up ScriptProcessor capture (fallback).
- * @param {import('./index.js').AudioManager} mgr
- * @param {MediaStreamAudioSourceNode} sourceNode
- */
-export function setupScriptProcessor(mgr, sourceNode) {
-  mgr.scriptProcessor = mgr.audioContext.createScriptProcessor(2048, 1, 1);
-  mgr.scriptProcessor.onaudioprocess = (e) => {
-    const inputData = e.inputBuffer.getChannelData(0);
-    mgr.audioBuffer.push(new Float32Array(inputData));
-  };
-  sourceNode.connect(mgr.scriptProcessor);
-  mgr.scriptProcessor.connect(mgr.audioContext.destination);
+  // Connect through a silent gain node — keeps the graph alive for processing
+  // without routing mic audio to speakers (which would cause feedback).
+  const silentGain = mgr.audioContext.createGain();
+  silentGain.gain.value = 0;
+  mgr.workletNode.connect(silentGain);
+  silentGain.connect(mgr.audioContext.destination);
 }
 
 /**

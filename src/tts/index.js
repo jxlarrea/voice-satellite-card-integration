@@ -10,7 +10,8 @@ import { buildMediaUrl, playMediaUrl } from '../audio/media-playback.js';
 import { playRemote, stopRemote } from './comms.js';
 import { Timing } from '../constants.js';
 
-const REMOTE_COMPLETION_DELAY = 2000;
+/** Safety ceiling so the UI never gets stuck if remote state monitoring fails */
+const REMOTE_SAFETY_TIMEOUT = 120_000;
 
 const CHIME_MAP = {
   wake: CHIME_WAKE,
@@ -28,6 +29,10 @@ export class TtsManager {
     this._endTimer = null;
     this._streamingUrl = null;
     this._playbackWatchdog = null;
+
+    // Remote media player state monitoring
+    this._remoteTarget = null;
+    this._remoteSawPlaying = false;
   }
 
   get isPlaying() { return this._playing; }
@@ -41,17 +46,22 @@ export class TtsManager {
    * @param {string} urlPath - URL or path to TTS audio
    */
   play(urlPath) {
-    const { config } = this._card;
     const url = buildMediaUrl(urlPath);
     this._playing = true;
 
-    // Remote media player target
-    if (config.tts_target && config.tts_target !== 'browser') {
+    // Remote media player target — monitor entity state for completion
+    const ttsTarget = this._card.ttsTarget;
+    if (ttsTarget) {
+      this._remoteTarget = ttsTarget;
+      this._remoteSawPlaying = false;
       playRemote(this._card, url);
+
+      // Safety timeout — if state monitoring never fires, clean up after 2 minutes
       this._endTimer = setTimeout(() => {
         this._endTimer = null;
+        this._log.log('tts', 'Remote safety timeout — forcing completion');
         this._onComplete();
-      }, REMOTE_COMPLETION_DELAY);
+      }, REMOTE_SAFETY_TIMEOUT);
       return;
     }
 
@@ -88,12 +98,17 @@ export class TtsManager {
       onStart: () => {
         this._log.log('tts', 'Playback started successfully');
         this._card.mediaPlayer.notifyAudioStart('tts');
+        if (this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false && this._currentAudio) {
+          this._card.analyser.attachAudio(this._currentAudio, this._card.audio.audioContext);
+        }
       },
     });
   }
 
   stop() {
     this._playing = false;
+    this._remoteTarget = null;
+    this._remoteSawPlaying = false;
     this._clearWatchdog();
 
     if (this._endTimer) {
@@ -101,6 +116,7 @@ export class TtsManager {
       this._endTimer = null;
     }
 
+    this._card.analyser.detachAudio();
     if (this._currentAudio) {
       this._currentAudio.onended = null;
       this._currentAudio.onerror = null;
@@ -139,6 +155,32 @@ export class TtsManager {
     }, (pattern.duration || 0.3) * 1000);
   }
 
+  /**
+   * Called from card's set hass() — monitors remote media player entity state
+   * to detect when TTS playback finishes.
+   * @param {object} hass
+   */
+  checkRemotePlayback(hass) {
+    if (!this._playing || !this._remoteTarget) return;
+
+    const entity = hass.states?.[this._remoteTarget];
+    if (!entity) return;
+
+    const state = entity.state;
+
+    if (state === 'playing' || state === 'buffering') {
+      this._remoteSawPlaying = true;
+      return;
+    }
+
+    // Only complete once we've confirmed it was playing first,
+    // to avoid false triggers during the brief delay before playback starts
+    if (this._remoteSawPlaying) {
+      this._log.log('tts', `Remote player stopped (state: ${state}) — completing`);
+      this._onComplete();
+    }
+  }
+
   // --- Private ---
 
   _clearWatchdog() {
@@ -153,8 +195,11 @@ export class TtsManager {
    */
   _onComplete(playbackFailed) {
     this._log.log('tts', `Complete — cleaning up UI${playbackFailed ? ' (playback failed)' : ''}`);
+    this._card.analyser.detachAudio();
     this._currentAudio = null;
     this._playing = false;
+    this._remoteTarget = null;
+    this._remoteSawPlaying = false;
 
     if (this._endTimer) {
       clearTimeout(this._endTimer);

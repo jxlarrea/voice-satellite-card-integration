@@ -8,9 +8,9 @@ export const behaviorSchema = [
     required: true,
     selector: { entity: { filter: { domain: 'assist_satellite', integration: 'voice_satellite' } } },
   },
-  { name: 'debug', selector: { boolean: {} } },
+];
 
-  // Microphone Processing
+export const microphoneSchema = [
   {
     type: 'expandable', name: '', title: 'Microphone Processing', flatten: true,
     schema: [{
@@ -23,6 +23,10 @@ export const behaviorSchema = [
       ],
     }],
   },
+];
+
+export const debugSchema = [
+  { name: 'debug', selector: { boolean: {} } },
 ];
 
 export const behaviorLabels = {
