@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This integration creates virtual Assist Satellite entities in Home Assistant for browsers running the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Each config entry produces one `assist_satellite.*` entity backed by a device in the device registry, along with supporting select and switch entities.
+This integration creates virtual Assist Satellite entities in Home Assistant for browsers running the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Each config entry produces one `assist_satellite.*` entity backed by a device in the device registry, along with supporting select, switch, number, and media player entities.
 
 **Critical dependency:** The card **requires** this integration. There is no standalone mode. The card routes all voice pipeline traffic through the integration's `voice_satellite/run_pipeline` WebSocket command.
 
@@ -22,7 +22,7 @@ This integration creates virtual Assist Satellite entities in Home Assistant for
 
 ### Cross-repo relationship
 
-This integration and the card are tightly coupled. The card reads entity attributes (`active_timers`, `muted`, `wake_sound`) and sends WebSocket commands. The integration pushes notification events (announcements, start_conversation, ask_question) directly to the card via a persistent WS subscription. Changes to event formats, WebSocket command schemas, or async flow timing affect both repos.
+This integration and the card are tightly coupled. The card reads entity attributes (`active_timers`, `muted`, `wake_sound`, `tts_target`, `announcement_display_duration`) and sends WebSocket commands. The integration pushes notification events (announcements, start_conversation, ask_question) directly to the card via a persistent WS subscription. Changes to event formats, WebSocket command schemas, or async flow timing affect both repos.
 
 See the card's [DESIGN.md](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant/blob/master/DESIGN.md) for the card-side implementation.
 
@@ -37,10 +37,13 @@ voice-satellite-card-integration/
 │       ├── config_flow.py       # Single-step config flow
 │       ├── const.py             # DOMAIN, SCREENSAVER_INTERVAL constants
 │       ├── media_player.py      # VoiceSatelliteMediaPlayer (media player entity)
-│       ├── select.py            # Pipeline, VAD sensitivity, screensaver selects
+│       ├── number.py            # Announcement display duration number entity
+│       ├── select.py            # Pipeline, VAD sensitivity, screensaver, TTS output selects
 │       ├── switch.py            # Wake sound, mute switches
 │       ├── manifest.json        # Integration manifest
 │       ├── strings.json         # UI strings for config flow + entity names
+│       ├── translations/
+│       │   └── en.json          # English translations (mirrors strings.json)
 │       ├── icon.png             # Integration branding (256×256)
 │       └── logo.png             # Integration branding (same as icon)
 ├── .github/
@@ -70,7 +73,7 @@ The resulting entity ID will be `assist_satellite.<slugified_name>`.
 
 `async_setup_entry` does two things:
 
-1. **Forward platform setup** — Calls `async_forward_entry_setups(entry, PLATFORMS)` where `PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.SELECT, Platform.SWITCH, Platform.MEDIA_PLAYER]`. This triggers setup in `assist_satellite.py`, `select.py`, `switch.py`, and `media_player.py`.
+1. **Forward platform setup** — Calls `async_forward_entry_setups(entry, PLATFORMS)` where `PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SELECT, Platform.SWITCH]`. This triggers setup in `assist_satellite.py`, `media_player.py`, `number.py`, `select.py`, and `switch.py`.
 2. **Register WebSocket commands** — Registers all 7 WS commands. Uses try/except around each registration because multiple config entries share the same command types (only the first registration succeeds, subsequent ones raise `ValueError`).
 
 The 7 WebSocket commands:
@@ -147,7 +150,7 @@ def device_info(self):
     }
 ```
 
-The `identifiers` tuple uses the config entry ID as the unique key. Each config entry = one device = one entity + its supporting select/switch entities (all sharing the same device identifiers).
+The `identifiers` tuple uses the config entry ID as the unique key. Each config entry = one device = 9 entities (1 assist_satellite, 1 media_player, 4 selects, 2 switches, 1 number), all sharing the same device identifiers.
 
 ### 4.3 Entity Naming
 
@@ -176,6 +179,27 @@ def extra_state_attributes(self):
     if wake_eid:
         s = self.hass.states.get(wake_eid)
         attrs["wake_sound"] = s.state == "on" if s else True
+
+    # Expose TTS output select entity_id for the card
+    tts_select_eid = registry.async_get_entity_id("select", DOMAIN, f"{self._entry.entry_id}_tts_output")
+    if tts_select_eid:
+        s = self.hass.states.get(tts_select_eid)
+        if s and s.state not in ("Browser", "unknown", "unavailable"):
+            attrs["tts_target"] = s.attributes.get("entity_id", "")
+        else:
+            attrs["tts_target"] = ""
+
+    # Expose announcement display duration for the card
+    ann_dur_eid = registry.async_get_entity_id("number", DOMAIN,
+        f"{self._entry.entry_id}_announcement_display_duration")
+    if ann_dur_eid:
+        s = self.hass.states.get(ann_dur_eid)
+        if s and s.state not in ("unknown", "unavailable"):
+            try:
+                attrs["announcement_display_duration"] = int(float(s.state))
+            except (ValueError, TypeError):
+                pass
+
     return attrs
 ```
 
@@ -185,6 +209,8 @@ def extra_state_attributes(self):
 | `last_timer_event` | `string \| null` | Last timer event type: `started`, `updated`, `cancelled`, `finished` |
 | `muted` | `bool` | Whether the mute switch is on (default `False`) |
 | `wake_sound` | `bool` | Whether the wake sound switch is on (default `True`) |
+| `tts_target` | `string` | Entity ID of the media player for remote TTS, or `""` if set to "Browser" (default) |
+| `announcement_display_duration` | `int` | Seconds to display announcement bubbles (default `5`, range 1–60) |
 
 **Important:** Announcements are NOT in entity attributes. They are pushed directly to the card via the satellite event subscription (§10).
 
@@ -195,8 +221,12 @@ The entity overrides the `available` property to reflect whether a card is actua
 ```python
 @property
 def available(self) -> bool:
+    if self.hass.is_stopping:
+        return True  # Save full attributes during shutdown
     return len(self._satellite_subscribers) > 0
 ```
+
+**Shutdown guard:** During HA shutdown, the entity reports as available so `RestoreEntity` saves state with full attributes (volume, timers, etc.) instead of an empty "unavailable" state.
 
 When no browser has an active `subscribe_events` subscription, the entity shows as **unavailable** in HA. This means:
 
@@ -229,8 +259,8 @@ These are used by the `AssistSatelliteEntity` base class to resolve the pipeline
 #### `async_added_to_hass`
 
 1. Registers the device as a timer handler via `intent.async_register_timer_handler`
-2. Subscribes to mute/wake_sound switch state changes so `extra_state_attributes` are re-evaluated when switches toggle
-3. Wraps both unregister callbacks with `async_on_remove()` for cleanup
+2. Subscribes to sibling entity state changes (mute/wake_sound switches, TTS output select, announcement duration number) so `extra_state_attributes` are re-evaluated when any change
+3. Wraps all unregister callbacks with `async_on_remove()` for cleanup
 
 ```python
 async def async_added_to_hass(self):
@@ -244,16 +274,23 @@ async def async_added_to_hass(self):
         )
     )
 
-    # Switch state tracking
+    # Track sibling entity state changes
     registry = er.async_get(self.hass)
-    switch_eids = []
+    tracked_eids = []
     for suffix in ("_mute", "_wake_sound"):
         eid = registry.async_get_entity_id("switch", DOMAIN, f"{self._entry.entry_id}{suffix}")
         if eid:
-            switch_eids.append(eid)
-    if switch_eids:
+            tracked_eids.append(eid)
+    tts_eid = registry.async_get_entity_id("select", DOMAIN, f"{self._entry.entry_id}_tts_output")
+    if tts_eid:
+        tracked_eids.append(tts_eid)
+    ann_dur_eid = registry.async_get_entity_id("number", DOMAIN,
+        f"{self._entry.entry_id}_announcement_display_duration")
+    if ann_dur_eid:
+        tracked_eids.append(ann_dur_eid)
+    if tracked_eids:
         self.async_on_remove(
-            async_track_state_change_event(self.hass, switch_eids, self._on_switch_state_change)
+            async_track_state_change_event(self.hass, tracked_eids, self._on_switch_state_change)
         )
 ```
 
@@ -871,13 +908,14 @@ HA's binary handler system routes the frame to the correct handler based on the 
 
 ### 12.1 Platform Setup
 
-Three select entities are created per config entry:
+Four select entities are created per config entry:
 
 ```python
 entities = [
     VoiceSatellitePipelineSelect(hass, entry),
     VoiceSatelliteVadSensitivitySelect(hass, entry),
     VoiceSatelliteScreensaverSelect(hass, entry),
+    VoiceSatelliteTTSOutputSelect(hass, entry),
 ]
 ```
 
@@ -923,7 +961,27 @@ Constructor: `super().__init__(hass, entry.entry_id)` — **2 arguments** (hass,
 
 **Name collision handling:** If two entities share the same friendly name, the duplicate gets `(entity_id)` appended.
 
-### 12.5 Unique ID Format (Critical Gotcha)
+### 12.5 TTS Output Select
+
+`VoiceSatelliteTTSOutputSelect` extends `SelectEntity` + `RestoreEntity`. This custom select lets the user route TTS audio to an external media player instead of the browser's Web Audio API.
+
+**Implementation details:**
+
+- Scans all `media_player.*` entities (excluding the integration's own media player entity)
+- Displays friendly names in the dropdown but stores `entity_id` internally
+- Exposes `entity_id` via `extra_state_attributes` for the card to read
+- Uses a 30-second mapping cache (`_build_mapping`) identical to the screensaver select pattern
+- Cache is disabled during HA startup (entities still loading)
+- "Browser" is always the first option (default — card plays audio locally via Web Audio)
+- Restores previous selection on startup via `RestoreEntity`
+- `EntityCategory.CONFIG` — appears in the device's configuration section
+- `translation_key = "tts_output"`
+
+The satellite entity reads this select's state in `extra_state_attributes` (§4.4) and exposes it as `tts_target`. When set to "Browser" or not configured, `tts_target` is `""`. Otherwise it contains the selected media_player's `entity_id`.
+
+**Name collision handling:** Same as screensaver — duplicate friendly names get `(entity_id)` appended.
+
+### 12.6 Unique ID Format (Critical Gotcha)
 
 The entities use **inconsistent separators** in their unique IDs. This is NOT a bug — the framework-inherited selects generate their own unique IDs internally using dashes, while our custom entities use underscores:
 
@@ -932,12 +990,14 @@ The entities use **inconsistent separators** in their unique IDs. This is NOT a 
 | Pipeline select | `{entry_id}-pipeline` | **dash** | Generated by `AssistPipelineSelect` base class |
 | VAD sensitivity select | `{entry_id}-vad_sensitivity` | **dash** | Generated by `VadSensitivitySelect` base class |
 | Screensaver select | `{entry_id}_screensaver` | **underscore** | Set explicitly in our code |
+| TTS output select | `{entry_id}_tts_output` | **underscore** | Set explicitly in our code |
 | Wake sound switch | `{entry_id}_wake_sound` | **underscore** | Set explicitly in our code |
 | Mute switch | `{entry_id}_mute` | **underscore** | Set explicitly in our code |
+| Announcement duration | `{entry_id}_announcement_display_duration` | **underscore** | Set explicitly in our code |
 
-The satellite entity's `pipeline_entity_id` and `vad_sensitivity_entity_id` properties (§4.5) use **dashes** to match the framework format. The `_get_screensaver_entity_id` method uses an **underscore**. Getting the separator wrong breaks entity registry lookups silently (returns `None`).
+The satellite entity's `pipeline_entity_id` and `vad_sensitivity_entity_id` properties (§4.5) use **dashes** to match the framework format. All custom entities (`_get_screensaver_entity_id`, TTS output, announcement duration) use **underscores**. Getting the separator wrong breaks entity registry lookups silently (returns `None`).
 
-### 12.6 Stale Entity Cleanup
+### 12.7 Stale Entity Cleanup
 
 After creating entities, `async_setup_entry` cleans up stale select entities from older integration versions:
 
@@ -987,13 +1047,39 @@ def _on_switch_state_change(self, _event):
     self.async_write_ha_state()
 ```
 
-## 13A. Media Player Entity (`media_player.py`)
+## 13A. Number Entity (`number.py`)
 
-### 13A.1 Overview
+### 13A.1 Announcement Display Duration
+
+`VoiceSatelliteAnnouncementDurationNumber` extends `NumberEntity` + `RestoreEntity`. This config entity controls how long announcement bubbles remain visible on the card.
+
+**Attributes:**
+
+| Attribute | Value |
+|-----------|-------|
+| `_attr_entity_category` | `EntityCategory.CONFIG` |
+| `_attr_translation_key` | `"announcement_display_duration"` |
+| `_attr_icon` | `"mdi:message-text-clock"` |
+| `_attr_native_min_value` | `1` |
+| `_attr_native_max_value` | `60` |
+| `_attr_native_step` | `1` |
+| `_attr_native_unit_of_measurement` | `UnitOfTime.SECONDS` |
+| `_attr_mode` | `NumberMode.SLIDER` |
+| Default value | `5` seconds |
+
+**Unique ID:** `f"{entry.entry_id}_announcement_display_duration"`
+
+**State persistence:** Extends `RestoreEntity` and restores the previous value on startup via `async_get_last_state()`. Invalid states (`unknown`, `unavailable`) are ignored.
+
+**How the card reads it:** The satellite entity's `extra_state_attributes` (§4.4) looks up this number entity via the entity registry and exposes its value as `announcement_display_duration`. The card reads this attribute and uses it for announcement bubble display timing.
+
+## 13B. Media Player Entity (`media_player.py`)
+
+### 13B.1 Overview
 
 `VoiceSatelliteMediaPlayer` extends `MediaPlayerEntity` and provides a media player entity for each satellite device. This enables volume control, `tts.speak` targeting, `media_player.play_media` from automations, and media library browsing — matching the Voice PE's media player capabilities.
 
-### 13A.2 Features & State
+### 13B.2 Features & State
 
 ```python
 _attr_supported_features = (
@@ -1012,7 +1098,7 @@ States: `MediaPlayerState.IDLE`, `PLAYING`, `PAUSED`.
 
 Volume: `_attr_volume_level` (0–1 float, default 1.0), `_attr_is_volume_muted` (bool, default False).
 
-### 13A.2.1 Volume Persistence via `ExtraStoredData`
+### 13B.2.1 Volume Persistence via `ExtraStoredData`
 
 The entity extends `RestoreEntity` and uses `ExtraStoredData` to persist volume and mute state across HA reboots.
 
@@ -1051,7 +1137,7 @@ async def async_added_to_hass(self):
         self._attr_is_volume_muted = data.is_volume_muted
 ```
 
-### 13A.3 Service Methods
+### 13B.3 Service Methods
 
 All methods push commands to the card via the satellite entity's `_push_satellite_event("media_player", payload)`:
 
@@ -1068,11 +1154,11 @@ All methods push commands to the card via the satellite entity's `_push_satellit
 
 **Announce flag:** When `kwargs[ATTR_MEDIA_ANNOUNCE]` is true, the command includes `announce: true`.
 
-### 13A.4 Media Library Browsing
+### 13B.4 Media Library Browsing
 
 `async_browse_media()` delegates to `async_browse_media()` from `homeassistant.components.media_source` to provide the HA media library browser. This allows users to browse local media, TTS samples, etc. from the media player's UI.
 
-### 13A.5 State Callback
+### 13B.5 State Callback
 
 `update_playback_state(state, volume=None, media_id=None)` is called by the `ws_media_player_event` WS handler when the card reports state changes:
 
@@ -1087,7 +1173,7 @@ def update_playback_state(self, state, volume=None, media_id=None):
     self.async_write_ha_state()
 ```
 
-### 13A.6 Satellite Entity Lookup
+### 13B.6 Satellite Entity Lookup
 
 The media player uses a lazy-lookup pattern to find the satellite entity for pushing commands:
 
@@ -1107,7 +1193,7 @@ def available(self) -> bool:
     return satellite.available if satellite else False
 ```
 
-### 13A.7 Entity Registration
+### 13B.7 Entity Registration
 
 - **Unique ID:** `f"{entry.entry_id}_media_player"`
 - **Translation key:** `_attr_translation_key = "media_player"`
@@ -1466,14 +1552,18 @@ When the satellite's subscriber list changes, `_update_media_player_availability
 | `last_timer_event` | `string \| null` | Last event type |
 | `muted` | `bool` | Whether mute switch is on |
 | `wake_sound` | `bool` | Whether wake sound switch is on |
+| `tts_target` | `string` | Media player entity ID for remote TTS, or `""` for browser |
+| `announcement_display_duration` | `int` | Seconds to display announcement bubbles |
 
 ## 19. Strings and Localization (`strings.json`)
 
 HA uses this file for config flow UI and entity names:
 
 - Config flow: title, description, input labels, description text, abort messages
-- Entity names: Translation keys for select entities ("Assistant", "Finished speaking detection", "Screensaver entity"), switch entities ("Wake sound", "Mute"), and media player entity ("Media Player")
+- Entity names: Translation keys for select entities ("Assistant", "Finished speaking detection", "Screensaver entity", "TTS output"), switch entities ("Wake sound", "Mute"), number entities ("Announcement display duration"), and media player entity ("Media Player")
 - Select states: Translation keys for pipeline select ("Preferred") and VAD sensitivity ("Default", "Relaxed", "Aggressive")
+
+A `translations/en.json` file mirrors the contents of `strings.json` for English locale support.
 
 ## 20. Configuration Files
 
@@ -1522,7 +1612,7 @@ SCREENSAVER_INTERVAL = 5  # seconds
 - [ ] Single-step flow asking for satellite name
 - [ ] Unique ID from lowercased, underscore-separated name
 - [ ] Duplicate detection via `_abort_if_unique_id_configured()`
-- [ ] `strings.json` with config flow strings and entity name translations
+- [ ] `strings.json` with config flow strings and entity name translations (mirrored in `translations/en.json`)
 
 ### Entity
 - [ ] Extends `AssistSatelliteEntity`
@@ -1530,11 +1620,11 @@ SCREENSAVER_INTERVAL = 5  # seconds
 - [ ] `_attr_has_entity_name = True`, `_attr_name = None`
 - [ ] `_attr_unique_id = entry.entry_id`
 - [ ] `device_info` with identifiers, name, manufacturer, model, sw_version
-- [ ] `extra_state_attributes`: `active_timers`, `last_timer_event`, `muted`, `wake_sound`
+- [ ] `extra_state_attributes`: `active_timers`, `last_timer_event`, `muted`, `wake_sound`, `tts_target`, `announcement_display_duration`
 - [ ] `pipeline_entity_id` and `vad_sensitivity_entity_id` properties
 - [ ] Timer handler registered in `async_added_to_hass` via `intent.async_register_timer_handler`
 - [ ] Timer handler wrapped in `async_on_remove()`
-- [ ] Switch state change tracking via `async_track_state_change_event`
+- [ ] Sibling entity state tracking (switches, TTS output select, announcement duration number) via `async_track_state_change_event`
 - [ ] `available` property returns `True` only when `_satellite_subscribers` is non-empty
 - [ ] `async_get_configuration` returns empty wake word config
 - [ ] `async_set_configuration` is a no-op
@@ -1600,9 +1690,20 @@ SCREENSAVER_INTERVAL = 5  # seconds
 - [ ] Pipeline select (extends `AssistPipelineSelect`) — constructor takes 3 args: `(hass, DOMAIN, entry_id)`
 - [ ] VAD sensitivity select (extends `VadSensitivitySelect`) — constructor takes 2 args: `(hass, entry_id)` — **no domain**
 - [ ] Screensaver select (extends `SelectEntity` + `RestoreEntity`)
-- [ ] Screensaver: entity scanning, friendly name mapping, 30s cache, "Disabled" default
+- [ ] Screensaver: entity scanning (switch + input_boolean), friendly name mapping, 30s cache, "Disabled" default
+- [ ] TTS output select (extends `SelectEntity` + `RestoreEntity`)
+- [ ] TTS output: entity scanning (media_player, excludes own integration), friendly name mapping, 30s cache, "Browser" default
+- [ ] TTS output: exposes `entity_id` via `extra_state_attributes` for the card
 - [ ] Unique ID separators: framework selects use **dashes**, custom entities use **underscores**
 - [ ] Stale entity cleanup after setup
+
+### Number Entity
+- [ ] Announcement display duration (extends `NumberEntity` + `RestoreEntity`)
+- [ ] `EntityCategory.CONFIG`, `translation_key = "announcement_display_duration"`
+- [ ] Range 1–60 seconds, step 1, slider mode, default 5 seconds
+- [ ] `RestoreEntity` restores previous value on startup
+- [ ] Unique ID: `f"{entry.entry_id}_announcement_display_duration"`
+- [ ] Same `device_info` identifiers as other entities
 
 ### Switch Entities
 - [ ] Wake sound switch (default on, `RestoreEntity`)
@@ -1639,7 +1740,7 @@ SCREENSAVER_INTERVAL = 5  # seconds
 - [ ] `media_player_event` uses `vol.Coerce(float)` for volume field (JSON integer/float ambiguity)
 
 ### Integration Setup
-- [ ] `async_setup_entry` forwards to ASSIST_SATELLITE + SELECT + SWITCH + MEDIA_PLAYER platforms
+- [ ] `async_setup_entry` forwards to ASSIST_SATELLITE + MEDIA_PLAYER + NUMBER + SELECT + SWITCH platforms
 - [ ] `async_setup_entry` registers all 7 WebSocket commands
 - [ ] `async_unload_entry` unloads platforms and removes entity + media_player from `hass.data`
 - [ ] Satellite entity stored in `hass.data[DOMAIN][entry.entry_id]`
