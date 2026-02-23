@@ -79,7 +79,7 @@ Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_re
 ### HACS (Recommended)
 
 1. Add this repository as a custom repository in HACS (type: Integration)
-2. Search for "Voice Satellite Card" and install
+2. Search for `Voice Satellite Card` and install
 3. Restart Home Assistant
 
 ### Manual
