@@ -14,11 +14,13 @@ If this is a bug, consider using the Bug Report template instead — it has a ch
 ## Before you start
 
 Please confirm:
-- [ ] I am running **Home Assistant 2025.2.1** or later
-- [ ] I have installed the integration and **restarted Home Assistant**
-- [ ] I have added a device via **Settings > Devices & Services > Add Integration > Voice Satellite Card**
-- [ ] I have the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant) installed
+
+- [ ] I have read the Troubleshooting section in the README
+- [ ] I am accessing Home Assistant over **HTTPS** (required for microphone access)
+- [ ] I have granted **microphone permission** when prompted by the browser (a user gesture like tapping the mic button is required to trigger the permission prompt; in Fully Kiosk, enable **Web Content Settings → Enable Microphone Access** and **Autoplay Audio**)
 - [ ] I have confirmed my Assist pipeline works independently (e.g., via the Assist dialog in the HA sidebar)
+- [ ] I have a wake word service (e.g., openWakeWord, microWakeWord) available to Home Assistant and enabled in my pipeline
+
 
 ## Description
 
