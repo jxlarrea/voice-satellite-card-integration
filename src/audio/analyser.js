@@ -32,6 +32,8 @@ export class AnalyserManager {
 
     this._rafId = null;
     this._barEl = null;
+    this._visibilityHandler = null;
+    this._lastLevel = -1;
   }
 
   /**
@@ -140,6 +142,19 @@ export class AnalyserManager {
    */
   start(barEl) {
     this._barEl = barEl;
+    if (!this._visibilityHandler) {
+      this._visibilityHandler = () => {
+        if (document.hidden) {
+          if (this._rafId) {
+            cancelAnimationFrame(this._rafId);
+            this._rafId = null;
+          }
+        } else if (this._barEl && !this._rafId) {
+          this._tick();
+        }
+      };
+      document.addEventListener('visibilitychange', this._visibilityHandler);
+    }
     if (this._rafId) return; // Already running
     this._tick();
   }
@@ -151,6 +166,10 @@ export class AnalyserManager {
     if (this._rafId) {
       cancelAnimationFrame(this._rafId);
       this._rafId = null;
+    }
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
     }
     if (this._barEl) {
       this._barEl.style.setProperty('--vs-audio-level', '0');
@@ -197,17 +216,20 @@ export class AnalyserManager {
 
     this._activeAnalyser.getByteFrequencyData(this._dataArray);
 
-    // Compute RMS volume normalized to 0–1
+    // Compute RMS volume normalized to 0–1, quantized to 20 steps
+    // to skip redundant CSS updates when the level barely changes.
     let sum = 0;
     for (let i = 0; i < this._dataArray.length; i++) {
       const v = this._dataArray[i] / 255;
       sum += v * v;
     }
     const rms = Math.sqrt(sum / this._dataArray.length);
+    const level = Math.min(1, Math.round(Math.min(1, rms * 2) * 20) / 20);
 
-    // Clamp and apply slight boost for visual responsiveness
-    const level = Math.min(1, rms * 2);
-    this._barEl.style.setProperty('--vs-audio-level', level.toFixed(3));
+    if (level !== this._lastLevel) {
+      this._lastLevel = level;
+      this._barEl.style.setProperty('--vs-audio-level', level.toFixed(2));
+    }
 
     this._rafId = requestAnimationFrame(() => this._tick());
   }

@@ -349,6 +349,10 @@ export class UIManager {
         `<span class="vs-timer-time">${formatTime(timer.secondsLeft)}</span>` +
       '</div>';
 
+    // Cache child references to avoid querySelector on every tick
+    pill._vsTimeEl = pill.querySelector('.vs-timer-time');
+    pill._vsProgressEl = pill.querySelector('.vs-timer-progress');
+
     if (onDoubleTap) {
       _attachDoubleTap(pill, onDoubleTap);
     }
@@ -390,10 +394,10 @@ export class UIManager {
    */
   updateTimerPill(el, secondsLeft, totalSeconds) {
     if (!el) return;
-    const timeEl = el.querySelector('.vs-timer-time');
+    const timeEl = el._vsTimeEl;
     if (timeEl) timeEl.textContent = formatTime(secondsLeft);
 
-    const progressEl = el.querySelector('.vs-timer-progress');
+    const progressEl = el._vsProgressEl;
     if (progressEl) {
       const pct = totalSeconds > 0 ? Math.max(0, (secondsLeft / totalSeconds) * 100) : 0;
       progressEl.style.width = `${pct}%`;

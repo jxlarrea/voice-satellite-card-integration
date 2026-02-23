@@ -1,13 +1,13 @@
 {
   "name": "voice-satellite-card-integration",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "description": "Voice Satellite Card for Home Assistant — turns browsers into Assist satellites.",
   "private": true,
   "scripts": {
     "prebuild": "node scripts/sync-version.js",
     "build": "webpack --mode production",
     "predev": "node scripts/sync-version.js",
-    "dev": "webpack --mode production && xcopy /E /I /Y custom_components\\voice_satellite \\\\hassio\\config\\custom_components\\voice_satellite"
+    "dev": "webpack --mode development && xcopy /E /I /Y custom_components\\voice_satellite \\\\hassio\\config\\custom_components\\voice_satellite"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

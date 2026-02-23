@@ -47,7 +47,7 @@ export function tick(mgr) {
   const now = Date.now();
 
   for (const t of mgr.timers) {
-    const elapsed = Math.floor((now - t.startedAt) / 1000);
+    const elapsed = Math.max(0, Math.floor((now - t.startedAt) / 1000));
     const left = Math.max(0, t.totalSeconds - elapsed);
     t.secondsLeft = left;
 
@@ -102,13 +102,14 @@ export function clearAlert(mgr) {
   }
 
   mgr.card.ui.clearTimerAlert();
-
-  // Clean up timer pills/container
-  mgr.stopTick();
-  removeContainer(mgr);
-  mgr.timers = [];
-
   mgr.card.ui.hideBlurOverlay(BlurReason.TIMER);
+
+  // Only tear down pills/container if no timers remain active
+  if (mgr.timers.length === 0) {
+    mgr.stopTick();
+    removeContainer(mgr);
+  }
+
   mgr.log.log('timer', 'Alert dismissed');
 }
 

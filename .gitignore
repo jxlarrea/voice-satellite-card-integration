@@ -4,8 +4,8 @@
 # Node
 node_modules/
 
-# Build artifacts (debug only — production JS is committed)
-custom_components/voice_satellite/frontend/voice-satellite-card.js.map
+# Build artifacts (CI builds production JS for releases)
+custom_components/voice_satellite/frontend/
 
 # Python
 __pycache__/

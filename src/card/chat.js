@@ -14,6 +14,15 @@ export class ChatManager {
 
     this._streamEl = null;
     this._streamedResponse = '';
+
+    // Reusable fade span pool — avoids creating/destroying 24 DOM nodes per update
+    this._fadeSpans = null;
+    this._solidNode = null;
+    this._fadeContainer = null;
+
+    // RAF coalescing — multiple rapid stream chunks produce one DOM write per frame
+    this._pendingText = null;
+    this._rafId = null;
   }
 
   get streamEl() { return this._streamEl; }
@@ -38,7 +47,7 @@ export class ChatManager {
     if (!this._streamEl) {
       this.addAssistant(text);
     } else {
-      this._updateStreaming(text);
+      this._scheduleStreaming(text);
     }
   }
 
@@ -50,15 +59,40 @@ export class ChatManager {
 
   addAssistant(text) {
     this._streamEl = this._card.ui.addChatMessage(text, 'assistant');
+    this._fadeSpans = null;
+    this._solidNode = null;
+    this._fadeContainer = null;
   }
 
   clear() {
     this._card.ui.clearChat();
     this._streamEl = null;
     this._streamedResponse = '';
+    this._fadeSpans = null;
+    this._solidNode = null;
+    this._fadeContainer = null;
+    if (this._rafId) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+      this._pendingText = null;
+    }
   }
 
   // --- Private ---
+
+  /** Coalesce rapid stream chunks into one DOM write per frame. */
+  _scheduleStreaming(text) {
+    this._pendingText = text;
+    if (!this._rafId) {
+      this._rafId = requestAnimationFrame(() => {
+        this._rafId = null;
+        if (this._pendingText !== null) {
+          this._updateStreaming(this._pendingText);
+          this._pendingText = null;
+        }
+      });
+    }
+  }
 
   _updateStreaming(text) {
     if (!this._streamEl) return;
@@ -68,18 +102,33 @@ export class ChatManager {
       return;
     }
 
+    // Lazily create the fade DOM structure once, then reuse it
+    if (!this._fadeSpans) {
+      this._initFadeNodes();
+    }
+
     const solid = text.slice(0, text.length - FADE_LEN);
     const tail = text.slice(text.length - FADE_LEN);
 
-    let html = _escapeHtml(solid);
-    for (let i = 0; i < tail.length; i++) {
-      const opacity = ((FADE_LEN - i) / FADE_LEN).toFixed(2);
-      html += `<span style="opacity:${opacity}">${_escapeHtml(tail[i])}</span>`;
+    // Update text nodes in-place — no innerHTML, no DOM creation/destruction
+    this._solidNode.textContent = solid;
+    for (let i = 0; i < FADE_LEN; i++) {
+      this._fadeSpans[i].textContent = i < tail.length ? tail[i] : '';
     }
-    this._card.ui.updateChatHtml(this._streamEl, html);
   }
-}
 
-function _escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  /** Build the fade DOM structure once: a text node for solid text + 24 reusable spans. */
+  _initFadeNodes() {
+    this._streamEl.textContent = '';
+    this._solidNode = document.createTextNode('');
+    this._streamEl.appendChild(this._solidNode);
+
+    this._fadeSpans = [];
+    for (let i = 0; i < FADE_LEN; i++) {
+      const span = document.createElement('span');
+      span.style.opacity = ((FADE_LEN - i) / FADE_LEN).toFixed(2);
+      this._fadeSpans.push(span);
+      this._streamEl.appendChild(span);
+    }
+  }
 }

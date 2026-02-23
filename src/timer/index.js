@@ -65,7 +65,6 @@ export class TimerManager {
   set knownTimerIds(val) { this._knownTimerIds = val; }
   get alertActive() { return this._alertActive; }
   set alertActive(val) { this._alertActive = val; }
-  get isAlertActive() { return this._alertActive; }
 
   dismissAlert() {
     this.clearAlert();
@@ -113,7 +112,7 @@ export class TimerManager {
         if (existing.totalSeconds !== raw.total_seconds) {
           existing.totalSeconds = raw.total_seconds;
           existing.startedAt = serverStartedAt;
-          const elapsed = Math.floor((now - serverStartedAt) / 1000);
+          const elapsed = Math.max(0, Math.floor((now - serverStartedAt) / 1000));
           existing.secondsLeft = Math.max(0, raw.total_seconds - elapsed);
           existing.startHours = raw.start_hours || 0;
           existing.startMinutes = raw.start_minutes || 0;
@@ -121,7 +120,7 @@ export class TimerManager {
         }
         newTimers.push(existing);
       } else {
-        const elapsed = Math.floor((now - serverStartedAt) / 1000);
+        const elapsed = Math.max(0, Math.floor((now - serverStartedAt) / 1000));
         newTimers.push({
           id: raw.id,
           name: raw.name || '',

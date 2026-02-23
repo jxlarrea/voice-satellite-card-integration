@@ -56,7 +56,7 @@ export const CHIME_ALERT = {
  * @param {object} card - Card instance (uses card.audio.audioContext)
  * @returns {{ ctx: AudioContext, owned: boolean }}
  */
-export function getOrCreateContext(card) {
+function getOrCreateContext(card) {
   const existing = card.audio?.audioContext;
 
   if (existing && existing.state !== 'closed') {

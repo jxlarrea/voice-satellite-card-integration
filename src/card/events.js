@@ -90,11 +90,10 @@ export async function startListening(card) {
       card.logger.error('mic', 'Microphone in use or not readable');
     }
 
+    setState(card, State.IDLE);
     if (reason !== 'error') {
       card.ui.showStartButton(reason);
-      setState(card, State.IDLE);
     } else {
-      setState(card, State.IDLE);
       card.pipeline.restart(card.pipeline.calculateRetryDelay());
     }
   } finally {

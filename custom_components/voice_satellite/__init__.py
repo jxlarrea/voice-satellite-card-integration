@@ -26,6 +26,14 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SELECT, Platform.SWITCH]
 
 
+def _find_entity(hass: HomeAssistant, entity_id: str, predicate=None):
+    """Find a registered entity by entity_id, with optional extra filter."""
+    for _, ent in hass.data.get(DOMAIN, {}).items():
+        if ent.entity_id == entity_id and (predicate is None or predicate(ent)):
+            return ent
+    return None
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up integration-wide resources: frontend JS + WebSocket commands."""
     # Register WebSocket commands (once, not per-entry)
@@ -87,13 +95,7 @@ async def ws_announce_finished(
     entity_id = msg["entity_id"]
     announce_id = msg["announce_id"]
 
-    # Find the entity by looking through all registered satellites
-    entity = None
-    for entry_id, ent in hass.data.get(DOMAIN, {}).items():
-        if ent.entity_id == entity_id:
-            entity = ent
-            break
-
+    entity = _find_entity(hass, entity_id)
     if entity is None:
         connection.send_error(
             msg["id"], "not_found", f"Entity {entity_id} not found"
@@ -121,12 +123,7 @@ async def ws_update_state(
     entity_id = msg["entity_id"]
     state = msg["state"]
 
-    entity = None
-    for entry_id, ent in hass.data.get(DOMAIN, {}).items():
-        if ent.entity_id == entity_id:
-            entity = ent
-            break
-
+    entity = _find_entity(hass, entity_id)
     if entity is None:
         connection.send_error(
             msg["id"], "not_found", f"Entity {entity_id} not found"
@@ -156,12 +153,7 @@ async def ws_question_answered(
     announce_id = msg["announce_id"]
     sentence = msg["sentence"]
 
-    entity = None
-    for entry_id, ent in hass.data.get(DOMAIN, {}).items():
-        if ent.entity_id == entity_id:
-            entity = ent
-            break
-
+    entity = _find_entity(hass, entity_id)
     if entity is None:
         connection.send_error(
             msg["id"], "not_found", f"Entity {entity_id} not found"
@@ -217,12 +209,7 @@ async def ws_run_pipeline(
     conversation_id = msg.get("conversation_id")
     extra_system_prompt = msg.get("extra_system_prompt")
 
-    entity = None
-    for entry_id, ent in hass.data.get(DOMAIN, {}).items():
-        if ent.entity_id == entity_id:
-            entity = ent
-            break
-
+    entity = _find_entity(hass, entity_id)
     if entity is None:
         connection.send_error(
             msg["id"], "not_found", f"Entity {entity_id} not found"
@@ -332,12 +319,7 @@ async def ws_subscribe_satellite_events(
     """
     entity_id = msg["entity_id"]
 
-    entity = None
-    for entry_id, ent in hass.data.get(DOMAIN, {}).items():
-        if ent.entity_id == entity_id:
-            entity = ent
-            break
-
+    entity = _find_entity(hass, entity_id)
     if entity is None:
         connection.send_error(
             msg["id"], "not_found", f"Entity {entity_id} not found"
@@ -373,12 +355,7 @@ async def ws_cancel_timer(
     entity_id = msg["entity_id"]
     timer_id = msg["timer_id"]
 
-    entity = None
-    for entry_id, ent in hass.data.get(DOMAIN, {}).items():
-        if ent.entity_id == entity_id:
-            entity = ent
-            break
-
+    entity = _find_entity(hass, entity_id)
     if entity is None:
         connection.send_error(
             msg["id"], "not_found", f"Entity {entity_id} not found"
@@ -423,13 +400,7 @@ async def ws_media_player_event(
     volume = msg.get("volume")
     media_id = msg.get("media_id")
 
-    # Find the media player entity
-    entity = None
-    for key, ent in hass.data.get(DOMAIN, {}).items():
-        if hasattr(ent, "update_playback_state") and ent.entity_id == entity_id:
-            entity = ent
-            break
-
+    entity = _find_entity(hass, entity_id, lambda e: hasattr(e, "update_playback_state"))
     if entity is None:
         connection.send_error(
             msg["id"], "not_found", f"Media player entity {entity_id} not found"

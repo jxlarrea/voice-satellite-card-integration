@@ -23,7 +23,7 @@ export class DoubleTapHandler {
   setup() {
     this._handler = (e) => {
       const isActive = INTERACTING_STATES.includes(this._card.currentState) || this._card.tts.isPlaying;
-      const isTimerAlert = this._card.timer.isAlertActive;
+      const isTimerAlert = this._card.timer.alertActive;
       const isNotification = this._card.announcement.playing
         || this._card.askQuestion.playing
         || this._card.startConversation.playing
@@ -43,7 +43,7 @@ export class DoubleTapHandler {
       if (timeSinceLastTap < Timing.DOUBLE_TAP_THRESHOLD && timeSinceLastTap > 0) {
         e.preventDefault();
 
-        if (this._card.timer.isAlertActive) {
+        if (this._card.timer.alertActive) {
           this._log.log('ui', 'Double-tap detected — dismissing timer alert');
           this._card.timer.dismissAlert();
           return;

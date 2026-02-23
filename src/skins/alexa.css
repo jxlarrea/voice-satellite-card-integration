@@ -12,8 +12,8 @@
   left: 0;
   right: 0;
   bottom: 0;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   opacity: 0;
   transition: opacity 0.4s ease;
   z-index: 9999;
@@ -77,11 +77,11 @@
   left: 0;
   right: 0;
   bottom: 0;
-  height: 6px;
+  height: 10px;
   border-radius: 3px 3px 0 0;
   background: linear-gradient(90deg, #00CAFF, #00E5FF, #00CAFF);
   background-size: 200% 100%;
-  box-shadow: 0 0 20px 6px rgba(0, 202, 255, 0.5), 0 0 40px 12px rgba(0, 202, 255, 0.2);
+  filter: drop-shadow(0 0 12px rgba(0, 202, 255, 0.5));
   opacity: 0;
   transition: opacity 0.4s ease;
   z-index: 10000;
@@ -110,7 +110,7 @@
 
 #voice-satellite-ui .vs-rainbow-bar.error-mode {
   background: #FF3B30;
-  box-shadow: 0 0 20px 5px rgba(255, 59, 48, 0.5);
+  filter: drop-shadow(0 0 12px rgba(255, 59, 48, 0.5));
   animation: alexa-glow-red 1.5s ease-in-out infinite;
   opacity: 1;
 }
@@ -121,13 +121,28 @@
 
 /* Reactive Bar — audio-driven glow, speed varies by state */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
-  transition: box-shadow 0.05s linear;
-  box-shadow:
-    0 0 calc(10px + 35px * var(--vs-audio-level, 0)) calc(3px + 10px * var(--vs-audio-level, 0)) rgba(0, 202, 255, calc(0.3 + 0.5 * var(--vs-audio-level, 0))),
-    0 0 calc(16px + 40px * var(--vs-audio-level, 0)) calc(5px + 14px * var(--vs-audio-level, 0)) rgba(0, 202, 255, calc(0.1 + 0.25 * var(--vs-audio-level, 0)));
+  overflow: visible;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #00CAFF, #00E5FF, #00CAFF);
+  background-size: 200% 100%;
+  border-radius: 50%;
+  filter: blur(calc(6px + 12px * var(--vs-audio-level, 0)));
+  opacity: calc(var(--vs-audio-level, 0) * 2.5);
+  transform: scale(1.05, 2);
+  z-index: -1;
+  pointer-events: none;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive.listening {
+  animation: alexa-shimmer 3s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.listening::after {
   animation: alexa-shimmer 3s linear infinite;
 }
 
@@ -135,36 +150,44 @@
   animation: alexa-shimmer 1s linear infinite;
 }
 
+#voice-satellite-ui .vs-rainbow-bar.reactive.processing::after {
+  animation: alexa-shimmer 1s linear infinite;
+}
+
 #voice-satellite-ui .vs-rainbow-bar.reactive.speaking {
+  animation: alexa-shimmer 4s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.speaking::after {
   animation: alexa-shimmer 4s linear infinite;
 }
 
 @keyframes alexa-breathe {
   0%, 100% {
     opacity: 0.3;
-    box-shadow: 0 0 12px 4px rgba(0, 202, 255, 0.2);
+    filter: drop-shadow(0 0 6px rgba(0, 202, 255, 0.3));
   }
   50% {
     opacity: 0.7;
-    box-shadow: 0 0 24px 8px rgba(0, 202, 255, 0.5);
+    filter: drop-shadow(0 0 14px rgba(0, 202, 255, 0.6));
   }
 }
 
 @keyframes alexa-glow {
   0%, 100% {
-    box-shadow: 0 0 20px 6px rgba(0, 202, 255, 0.5), 0 0 40px 12px rgba(0, 202, 255, 0.2);
+    filter: drop-shadow(0 0 12px rgba(0, 202, 255, 0.5));
   }
   50% {
-    box-shadow: 0 0 40px 14px rgba(0, 202, 255, 0.8), 0 0 60px 20px rgba(0, 202, 255, 0.3);
+    filter: drop-shadow(0 0 24px rgba(0, 202, 255, 0.8));
   }
 }
 
 @keyframes alexa-speak {
   0%, 100% {
-    box-shadow: 0 0 16px 5px rgba(0, 202, 255, 0.5), 0 0 30px 10px rgba(0, 202, 255, 0.2);
+    filter: drop-shadow(0 0 10px rgba(0, 202, 255, 0.5));
   }
   50% {
-    box-shadow: 0 0 30px 10px rgba(0, 202, 255, 0.7), 0 0 50px 16px rgba(0, 202, 255, 0.3);
+    filter: drop-shadow(0 0 18px rgba(0, 202, 255, 0.7));
   }
 }
 
@@ -175,10 +198,10 @@
 
 @keyframes alexa-glow-red {
   0%, 100% {
-    box-shadow: 0 0 15px 3px rgba(255, 59, 48, 0.4);
+    filter: drop-shadow(0 0 8px rgba(255, 59, 48, 0.4));
   }
   50% {
-    box-shadow: 0 0 30px 8px rgba(255, 59, 48, 0.7);
+    filter: drop-shadow(0 0 18px rgba(255, 59, 48, 0.7));
   }
 }
 
@@ -192,7 +215,7 @@
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: 76px;
+  bottom: 80px;
   display: none;
   flex-direction: column;
   align-items: center;
@@ -210,7 +233,7 @@
 }
 
 #voice-satellite-ui.reactive-mode .vs-chat-container {
-  bottom: 90px;
+  bottom: 104px;
 }
 
 #voice-satellite-ui .vs-chat-container.announcement-mode {

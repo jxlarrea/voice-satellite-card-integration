@@ -33,7 +33,7 @@ export async function setupAudioWorklet(mgr, sourceNode) {
 
   mgr.workletNode = new AudioWorkletNode(mgr.audioContext, 'voice-satellite-processor');
   mgr.workletNode.port.onmessage = (e) => {
-    mgr.audioBuffer.push(new Float32Array(e.data));
+    mgr.audioBuffer.push(e.data);
   };
   sourceNode.connect(mgr.workletNode);
   // Connect through a silent gain node — keeps the graph alive for processing

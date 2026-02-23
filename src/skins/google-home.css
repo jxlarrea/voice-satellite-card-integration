@@ -1,5 +1,12 @@
 /* Google Home Skin */
 
+/* Animatable custom property for syncing bar + glow gradient position */
+@property --vs-gp {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
 /* Font */
 #voice-satellite-ui {
   font-family: "Google Sans", Roboto, Noto, sans-serif;
@@ -118,24 +125,42 @@
   animation: google-error-flash 0.15s ease-in-out 3;
 }
 
-/* Reactive Bar — audio-driven pulsation, speed varies by state */
+/* Reactive Bar — audio-driven pulsation, speed varies by state.
+   Uses @property --vs-gp so the bar and its ::after glow share a single
+   animated gradient position — guaranteeing perfect color sync. */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
-  transition: height 0.05s linear, box-shadow 0.05s linear;
-  height: calc(4px + 12px * var(--vs-audio-level, 0));
-  box-shadow:
-    0 0 calc(4px + 14px * var(--vs-audio-level, 0)) calc(1px + 5px * var(--vs-audio-level, 0)) rgba(66, 133, 244, calc(0.15 + 0.35 * var(--vs-audio-level, 0)));
+  transition: transform 0.05s linear;
+  transform-origin: bottom;
+  transform: scaleY(calc(1 + 3 * var(--vs-audio-level, 0)));
+  overflow: visible;
+  background-position: var(--vs-gp) 50%;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #4285F4, #4285F4 25%, #EA4335 25%, #EA4335 50%, #FBBC05 50%, #FBBC05 75%, #34A853 75%, #34A853);
+  background-size: 200% 100%;
+  background-position: var(--vs-gp) 50%;
+  border-radius: 50%;
+  filter: blur(calc(6px + 12px * var(--vs-audio-level, 0)));
+  opacity: calc(var(--vs-audio-level, 0) * 2.5);
+  transform: scale(1.15, 2);
+  z-index: -1;
+  pointer-events: none;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive.listening {
-  animation: google-flow 3s linear infinite;
+  animation: google-flow-sync 3s linear infinite;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive.processing {
-  animation: google-flow 0.5s linear infinite;
+  animation: google-flow-sync 0.5s linear infinite;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive.speaking {
-  animation: google-flow 2s linear infinite;
+  animation: google-flow-sync 2s linear infinite;
 }
 
 @keyframes google-breathe {
@@ -154,6 +179,11 @@
   100% {
     background-position: 200% 50%;
   }
+}
+
+@keyframes google-flow-sync {
+  0%   { --vs-gp: 0%; }
+  100% { --vs-gp: 200%; }
 }
 
 @keyframes google-error-flash {
@@ -184,7 +214,7 @@
 }
 
 #voice-satellite-ui.reactive-mode .vs-chat-container {
-  bottom: 80px;
+  bottom: 120px;
 }
 
 #voice-satellite-ui .vs-chat-container.announcement-mode {

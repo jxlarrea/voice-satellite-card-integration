@@ -1,5 +1,12 @@
 /* Default Skin */
 
+/* Animatable custom property for syncing bar + glow gradient position */
+@property --vs-gp {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
 /* Font */
 #voice-satellite-ui {
   font-family: Roboto, Noto, sans-serif;
@@ -117,25 +124,42 @@
   animation: vs-error-flash 0.15s ease-in-out 3;
 }
 
-/* Reactive Bar — audio-driven height and glow, speed varies by state */
+/* Reactive Bar — audio-driven scale and glow, speed varies by state.
+   Uses @property --vs-gp so the bar and its ::after glow share a single
+   animated gradient position — guaranteeing perfect color sync. */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
-  transition: height 0.05s linear, box-shadow 0.05s linear;
-  height: calc(16px + 8px * var(--vs-audio-level, 0));
-  box-shadow:
-    0 0 calc(5px + 20px * var(--vs-audio-level, 0)) calc(2px + 8px * var(--vs-audio-level, 0)) rgba(200, 170, 255, calc(0.15 + 0.4 * var(--vs-audio-level, 0))),
-    0 0 calc(8px + 30px * var(--vs-audio-level, 0)) calc(4px + 12px * var(--vs-audio-level, 0)) rgba(240, 240, 255, calc(0.1 + 0.25 * var(--vs-audio-level, 0)));
+  transition: transform 0.05s linear;
+  transform-origin: bottom;
+  transform: scaleY(calc(1 + 0.5 * var(--vs-audio-level, 0)));
+  overflow: visible;
+  background-position: var(--vs-gp) 50%;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC, #FF7777);
+  background-size: 200% 100%;
+  background-position: var(--vs-gp) 50%;
+  border-radius: 50%;
+  filter: blur(calc(6px + 12px * var(--vs-audio-level, 0)));
+  opacity: calc(var(--vs-audio-level, 0) * 2.5);
+  transform: scale(1.05, 1.5);
+  z-index: -1;
+  pointer-events: none;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive.listening {
-  animation: vs-gradient-flow 3s linear infinite;
+  animation: vs-gradient-flow-sync 3s linear infinite;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive.processing {
-  animation: vs-gradient-flow 0.5s linear infinite;
+  animation: vs-gradient-flow-sync 0.5s linear infinite;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive.speaking {
-  animation: vs-gradient-flow 2s linear infinite;
+  animation: vs-gradient-flow-sync 2s linear infinite;
 }
 
 @keyframes vs-error-flash {
@@ -166,7 +190,7 @@
 }
 
 #voice-satellite-ui.reactive-mode .vs-chat-container {
-  bottom: 80px;
+  bottom: 100px;
 }
 
 #voice-satellite-ui .vs-chat-container.announcement-mode {
@@ -242,6 +266,11 @@
   100% {
     background-position: 200% 50%;
   }
+}
+
+@keyframes vs-gradient-flow-sync {
+  0%   { --vs-gp: 0%; }
+  100% { --vs-gp: 200%; }
 }
 
 @keyframes vs-bar-breathe {

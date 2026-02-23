@@ -30,7 +30,7 @@ const baseConfig = {
 
 module.exports = (env, argv) => {
   if (argv.mode === 'development') {
-    // Dev: unminified with source maps
+    // Dev: unminified with source maps (npm run dev)
     return {
       ...baseConfig,
       output: {
@@ -38,12 +38,12 @@ module.exports = (env, argv) => {
         path: frontendDir,
       },
       optimization: {
-        minimize: true,
+        minimize: false,
       },
       devtool: 'source-map',
     };
   }
-  // Production: minified, no source map
+  // Production: minified, no source map (npm run build / CI)
   return {
     ...baseConfig,
     output: {
