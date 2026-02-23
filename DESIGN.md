@@ -46,7 +46,6 @@ voice-satellite-card/
 │   ├── index.js                          ← Entry point, custom element registration
 │   ├── constants.js                      ← State enum, DEFAULT_CONFIG, Timing, BlurReason, EXPECTED_ERRORS
 │   ├── logger.js                         ← Shared Logger class
-│   ├── styles.css                        ← CSS styles (imported as raw string via webpack)
 │   │
 │   ├── card/                             ← Main card class + helpers
 │   │   ├── index.js                      ← VoiceSatelliteCard (thin orchestrator)
@@ -57,8 +56,9 @@ voice-satellite-card/
 │   │   ├── double-tap.js                 ← DoubleTapHandler (cancel with touch dedup)
 │   │   └── visibility.js                 ← VisibilityManager (tab pause/resume)
 │   │
-│   ├── audio/                            ← Audio capture + chimes + media playback
+│   ├── audio/                            ← Audio capture + chimes + media playback + analysis
 │   │   ├── index.js                      ← AudioManager (mic, worklet, send interval)
+│   │   ├── analyser.js                   ← AnalyserManager (dual-analyser for reactive bar)
 │   │   ├── processing.js                 ← AudioWorklet/ScriptProcessor setup, resample, buffer
 │   │   ├── comms.js                      ← Binary WebSocket audio transmission
 │   │   ├── chime.js                      ← Web Audio API chime generation (all chime patterns)
@@ -92,24 +92,33 @@ voice-satellite-card/
 │   ├── start-conversation/               ← Start conversation (prompt → STT listening mode)
 │   │   └── index.js                      ← StartConversationManager (prompt → restartContinue)
 │   │
+│   ├── skins/                            ← Skin definitions (CSS + config)
+│   │   ├── index.js                      ← Skin registry (getSkin, getSkinOptions)
+│   │   ├── default.js                    ← Default skin definition
+│   │   ├── default.css                   ← Default skin styles
+│   │   ├── default-preview.css           ← Default skin editor preview styles
+│   │   ├── alexa.js                      ← Alexa skin definition
+│   │   ├── alexa.css                     ← Alexa skin styles
+│   │   ├── alexa-preview.css             ← Alexa skin editor preview styles
+│   │   ├── google-home.js               ← Google Home skin definition
+│   │   ├── google-home.css              ← Google Home skin styles
+│   │   └── google-home-preview.css      ← Google Home skin editor preview styles
+│   │
 │   ├── shared/                           ← Cross-feature utilities
 │   │   ├── singleton.js                  ← Single-instance guarantee (window.__vsSingleton)
 │   │   ├── satellite-subscription.js     ← WS subscription for integration-pushed events
 │   │   ├── satellite-notification.js     ← Shared notification lifecycle (dispatch/queue/play/cleanup)
-│   │   ├── satellite-state.js            ← Pure entity lookups (getSatelliteAttr, getSwitchState)
+│   │   ├── satellite-state.js            ← Pure entity lookups (getSatelliteAttr, getSwitchState, getSelectEntityId, getNumberState)
 │   │   ├── notification-comms.js         ← Shared ACK WebSocket call
 │   │   ├── entity-subscription.js        ← HA state_changed subscription pattern
-│   │   ├── style-utils.js               ← 9-property bubble styling helper
 │   │   └── format.js                     ← Time formatting utility
 │   │
 │   └── editor/                           ← Config editor + preview
 │       ├── index.js                      ← getConfigForm() schema assembler
 │       ├── behavior.js                   ← satellite_entity, debug, mic processing
-│       ├── media.js                      ← TTS target, announcement duration
-│       ├── timer.js                      ← Timer pill styling (11 fields)
-│       ├── bar.js                        ← Activity bar (position, height, gradient, blur)
-│       ├── bubbles.js                    ← Bubble style, transcription/response sections
-│       └── preview.js                    ← Static editor preview renderer
+│       ├── skin.js                       ← Skin selector, reactive bar, text scale, opacity, custom CSS
+│       ├── preview.js                    ← Static editor preview renderer
+│       └── preview.css                   ← Editor preview styles
 │
 ├── webpack.config.js                     ← Webpack config (dev + minified builds)
 ├── package.json                          ← Version source of truth
@@ -206,11 +215,12 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
 
 ## 5. Card Orchestrator (`card/index.js`)
 
-`VoiceSatelliteCard` extends `HTMLElement` and composes 12 managers:
+`VoiceSatelliteCard` extends `HTMLElement` and composes 13 managers:
 
 | Manager | Purpose |
 |---------|---------|
 | `AudioManager` | Microphone, AudioWorklet, send interval |
+| `AnalyserManager` | Dual-analyser for reactive bar (mic + audio FFT) |
 | `TtsManager` | TTS playback (browser + remote), chime facade |
 | `MediaPlayerManager` | Media player entity bridge (volume, playback, state sync) |
 | `PipelineManager` | Pipeline lifecycle (start/stop/restart/retry/mute) |
@@ -238,17 +248,18 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
 
 **`set hass(hass)`** — Called by HA when state updates arrive:
 1. Editor previews return immediately
-2. If this is the active owner: updates TimerManager and retries satellite subscription if needed
+2. If this is the active owner: updates TimerManager, checks remote TTS playback state (`tts.checkRemotePlayback`), and retries satellite subscription if needed
 3. If not yet started: acquires connection, ensures global UI, starts listening
 
 **`setConfig(config)`** — Called when the user saves config in the editor:
 1. Captures whether satellite_entity was previously empty
-2. Merges config with defaults
-3. Updates logger debug flag
-4. Applies styles to the global UI
-5. Updates editor preview if in preview context
-6. Propagates config to the active singleton instance
-7. **Config reactivity:** If satellite_entity was just configured (empty → value), triggers startup without requiring a page reload
+2. Resolves skin via `getSkin(config.skin)` → stored as `_activeSkin`
+3. Merges config with defaults
+4. Updates logger debug flag
+5. Applies styles to the global UI (skin CSS injection, opacity, text scale, custom CSS)
+6. Updates editor preview if in preview context
+7. Propagates config to the active singleton instance
+8. **Config reactivity:** If satellite_entity was just configured (empty → value), triggers startup without requiring a page reload
 
 **Gotcha — Config reactivity:** When a user adds a satellite entity in the editor and saves, `set hass` may have already returned early (before `_hasStarted` is set) because `satellite_entity` was empty at the time. `setConfig` detects this transition and triggers startup directly.
 
@@ -310,7 +321,31 @@ Single-note chimes (`playChime`) use one oscillator with frequency steps. Multi-
 
 Volume sourced from `card.mediaPlayer.volume` (perceptual curve applied), scaled to max 0.5 for single-note chimes and 0.25 for multi-note chimes. Error chime additionally reduced to 30%.
 
-### 6.4 Media Playback
+### 6.4 AnalyserManager (`audio/analyser.js`)
+
+Provides real-time audio level data for reactive bar animations via two separate AnalyserNodes — a **mic analyser** and an **audio analyser** — to structurally prevent open-mic feedback loops.
+
+**Problem:** A single AnalyserNode architecture routes audio through `createMediaElementSource` → analyser → `AudioContext.destination`. If the mic source is also connected to the same analyser, the mic signal gains a path to the speakers through the Web Audio graph, creating a feedback loop on devices without hardware echo cancellation.
+
+**Solution — Dual-analyser architecture:**
+
+```
+Mic path:    getUserMedia → sourceNode → _micAnalyser  (dead end — no destination)
+Audio path:  <audio> → createMediaElementSource → _audioAnalyser → destination (speakers)
+```
+
+- `_micAnalyser` — Connected to the mic source node but **never** connected to `AudioContext.destination`. It only provides FFT data for the reactive bar. Feedback is structurally impossible because there is no audio path from mic to speakers through this node.
+- `_audioAnalyser` — Routes TTS/notification audio through to `destination` for playback. Connected only during active audio playback via `attachAudio()`.
+- `_activeAnalyser` — Pointer that determines which node `_tick()` reads FFT data from. Defaults to mic; switches to audio during playback; reverts to mic when audio detaches.
+
+**Key methods:**
+- `attachMic(sourceNode, audioContext)` — One-time setup: creates `_micAnalyser`, connects mic source. Sets as active if no audio is playing.
+- `attachAudio(audioEl, audioContext)` — Creates `_audioAnalyser`, routes `<audio>` element through it to destination. Switches `_activeAnalyser` to audio.
+- `detachAudio()` — Disconnects audio routing, reverts `_activeAnalyser` to mic.
+- `reconnectMic()` — Switches `_activeAnalyser` back to mic. **No-op guard:** Skips if `_mediaSourceNode` is still set, preventing mid-playback switches (e.g., `updateForState` fires for TTS state).
+- `start(barEl)` / `stop()` — Start/stop the `requestAnimationFrame` tick loop that writes `--vs-audio-level` CSS variable (RMS volume, 0–1 range, 2× boost for visual responsiveness).
+
+### 6.5 Media Playback
 
 `media-playback.js` provides two utilities:
 - `buildMediaUrl(path)` — Normalizes a URL path: full URLs pass through, root-relative paths are prefixed with `window.location.origin`
@@ -326,7 +361,7 @@ Handles two playback targets:
 
 **Browser playback** — Creates an HTML Audio element via `playMediaUrl()`. Includes a stall-detection watchdog (`setInterval`) that monitors `audio.currentTime` progression. If the audio stops advancing between intervals, playback is force-completed (workaround for HA Companion App WebView quirks). Unlike a fixed timeout, this supports TTS responses of any length.
 
-**Remote playback** — Calls `media_player.play_media` on the configured `tts_target` entity. Uses a 2-second delay before reporting completion (estimation, since there's no feedback from the media player).
+**Remote playback** — Calls `media_player.play_media` on the configured `tts_target` entity (resolved from the integration's TTS Output select entity via `getSelectEntityId`). Completion is detected by monitoring the remote entity's state via `checkRemotePlayback()`, which is called from the card's `set hass()` on every state update. The method tracks a `_remoteSawPlaying` flag — only completes after the entity has been in `playing`/`buffering` state first (avoids false triggers during the startup delay). A 120-second safety timeout (`REMOTE_SAFETY_TIMEOUT`) forces completion if state monitoring never fires.
 
 ### 7.2 Streaming TTS
 
@@ -336,7 +371,26 @@ If the pipeline's `run-start` event includes `tts_output.stream_response: true`,
 
 `TtsManager.playChime(type)` maps `'wake'`/`'error'`/`'done'` to the corresponding chime pattern and delegates to `audio/chime.js`. This keeps chime logic centralized while letting all code paths call `tts.playChime()`.
 
-### 7.4 TTS Stop Safety
+### 7.4 Streaming Token Refresh
+
+HA's TTS proxy pre-allocates a streaming token at `run-start` (in `tts_output.url`). The server-side cache evicts tokens based on creation time (not TTS generation time), with a TTL of ~5-10 minutes. If the user doesn't trigger a wake word for longer than the TTL, the token expires and TTS playback fails with a 404/NotSupportedError. The `tts-end` URL uses the **same** token — there is no fresh URL available from that pipeline run.
+
+**Workaround:** PipelineManager starts a `TOKEN_REFRESH_INTERVAL` (4 minute) timer on every `run-start` when a streaming URL is present. If the timer fires and the card is still in LISTENING state (idle wake-word detection), it calls `restart(0)` to get a fresh pipeline subscription with a new token. The ~200ms restart gap during idle listening is imperceptible. The timer is cleared on `wake_word-end` (interaction started) and `stop()` (pipeline torn down).
+
+See also: [home-assistant/core#159262](https://github.com/home-assistant/core/issues/159262)
+
+### 7.5 TTS Retry Mechanism
+
+On browser playback failure, the TTS manager retries once using the stored `tts-end` URL:
+
+1. `handleTtsEnd` stores the tts-end URL via `tts.storeTtsEndUrl(url)` before calling `tts.play(url)`
+2. If `play()` encounters an error and `isRetry` is false, it tries the stored `_pendingTtsEndUrl`
+3. On successful playback start (`onStart`), the pending URL is cleared
+4. If the retry also fails, `_onComplete(true)` is called (playback failed path)
+
+This covers transient failures where the TTS proxy token wasn't ready yet at the time of the first attempt.
+
+### 7.6 TTS Stop Safety
 
 When stopping TTS playback (`tts.stop()`), `onended` and `onerror` handlers are nulled BEFORE calling `pause()`. Otherwise the pause triggers `onended`, which calls `_onComplete()`, which can trigger continue-conversation or cleanup incorrectly (ghost events).
 
@@ -480,9 +534,9 @@ Events flow from `voice_satellite/run_pipeline` → `card.onPipelineMessage()` �
 
 | Event | Handler | Action |
 |-------|---------|--------|
-| `run-start` | `handleRunStart` | Store streaming TTS URL, set state (LISTENING or STT for continue) |
+| `run-start` | `handleRunStart` | Store streaming TTS URL, set state (LISTENING or STT for continue), start token refresh timer |
 | `wake_word-start` | `handleWakeWordStart` | Track recovery from service unavailable |
-| `wake_word-end` | `handleWakeWordEnd` | Play wake chime (if enabled), show blur, enter WAKE_WORD_DETECTED |
+| `wake_word-end` | `handleWakeWordEnd` | Clear token refresh timer, play wake chime (if enabled), show blur, enter WAKE_WORD_DETECTED |
 | `stt-start` | (inline) | Set state STT |
 | `stt-end` | `handleSttEnd` | Show transcription bubble, invoke askQuestionCallback if set |
 | `intent-start` | (inline) | Set state INTENT |
@@ -518,6 +572,16 @@ When `run-end` arrives during the wake_word phase without a preceding error, the
 This handles a post-reboot race condition: after HA reconnects, the HA frontend WebSocket library auto-replays active subscriptions (including `run_pipeline`). The card's explicit reconnect handler also creates a new pipeline after a 2-second delay. The replayed pipeline starts first, but the card's restart kills it and creates a second pipeline. The server-side pipeline may genuinely end during wake_word detection (e.g., the audio stream ends due to reconnect timing), sending a valid `run-end`. Rather than ignoring this as "stale", the card restarts the pipeline to ensure continuous wake word listening.
 
 If the `run-end` during wake_word phase was preceded by an error (`_errorReceived` is true), normal cleanup and error handling proceed instead.
+
+### 8.9 Streaming Token Refresh Timer
+
+Prevents stale TTS streaming tokens by periodically restarting the pipeline during idle wake-word listening (see §7.4 for root cause).
+
+**Lifecycle:**
+- **Started** in `handleRunStart` after storing the streaming URL — only if a streaming URL was allocated
+- **Cleared** in `handleWakeWordEnd` (user interaction started — no longer idle)
+- **Cleared** in `stop()` (pipeline torn down)
+- **Fires** after `TOKEN_REFRESH_INTERVAL` (4 minutes) — only executes `restart(0)` if `currentState === LISTENING`, ensuring it never interrupts active interactions, continue-conversation, ask-question, or TTS playback
 
 ---
 
@@ -584,7 +648,7 @@ All three managers use the same playback flow:
 After playback:
 1. ACK to integration (`announce_finished`)
 2. Restart pipeline (HA cancels the running pipeline when triggering announcements)
-3. After configurable delay (`announcement_display_duration`): clear UI, then either play done chime or play queued notification
+3. After configurable delay (`announcementDisplayDuration` — from integration number entity, default 3.5s): clear UI, then either play done chime or play queued notification
 
 **Queued notification priority:** If a notification is queued when the display timer fires, the done chime is skipped and the queued notification plays immediately (it has its own announce chime). Playing the done chime (Web Audio oscillator) concurrently with the announce chime (HTML Audio MP3) causes audio distortion in HA Companion App WebView.
 
@@ -655,19 +719,25 @@ Features:
 
 ## 13. Satellite State Helpers (`shared/satellite-state.js`)
 
-Two pure lookup functions used across all managers:
+Four pure lookup functions used across all managers. All follow the same pattern: find a sibling entity on the same device via `hass.entities` (frontend entity registry cache) matching `device_id` + `platform === 'voice_satellite'` + `translation_key`.
 
 ### `getSatelliteAttr(hass, entityId, name)`
 Reads an attribute from the satellite entity's HA state cache.
 
 ### `getSwitchState(hass, satelliteId, translationKey)`
 Reads a sibling switch entity's state. The lookup strategy:
-1. **Primary:** Search `hass.entities` (frontend entity registry cache) for a switch with matching `device_id` and `translation_key` on the `voice_satellite` platform. Read its state from `hass.states`.
+1. **Primary:** Search `hass.entities` for a switch with matching `device_id` and `translation_key` on the `voice_satellite` platform. Read its state from `hass.states`.
 2. **Fallback:** Read `extra_state_attributes` on the satellite entity (may be stale).
 
 Used for:
 - `mute` switch — Blocks pipeline start when on
 - `wake_sound` switch — Controls chime playback (wake, done chimes)
+
+### `getSelectEntityId(hass, satelliteId, translationKey)`
+Reads a sibling select entity's `entity_id` attribute (the selected option value). Used to resolve the TTS Output select to a `media_player.*` entity ID.
+
+### `getNumberState(hass, satelliteId, translationKey, defaultValue)`
+Reads a sibling number entity's numeric state. Parses `hass.states[eid].state` as float, returns `defaultValue` if not found or NaN. Used for announcement display duration.
 
 ---
 
@@ -715,9 +785,9 @@ Touch/click deduplication prevents double-firing on touch devices (touchstart fi
 Manages chat message state. All DOM operations delegate to UIManager.
 
 **Bubble types:**
-- `user` — Transcription bubble (styled with `transcription_*` config)
-- `assistant` — Response bubble (styled with `response_*` config)
-- `announcement` — Notification message (uses `response_*` styling, always centered)
+- `user` — Transcription bubble (styled by skin CSS)
+- `assistant` — Response bubble (styled by skin CSS)
+- `announcement` — Notification message (styled by skin CSS, always centered)
 
 **Streaming text fade:** During `intent-progress` streaming, the last 24 characters fade from opaque to transparent using per-character `<span>` elements with decreasing opacity. When the final text arrives in `intent-end`, the full text replaces the faded version.
 
@@ -744,6 +814,14 @@ State-driven animation speeds:
 - `error-mode` — Red gradient, 2s flow
 - `error-flash` — 3x flash animation (ask_question unmatched answer)
 
+**Reactive mode:** When the skin opts in (`reactiveBar: true`) and the card config allows it (`reactive_bar !== false`), states with `useReactive: true` drive the bar height from real-time audio levels via `--vs-audio-level` CSS variable. The `useReactive` flag is per-state:
+- `WAKE_WORD_DETECTED` — reactive (mic levels)
+- `STT` — reactive (mic levels)
+- `INTENT` — **not** reactive (CSS-only processing animation)
+- `TTS` — reactive (audio output levels)
+
+On reactive state entry, `reconnectMic()` switches the analyser to mic input. When TTS `attachAudio()` fires, the analyser switches to audio output. INTENT uses CSS animation only because no meaningful audio data flows during intent processing.
+
 ### Start Button
 Floating mic button with pulse animation. Shows on initial load, microphone permission denied, microphone not found, or generic mic error.
 
@@ -752,6 +830,69 @@ Fixed position, centered horizontally. Bottom offset accounts for bar height. `a
 
 ### Timer DOM
 Timer pills, alert overlay, progress bar updates, expired pill animations — all coordinated by TimerManager but executed by UIManager.
+
+---
+
+## 17A. Skin System (`skins/`)
+
+### 17A.1 Overview
+
+Skins define the complete visual theme — activity bar, blur overlay, chat bubbles, timer pills, and animations. All visual styling is owned by skins via CSS; the card has no hardcoded gradient colors or layout values. Three built-in skins ship with the card.
+
+### 17A.2 Skin Definition
+
+Each skin is a JS module exporting a definition object:
+
+```javascript
+{
+  id: 'default',          // Config value
+  name: 'Default',        // Editor dropdown label
+  css: '...',             // Imported CSS string (injected into <style>)
+  reactiveBar: true,      // Whether this skin supports reactive (audio-driven) bar
+  overlayColor: [0, 0, 0],// RGB for blur overlay background
+  defaultOpacity: 0.3,    // Default blur overlay opacity (0–1)
+  previewCSS: '...',      // Imported CSS for editor preview rendering
+}
+```
+
+### 17A.3 Built-in Skins
+
+| Skin | ID | Overlay Color | Default Opacity | Description |
+|------|----|--------------|-----------------|-------------|
+| Default | `default` | `[0, 0, 0]` (black) | 0.3 | Rainbow gradient bar, dark overlay |
+| Alexa | `alexa` | `[0, 8, 20]` (dark blue) | 0.7 | Cyan accent glow, Echo Show-inspired |
+| Google Home | `google-home` | `[255, 255, 255]` (white) | 0.75 | 4-color palette, Material Design, frosted overlay |
+
+All three skins have `reactiveBar: true`.
+
+### 17A.4 Skin Registry (`skins/index.js`)
+
+- `getSkin(id)` — Returns skin definition by ID. Falls back to default if ID is unknown.
+- `getSkinOptions()` — Returns `{ value, label }[]` for the editor dropdown.
+
+### 17A.5 Skin Application
+
+On `setConfig()`, the card resolves the skin via `getSkin(config.skin)` and stores it as `_activeSkin`. UIManager applies the skin in `applyStyles()`:
+
+1. **`_injectSkinCSS()`** — Replaces the `<style id="voice-satellite-styles">` element with the skin's CSS string. All visual theming (bar gradient, bubble styles, animations) comes from this.
+2. **`_applyBackgroundOpacity()`** — Sets `--vs-bg-opacity` CSS variable. Uses `config.background_opacity / 100` if set, otherwise falls back to `skin.defaultOpacity`. The overlay color is set from `skin.overlayColor` as an `rgba()` background.
+3. **`_applyTextScale()`** — Sets `--vs-text-scale` CSS variable (50–200%).
+4. **`_applyCustomCSS()`** — Appends user's `custom_css` overrides in a separate `<style>` element.
+
+### 17A.6 Reactive Bar Opt-In
+
+The reactive bar (audio-level-driven animation) requires **both** the skin and the user config to agree:
+
+```javascript
+const reactive = this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false;
+```
+
+This check appears in:
+- `updateForState()` — Determines whether to start the analyser tick loop
+- `showBarForNotification()` — Enables reactive mode during notification playback
+- `AudioManager.startMicrophone()` — Decides whether to connect mic to analyser
+- `TtsManager.play()` — Decides whether to route audio through analyser
+- `satellite-notification.js` — Decides whether to attach notification audio to analyser
 
 ---
 
@@ -794,65 +935,37 @@ State changes are synced to the integration entity via `voice_satellite/update_s
 
 ### 19.1 Config Defaults
 
-`DEFAULT_CONFIG` in `constants.js` defines all configuration keys with their defaults:
+`DEFAULT_CONFIG` in `constants.js` defines all configuration keys with their defaults. Visual styling (bar appearance, bubble styles, layout) is fully handled by skins (§17A) and is no longer in the card config.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | **Behavior** ||||
 | `satellite_entity` | string | `''` | **Required.** Integration satellite entity ID (e.g., `assist_satellite.kitchen_tablet`) |
-| `start_listening_on_load` | bool | `true` | Auto-start pipeline on page load (internal, not in editor) |
-| `double_tap_cancel` | bool | `true` | Enable double-tap to cancel (internal, not in editor) |
 | `debug` | bool | `false` | Enable debug logging to browser console |
-| `tts_target` | string | `''` | Remote media_player entity for TTS (empty = browser playback) |
 | **Microphone Processing** ||||
 | `noise_suppression` | bool | `true` | WebRTC noise suppression |
 | `echo_cancellation` | bool | `true` | WebRTC echo cancellation |
 | `auto_gain_control` | bool | `true` | WebRTC auto gain control |
-| `voice_isolation` | bool | `false` | Experimental voice isolation (not supported on all browsers) |
-| **Timer Pill** ||||
-| `timer_position` | string | `'top-right'` | Pill container position: `top-left`, `top-right`, `bottom-left`, `bottom-right` |
-| `timer_font_size` | number | `20` | Font size in px |
-| `timer_font_family` | string | `'inherit'` | Font family |
-| `timer_font_color` | string | `'#444444'` | Text color |
-| `timer_font_bold` | bool | `true` | Bold text |
-| `timer_font_italic` | bool | `false` | Italic text |
-| `timer_background` | string | `'#ffffff'` | Pill background color |
-| `timer_border_color` | string | `'rgba(100, 200, 150, 0.5)'` | Pill border color |
-| `timer_padding` | number | `16` | Pill padding in px |
-| `timer_rounded` | bool | `true` | Rounded corners |
-| `timer_finished_duration` | number | `60` | Seconds to show finished alert (0 = manual dismiss only) |
-| **Announcements** ||||
-| `announcement_display_duration` | number | `5` | Seconds to display announcement text after playback |
-| **Activity Bar** ||||
-| `bar_position` | string | `'bottom'` | Bar position: `top` or `bottom` |
-| `bar_height` | number | `16` | Bar height in px |
-| `bar_gradient` | string | *(rainbow)* | Comma-separated CSS colors for the animated gradient |
-| `background_blur` | bool | `true` | Enable blur overlay behind UI |
-| `background_blur_intensity` | number | `5` | Blur intensity in px |
-| **Transcription Bubble** ||||
-| `transcription_font_size` | number | `20` | Font size in px |
-| `transcription_font_family` | string | `'inherit'` | Font family |
-| `transcription_font_color` | string | `'#444444'` | Text color |
-| `transcription_font_bold` | bool | `true` | Bold text |
-| `transcription_font_italic` | bool | `false` | Italic text |
-| `transcription_background` | string | `'#ffffff'` | Background color |
-| `transcription_border_color` | string | `'rgba(0, 180, 255, 0.5)'` | Border color |
-| `transcription_padding` | number | `16` | Padding in px |
-| `transcription_rounded` | bool | `true` | Rounded corners |
-| **Response Bubble** ||||
-| `show_response` | bool | `true` | Show assistant response bubble |
-| `response_font_size` | number | `20` | Font size in px |
-| `response_font_family` | string | `'inherit'` | Font family |
-| `response_font_color` | string | `'#444444'` | Text color |
-| `response_font_bold` | bool | `true` | Bold text |
-| `response_font_italic` | bool | `false` | Italic text |
-| `response_background` | string | `'#ffffff'` | Background color |
-| `response_border_color` | string | `'rgba(100, 200, 150, 0.5)'` | Border color |
-| `response_padding` | number | `16` | Padding in px |
-| `response_rounded` | bool | `true` | Rounded corners |
-| **Layout** ||||
-| `bubble_style` | string | `'chat'` | Bubble layout style: `chat` (left/right aligned) or `centered` |
-| `bubble_container_width` | number | `85` | Chat container width as % of viewport |
+| `voice_isolation` | bool | `false` | Experimental voice isolation (Chrome-only) |
+| **Skin** ||||
+| `skin` | string | `'default'` | Active skin ID (`default`, `alexa`, `google-home`) |
+| `custom_css` | string | `''` | CSS overrides applied on top of the selected skin |
+| `text_scale` | number | `100` | Text scale percentage (50–200%) |
+| `reactive_bar` | bool | `true` | Audio-reactive activity bar (disable on slow devices) |
+
+**Settings moved to integration entities:** Several options that were previously card config are now managed as integration entities per device, making them accessible from HA automations and the device page:
+
+| Setting | Integration Entity | Type | Default |
+|---------|-------------------|------|---------|
+| TTS Output | Select (`tts_output`) | `select` | `"Browser"` |
+| Announcement Display Duration | Number (`announcement_display_duration`) | `number` | `3.5s` |
+| Screensaver | Select (`screensaver`) | `select` | `"Disabled"` |
+
+The card reads these via `getSelectEntityId()` and `getNumberState()` (§13) through computed accessors:
+- `card.ttsTarget` → reads `tts_output` select entity's `entity_id` attribute
+- `card.announcementDisplayDuration` → reads `announcement_display_duration` number entity
+
+**Note:** `background_opacity` (0–100%) is exposed in the editor but not in `DEFAULT_CONFIG`. When unset, it falls back to `_activeSkin.defaultOpacity`.
 
 ### 19.2 Editor
 
@@ -860,13 +973,10 @@ The editor uses HA's `ha-form` schema system. Each section is defined in its own
 
 | File | Section |
 |------|---------|
-| `behavior.js` | Satellite entity selector (required), debug toggle, mic processing expandable |
-| `media.js` | TTS target, announcement duration |
-| `timer.js` | Timer pill expandable (11 style fields) |
-| `bar.js` | Activity bar expandable (position, height, gradient, blur) |
-| `bubbles.js` | Bubble style, container width, transcription expandable, response expandable |
+| `behavior.js` | Satellite entity selector (required), debug toggle, microphone processing expandable |
+| `skin.js` | Appearance expandable: skin selector dropdown, reactive bar toggle, text scale slider, background opacity slider, custom CSS textarea |
 
-The editor assembler (`editor/index.js`) concatenates all schemas and merges label/helper maps into `getConfigForm()`.
+The editor assembler (`editor/index.js`) concatenates `behaviorSchema`, `skinSchema`, `microphoneSchema`, and `debugSchema`, then merges all label/helper maps into `getConfigForm()`. The skin dropdown options are populated dynamically from the skin registry via `getSkinOptions()`.
 
 ### 19.3 Preview
 
@@ -906,22 +1016,11 @@ All are devDependencies. There are no runtime dependencies — the card is a sel
 
 **Babel** transpiles ES6+ features for broader browser support.
 
-**CSS** is imported as a raw string via Webpack's `asset/source` rule and injected into the document head at runtime by UIManager.
+**CSS** — Each skin's CSS files and the editor preview CSS are imported as raw strings via Webpack's `asset/source` rule. Skin CSS is injected into the document head at runtime by UIManager (`_injectSkinCSS`).
 
 **Version** is defined only in `package.json` and injected via `DefinePlugin` as `__VERSION__`.
 
 Build command: `npm run build`
-
-### 20.3 `seamlessGradient` Utility
-
-The gradient bar animation uses `background-position` keyframes that move from `0% 50%` to `200% 50%`. For the animation to loop seamlessly, the gradient must wrap without a hard edge. The `seamlessGradient()` function in `constants.js` handles this by appending the first color to the end of the color list:
-
-```javascript
-// Input:  "red, green, blue"
-// Output: "linear-gradient(90deg, red, green, blue, red)"
-```
-
-Without the duplicated first color, the animation would snap from the last color back to the first on each loop iteration.
 
 ---
 
@@ -940,6 +1039,7 @@ All timing values are centralized in `constants.js`:
 | `NO_MEDIA_DISPLAY` | 3000ms | Delay before completing text-only announcements |
 | `ASK_QUESTION_CLEANUP` | 2000ms | Safety timeout for sendAnswer promise |
 | `ASK_QUESTION_STT_SAFETY` | 30000ms | Safety timeout if STT never produces a result |
+| `TOKEN_REFRESH_INTERVAL` | 240000ms | Periodic pipeline restart to refresh streaming TTS token (§7.4, §8.9) |
 | `MAX_RETRY_DELAY` | 30000ms | Maximum backoff delay |
 | `RETRY_BASE_DELAY` | 5000ms | Base delay for linear backoff |
 | `VISIBILITY_DEBOUNCE` | 500ms | Debounce before pausing on tab hide |
@@ -1029,6 +1129,19 @@ When recreating or modifying this card, verify:
 - [ ] Stall-detection watchdog (`setInterval`) checks `audio.currentTime` progression, force-completes on stall
 - [ ] Done chime controlled by `wake_sound` switch, suppressed for remote TTS
 - [ ] Streaming TTS: no restart at `tts_start_streaming`, skip duplicate at `tts-end`
+- [ ] Remote TTS: entity state monitoring via `checkRemotePlayback()` in `set hass()`, not a fixed delay
+- [ ] Remote TTS: `_remoteSawPlaying` guard prevents false completion before playback starts
+- [ ] Remote TTS: 120-second safety timeout (`REMOTE_SAFETY_TIMEOUT`) as fallback
+- [ ] Token refresh timer restarts pipeline every 4 min during idle LISTENING (prevents stale streaming token)
+- [ ] Token refresh timer cleared on `wake_word-end` and `stop()`
+- [ ] Retry mechanism: `_pendingTtsEndUrl` stored by `handleTtsEnd`, retried once on playback failure
+
+**Audio Analyser:**
+- [ ] Dual-analyser architecture: `_micAnalyser` (no destination) and `_audioAnalyser` (routes to destination)
+- [ ] Mic analyser never connected to `AudioContext.destination` (feedback prevention)
+- [ ] `_activeAnalyser` pointer switches between mic and audio analysers
+- [ ] `reconnectMic()` is a no-op while `_mediaSourceNode` is set (prevents mid-playback switch)
+- [ ] `useReactive` flag in UI state config: only WAKE_WORD_DETECTED, STT, TTS are reactive; INTENT uses CSS animation
 
 **Notifications:**
 - [ ] All three managers use `satellite-notification.js` lifecycle
@@ -1064,6 +1177,21 @@ When recreating or modifying this card, verify:
 - [ ] Real-time volume propagation to active TTS/notification Audio elements
 - [ ] `interrupt()` called on wake word detection and notification start
 - [ ] Entity lookup via `hass.entities` device_id matching (same pattern as `getSwitchState`)
+
+**Skins:**
+- [ ] All visual styling owned by skin CSS — no hardcoded gradient colors or layout values in card
+- [ ] Skin resolved via `getSkin(config.skin)` in `setConfig()`, stored as `_activeSkin`
+- [ ] CSS injected into `<style id="voice-satellite-styles">` by `_injectSkinCSS()`
+- [ ] `background_opacity` falls back to `skin.defaultOpacity` when unset in config
+- [ ] `overlayColor` from skin definition sets blur overlay `rgba()` background
+- [ ] Reactive bar requires both `_activeSkin.reactiveBar` and `config.reactive_bar !== false`
+- [ ] Editor skin dropdown populated dynamically from `getSkinOptions()`
+- [ ] Each skin has paired preview CSS for editor preview rendering
+
+**Integration Entity Lookups:**
+- [ ] `ttsTarget` computed accessor reads `tts_output` select entity via `getSelectEntityId()`
+- [ ] `announcementDisplayDuration` computed accessor reads number entity via `getNumberState()`
+- [ ] All entity lookups use `hass.entities` device_id + platform + translation_key pattern
 
 **Version:**
 - [ ] Card version in `package.json` only (injected via DefinePlugin)
