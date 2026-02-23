@@ -10,7 +10,8 @@
     "assist_satellite",
     "frontend",
     "http",
-    "intent"
+    "intent",
+    "lovelace"
   ],
   "documentation": "https://github.com/jxlarrea/voice-satellite-card-integration",
   "iot_class": "local_push",

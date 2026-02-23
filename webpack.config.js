@@ -2,7 +2,7 @@ const path = require('path');
 const pkg = require('./package.json');
 const webpack = require('webpack');
 
-const wwwDir = path.resolve(__dirname, 'custom_components/voice_satellite/www');
+const frontendDir = path.resolve(__dirname, 'custom_components/voice_satellite/frontend');
 
 const baseConfig = {
   entry: './src/index.js',
@@ -35,10 +35,10 @@ module.exports = (env, argv) => {
       ...baseConfig,
       output: {
         filename: 'voice-satellite-card.js',
-        path: wwwDir,
+        path: frontendDir,
       },
       optimization: {
-        minimize: false,
+        minimize: true,
       },
       devtool: 'source-map',
     };
@@ -48,7 +48,7 @@ module.exports = (env, argv) => {
     ...baseConfig,
     output: {
       filename: 'voice-satellite-card.js',
-      path: wwwDir,
+      path: frontendDir,
     },
     optimization: {
       minimize: true,

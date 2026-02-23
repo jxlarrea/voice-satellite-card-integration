@@ -2,9 +2,7 @@
 
 ## 1. Overview
 
-This integration creates virtual Assist Satellite entities in Home Assistant for browsers running the [Voice Satellite Card](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant). Each config entry produces one `assist_satellite.*` entity backed by a device in the device registry, along with supporting select, switch, number, and media player entities.
-
-**Critical dependency:** The card **requires** this integration. There is no standalone mode. The card routes all voice pipeline traffic through the integration's `voice_satellite/run_pipeline` WebSocket command.
+This integration creates virtual Assist Satellite entities in Home Assistant for browsers running the Voice Satellite Card. Each config entry produces one `assist_satellite.*` entity backed by a device in the device registry, along with supporting select, switch, number, and media player entities.
 
 ### What the integration provides
 
@@ -20,22 +18,24 @@ This integration creates virtual Assist Satellite entities in Home Assistant for
 | Bridged pipeline | Card audio → integration → HA pipeline → events back to card |
 | Per-device automations | Entity state changes trigger automations |
 
-### Cross-repo relationship
+### Card–Integration Relationship
 
-This integration and the card are tightly coupled. The card reads entity attributes (`active_timers`, `muted`, `wake_sound`, `tts_target`, `announcement_display_duration`) and sends WebSocket commands. The integration pushes notification events (announcements, start_conversation, ask_question) directly to the card via a persistent WS subscription. Changes to event formats, WebSocket command schemas, or async flow timing affect both repos.
+The card and integration are tightly coupled and ship as a single package. The card reads entity attributes (`active_timers`, `muted`, `wake_sound`, `tts_target`, `announcement_display_duration`) and sends WebSocket commands. The integration pushes notification events (announcements, start_conversation, ask_question) directly to the card via a persistent WS subscription. Changes to event formats, WebSocket command schemas, or async flow timing affect both sides.
 
-See the card's [DESIGN.md](https://github.com/jxlarrea/Voice-Satellite-Card-for-Home-Assistant/blob/master/DESIGN.md) for the card-side implementation.
+See [DESIGN-CARD.md](DESIGN-CARD.md) for the card-side design.
 
 ## 2. Project Structure
 
 ```
 voice-satellite-card-integration/
+├── src/                              ← Card source (see DESIGN-CARD.md)
 ├── custom_components/
 │   └── voice_satellite/
-│       ├── __init__.py          # Entry setup, 7 WebSocket command registrations
+│       ├── __init__.py          # async_setup (WS commands + frontend), async_setup_entry (platforms)
 │       ├── assist_satellite.py  # VoiceSatelliteEntity (core entity)
 │       ├── config_flow.py       # Single-step config flow
-│       ├── const.py             # DOMAIN, SCREENSAVER_INTERVAL constants
+│       ├── const.py             # DOMAIN, SCREENSAVER_INTERVAL, INTEGRATION_VERSION, URL_BASE, JS_FILENAME
+│       ├── frontend.py          # JSModuleRegistration — auto-serve JS + register Lovelace resource
 │       ├── media_player.py      # VoiceSatelliteMediaPlayer (media player entity)
 │       ├── number.py            # Announcement display duration number entity
 │       ├── select.py            # Pipeline, VAD sensitivity, screensaver, TTS output selects
@@ -44,16 +44,26 @@ voice-satellite-card-integration/
 │       ├── strings.json         # UI strings for config flow + entity names
 │       ├── translations/
 │       │   └── en.json          # English translations (mirrors strings.json)
+│       ├── frontend/
+│       │   └── voice-satellite-card.js  # Webpack build output (committed for HACS)
 │       ├── icon.png             # Integration branding (256×256)
-│       └── logo.png             # Integration branding (same as icon)
+│       └── icon@2x.png         # Integration branding (high-res)
+├── scripts/
+│   └── sync-version.js          # Syncs package.json version → manifest.json + const.py
 ├── .github/
 │   ├── workflows/
-│   │   └── hacs.yml             # HACS validation + hassfest
+│   │   ├── hacs.yml             # HACS validation + hassfest
+│   │   └── release.yml          # Build JS + zip + upload release asset
 │   └── FUNDING.yml              # GitHub Sponsors + Buy Me a Coffee
-├── hacs.json                    # HACS metadata
+├── webpack.config.js             # Webpack config (outputs to custom_components/.../frontend/)
+├── babel.config.js
+├── package.json                  # Version source of truth
+├── package-lock.json
+├── hacs.json                     # HACS metadata
+├── DESIGN-CARD.md                # Card design document
+├── DESIGN-INTEGRATION.md         # This file
 ├── README.md
-├── DESIGN.md                    # This file
-└── LICENSE                      # MIT
+└── LICENSE                       # MIT
 ```
 
 ## 3. Integration Lifecycle
@@ -71,10 +81,14 @@ The resulting entity ID will be `assist_satellite.<slugified_name>`.
 
 ### 3.2 Entry Setup (`__init__.py`)
 
-`async_setup_entry` does two things:
+**`async_setup`** handles integration-wide setup (called once, not per-entry):
 
-1. **Forward platform setup** — Calls `async_forward_entry_setups(entry, PLATFORMS)` where `PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SELECT, Platform.SWITCH]`. This triggers setup in `assist_satellite.py`, `media_player.py`, `number.py`, `select.py`, and `switch.py`.
-2. **Register WebSocket commands** — Registers all 7 WS commands. Uses try/except around each registration because multiple config entries share the same command types (only the first registration succeeds, subsequent ones raise `ValueError`).
+1. **Register WebSocket commands** — Registers all 7 WS commands. Since this runs once (not per-entry), no try/except wrapper is needed.
+2. **Register frontend JS** — Registers the card's JavaScript module via `JSModuleRegistration`. Deferred to `EVENT_HOMEASSISTANT_STARTED` if HA is still starting, ensuring the HTTP server and Lovelace are ready.
+
+**`async_setup_entry`** handles per-device setup:
+
+1. **Forward platform setup** — Calls `async_forward_entry_setups(entry, PLATFORMS)` where `PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SELECT, Platform.SWITCH]`.
 
 The 7 WebSocket commands:
 - `voice_satellite/announce_finished`
@@ -87,7 +101,7 @@ The 7 WebSocket commands:
 
 ### 3.3 Entry Unload
 
-Unloads platforms and removes entity references from `hass.data[DOMAIN]`:
+Unloads platforms, removes entity references from `hass.data[DOMAIN]`, and cleans up the Lovelace resource when the last entry is unloaded:
 
 ```python
 async def async_unload_entry(hass, entry):
@@ -95,6 +109,10 @@ async def async_unload_entry(hass, entry):
     if result:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         hass.data[DOMAIN].pop(f"{entry.entry_id}_media_player", None)
+        # Remove Lovelace resource when last entry is unloaded
+        if not hass.data[DOMAIN]:
+            registration = JSModuleRegistration(hass)
+            await registration.async_unregister()
     return result
 ```
 
@@ -109,6 +127,24 @@ for entry_id, ent in hass.data.get(DOMAIN, {}).items():
         entity = ent
         break
 ```
+
+### 3.5 Frontend JS Serving (`frontend.py`)
+
+The integration auto-serves the card's JavaScript and registers it as a Lovelace resource. This is handled by `JSModuleRegistration` in `frontend.py`:
+
+1. **Static path registration** — Registers `/voice_satellite` as an HTTP static path serving the `frontend/` directory via `hass.http.async_register_static_paths([StaticPathConfig(...)])`.
+
+2. **Lovelace resource registration** — In storage mode, registers `/voice_satellite/voice-satellite-card.js?v={version}` as a `module` resource via the Lovelace resources collection API. On version updates, the `?v=` cache-busting parameter is updated automatically.
+
+3. **YAML mode fallback** — If Lovelace is in YAML mode, logs a message with the manual resource URL.
+
+4. **Resource cleanup** — `async_unregister()` removes the Lovelace resource entry when the last config entry is unloaded, preventing dangling 404 URLs.
+
+5. **HA 2026.2 compatibility** — Uses `getattr(lovelace, "resource_mode", getattr(lovelace, "mode", "yaml"))` to handle the `mode` → `resource_mode` rename in HA 2026.2.
+
+6. **Resource load retry** — Uses `async_call_later` with 5-second retry if Lovelace resources aren't loaded yet.
+
+The registration is triggered from `async_setup()` via an `EVENT_HOMEASSISTANT_STARTED` listener (or called directly if HA is already running).
 
 ## 4. Entity (`assist_satellite.py`)
 
@@ -1241,7 +1277,7 @@ All 7 WebSocket commands follow the same patterns:
 - Decorated with `@websocket_api.websocket_command(schema)` and `@websocket_api.async_response`
 - Entity lookup iterates `hass.data[DOMAIN]` by `entity_id`
 - Returns error if entity not found
-- Registration wrapped in try/except for idempotency
+- Registered once in `async_setup` (not per-entry)
 
 ### 15.1 `voice_satellite/announce_finished`
 
@@ -1409,9 +1445,9 @@ The `finally` blocks of `async_announce` and `async_start_conversation` only sto
 
 When the last satellite subscriber disconnects, pending `async_announce` and `async_internal_ask_question` calls are unblocked by setting their events. Without this, the entity would wait the full `ANNOUNCE_TIMEOUT` (120s) for a card that's already gone.
 
-### 16.16 Cross-Repo Version Bumping
+### 16.16 Version Sync
 
-The integration version appears in two places: `manifest.json` (`version`) and `assist_satellite.py` (`sw_version` in `device_info`). Both must be updated together. The card version is in `package.json` only.
+Version is defined in a single place: `package.json`. The `scripts/sync-version.js` script propagates it to `manifest.json` (`version` field) and `const.py` (`INTEGRATION_VERSION` string). The prebuild/predev npm hooks run this automatically. Webpack's `DefinePlugin` injects it into the JS bundle as `__VERSION__`.
 
 ### 16.17 No `homeassistant` Key in `manifest.json`
 
@@ -1572,18 +1608,18 @@ A `translations/en.json` file mirrors the contents of `strings.json` for English
 ```json
 {
     "domain": "voice_satellite",
-    "name": "Voice Satellite Card Integration",
+    "name": "Voice Satellite Card",
     "codeowners": ["@jxlarrea"],
     "config_flow": true,
-    "dependencies": ["assist_pipeline", "assist_satellite", "intent"],
+    "dependencies": ["assist_pipeline", "assist_satellite", "frontend", "http", "intent", "lovelace"],
     "documentation": "...",
     "iot_class": "local_push",
     "issue_tracker": "...",
-    "version": "<version>"
+    "version": "5.0.0"
 }
 ```
 
-- `dependencies` — `assist_pipeline` (pipeline selects), `assist_satellite` (entity base class), `intent` (timer handlers). HA loads these before our integration.
+- `dependencies` — `assist_pipeline` (pipeline selects), `assist_satellite` (entity base class), `frontend` (Lovelace resource registration), `http` (static path serving), `intent` (timer handlers), `lovelace` (resource collection API). HA loads these before our integration.
 - `iot_class: "local_push"` — card pushes state via WebSocket; no polling.
 - **No `homeassistant` key** — HACS validation rejects it for custom integrations.
 
@@ -1591,9 +1627,11 @@ A `translations/en.json` file mirrors the contents of `strings.json` for English
 
 ```json
 {
-    "name": "Voice Satellite Card Integration",
-    "homeassistant": "2025.1.2",
-    "render_readme": true
+    "name": "Voice Satellite Card",
+    "homeassistant": "2025.2.1",
+    "render_readme": true,
+    "zip_release": true,
+    "filename": "voice-satellite-card.zip"
 }
 ```
 
@@ -1602,6 +1640,9 @@ A `translations/en.json` file mirrors the contents of `strings.json` for English
 ```python
 DOMAIN = "voice_satellite"
 SCREENSAVER_INTERVAL = 5  # seconds
+INTEGRATION_VERSION = "5.0.0"  # synced from package.json
+URL_BASE = "/voice_satellite"
+JS_FILENAME = "voice-satellite-card.js"
 ```
 
 ---
@@ -1736,18 +1777,22 @@ SCREENSAVER_INTERVAL = 5  # seconds
 ### WebSocket Commands
 - [ ] 7 commands: announce_finished, update_state, question_answered, run_pipeline, subscribe_events, cancel_timer, media_player_event
 - [ ] Entity lookup iterates `hass.data[DOMAIN]` by `entity_id`
-- [ ] Registration wrapped in try/except for idempotency
+- [ ] Registered once in `async_setup` (not per-entry)
 - [ ] `media_player_event` uses `vol.Coerce(float)` for volume field (JSON integer/float ambiguity)
 
 ### Integration Setup
+- [ ] `async_setup` registers all 7 WebSocket commands (once, no try/except needed)
+- [ ] `async_setup` registers frontend JS via `JSModuleRegistration` (deferred to `EVENT_HOMEASSISTANT_STARTED` if starting)
 - [ ] `async_setup_entry` forwards to ASSIST_SATELLITE + MEDIA_PLAYER + NUMBER + SELECT + SWITCH platforms
-- [ ] `async_setup_entry` registers all 7 WebSocket commands
 - [ ] `async_unload_entry` unloads platforms and removes entity + media_player from `hass.data`
+- [ ] `async_unload_entry` removes Lovelace resource when last entry is unloaded
 - [ ] Satellite entity stored in `hass.data[DOMAIN][entry.entry_id]`
 - [ ] Media player entity stored in `hass.data[DOMAIN][f"{entry.entry_id}_media_player"]`
 
 ### Infrastructure
-- [ ] `manifest.json` with 3 dependencies: `assist_pipeline`, `assist_satellite`, `intent`
+- [ ] `manifest.json` with 6 dependencies: `assist_pipeline`, `assist_satellite`, `frontend`, `http`, `intent`, `lovelace`
 - [ ] No `homeassistant` key in `manifest.json`
-- [ ] `hacs.json` with minimum HA version
-- [ ] Integration version in 2 places: `manifest.json`, `assist_satellite.py` (`sw_version`)
+- [ ] `hacs.json` with minimum HA version, `zip_release: true`
+- [ ] Single version source: `package.json` → `scripts/sync-version.js` → `manifest.json` + `const.py`
+- [ ] `frontend.py` auto-serves JS and registers Lovelace resource
+- [ ] Lovelace resource cleanup on last entry unload

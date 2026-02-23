@@ -7,7 +7,7 @@
     "prebuild": "node scripts/sync-version.js",
     "build": "webpack --mode production",
     "predev": "node scripts/sync-version.js",
-    "dev": "webpack --mode development && xcopy /E /I /Y custom_components\\voice_satellite \\\\hassio\\config\\custom_components\\voice_satellite"
+    "dev": "webpack --mode production && xcopy /E /I /Y custom_components\\voice_satellite \\\\hassio\\config\\custom_components\\voice_satellite"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

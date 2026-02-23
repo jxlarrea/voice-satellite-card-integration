@@ -63,6 +63,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if result:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         hass.data[DOMAIN].pop(f"{entry.entry_id}_media_player", None)
+        # Remove Lovelace resource when last entry is unloaded
+        if not hass.data[DOMAIN]:
+            registration = JSModuleRegistration(hass)
+            await registration.async_unregister()
     return result
 
 

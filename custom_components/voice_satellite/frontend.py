@@ -10,13 +10,15 @@ import logging
 from pathlib import Path
 
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.lovelace import MODE_STORAGE
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_call_later
 
 from .const import INTEGRATION_VERSION, URL_BASE, JS_FILENAME
 
 _LOGGER = logging.getLogger(__name__)
 
-WWW_DIR = str(Path(__file__).parent / "www")
+FRONTEND_DIR = str(Path(__file__).parent / "frontend")
 
 
 class JSModuleRegistration:
@@ -26,6 +28,11 @@ class JSModuleRegistration:
         """Initialize the registrar."""
         self.hass = hass
         self.lovelace = hass.data.get("lovelace")
+        # HA 2026.2 renamed lovelace.mode → lovelace.resource_mode
+        self.resource_mode: str = getattr(
+            self.lovelace, "resource_mode",
+            getattr(self.lovelace, "mode", "yaml"),
+        )
 
     async def async_register(self) -> None:
         """Register static path and Lovelace resource."""
@@ -35,9 +42,8 @@ class JSModuleRegistration:
             _LOGGER.warning("Lovelace not available — cannot auto-register card resource")
             return
 
-        mode = getattr(self.lovelace, "mode", "yaml")
-        if mode == "storage":
-            await self._async_register_module()
+        if self.resource_mode == MODE_STORAGE:
+            await self._async_wait_for_lovelace_resources()
         else:
             _LOGGER.info(
                 "Lovelace is in YAML mode — add this resource manually: "
@@ -47,21 +53,28 @@ class JSModuleRegistration:
             )
 
     async def _async_register_path(self) -> None:
-        """Register /voice_satellite as a static HTTP path serving www/."""
+        """Register /voice_satellite as a static HTTP path serving frontend/."""
         try:
             await self.hass.http.async_register_static_paths(
-                [StaticPathConfig(URL_BASE, WWW_DIR, False)]
+                [StaticPathConfig(URL_BASE, FRONTEND_DIR, False)]
             )
-            _LOGGER.debug("Static path registered: %s -> %s", URL_BASE, WWW_DIR)
+            _LOGGER.debug("Static path registered: %s -> %s", URL_BASE, FRONTEND_DIR)
         except RuntimeError:
             _LOGGER.debug("Static path already registered: %s", URL_BASE)
 
+    async def _async_wait_for_lovelace_resources(self) -> None:
+        """Wait for Lovelace resources to be loaded, then register."""
+        async def _check_loaded(_now) -> None:
+            if self.lovelace.resources.loaded:
+                await self._async_register_module()
+            else:
+                _LOGGER.debug("Lovelace resources not yet loaded, retrying in 5s")
+                async_call_later(self.hass, 5, _check_loaded)
+
+        await _check_loaded(0)
+
     async def _async_register_module(self) -> None:
         """Register or update the JS module in Lovelace resources."""
-        # Wait for resources to be loaded
-        if not self.lovelace.resources.loaded:
-            await self.lovelace.resources.async_load()
-
         url = f"{URL_BASE}/{JS_FILENAME}"
         versioned_url = f"{url}?v={INTEGRATION_VERSION}"
 
@@ -93,3 +106,18 @@ class JSModuleRegistration:
             await self.lovelace.resources.async_create_item(
                 {"res_type": "module", "url": versioned_url}
             )
+
+    async def async_unregister(self) -> None:
+        """Remove the Lovelace resource entry (called on integration unload)."""
+        if self.lovelace is None or self.resource_mode != MODE_STORAGE:
+            return
+
+        if not self.lovelace.resources.loaded:
+            await self.lovelace.resources.async_load()
+
+        url = f"{URL_BASE}/{JS_FILENAME}"
+        for resource in self.lovelace.resources.async_items():
+            if resource["url"].split("?")[0] == url:
+                await self.lovelace.resources.async_delete_item(resource["id"])
+                _LOGGER.info("Removed Voice Satellite Card Lovelace resource")
+                break

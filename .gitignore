@@ -5,12 +5,7 @@
 node_modules/
 
 # Build artifacts (debug only — production JS is committed)
-custom_components/voice_satellite/www/voice-satellite-card.js.map
-
-# Legacy card build artifacts (no longer used)
-voice-satellite-card.js
-voice-satellite-card.js.map
-voice-satellite-card.min.js
+custom_components/voice_satellite/frontend/voice-satellite-card.js.map
 
 # Python
 __pycache__/
