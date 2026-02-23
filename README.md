@@ -10,7 +10,7 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jxlarrea)
 
-![skins](https://github.com/user-attachments/assets/12be9f4c-2f31-44a0-bb70-0c711989df42)
+![screenshot](https://github.com/user-attachments/assets/36072725-7b82-46a0-bff1-680e509eb74a)
 
 ## Why This Card?
 
