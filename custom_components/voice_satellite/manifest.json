@@ -1,11 +1,19 @@
 {
   "domain": "voice_satellite",
-  "name": "Voice Satellite Card Integration",
-  "codeowners": ["@jxlarrea"],
+  "name": "Voice Satellite Card",
+  "codeowners": [
+    "@jxlarrea"
+  ],
   "config_flow": true,
-  "dependencies": ["assist_pipeline", "assist_satellite", "intent"],
+  "dependencies": [
+    "assist_pipeline",
+    "assist_satellite",
+    "frontend",
+    "http",
+    "intent"
+  ],
   "documentation": "https://github.com/jxlarrea/voice-satellite-card-integration",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/jxlarrea/voice-satellite-card-integration/issues",
-  "version": "2.3.0"
+  "version": "5.0.0"
 }

@@ -50,7 +50,7 @@ except ImportError:
 
 from datetime import timedelta
 
-from .const import DOMAIN, SCREENSAVER_INTERVAL
+from .const import DOMAIN, INTEGRATION_VERSION, SCREENSAVER_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             "name": self._satellite_name,
             "manufacturer": "Voice Satellite Card Integration",
             "model": "Browser Satellite",
-            "sw_version": "2.3.0",
+            "sw_version": INTEGRATION_VERSION,
         }
 
     @property

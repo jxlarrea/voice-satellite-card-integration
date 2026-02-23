@@ -1,0 +1,375 @@
+/* Google Home Skin */
+
+/* Font */
+#voice-satellite-ui {
+  font-family: "Google Sans", Roboto, Noto, sans-serif;
+}
+
+/* Blur Overlay — light, frosted glass */
+#voice-satellite-ui .vs-blur-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+#voice-satellite-ui .vs-blur-overlay.visible {
+  opacity: 1;
+}
+
+/* Start Button — Google Blue with material shadow */
+#voice-satellite-ui .vs-start-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #4285F4;
+  border: none;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.3), 0 4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 10001;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+#voice-satellite-ui .vs-start-btn.visible {
+  display: flex;
+  animation: google-btn-pulse 2.5s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-start-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(66, 133, 244, 0.5), 0 6px 20px rgba(0, 0, 0, 0.2);
+  animation: none;
+}
+
+#voice-satellite-ui .vs-start-btn svg {
+  width: 28px;
+  height: 28px;
+  fill: white;
+}
+
+@keyframes google-btn-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 2px 8px rgba(66, 133, 244, 0.3), 0 4px 16px rgba(0, 0, 0, 0.15);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 4px 16px rgba(66, 133, 244, 0.5), 0 6px 24px rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* Google Bar — 4-color gradient, 60% width, floating above bottom */
+#voice-satellite-ui .vs-rainbow-bar {
+  position: fixed;
+  left: 20%;
+  right: 20%;
+  bottom: 24px;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #4285F4, #4285F4 25%, #EA4335 25%, #EA4335 50%, #FBBC05 50%, #FBBC05 75%, #34A853 75%, #34A853);
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 10000;
+  pointer-events: none;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.visible {
+  opacity: 1;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.connecting {
+  animation: google-breathe 1.5s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.listening {
+  animation: google-flow 3s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.processing {
+  animation: google-flow 0.5s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.speaking {
+  animation: google-flow 2s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.error-mode {
+  background: linear-gradient(90deg, #EA4335, #d93025, #EA4335, #d93025);
+  background-size: 200% 100%;
+  animation: google-flow 2s linear infinite;
+  opacity: 1;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.error-flash {
+  animation: google-error-flash 0.15s ease-in-out 3;
+}
+
+/* Reactive Bar — audio-driven pulsation, speed varies by state */
+#voice-satellite-ui .vs-rainbow-bar.reactive {
+  transition: height 0.05s linear, box-shadow 0.05s linear;
+  height: calc(4px + 12px * var(--vs-audio-level, 0));
+  box-shadow:
+    0 0 calc(4px + 14px * var(--vs-audio-level, 0)) calc(1px + 5px * var(--vs-audio-level, 0)) rgba(66, 133, 244, calc(0.15 + 0.35 * var(--vs-audio-level, 0)));
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.listening {
+  animation: google-flow 3s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.processing {
+  animation: google-flow 0.5s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.speaking {
+  animation: google-flow 2s linear infinite;
+}
+
+@keyframes google-breathe {
+  0%, 100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes google-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+@keyframes google-error-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Chat Container — left-aligned, Nest Hub style */
+#voice-satellite-ui .vs-chat-container {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 72px;
+  display: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 85%;
+  width: 85%;
+  z-index: 10001;
+  pointer-events: none;
+  overflow: visible;
+}
+
+#voice-satellite-ui .vs-chat-container.visible {
+  display: flex;
+  pointer-events: auto;
+}
+
+#voice-satellite-ui.reactive-mode .vs-chat-container {
+  bottom: 80px;
+}
+
+#voice-satellite-ui .vs-chat-container.announcement-mode {
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%);
+}
+
+/* Chat Messages — left-aligned text, no bubbles (Nest Hub style) */
+#voice-satellite-ui .vs-chat-msg {
+  max-width: 85%;
+  opacity: 0;
+  animation: google-fade-in 0.3s ease forwards;
+  word-wrap: break-word;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 4px 0;
+  border-radius: 0;
+}
+
+#voice-satellite-ui .vs-chat-msg.user {
+  font-size: calc(32px * var(--vs-text-scale, 1));
+  color: rgba(32, 33, 36, 0.5);
+  font-weight: normal;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+}
+
+#voice-satellite-ui .vs-chat-msg.assistant {
+  font-size: calc(36px * var(--vs-text-scale, 1));
+  color: #202124;
+  font-weight: 400;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+}
+
+#voice-satellite-ui .vs-chat-msg.announcement {
+  font-size: calc(36px * var(--vs-text-scale, 1));
+  color: #202124;
+  font-weight: 400;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+}
+
+/* Animations */
+@keyframes google-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Timer Container */
+.vs-timer-container {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10001;
+  pointer-events: none;
+  font-family: "Google Sans", Roboto, Noto, sans-serif;
+}
+
+/* Timer Pills — white material cards with Google Blue progress */
+.vs-timer-pill {
+  position: relative;
+  overflow: hidden;
+  font-size: calc(28px * var(--vs-text-scale, 1));
+  color: #3c4043;
+  font-weight: bold;
+  font-style: normal;
+  background: #ffffff;
+  border: none;
+  padding: 14px 18px;
+  border-radius: 18px;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.15), 0 4px 8px rgba(60, 64, 67, 0.1);
+  animation: google-timer-fade-in 0.3s ease forwards;
+  pointer-events: auto;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.vs-timer-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(66, 133, 244, 0.15);
+  opacity: 1;
+  transition: width 1s linear;
+  pointer-events: none;
+}
+
+.vs-timer-content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vs-timer-icon {
+  flex-shrink: 0;
+}
+
+.vs-timer-time {
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.vs-timer-pill.vs-timer-expired {
+  animation: google-timer-fade-out 0.4s ease forwards;
+}
+
+/* Timer Finished Alert — white card with Google Blue accent */
+.vs-timer-alert {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: calc(28px * var(--vs-text-scale, 1));
+  font-family: "Google Sans", Roboto, Noto, sans-serif;
+  color: #202124;
+  font-weight: bold;
+  font-style: normal;
+  background: #ffffff;
+  border: none;
+  padding: 18px 24px;
+  border-radius: 18px;
+  box-shadow: 0 2px 6px rgba(60, 64, 67, 0.15), 0 8px 24px rgba(60, 64, 67, 0.15);
+  z-index: 10002;
+  animation: google-alert-pulse 1.5s ease-in-out infinite;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.vs-timer-alert .vs-timer-icon {
+  font-size: 1.5em;
+}
+
+.vs-timer-alert .vs-timer-time {
+  font-size: 1.2em;
+}
+
+@keyframes google-timer-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes google-timer-fade-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes google-alert-pulse {
+  0%, 100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.04);
+    box-shadow: 0 2px 6px rgba(60, 64, 67, 0.15), 0 12px 32px rgba(66, 133, 244, 0.2);
+  }
+}

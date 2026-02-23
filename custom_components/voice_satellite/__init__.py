@@ -2,7 +2,8 @@
 
 Registers browser tablets as Assist Satellite devices in Home Assistant,
 giving the Voice Satellite Card a device identity. This unlocks timers,
-announcements, and per-device LLM context.
+announcements, and per-device LLM context. Also serves the card's
+JavaScript frontend automatically.
 """
 
 from __future__ import annotations
@@ -14,57 +15,45 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
+from homeassistant.core import CoreState, HomeAssistant
 
 from .const import DOMAIN
+from .frontend import JSModuleRegistration
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SELECT, Platform.SWITCH]
 
 
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up integration-wide resources: frontend JS + WebSocket commands."""
+    # Register WebSocket commands (once, not per-entry)
+    websocket_api.async_register_command(hass, ws_announce_finished)
+    websocket_api.async_register_command(hass, ws_update_state)
+    websocket_api.async_register_command(hass, ws_question_answered)
+    websocket_api.async_register_command(hass, ws_run_pipeline)
+    websocket_api.async_register_command(hass, ws_subscribe_satellite_events)
+    websocket_api.async_register_command(hass, ws_cancel_timer)
+    websocket_api.async_register_command(hass, ws_media_player_event)
+
+    # Register frontend JS module
+    async def _register_frontend(_event=None) -> None:
+        registration = JSModuleRegistration(hass)
+        await registration.async_register()
+
+    if hass.state is CoreState.running:
+        await _register_frontend()
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_frontend)
+
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Voice Satellite Card from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    # Register WebSocket commands (idempotent — safe to call multiple times)
-    try:
-        websocket_api.async_register_command(hass, ws_announce_finished)
-    except ValueError:
-        pass  # Already registered from another config entry
-
-    try:
-        websocket_api.async_register_command(hass, ws_update_state)
-    except ValueError:
-        pass
-
-    try:
-        websocket_api.async_register_command(hass, ws_question_answered)
-    except ValueError:
-        pass
-
-    try:
-        websocket_api.async_register_command(hass, ws_run_pipeline)
-    except ValueError:
-        pass
-
-    try:
-        websocket_api.async_register_command(hass, ws_subscribe_satellite_events)
-    except ValueError:
-        pass
-
-    try:
-        websocket_api.async_register_command(hass, ws_cancel_timer)
-    except ValueError:
-        pass
-
-    try:
-        websocket_api.async_register_command(hass, ws_media_player_event)
-    except ValueError:
-        pass
-
     return True
 
 

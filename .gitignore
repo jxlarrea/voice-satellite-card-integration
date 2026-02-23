@@ -1,3 +1,17 @@
+# Claude
+.claude/
+
+# Node
+node_modules/
+
+# Build artifacts (debug only — production JS is committed)
+custom_components/voice_satellite/www/voice-satellite-card.js.map
+
+# Legacy card build artifacts (no longer used)
+voice-satellite-card.js
+voice-satellite-card.js.map
+voice-satellite-card.min.js
+
 # Python
 __pycache__/
 *.py[cod]
@@ -28,5 +42,3 @@ env/
 # OS
 .DS_Store
 Thumbs.db
-
-.claude/

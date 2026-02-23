@@ -1,0 +1,58 @@
+/* Default Skin — Editor Preview Overrides */
+
+.preview-container {
+  font-family: Roboto, Noto, sans-serif;
+}
+
+.preview-bar {
+  height: 16px;
+  background: linear-gradient(90deg, #FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC, #FF7777);
+  background-size: 200% 100%;
+}
+
+.preview-chat {
+  align-items: flex-start;
+}
+
+.preview-msg {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.preview-msg.user {
+  font-size: 30px;
+  color: #444444;
+  background: #ffffff;
+  border: 3px solid rgba(0, 180, 255, 0.5);
+  padding: 16px;
+  border-radius: 12px;
+  align-self: flex-end;
+  text-align: left;
+}
+
+.preview-msg.assistant {
+  font-size: 30px;
+  color: #444444;
+  background: #ffffff;
+  border: 3px solid rgba(100, 200, 150, 0.5);
+  padding: 16px;
+  border-radius: 12px;
+  align-self: flex-start;
+  text-align: left;
+}
+
+.preview-timer {
+  color: #444444;
+  background: #ffffff;
+  border: 3px solid rgba(0, 180, 255, 0.5);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.preview-timer-progress {
+  background: rgba(0, 180, 255, 0.5);
+  opacity: 0.3;
+}
+
+.preview-label {
+  color: rgba(0, 0, 0, 0.35);
+}
