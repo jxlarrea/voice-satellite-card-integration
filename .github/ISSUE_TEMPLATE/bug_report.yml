@@ -52,7 +52,6 @@ body:
       description: Please provide the following details.
       value: |
         - Home Assistant version:
-        - Voice Satellite Card Integration version:
         - Voice Satellite Card version:
         - Browser / app:
         - Device (tablet model, phone, desktop):
