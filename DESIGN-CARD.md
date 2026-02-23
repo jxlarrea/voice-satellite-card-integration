@@ -104,7 +104,10 @@ voice-satellite-card-integration/
 │   │   ├── alexa-preview.css             ← Alexa skin editor preview styles
 │   │   ├── google-home.js               ← Google Home skin definition
 │   │   ├── google-home.css              ← Google Home skin styles
-│   │   └── google-home-preview.css      ← Google Home skin editor preview styles
+│   │   ├── google-home-preview.css      ← Google Home skin editor preview styles
+│   │   ├── retro-terminal.js            ← Retro Terminal skin definition
+│   │   ├── retro-terminal.css           ← Retro Terminal skin styles
+│   │   └── retro-terminal-preview.css   ← Retro Terminal skin editor preview styles
 │   │
 │   ├── shared/                           ← Cross-feature utilities
 │   │   ├── singleton.js                  ← Single-instance guarantee (window.__vsSingleton)
@@ -818,13 +821,24 @@ State-driven animation speeds:
 - `error-mode` — Red gradient, 2s flow
 - `error-flash` — 3x flash animation (ask_question unmatched answer)
 
-**Reactive mode:** When the skin opts in (`reactiveBar: true`) and the card config allows it (`reactive_bar !== false`), states with `useReactive: true` drive the bar height from real-time audio levels via `--vs-audio-level` CSS variable. The `useReactive` flag is per-state:
+**Reactive mode:** When the skin opts in (`reactiveBar: true`) and the card config allows it (`reactive_bar !== false`), states with `useReactive: true` drive bar visuals from real-time audio levels via the `--vs-audio-level` CSS custom property (0–1). The `useReactive` flag is per-state:
 - `WAKE_WORD_DETECTED` — reactive (mic levels)
 - `STT` — reactive (mic levels)
 - `INTENT` — **not** reactive (CSS-only processing animation)
 - `TTS` — reactive (audio output levels)
 
 On reactive state entry, `reconnectMic()` switches the analyser to mic input. When TTS `attachAudio()` fires, the analyser switches to audio output. INTENT uses CSS animation only because no meaningful audio data flows during intent processing.
+
+**Reactive bar rendering — GPU-accelerated glow:** All skins use GPU-composited properties (`filter`, `opacity`, `box-shadow`) driven by `--vs-audio-level` to avoid layout thrashing. The specific technique varies by skin:
+
+| Skin | Reactive technique |
+|------|--------------------|
+| Default | `scaleY` for bar height + `::after` pseudo-element with `filter: blur()` and `opacity` for glow, gradient position synced via `@property --vs-gp` |
+| Alexa | `::after` pseudo-element with `filter: blur()` and `opacity` for cyan glow halo; no `scaleY` — bar stays fixed height |
+| Google Home | `scaleY` for bar height + `::after` pseudo-element with `filter: blur()` and `opacity` for 4-color glow, gradient synced via `@property --vs-gp` |
+| Retro Terminal | `filter: drop-shadow()` for outer glow + `box-shadow: inset` for inner glow around the full-screen border frame; no `scaleY` or `::after` |
+
+The Default and Google Home skins use `@property --vs-gp` (registered via `@property` at-rule) to animate `background-position` on both the bar and its `::after` glow pseudo-element simultaneously, ensuring perfect gradient color sync between the bar and its glow. All `transition` durations on reactive properties are set to `0.05s linear` for near-instant response to audio level changes.
 
 ### Start Button
 Floating mic button with pulse animation. Shows on initial load, microphone permission denied, microphone not found, or generic mic error.
@@ -841,7 +855,7 @@ Timer pills, alert overlay, progress bar updates, expired pill animations — al
 
 ### 17A.1 Overview
 
-Skins define the complete visual theme — activity bar, blur overlay, chat bubbles, timer pills, and animations. All visual styling is owned by skins via CSS; the card has no hardcoded gradient colors or layout values. Three built-in skins ship with the card.
+Skins define the complete visual theme — activity bar, blur overlay, chat bubbles, timer pills, and animations. All visual styling is owned by skins via CSS; the card has no hardcoded gradient colors or layout values. Four built-in skins ship with the card.
 
 ### 17A.2 Skin Definition
 
@@ -866,8 +880,9 @@ Each skin is a JS module exporting a definition object:
 | Default | `default` | `[0, 0, 0]` (black) | 0.3 | Rainbow gradient bar, dark overlay |
 | Alexa | `alexa` | `[0, 8, 20]` (dark blue) | 0.7 | Cyan accent glow, Echo Show-inspired |
 | Google Home | `google-home` | `[255, 255, 255]` (white) | 0.75 | 4-color palette, Material Design, frosted overlay |
+| Retro Terminal | `retro-terminal` | `[0, 10, 0]` (deep green-black) | 0.92 | Green phosphor CRT aesthetic, monospace font, scanlines, bezel frame |
 
-All three skins have `reactiveBar: true`.
+All four skins have `reactiveBar: true`.
 
 ### 17A.4 Skin Registry (`skins/index.js`)
 
@@ -952,7 +967,7 @@ State changes are synced to the integration entity via `voice_satellite/update_s
 | `auto_gain_control` | bool | `true` | WebRTC auto gain control |
 | `voice_isolation` | bool | `false` | Experimental voice isolation (Chrome-only) |
 | **Skin** ||||
-| `skin` | string | `'default'` | Active skin ID (`default`, `alexa`, `google-home`) |
+| `skin` | string | `'default'` | Active skin ID (`default`, `alexa`, `google-home`, `retro-terminal`) |
 | `custom_css` | string | `''` | CSS overrides applied on top of the selected skin |
 | `text_scale` | number | `100` | Text scale percentage (50–200%) |
 | `reactive_bar` | bool | `true` | Audio-reactive activity bar (disable on slow devices) |
