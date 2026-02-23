@@ -84,6 +84,7 @@ Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_re
 
 ### Manual
 
+1. Download the [latest release ZIP file](https://github.com/jxlarrea/voice-satellite-card-integration/releases/latest).
 1. Copy the `custom_components/voice_satellite` folder to your `config/custom_components/` directory
 2. Restart Home Assistant
 
