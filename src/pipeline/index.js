@@ -54,6 +54,11 @@ export class PipelineManager {
     this._wakeWordPhase = false;
     this._errorReceived = false;
 
+    // Periodic pipeline restart to keep the streaming TTS token fresh.
+    // HA's TTS proxy evicts pre-allocated tokens after a server-side TTL,
+    // making them unplayable.  Restarting allocates a fresh token.
+    this._tokenRefreshTimer = null;
+
     // Generation counter — incremented by stop() so that a stale start()
     // (e.g. from a throttled background-tab timeout) can detect it was
     // superseded and abort without clobbering the current subscription.
@@ -222,6 +227,8 @@ export class PipelineManager {
   }
 
   async stop() {
+    this._clearTokenRefreshTimer();
+
     // Increment generation first — any in-flight start() will see the
     // mismatch after its next await and abort cleanly.
     this._pipelineGen++;
@@ -315,6 +322,7 @@ export class PipelineManager {
     this._wakeWordPhase = false;
     this._errorReceived = false;
     handleRunStart(this, data);
+    this._startTokenRefreshTimer();
   }
 
   handleWakeWordStart() {
@@ -323,6 +331,7 @@ export class PipelineManager {
   }
 
   handleWakeWordEnd(data) {
+    this._clearTokenRefreshTimer();
     if (!this._runStartReceived) {
       this._log.log('pipeline', 'Ignoring stale wake_word-end (no run-start received for this subscription)');
       return;
@@ -420,5 +429,28 @@ export class PipelineManager {
     const delay = Math.min(Timing.RETRY_BASE_DELAY * this._retryCount, Timing.MAX_RETRY_DELAY);
     this._log.log('pipeline', `Retry in ${delay}ms (attempt #${this._retryCount})`);
     return delay;
+  }
+
+  /**
+   * Start a timer to restart the pipeline before the streaming TTS token
+   * expires on the HA server.  Only fires while idle in wake-word listening.
+   */
+  _startTokenRefreshTimer() {
+    this._clearTokenRefreshTimer();
+    if (!this._card.tts._streamingUrl) return;
+
+    this._tokenRefreshTimer = setTimeout(() => {
+      this._tokenRefreshTimer = null;
+      if (this._card.currentState !== State.LISTENING) return;
+      this._log.log('tts', 'Refreshing streaming token — restarting pipeline');
+      this.restart(0);
+    }, Timing.TOKEN_REFRESH_INTERVAL);
+  }
+
+  _clearTokenRefreshTimer() {
+    if (this._tokenRefreshTimer) {
+      clearTimeout(this._tokenRefreshTimer);
+      this._tokenRefreshTimer = null;
+    }
   }
 }

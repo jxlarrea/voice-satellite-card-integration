@@ -30,6 +30,9 @@ export class TtsManager {
     this._streamingUrl = null;
     this._playbackWatchdog = null;
 
+    // Retry fallback — tts-end URL stored for retry on playback failure
+    this._pendingTtsEndUrl = null;
+
     // Remote media player state monitoring
     this._remoteTarget = null;
     this._remoteSawPlaying = false;
@@ -44,8 +47,9 @@ export class TtsManager {
 
   /**
    * @param {string} urlPath - URL or path to TTS audio
+   * @param {boolean} [isRetry] - Whether this is a retry attempt
    */
-  play(urlPath) {
+  play(urlPath, isRetry) {
     const url = buildMediaUrl(urlPath);
     this._playing = true;
 
@@ -93,10 +97,22 @@ export class TtsManager {
         this._log.error('tts', `Playback error: ${e}`);
         this._log.error('tts', `URL: ${url}`);
         this._clearWatchdog();
+
+        // Retry once — the TTS proxy token may not have been ready yet
+        if (!isRetry && this._pendingTtsEndUrl) {
+          const retryUrl = this._pendingTtsEndUrl;
+          this._pendingTtsEndUrl = null;
+          this._currentAudio = null;
+          this._log.log('tts', `Retrying with tts-end URL: ${retryUrl}`);
+          this.play(retryUrl, true);
+          return;
+        }
+
         this._onComplete(true);
       },
       onStart: () => {
         this._log.log('tts', 'Playback started successfully');
+        this._pendingTtsEndUrl = null;
         this._card.mediaPlayer.notifyAudioStart('tts');
         if (this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false && this._currentAudio) {
           this._card.analyser.attachAudio(this._currentAudio, this._card.audio.audioContext);
@@ -109,6 +125,7 @@ export class TtsManager {
     this._playing = false;
     this._remoteTarget = null;
     this._remoteSawPlaying = false;
+    this._pendingTtsEndUrl = null;
     this._clearWatchdog();
 
     if (this._endTimer) {
@@ -139,6 +156,14 @@ export class TtsManager {
       this._streamingUrl = url.startsWith('http') ? url : window.location.origin + url;
       this._log.log('tts', `Streaming TTS URL available: ${this._streamingUrl}`);
     }
+  }
+
+  /**
+   * Store the tts-end URL as a fallback for retry on playback failure.
+   * @param {string|null} url
+   */
+  storeTtsEndUrl(url) {
+    this._pendingTtsEndUrl = url ? buildMediaUrl(url) : null;
   }
 
   // --- Chimes ---
@@ -200,6 +225,7 @@ export class TtsManager {
     this._playing = false;
     this._remoteTarget = null;
     this._remoteSawPlaying = false;
+    this._pendingTtsEndUrl = null;
 
     if (this._endTimer) {
       clearTimeout(this._endTimer);

@@ -212,6 +212,9 @@ export function handleTtsEnd(mgr, eventData) {
 
   const { tts } = mgr.card;
   if (tts.isPlaying) {
+    // Store tts-end URL as retry fallback for the in-progress streaming playback
+    const endUrl = eventData.tts_output?.url || eventData.tts_output?.url_path || null;
+    if (endUrl) tts.storeTtsEndUrl(endUrl);
     mgr.log.log('tts', 'Streaming TTS already playing — skipping duplicate playback');
     mgr.restart(0);
     return;
@@ -219,6 +222,7 @@ export function handleTtsEnd(mgr, eventData) {
 
   const url = eventData.tts_output?.url || eventData.tts_output?.url_path || null;
   if (url) {
+    tts.storeTtsEndUrl(url);
     tts.play(url);
   }
 

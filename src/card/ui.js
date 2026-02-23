@@ -95,10 +95,10 @@ export class UIManager {
       CONNECTING: { barVisible: false },
       LISTENING: { barVisible: false },
       PAUSED: { barVisible: false },
-      WAKE_WORD_DETECTED: { barVisible: true, animation: 'listening' },
-      STT: { barVisible: true, animation: 'listening' },
+      WAKE_WORD_DETECTED: { barVisible: true, animation: 'listening', useReactive: true },
+      STT: { barVisible: true, animation: 'listening', useReactive: true },
       INTENT: { barVisible: true, animation: 'processing' },
-      TTS: { barVisible: true, animation: 'speaking' },
+      TTS: { barVisible: true, animation: 'speaking', useReactive: true },
       ERROR: { barVisible: false },
     };
 
@@ -118,11 +118,14 @@ export class UIManager {
       if (config.animation) {
         bar.classList.add(config.animation);
       }
-      if (reactive) {
+      if (reactive && config.useReactive) {
         bar.classList.add('reactive');
         this._globalUI.classList.add('reactive-mode');
         this._card.analyser.reconnectMic();
         this._card.analyser.start(bar);
+      } else {
+        bar.classList.remove('reactive');
+        this._globalUI.classList.remove('reactive-mode');
       }
     } else {
       if (bar.classList.contains('error-mode')) this.clearErrorBar();
