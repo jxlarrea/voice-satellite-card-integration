@@ -1,0 +1,422 @@
+/* Retro Terminal Skin — Green phosphor CRT aesthetic */
+
+/* Font */
+#voice-satellite-ui {
+  font-family: 'Courier New', 'Lucida Console', monospace;
+}
+
+/* Blur Overlay — near-black with CRT bezel frame */
+#voice-satellite-ui .vs-blur-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 9999;
+  pointer-events: none;
+  border-radius: 0;
+  box-shadow:
+    inset 0 0 0 12px #111,
+    inset 0 0 0 14px #2a2a2a,
+    inset 0 0 0 16px #111,
+    inset 0 0 80px 20px rgba(0, 0, 0, 0.7);
+}
+
+#voice-satellite-ui .vs-blur-overlay.visible {
+  opacity: 1;
+}
+
+/* Scanline overlay */
+#voice-satellite-ui .vs-blur-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 16px;
+  border-radius: 0;
+  background:
+    repeating-linear-gradient(
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.12) 2px,
+      rgba(0, 0, 0, 0.12) 4px
+    );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* CRT vignette — deep curved-glass darkening at edges */
+#voice-satellite-ui .vs-blur-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 16px;
+  border-radius: 0;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.5) 100%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Start Button — green phosphor */
+#voice-satellite-ui .vs-start-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #33ff33;
+  border: none;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 16px rgba(51, 255, 51, 0.4);
+  z-index: 10001;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+#voice-satellite-ui .vs-start-btn.visible {
+  display: flex;
+  animation: terminal-btn-pulse 2.5s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-start-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 24px rgba(51, 255, 51, 0.6);
+  animation: none;
+}
+
+#voice-satellite-ui .vs-start-btn svg {
+  width: 28px;
+  height: 28px;
+  fill: #0a0a0a;
+}
+
+@keyframes terminal-btn-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 16px rgba(51, 255, 51, 0.4);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 28px rgba(51, 255, 51, 0.7);
+  }
+}
+
+/* Bar — green phosphor frame tracing the inner CRT bezel edge */
+#voice-satellite-ui .vs-rainbow-bar {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  right: 18px;
+  bottom: 18px;
+  height: auto;
+  background: none;
+  border: 2px solid #33ff33;
+  filter: drop-shadow(0 0 8px rgba(51, 255, 51, 0.5));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 10000;
+  pointer-events: none;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.visible {
+  opacity: 1;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.connecting {
+  animation: terminal-breathe 2s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.listening {
+  animation: terminal-pulse 2s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.processing {
+  animation: terminal-flicker 0.15s steps(2) infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.speaking {
+  animation: terminal-glow 1.5s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.error-mode {
+  border-color: #ff3333;
+  filter: drop-shadow(0 0 8px rgba(255, 51, 51, 0.5));
+  animation: terminal-flicker 0.15s steps(2) infinite;
+  opacity: 1;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.error-flash {
+  animation: terminal-error-flash 0.15s ease-in-out 3;
+}
+
+/* Reactive Bar — audio-driven glow intensity around the frame */
+#voice-satellite-ui .vs-rainbow-bar.reactive {
+  overflow: visible;
+  transition: filter 0.05s linear, box-shadow 0.05s linear;
+  filter: drop-shadow(0 0 calc(4px + 16px * var(--vs-audio-level, 0)) rgba(51, 255, 51, calc(0.4 + 0.4 * var(--vs-audio-level, 0))));
+  box-shadow:
+    inset 0 0 calc(6px + 30px * var(--vs-audio-level, 0)) rgba(51, 255, 51, calc(0.08 + 0.2 * var(--vs-audio-level, 0)));
+}
+
+/* Keyframes — bar states */
+@keyframes terminal-breathe {
+  0%, 100% {
+    opacity: 0.3;
+    filter: drop-shadow(0 0 4px rgba(51, 255, 51, 0.3));
+  }
+  50% {
+    opacity: 0.7;
+    filter: drop-shadow(0 0 12px rgba(51, 255, 51, 0.6));
+  }
+}
+
+@keyframes terminal-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px rgba(51, 255, 51, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 20px rgba(51, 255, 51, 0.8));
+  }
+}
+
+@keyframes terminal-flicker {
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+
+@keyframes terminal-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px rgba(51, 255, 51, 0.5));
+  }
+  50% {
+    filter: drop-shadow(0 0 16px rgba(51, 255, 51, 0.7));
+  }
+}
+
+@keyframes terminal-error-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Chat Container */
+#voice-satellite-ui .vs-chat-container {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 100px;
+  display: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 85%;
+  width: 85%;
+  z-index: 10001;
+  pointer-events: none;
+  overflow: visible;
+}
+
+#voice-satellite-ui .vs-chat-container.visible {
+  display: flex;
+  pointer-events: auto;
+}
+
+#voice-satellite-ui.reactive-mode .vs-chat-container {
+  bottom: 100px;
+}
+
+#voice-satellite-ui .vs-chat-container.announcement-mode {
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%);
+}
+
+/* Chat Messages — raw terminal text, no bubbles */
+#voice-satellite-ui .vs-chat-msg {
+  max-width: 90%;
+  opacity: 0;
+  animation: terminal-fade-in 0.25s ease forwards;
+  word-wrap: break-word;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 4px 0;
+  border-radius: 0;
+  text-shadow: 0 0 8px rgba(51, 255, 51, 0.4);
+}
+
+#voice-satellite-ui .vs-chat-msg.user {
+  font-size: calc(28px * var(--vs-text-scale, 1));
+  color: #1a8c1a;
+  font-weight: normal;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+}
+
+#voice-satellite-ui .vs-chat-msg.user::before {
+  content: '> ';
+}
+
+#voice-satellite-ui .vs-chat-msg.assistant {
+  font-size: calc(32px * var(--vs-text-scale, 1));
+  color: #33ff33;
+  font-weight: bold;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+}
+
+#voice-satellite-ui .vs-chat-msg.announcement {
+  font-size: calc(32px * var(--vs-text-scale, 1));
+  color: #33ff33;
+  font-weight: bold;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+}
+
+@keyframes terminal-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Timer Container */
+.vs-timer-container {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10001;
+  pointer-events: none;
+  font-family: 'Courier New', 'Lucida Console', monospace;
+}
+
+/* Timer Pills — green border on dark */
+.vs-timer-pill {
+  position: relative;
+  overflow: hidden;
+  font-size: calc(28px * var(--vs-text-scale, 1));
+  color: #33ff33;
+  font-weight: bold;
+  font-style: normal;
+  background: rgba(0, 10, 0, 0.9);
+  border: 2px solid rgba(51, 255, 51, 0.4);
+  padding: 14px 18px;
+  border-radius: 4px;
+  box-shadow: 0 0 12px rgba(51, 255, 51, 0.15);
+  animation: terminal-timer-fade-in 0.3s ease forwards;
+  pointer-events: auto;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.vs-timer-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(51, 255, 51, 0.2);
+  opacity: 1;
+  transition: width 1s linear;
+  pointer-events: none;
+}
+
+.vs-timer-content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vs-timer-icon {
+  flex-shrink: 0;
+}
+
+.vs-timer-time {
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.vs-timer-pill.vs-timer-expired {
+  animation: terminal-timer-fade-out 0.4s ease forwards;
+}
+
+/* Timer Finished Alert */
+.vs-timer-alert {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: calc(28px * var(--vs-text-scale, 1));
+  font-family: 'Courier New', 'Lucida Console', monospace;
+  color: #33ff33;
+  font-weight: bold;
+  font-style: normal;
+  background: rgba(0, 10, 0, 0.95);
+  border: 2px solid rgba(51, 255, 51, 0.5);
+  padding: 18px 24px;
+  border-radius: 4px;
+  box-shadow: 0 0 24px rgba(51, 255, 51, 0.2);
+  z-index: 10002;
+  animation: terminal-alert-pulse 1.5s ease-in-out infinite;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.vs-timer-alert .vs-timer-icon {
+  font-size: 1.5em;
+}
+
+.vs-timer-alert .vs-timer-time {
+  font-size: 1.2em;
+}
+
+@keyframes terminal-timer-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes terminal-timer-fade-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes terminal-alert-pulse {
+  0%, 100% {
+    transform: translate(-50%, -50%) scale(1);
+    box-shadow: 0 0 24px rgba(51, 255, 51, 0.2);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.03);
+    box-shadow: 0 0 36px rgba(51, 255, 51, 0.4);
+  }
+}

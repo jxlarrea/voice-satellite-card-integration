@@ -1,0 +1,74 @@
+/* Retro Terminal Skin — Editor Preview Overrides */
+
+.preview-container {
+  font-family: 'Courier New', 'Lucida Console', monospace;
+}
+
+.preview-blur {
+  background: rgba(0, 10, 0, 0.92);
+}
+
+.preview-bar {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  height: auto;
+  background: none;
+  border: 2px solid #33ff33;
+  box-shadow: 0 0 12px 2px rgba(51, 255, 51, 0.4);
+}
+
+.preview-chat {
+  align-items: flex-start;
+}
+
+.preview-msg {
+  box-shadow: none;
+  text-shadow: 0 0 8px rgba(51, 255, 51, 0.4);
+}
+
+.preview-msg.user {
+  font-size: 28px;
+  color: #1a8c1a;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  border-radius: 0;
+  align-self: flex-start;
+  text-align: left;
+}
+
+.preview-msg.user::before {
+  content: '> ';
+}
+
+.preview-msg.assistant {
+  font-size: 32px;
+  color: #33ff33;
+  font-weight: bold;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  border-radius: 0;
+  align-self: flex-start;
+  text-align: left;
+}
+
+.preview-timer {
+  color: #33ff33;
+  background: rgba(0, 10, 0, 0.9);
+  border: 2px solid rgba(51, 255, 51, 0.4);
+  border-radius: 4px;
+  box-shadow: 0 0 12px rgba(51, 255, 51, 0.15);
+}
+
+.preview-timer-progress {
+  background: rgba(51, 255, 51, 0.2);
+  opacity: 1;
+}
+
+.preview-label {
+  color: rgba(51, 255, 51, 0.3);
+}
