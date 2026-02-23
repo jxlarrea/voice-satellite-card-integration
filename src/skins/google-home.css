@@ -1,5 +1,7 @@
 /* Google Home Skin */
 
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap');
+
 /* Animatable custom property for syncing bar + glow gradient position */
 @property --vs-gp {
   syntax: '<percentage>';

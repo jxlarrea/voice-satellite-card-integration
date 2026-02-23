@@ -1,8 +1,10 @@
 /* Retro Terminal Skin — Green phosphor CRT aesthetic */
 
+@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
 /* Font */
 #voice-satellite-ui {
-  font-family: 'Courier New', 'Lucida Console', monospace;
+  font-family: 'VT323', 'Courier New', monospace;
 }
 
 /* Blur Overlay — near-black with CRT bezel frame */
@@ -250,7 +252,7 @@
 }
 
 #voice-satellite-ui .vs-chat-msg.user {
-  font-size: calc(28px * var(--vs-text-scale, 1));
+  font-size: calc(42px * var(--vs-text-scale, 1));
   color: #1a8c1a;
   font-weight: normal;
   font-style: normal;
@@ -263,7 +265,7 @@
 }
 
 #voice-satellite-ui .vs-chat-msg.assistant {
-  font-size: calc(32px * var(--vs-text-scale, 1));
+  font-size: calc(48px * var(--vs-text-scale, 1));
   color: #33ff33;
   font-weight: bold;
   font-style: normal;
@@ -272,7 +274,7 @@
 }
 
 #voice-satellite-ui .vs-chat-msg.announcement {
-  font-size: calc(32px * var(--vs-text-scale, 1));
+  font-size: calc(48px * var(--vs-text-scale, 1));
   color: #33ff33;
   font-weight: bold;
   font-style: normal;
@@ -301,14 +303,14 @@
   gap: 8px;
   z-index: 10001;
   pointer-events: none;
-  font-family: 'Courier New', 'Lucida Console', monospace;
+  font-family: 'VT323', 'Courier New', monospace;
 }
 
 /* Timer Pills — green border on dark */
 .vs-timer-pill {
   position: relative;
   overflow: hidden;
-  font-size: calc(28px * var(--vs-text-scale, 1));
+  font-size: calc(42px * var(--vs-text-scale, 1));
   color: #33ff33;
   font-weight: bold;
   font-style: normal;
@@ -364,8 +366,8 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: calc(28px * var(--vs-text-scale, 1));
-  font-family: 'Courier New', 'Lucida Console', monospace;
+  font-size: calc(42px * var(--vs-text-scale, 1));
+  font-family: 'VT323', 'Courier New', monospace;
   color: #33ff33;
   font-weight: bold;
   font-style: normal;

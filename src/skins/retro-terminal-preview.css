@@ -1,7 +1,7 @@
 /* Retro Terminal Skin — Editor Preview Overrides */
 
 .preview-container {
-  font-family: 'Courier New', 'Lucida Console', monospace;
+  font-family: 'VT323', 'Courier New', monospace;
 }
 
 .preview-blur {
@@ -30,7 +30,7 @@
 }
 
 .preview-msg.user {
-  font-size: 28px;
+  font-size: 34px;
   color: #1a8c1a;
   background: none;
   border: none;
@@ -45,7 +45,7 @@
 }
 
 .preview-msg.assistant {
-  font-size: 32px;
+  font-size: 38px;
   color: #33ff33;
   font-weight: bold;
   background: none;

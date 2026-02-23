@@ -39,6 +39,12 @@ export function isEditorPreview(el) {
  */
 export function renderPreview(shadowRoot, config) {
   const skin = getSkin(config.skin || 'default');
+  if (skin.fontURL && !document.querySelector(`link[href="${skin.fontURL}"]`)) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = skin.fontURL;
+    document.head.appendChild(link);
+  }
   shadowRoot.innerHTML = `
     <style>
       ${baseCSS}

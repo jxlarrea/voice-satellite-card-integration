@@ -16,4 +16,5 @@ export const retroTerminalSkin = {
   overlayColor: [0, 10, 0],
   defaultOpacity: 0.92,
   previewCSS,
+  fontURL: 'https://fonts.googleapis.com/css2?family=VT323&display=swap',
 };

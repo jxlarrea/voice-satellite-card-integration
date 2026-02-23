@@ -16,4 +16,5 @@ export const googleHomeSkin = {
   overlayColor: [255, 255, 255],
   defaultOpacity: 0.75,
   previewCSS,
+  fontURL: 'https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap',
 };
