@@ -197,9 +197,22 @@ The card renders nothing in its own Shadow DOM (just a hidden `<div>`). All visi
   <div class="vs-blur-overlay"></div>
   <button class="vs-start-btn"><!-- SVG mic icon --></button>
   <div class="vs-chat-container"></div>
+  <div class="vs-image-panel"><div class="vs-panel-scroll"></div></div>
+  <div class="vs-lightbox">
+    <img class="vs-lightbox-img" />
+    <iframe class="vs-lightbox-iframe" frameborder="0"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media;
+             gyroscope; picture-in-picture; web-share"
+      referrerpolicy="strict-origin-when-cross-origin"
+      allowfullscreen></iframe>
+  </div>
   <div class="vs-rainbow-bar"></div>
 </div>
 ```
+
+**Key containers:**
+- `.vs-image-panel` — Fixed-position media panel (right side). Contains `.vs-panel-scroll` inner wrapper for scrollbar positioning. Holds image grids and video card grids.
+- `.vs-lightbox` — Full-screen overlay for viewing full-size images or playing YouTube videos via iframe embed. Tap to dismiss.
 
 Timer pills live in a separate `#voice-satellite-timers` container, also on `document.body`.
 
@@ -386,7 +399,11 @@ HA's TTS proxy pre-allocates a streaming token at `run-start` (in `tts_output.ur
 
 See also: [home-assistant/core#159262](https://github.com/home-assistant/core/issues/159262)
 
-### 7.5 TTS Retry Mechanism
+### 7.5 Video Playback TTS Suppression
+
+When a video is playing in the lightbox (`card._videoPlaying === true`), TTS audio is suppressed at both play sites in the pipeline event handlers. See §16A.6 for the full `_videoPlaying` flag design.
+
+### 7.6 TTS Retry Mechanism
 
 On browser playback failure, the TTS manager retries once using the stored `tts-end` URL:
 
@@ -397,7 +414,7 @@ On browser playback failure, the TTS manager retries once using the stored `tts-
 
 This covers transient failures where the TTS proxy token wasn't ready yet at the time of the first attempt.
 
-### 7.6 TTS Stop Safety
+### 7.7 TTS Stop Safety
 
 When stopping TTS playback (`tts.stop()`), `onended` and `onerror` handlers are nulled BEFORE calling `pause()`. Otherwise the pause triggers `onended`, which calls `_onComplete()`, which can trigger continue-conversation or cleanup incorrectly (ghost events).
 
@@ -547,7 +564,7 @@ Events flow from `voice_satellite/run_pipeline` → `card.onPipelineMessage()` �
 | `stt-start` | (inline) | Set state STT |
 | `stt-end` | `handleSttEnd` | Show transcription bubble, invoke askQuestionCallback if set |
 | `intent-start` | (inline) | Set state INTENT |
-| `intent-progress` | `handleIntentProgress` | Stream response text, start streaming TTS |
+| `intent-progress` | `handleIntentProgress` | Stream response text, start streaming TTS, route `tool_result` (image/video search results — §16A) |
 | `intent-end` | `handleIntentEnd` | Show final response, handle continue_conversation, handle errors |
 | `tts-start` | (inline) | Set state TTS |
 | `tts-end` | `handleTtsEnd` | Play TTS audio (if not already streaming), restart pipeline |
@@ -758,8 +775,18 @@ Handles browser tab show/hide transitions.
 
 ### Tab Hidden
 1. Cancel any in-progress ask_question flow (prevents cleanup timers firing after resume)
-2. If in an active interaction: clear chat, hide blur, clear continue state, stop TTS
+2. If in an active interaction OR media is lingering: clear image linger timeout, clear chat, hide blur, clear continue state, stop TTS
 3. After 500ms debounce: set state PAUSED, disable audio tracks
+
+**Linger detection:** During the image/video linger phase (30s timeout after TTS completes), the card state is `LISTENING` — not in `INTERACTING_STATES`. The visibility handler must independently check for lingering UI:
+
+```javascript
+const isLingering = this._card._imageLingerTimeout
+  || this._card.ui.hasVisibleImages()
+  || this._card.ui.isLightboxVisible();
+```
+
+The `isLingering` check is evaluated alongside `isInteracting`. If either is true, the full UI cleanup runs (clear linger timeout, clear chat, hide blur, stop TTS).
 
 **Gotcha — No `pipeline.stop()` on hide:** Calling `stop()` creates a race condition where the server is still cancelling the old pipeline when `resume()` starts a new one, causing `async_accept_pipeline_from_satellite()` to silently fail. The `restart(0)` call in `_resume()` handles the properly sequenced stop→start.
 
@@ -774,14 +801,22 @@ Handles browser tab show/hide transitions.
 
 ---
 
-## 15. Double-Tap Handler (`card/double-tap.js`)
+## 15. Double-Tap / Escape Handler (`card/double-tap.js`)
 
-Listens on `document` for touch/click events. On double-tap (within 400ms threshold):
+Listens on `document` for touch/click events and keyboard events. On double-tap (within 400ms threshold) **or** Escape key press:
+
+**Activation conditions:** The handler is active when any of these are true:
+- Card is in an `INTERACTING_STATE` or TTS is playing
+- Image/video media is lingering (linger timeout active, lightbox visible, or panel has visible images)
+- Timer alert is active
+- A notification is playing or in display-timeout phase
 
 **Priority order:**
 1. **Timer alert active** → Dismiss alert
 2. **Notification playing** → ACK each active notification, stop audio, clear UI, cancel ask_question's server-side event, restart pipeline
-3. **Active interaction** → Stop TTS, cancel ask_question, clear continue state, set IDLE, clear chat/blur, play done chime, restart pipeline
+3. **Active interaction or media linger** → Cancel image linger timeout, stop TTS, cancel ask_question, clear continue state, set IDLE, clear chat/blur, play done chime, restart pipeline
+
+**Escape key:** Registered as a `keydown` listener on `document`. Fires `_cancel()` directly (no double-tap threshold needed). Uses the same activation conditions and priority order.
 
 Touch/click deduplication prevents double-firing on touch devices (touchstart fires before click).
 
@@ -803,6 +838,146 @@ Manages chat message state. All DOM operations delegate to UIManager.
 - `centered` — All bubbles centered
 
 **Gotcha — `streamEl` must be cleared between turns:** If not reset in `handleIntentEnd` and continue-conversation transitions, streaming text appends to the previous turn's bubble.
+
+---
+
+## 16A. Rich Media System (Experimental)
+
+The card supports displaying image and video search results from LLM tool calls. This requires the external [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration, which registers custom tools with the conversational AI agent. Results arrive as `tool_result` payloads inside `intent-progress` pipeline events.
+
+**Requirement:** The HA Assist pipeline must use a conversational AI agent (e.g., OpenAI, Google Generative AI). The built-in Home Assistant agent does not support LLM tool calls.
+
+### 16A.1 Data Flow
+
+```
+LLM tool call → intent-progress (tool_result) → handleIntentProgress
+  → filter by video_id → chat.addVideos() → ui.showVideoPanel()
+  → filter by image_url → chat.addImages() → ui.showImagePanel()
+```
+
+The `intent-progress` event carries `chat_log_delta` with `role: 'tool_result'`. The `tool_result` object contains:
+- `results[]` — Array of search results
+- `auto_display` (images) / `auto_play` (videos) — Boolean flag for auto-opening lightbox
+
+**Result routing:** Results with `video_id` are routed to the video path. Results with `image_url` (and no `video_id`) are routed to the image path. This allows mixed results to route correctly (though unlikely in practice).
+
+### 16A.2 Image Search
+
+**Image result format:**
+```json
+{
+  "image_url": "https://example.com/full.jpg",
+  "thumbnail_url": "https://example.com/thumb.jpg",
+  "title": "Image title"
+}
+```
+
+`showImagePanel(results, autoDisplay)`:
+1. Creates a `.vs-image-grid` container (`.single` class for single-result layout)
+2. For each result: creates `<img>` with `thumbnail_url` (falls back to `image_url`)
+3. Click handler → `showLightbox(image_url)` opens full-size image
+4. `onerror` removes the failed image; if grid is empty, hides the panel
+5. If `autoDisplay`, opens lightbox with the first image immediately
+
+### 16A.3 Video Search
+
+**Video result format:**
+```json
+{
+  "video_id": "dQw4w9WgXcQ",
+  "title": "Video Title",
+  "channel_name": "Channel Name",
+  "thumbnail_url": "https://i.ytimg.com/vi/.../hqdefault.jpg",
+  "duration": "PT15M32S"
+}
+```
+
+`showVideoPanel(results, autoPlay)`:
+1. Creates a `.vs-video-grid` container
+2. For each result: creates a `.vs-video-card` with:
+   - `.vs-video-thumb-wrap` — Thumbnail image + duration badge overlay
+   - `.vs-video-info` — Title (2-line clamp) + channel name
+3. Click handler → `showVideoLightbox(video_id)` opens YouTube embed
+4. If `autoPlay`, opens lightbox with the first video immediately
+
+**Duration parsing:** `_parseDuration(iso)` converts ISO 8601 durations to display format:
+- `PT1H15M32S` → `"1:15:32"`
+- `PT5M8S` → `"5:08"`
+- Regex: `/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/`
+
+### 16A.4 Inner Scroll Wrapper
+
+The media panel uses a two-layer structure for proper scrollbar positioning:
+
+```html
+<div class="vs-image-panel">     <!-- overflow: hidden (clips at border-radius) -->
+  <div class="vs-panel-scroll">  <!-- overflow-y: auto (actual scrollbar) -->
+    <!-- grids appended here -->
+  </div>
+</div>
+```
+
+**Why:** Direct scrollbar styling on the panel via `::-webkit-scrollbar` pseudo-elements does not work in the HA Companion App WebView. The inner wrapper pattern moves the scrollbar inside the rounded container, and `padding-right: 8px` on `.vs-panel-scroll` creates a gap between content and the scrollbar.
+
+**Gotcha — `padding-right` vs `margin-right`:** `margin-right` on the scroll wrapper pushes the entire container (including scrollbar) leftward but does NOT create space between content and scrollbar. `padding-right` creates the gap between content and the scrollbar — this is what actually works.
+
+**Scroll-cancels-linger:** A `scroll` event listener on `.vs-panel-scroll` clears the `_imageLingerTimeout` — once the user starts browsing results, the auto-dismiss timer is cancelled.
+
+### 16A.5 Lightbox
+
+Two modes sharing a single `.vs-lightbox` container:
+
+**Image mode** (`showLightbox(src)`):
+- Hides iframe, shows `<img>` with `src`
+- Tap to close → returns to media panel
+
+**Video mode** (`showVideoLightbox(videoId)`):
+- Hides img, shows `<iframe>` with `src="https://www.youtube-nocookie.com/embed/{videoId}?autoplay=1"`
+- Stops TTS if playing and sets `_videoPlaying = true` (see §16A.6)
+- Tap to close → clears iframe `src` to stop playback, sets `_videoPlaying = false`
+
+**Gotcha — `youtube-nocookie.com`:** Standard `youtube.com/embed` triggers error 153 in some contexts. Using `youtube-nocookie.com` avoids this (enhanced privacy mode, no tracking cookies).
+
+**Gotcha — iframe permissions:** The iframe requires `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"` and `allowfullscreen` for proper YouTube playback within HA's WebView.
+
+Both modes cancel the linger timeout on open (UI stays until user dismisses). Close handler is registered once (`_vsCloseHandler` guard on the lightbox element).
+
+### 16A.6 `_videoPlaying` Flag
+
+Bridges the timing gap between video lightbox open and TTS events. When a video is playing in the lightbox, TTS audio must not play over it.
+
+**Problem:** The LLM returns tool results (video search) during `intent-progress`, BEFORE `tts-end` arrives. By the time `tts-end` fires with the TTS URL, the user is already watching a video. Playing TTS over the video would be disruptive.
+
+**Solution:** `card._videoPlaying` flag:
+- Set `true` by `showVideoLightbox()` (also stops any in-progress TTS)
+- Set `false` by `hideLightbox()`
+- Checked at both TTS play sites in `handleTtsEnd`:
+  - Streaming TTS (`intent-progress` with `tts_start_streaming`): skips `tts.play()` if `_videoPlaying`
+  - Normal TTS (`tts-end`): calls `onTTSComplete(card, false)` instead of `tts.play()` to run cleanup without audio
+- Checked at streaming TTS early-start in `handleIntentProgress`: skips `tts.play()` if `_videoPlaying`
+
+### 16A.7 Image Linger Timeout
+
+After TTS completes, if images/videos are visible, the UI lingers for 30 seconds before auto-dismissing:
+
+```javascript
+// In onTTSComplete:
+if (card.ui.hasVisibleImages()) {
+  card.ui.stopReactive();  // Stop mic reactivity on bar
+  card._imageLingerTimeout = setTimeout(cleanup, 30000);
+} else {
+  cleanup();  // Immediate dismiss
+}
+```
+
+The linger timeout is cancelled by:
+- **User scrolling** the media panel (browsing results)
+- **Opening the lightbox** (viewing a specific result)
+- **New wake word** detection (`handleWakeWordEnd` clears it)
+- **Tab visibility change** (visibility handler clears it)
+- **Double-tap / Escape** (dismiss handler clears it)
+
+**Gotcha — Lightbox blocks cleanup:** If the lightbox is open when the linger timeout fires, the `cleanup` function returns early (`if (card.ui.isLightboxVisible()) return`). The UI stays until the user closes the lightbox and double-taps/presses Escape.
 
 ---
 
@@ -1079,6 +1254,14 @@ These errors are normal and trigger a silent restart:
 
 If the card was in an interacting state, UI is cleaned up and done chime plays before restart.
 
+### Intent Errors (response_type === 'error')
+
+When the LLM returns an error response (e.g., tool failure, conversation agent error), `handleIntentEnd` sets `mgr.suppressTTS = true`. When `tts-end` subsequently fires, the handler detects the flag, calls `onTTSComplete(card, true)` for cleanup, and restarts the pipeline — without playing TTS audio.
+
+**Why `onTTSComplete` is needed:** Without it, the blur overlay, chat bubbles, and media panel stay stuck on screen. The `playbackFailed = true` parameter suppresses the "done" chime (the error chime was already played by `handleIntentEnd`).
+
+**Done chime suppression on error:** `onTTSComplete` checks `!playbackFailed` before playing the done chime. This prevents a double-chime scenario (error chime from `handleIntentEnd` + done chime from `onTTSComplete`).
+
 ### Unexpected Pipeline Errors
 
 All other errors: show error bar (red gradient), play error chime, set `serviceUnavailable = true`, retry with linear backoff.
@@ -1146,7 +1329,9 @@ When recreating or modifying this card, verify:
 - [ ] `handleTtsEnd()` calls `tts.play()` then `pipeline.restart(0)` for barge-in
 - [ ] `stop()` nulls `onended`/`onerror` before pausing (ghost event prevention)
 - [ ] Stall-detection watchdog (`setInterval`) checks `audio.currentTime` progression, force-completes on stall
-- [ ] Done chime controlled by `wake_sound` switch, suppressed for remote TTS
+- [ ] Done chime controlled by `wake_sound` switch, suppressed for remote TTS and on playback failure
+- [ ] `suppressTTS` flag: `handleIntentEnd` sets on intent error, `handleTtsEnd` skips play and calls `onTTSComplete(card, true)`
+- [ ] `_videoPlaying` flag checked at both TTS play sites — suppresses TTS during video lightbox playback
 - [ ] Streaming TTS: no restart at `tts_start_streaming`, skip duplicate at `tts-end`
 - [ ] Remote TTS: entity state monitoring via `checkRemotePlayback()` in `set hass()`, not a fixed delay
 - [ ] Remote TTS: `_remoteSawPlaying` guard prevents false completion before playback starts
@@ -1182,6 +1367,26 @@ When recreating or modifying this card, verify:
 - [ ] Config reactivity: startup triggered when satellite_entity goes from empty to set
 - [ ] Blur uses reference counting with `BlurReason` strings
 - [ ] `chat.streamEl` cleared between conversation turns
+- [ ] Escape key dismisses active interactions, media linger, timer alerts, and notifications (same priority as double-tap)
+
+**Rich Media (Experimental — §16A):**
+- [ ] `intent-progress` with `role: 'tool_result'` routes to image/video handlers
+- [ ] Video results filtered by `video_id`, image results filtered by `image_url && !video_id`
+- [ ] `showImagePanel`: 2-column grid (`.single` class for 1 result), `onerror` removes failed images
+- [ ] `showVideoPanel`: video cards with thumbnail, duration badge, title, channel name
+- [ ] `_parseDuration(iso)` converts ISO 8601 (`PT1H15M32S`) to display format (`1:15:32`)
+- [ ] Inner scroll wrapper: `.vs-image-panel` (overflow: hidden) → `.vs-panel-scroll` (overflow-y: auto, padding-right: 8px)
+- [ ] Lightbox: image mode (img) and video mode (iframe), tap-to-close, `_vsCloseHandler` registered once
+- [ ] YouTube embed uses `youtube-nocookie.com` (avoids error 153)
+- [ ] Iframe requires full permissions: `autoplay`, `encrypted-media`, `picture-in-picture`, `web-share`, `allowfullscreen`
+- [ ] `_videoPlaying` flag: set by `showVideoLightbox`, cleared by `hideLightbox`
+- [ ] `_videoPlaying` suppresses TTS at both play sites (streaming in `handleIntentProgress`, normal in `handleTtsEnd`)
+- [ ] Image linger: 30s timeout after TTS, cancelled by scroll/lightbox/wake-word/tab-hide/double-tap/Escape
+- [ ] Lightbox blocks linger cleanup (`isLightboxVisible()` returns early from cleanup function)
+- [ ] `auto_display` (images) / `auto_play` (videos) flags auto-open lightbox with first result
+- [ ] Visibility handler checks `isLingering` independently of `INTERACTING_STATES` for tab-hide cleanup
+- [ ] `clearChat()` also clears panel scroll children, hides panel, removes `has-images` class, hides lightbox
+- [ ] `hideLightbox()` clears iframe `src` to stop video playback
 
 **Media Player:**
 - [ ] `MediaPlayerManager` receives commands via `dispatchSatelliteEvent` → `handleCommand`
