@@ -437,6 +437,7 @@ Results appear as video cards showing the thumbnail, duration, title, and channe
 
 1. Check that TTS is configured in your Assist pipeline.
 2. Check browser audio permissions.
+3. Check Fully Kiosk settings: If using Fully Kiosk, ensure that **Web Content Settings** → **Autoplay Audio** is enabled.
 
 ### No TTS audio on Home Assistant Companion App
 
