@@ -1,4 +1,4 @@
-/* Default Skin */
+/* Default Skin — Bubble-less */
 
 /* Animatable custom property for syncing bar + glow gradient position */
 @property --vs-gp {
@@ -19,8 +19,8 @@
   left: 0;
   right: 0;
   bottom: 0;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   opacity: 0;
   transition: opacity 0.3s ease;
   z-index: 9999;
@@ -124,13 +124,11 @@
   animation: vs-error-flash 0.15s ease-in-out 3;
 }
 
-/* Reactive Bar — audio-driven scale and glow, speed varies by state.
-   Uses @property --vs-gp so the bar and its ::after glow share a single
-   animated gradient position — guaranteeing perfect color sync. */
+/* Reactive Bar — enhanced glow */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   transition: transform 0.05s linear;
   transform-origin: bottom;
-  transform: scaleY(calc(1 + 0.5 * var(--vs-audio-level, 0)));
+  transform: scaleY(calc(1 + 1 * var(--vs-audio-level, 0)));
   overflow: visible;
   background-position: var(--vs-gp) 50%;
 }
@@ -139,13 +137,13 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, #FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC, #FF7777);
+  background: linear-gradient(90deg, #FF5555, #FF8855, #FFBB55, #AAFF55, #55FF88, #55CCFF, #5588FF, #8855FF, #FF55AA, #FF5555);
   background-size: 200% 100%;
   background-position: var(--vs-gp) 50%;
   border-radius: 50%;
-  filter: blur(calc(6px + 12px * var(--vs-audio-level, 0)));
-  opacity: calc(var(--vs-audio-level, 0) * 2.5);
-  transform: scale(1.05, 1.5);
+  filter: blur(calc(20px + 50px * var(--vs-audio-level, 0)));
+  opacity: 1;
+  transform: scale(1.2, 5);
   z-index: -1;
   pointer-events: none;
 }
@@ -176,7 +174,7 @@
   display: none;
   flex-direction: column;
   align-items: flex-start;
-  gap: 14px;
+  gap: 20px;
   width: auto;
   z-index: 10001;
   pointer-events: none;
@@ -202,52 +200,57 @@
   transform: translate(-50%, -50%);
 }
 
-/* Chat Messages */
+/* Chat Messages — Bubble-less floating text */
 #voice-satellite-ui .vs-chat-msg {
   max-width: 85%;
   opacity: 0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   animation: vs-chat-fade-in 0.3s ease forwards;
   word-wrap: break-word;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 4px 0;
+  border-radius: 0;
 }
 
 #voice-satellite-ui .vs-chat-msg.user {
   font-size: calc(30px * var(--vs-text-scale, 1));
-  color: #444444;
+  color: rgba(50, 50, 50, 0.65);
   font-weight: normal;
   font-style: normal;
-  background: #ffffff;
-  border: 3px solid rgba(0, 180, 255, 0.5);
-  padding: 16px 36px 16px 16px;
-  border-radius: 12px;
-  align-self: flex-end;
+  align-self: flex-start;
   text-align: left;
+  border-bottom: 3px solid transparent;
+  border-image: linear-gradient(to right, rgba(0, 150, 220, 0.7), transparent) 1;
+  padding-bottom: 8px;
 }
 
 #voice-satellite-ui .vs-chat-msg.assistant {
-  font-size: calc(30px * var(--vs-text-scale, 1));
-  color: #444444;
-  font-weight: normal;
+  font-size: calc(34px * var(--vs-text-scale, 1));
+  color: #333333;
+  font-weight: 400;
   font-style: normal;
-  background: #ffffff;
-  border: 3px solid rgba(100, 200, 150, 0.5);
-  padding: 16px 36px 16px 16px;
-  border-radius: 12px;
   align-self: flex-start;
   text-align: left;
+  max-height: 70vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+  border-bottom: 3px solid transparent;
+  border-image: linear-gradient(to right, rgba(40, 180, 100, 0.7), transparent) 1;
+  padding-bottom: 8px;
 }
 
 #voice-satellite-ui .vs-chat-msg.announcement {
-  font-size: calc(30px * var(--vs-text-scale, 1));
-  color: #444444;
-  font-weight: normal;
+  font-size: calc(34px * var(--vs-text-scale, 1));
+  color: #333333;
+  font-weight: 400;
   font-style: normal;
-  background: #ffffff;
-  border: 3px solid rgba(100, 200, 150, 0.5);
-  padding: 16px;
-  border-radius: 12px;
-  align-self: center;
-  text-align: center;
+  align-self: flex-start;
+  text-align: left;
+  border-bottom: 3px solid transparent;
+  border-image: linear-gradient(to right, rgba(40, 180, 100, 0.7), transparent) 1;
+  padding-bottom: 8px;
 }
 
 /* Animations */
@@ -298,19 +301,19 @@
   font-family: Roboto, Noto, sans-serif;
 }
 
-/* Timer Pills */
+/* Timer Pills — white card with subtle shadow */
 .vs-timer-pill {
   position: relative;
   overflow: hidden;
-  font-size: calc(30px * var(--vs-text-scale, 1));
+  font-size: calc(28px * var(--vs-text-scale, 1));
   color: #444444;
   font-weight: bold;
   font-style: normal;
   background: #ffffff;
-  border: 3px solid rgba(0, 180, 255, 0.5);
-  padding: 16px;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: none;
+  padding: 14px 18px;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 4px 16px rgba(0, 0, 0, 0.06);
   animation: vs-timer-fade-in 0.3s ease forwards;
   pointer-events: auto;
   cursor: default;
@@ -323,8 +326,8 @@
   top: 0;
   left: 0;
   height: 100%;
-  background: rgba(0, 180, 255, 0.5);
-  opacity: 0.3;
+  background: rgba(0, 180, 255, 0.12);
+  opacity: 1;
   transition: width 1s linear;
   pointer-events: none;
 }
@@ -358,16 +361,16 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: calc(30px * var(--vs-text-scale, 1));
+  font-size: calc(28px * var(--vs-text-scale, 1));
   font-family: Roboto, Noto, sans-serif;
   color: #444444;
   font-weight: bold;
   font-style: normal;
   background: #ffffff;
-  border: 3px solid rgba(0, 180, 255, 0.5);
-  padding: 16px;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  border: none;
+  padding: 18px 24px;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 8px 24px rgba(0, 0, 0, 0.1);
   z-index: 10002;
   animation: vs-timer-alert-pulse 1.5s ease-in-out infinite;
   user-select: none;
@@ -413,7 +416,7 @@
   }
 }
 
-/* Image Panel — right-side slide-in panel for tool results */
+/* Image Panel — white card */
 #voice-satellite-ui .vs-image-panel {
   position: fixed;
   top: 50%;
@@ -425,10 +428,10 @@
   z-index: 10001;
   pointer-events: none;
   display: none;
-  background: rgba(0, 0, 0, 0.6);
-  border-radius: 16px;
+  background: #ffffff;
+  border-radius: 20px;
   padding: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 8px 24px rgba(0, 0, 0, 0.1);
 }
 
 #voice-satellite-ui .vs-panel-scroll {
@@ -437,7 +440,7 @@
   padding-right: 8px;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.4) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 #voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar {
@@ -449,12 +452,12 @@
 }
 
 #voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.15);
   border-radius: 3px;
 }
 
 #voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 #voice-satellite-ui .vs-image-panel.visible {
@@ -483,7 +486,7 @@
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 12px;
   opacity: 0;
   animation: vs-chat-fade-in 0.3s ease forwards;
 }
@@ -507,14 +510,14 @@
   max-width: 90vw;
   max-height: 90vh;
   object-fit: contain;
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 #voice-satellite-ui .vs-lightbox-iframe {
   width: 90vw;
   max-width: 1200px;
   aspect-ratio: 16 / 9;
-  border-radius: 8px;
+  border-radius: 12px;
   display: none;
 }
 
@@ -539,7 +542,7 @@
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 #voice-satellite-ui .vs-video-duration {
@@ -561,7 +564,7 @@
 #voice-satellite-ui .vs-video-title {
   font-size: 14px;
   font-weight: 500;
-  color: #fff;
+  color: #333333;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -570,11 +573,19 @@
 
 #voice-satellite-ui .vs-video-channel {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: #888888;
   margin-top: 2px;
 }
 
 /* Chat narrows when image panel is open */
 #voice-satellite-ui.has-images .vs-chat-container {
   right: calc(45% + 80px);
+}
+
+#voice-satellite-ui.has-featured .vs-chat-container {
+  right: calc(25% + 80px);
+}
+
+#voice-satellite-ui .vs-image-panel.featured {
+  width: 25%;
 }

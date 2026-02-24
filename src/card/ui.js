@@ -284,8 +284,9 @@ export class UIManager {
    * Show the image panel with a 2-column grid of images.
    * @param {Array<{image_url: string, thumbnail_url?: string, title?: string}>} results
    * @param {boolean} [autoDisplay=false] - If true, auto-open lightbox with first image
+   * @param {boolean} [featured=false] - If true, use narrower panel (featured image from web/wiki search)
    */
-  showImagePanel(results, autoDisplay) {
+  showImagePanel(results, autoDisplay, featured) {
     if (!this._globalUI) return;
     const panel = this._globalUI.querySelector('.vs-image-panel');
     const scroll = panel.querySelector('.vs-panel-scroll');
@@ -331,8 +332,10 @@ export class UIManager {
     }
 
     scroll.appendChild(grid);
+    panel.classList.toggle('featured', !!featured);
     panel.classList.add('visible');
-    this._globalUI.classList.add('has-images');
+    this._globalUI.classList.toggle('has-featured', !!featured);
+    if (!featured) this._globalUI.classList.add('has-images');
 
     // Auto-display: open lightbox with first image immediately
     if (autoDisplay && items.length > 0) {
@@ -426,7 +429,7 @@ export class UIManager {
   hasVisibleImages() {
     if (!this._globalUI) return false;
     const panel = this._globalUI.querySelector('.vs-image-panel');
-    return panel && panel.classList.contains('visible');
+    return panel && panel.classList.contains('visible') && !panel.classList.contains('featured');
   }
 
   showLightbox(src) {
@@ -521,9 +524,9 @@ export class UIManager {
       if (scroll) {
         while (scroll.firstChild) scroll.removeChild(scroll.firstChild);
       }
-      panel.classList.remove('visible');
+      panel.classList.remove('visible', 'featured');
     }
-    this._globalUI.classList.remove('has-images');
+    this._globalUI.classList.remove('has-images', 'has-featured');
     this.hideLightbox();
   }
 

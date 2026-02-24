@@ -23,7 +23,7 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 - [Integration](#integration)
 - [Usage](#usage)
 - [Skins](#skins)
-- [Experimental: Image & Video Search](#experimental-image--video-search)
+- [Experimental: LLM Tools](#experimental-llm-tools)
 - [Troubleshooting](#troubleshooting)
 - [Requirements](#requirements)
 - [Contributing](#contributing)
@@ -80,7 +80,7 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 - **Ask Question** - Receive `assist_satellite.ask_question` calls that speak a question, capture the user's voice response, and match it against predefined answers using hassil sentence templates. Returns structured results to the calling automation.
 - **Screensaver Control** - Automatically dismisses a configured screensaver entity when a voice interaction begins.
 - **Media Player Entity** - Each satellite exposes a `media_player` entity. Volume is controlled via the entity's volume slider in HA and applies to all audio (chimes, TTS, announcements). Supports `tts.speak` and `media_player.play_media` targeting from automations.
-- **Image & Video Search** *(Experimental)* - Search for images and YouTube videos by voice. Results display in a scrollable media panel with fullscreen lightbox viewing and video playback. Requires the [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration.
+- **LLM Tools** *(Experimental)* - Enhance your voice assistant with visual tools: search for images and YouTube videos displayed in a media panel, get web search results with featured images, and look up Wikipedia articles with summaries and images. Requires the [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration.
 
 ## Prerequisites
 
@@ -167,7 +167,7 @@ Each satellite device exposes configuration entities on its device page (**Setti
 | **Finished speaking detection** | Select | VAD sensitivity — how aggressively to detect end of speech |
 | **TTS Output** | Select | Where to play TTS audio: "Browser" (default) plays audio locally, or select any `media_player` entity to route TTS to an external speaker |
 | **Screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
-| **Announcement display duration** | Number | How long (1–60 seconds) to show the announcement bubble on screen after playback completes |
+| **Announcement display duration** | Number | How long (1–60 seconds) to show the announcement text on screen after playback completes |
 | **Mute** | Switch | Mute/unmute the satellite — when muted, wake word detection is paused |
 | **Wake sound** | Switch | Enable/disable chime sounds (wake, done, error) |
 
@@ -363,7 +363,7 @@ The card includes a skin system that themes the entire UI — activity bar, text
 
 | Skin | Description |
 |------|-------------|
-| **Default** | Rainbow gradient bar, bordered text containers, clean look |
+| **Default** | Rainbow gradient bar with enhanced glow, floating text with colored fading borders, white overlay |
 | **Alexa** | Cyan glow bar, dark overlay, centered bold text, Echo-inspired design |
 | **Google Home** | Four-color Google gradient bar, left-aligned text, light overlay, Nest-inspired design |
 | **Retro Terminal** | Green phosphor CRT aesthetic with scanlines, bezel frame, monospace font, and screen-edge glow |
@@ -388,9 +388,9 @@ Each skin defines CSS classes for all UI elements. Use the **Custom CSS** field 
 }
 ```
 
-## Experimental: Image & Video Search
+## Experimental: LLM Tools
 
-The card supports displaying image and video search results inline during voice interactions. Ask your assistant to search for images or videos, and results appear in a scrollable media panel on the right side of the screen.
+The card supports displaying rich visual results from LLM tool calls inline during voice interactions. These features require the **[Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)** integration, which provides the tools to your conversation agent.
 
 > **Requirements:**
 > - Install the **[Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)** integration, which provides the search tools to your conversation agent.
@@ -417,6 +417,24 @@ Ask your assistant to search for videos:
 - *"Find YouTube videos about woodworking"*
 
 Results appear as video cards showing the thumbnail, duration, title, and channel name. Tap any video to play it in the lightbox via YouTube embed. When a video is playing, TTS audio is automatically suppressed.
+
+### Web Search
+
+Ask your assistant to search the web:
+
+- *"Search the web for Home Assistant 2025 new features"*
+- *"Look up the weather forecast for this weekend"*
+
+The assistant responds with a summary of the search results. If the search returns a relevant featured image, it is displayed alongside the response.
+
+### Wikipedia Search
+
+Ask your assistant to look up topics on Wikipedia:
+
+- *"Tell me about the James Webb Space Telescope"*
+- *"Look up the history of the Roman Empire"*
+
+The assistant responds with a summary from the Wikipedia article. If the article includes a main image, it is displayed alongside the response.
 
 ## Troubleshooting
 

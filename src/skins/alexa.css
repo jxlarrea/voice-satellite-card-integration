@@ -276,6 +276,10 @@
   font-weight: bold;
   align-self: center;
   text-align: center;
+  max-height: 70vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 202, 255, 0.3) transparent;
 }
 
 #voice-satellite-ui .vs-chat-msg.announcement {
@@ -593,4 +597,12 @@
 /* Chat narrows when image panel is open */
 #voice-satellite-ui.has-images .vs-chat-container {
   right: calc(45% + 80px);
+}
+
+#voice-satellite-ui.has-featured .vs-chat-container {
+  right: calc(25% + 80px);
+}
+
+#voice-satellite-ui .vs-image-panel.featured {
+  width: 25%;
 }

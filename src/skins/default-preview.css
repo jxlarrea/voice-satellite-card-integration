@@ -4,6 +4,10 @@
   font-family: Roboto, Noto, sans-serif;
 }
 
+.preview-blur {
+  background: rgba(255, 255, 255, 0.85);
+}
+
 .preview-bar {
   height: 16px;
   background: linear-gradient(90deg, #FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC, #FF7777);
@@ -12,30 +16,36 @@
 
 .preview-chat {
   align-items: flex-start;
+  gap: 20px;
 }
 
 .preview-msg {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: none;
 }
 
 .preview-msg.user {
   font-size: 30px;
-  color: #444444;
-  background: #ffffff;
-  border: 3px solid rgba(0, 180, 255, 0.5);
-  padding: 16px;
-  border-radius: 12px;
-  align-self: flex-end;
+  color: rgba(50, 50, 50, 0.65);
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  border-image: linear-gradient(to right, rgba(0, 150, 220, 0.7), transparent) 1;
+  padding: 4px 0 8px;
+  border-radius: 0;
+  align-self: flex-start;
   text-align: left;
 }
 
 .preview-msg.assistant {
-  font-size: 30px;
-  color: #444444;
-  background: #ffffff;
-  border: 3px solid rgba(100, 200, 150, 0.5);
-  padding: 16px;
-  border-radius: 12px;
+  font-size: 34px;
+  color: #333333;
+  font-weight: 400;
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  border-image: linear-gradient(to right, rgba(40, 180, 100, 0.7), transparent) 1;
+  padding: 4px 0 8px;
+  border-radius: 0;
   align-self: flex-start;
   text-align: left;
 }
@@ -43,14 +53,14 @@
 .preview-timer {
   color: #444444;
   background: #ffffff;
-  border: 3px solid rgba(0, 180, 255, 0.5);
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: none;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 4px 16px rgba(0, 0, 0, 0.06);
 }
 
 .preview-timer-progress {
-  background: rgba(0, 180, 255, 0.5);
-  opacity: 0.3;
+  background: rgba(0, 180, 255, 0.12);
+  opacity: 1;
 }
 
 .preview-label {

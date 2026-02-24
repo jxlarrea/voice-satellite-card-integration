@@ -167,6 +167,10 @@ export function handleIntentProgress(mgr, eventData) {
         mgr.card.chat.addImages(images, !!toolResult.auto_display);
       }
     }
+    // Featured image from web search / Wikipedia — narrower panel
+    if (toolResult?.featured_image) {
+      mgr.card.chat.addImages([{ image_url: toolResult.featured_image }], false, true);
+    }
     return;
   }
 

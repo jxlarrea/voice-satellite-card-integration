@@ -38,6 +38,7 @@ export class ChatManager {
   showResponse(text) {
     if (this._streamEl) {
       this._card.ui.updateChatText(this._streamEl, text);
+      this._autoScroll();
     } else {
       this.addAssistant(text);
     }
@@ -57,8 +58,8 @@ export class ChatManager {
     this._card.ui.addChatMessage(text, 'user');
   }
 
-  addImages(results, autoDisplay) {
-    this._card.ui.showImagePanel(results, autoDisplay);
+  addImages(results, autoDisplay, featured) {
+    this._card.ui.showImagePanel(results, autoDisplay, featured);
   }
 
   addVideos(results, autoPlay) {
@@ -107,6 +108,7 @@ export class ChatManager {
 
     if (text.length <= FADE_LEN) {
       this._card.ui.updateChatText(this._streamEl, text);
+      this._autoScroll();
       return;
     }
 
@@ -122,6 +124,16 @@ export class ChatManager {
     this._solidNode.textContent = solid;
     for (let i = 0; i < FADE_LEN; i++) {
       this._fadeSpans[i].textContent = i < tail.length ? tail[i] : '';
+    }
+
+    this._autoScroll();
+  }
+
+  /** Scroll the stream element to the bottom if it overflows. */
+  _autoScroll() {
+    const el = this._streamEl;
+    if (el && el.scrollHeight > el.clientHeight) {
+      el.scrollTop = el.scrollHeight;
     }
   }
 

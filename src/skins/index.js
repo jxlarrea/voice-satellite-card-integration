@@ -6,7 +6,6 @@ import { defaultSkin } from './default.js';
 import { alexaSkin } from './alexa.js';
 import { googleHomeSkin } from './google-home.js';
 import { retroTerminalSkin } from './retro-terminal.js';
-
 /** All registered skins keyed by id */
 const SKINS = {
   [defaultSkin.id]: defaultSkin,
