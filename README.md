@@ -12,6 +12,23 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 
 ![screenshot](https://github.com/user-attachments/assets/728b03ac-1084-4198-8c47-93ca80edc171)
 
+## Table of Contents
+
+- [Why This Card?](#why-this-card)
+- [Important: Browser Requirements](#important-browser-requirements)
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Setup](#setup)
+- [Integration](#integration)
+- [Usage](#usage)
+- [Skins](#skins)
+- [Experimental: Image & Video Search](#experimental-image--video-search)
+- [Troubleshooting](#troubleshooting)
+- [Requirements](#requirements)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Why This Card?
 
 Home Assistant's built-in voice features require dedicated hardware like ESPHome devices or the Home Assistant Voice Preview Edition. But what if you already have a tablet mounted on your wall running the Home Assistant dashboard?
@@ -63,6 +80,7 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 - **Ask Question** - Receive `assist_satellite.ask_question` calls that speak a question, capture the user's voice response, and match it against predefined answers using hassil sentence templates. Returns structured results to the calling automation.
 - **Screensaver Control** - Automatically dismisses a configured screensaver entity when a voice interaction begins.
 - **Media Player Entity** - Each satellite exposes a `media_player` entity. Volume is controlled via the entity's volume slider in HA and applies to all audio (chimes, TTS, announcements). Supports `tts.speak` and `media_player.play_media` targeting from automations.
+- **Image & Video Search** *(Experimental)* - Search for images and YouTube videos by voice. Results display in a scrollable media panel with fullscreen lightbox viewing and video playback. Requires the [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration.
 
 ## Prerequisites
 
@@ -369,6 +387,32 @@ Each skin defines CSS classes for all UI elements. Use the **Custom CSS** field 
   font-family: "Comic Sans MS", cursive;
 }
 ```
+
+## Experimental: Image & Video Search
+
+The card supports displaying image and video search results inline during voice interactions. Ask your assistant to search for images or videos, and results appear in a scrollable media panel on the right side of the screen.
+
+> **Requirements:**
+> - Install the **[Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)** integration, which provides the search tools to your conversation agent.
+> - Your Assist pipeline must use a **conversational AI agent** (e.g., OpenAI, Google Generative AI, Anthropic, Ollama, etc.). The built-in Home Assistant conversation agent does not support tool calling and cannot use these features.
+
+### Image Search
+
+Ask your assistant to search for images:
+
+- *"Show me images of golden retrievers"*
+- *"Search for pictures of the Eiffel Tower"*
+
+Results appear as a thumbnail grid in the media panel. Tap any image to view it fullscreen in a lightbox. The panel stays visible for 30 seconds after TTS completes, and can be dismissed at any time with a double-tap, double-click, or the Escape key.
+
+### Video Search
+
+Ask your assistant to search for videos:
+
+- *"Search for cooking videos"*
+- *"Find YouTube videos about woodworking"*
+
+Results appear as video cards showing the thumbnail, duration, title, and channel name. Tap any video to play it in the lightbox via YouTube embed. When a video is playing, TTS audio is automatically suppressed.
 
 ## Troubleshooting
 
