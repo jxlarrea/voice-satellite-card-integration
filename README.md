@@ -136,7 +136,7 @@ browser_satellite_override: true
 
 If only one satellite entity exists, it is auto-selected without showing the popup.
 
-To change the selected satellite on a device, clear the browser's local storage for your Home Assistant URL, or toggle the option off and on again.
+To change the selected satellite on a device, toggle the option off and on again.
 
 ### Visual Editor
 
