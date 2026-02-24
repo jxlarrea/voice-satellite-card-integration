@@ -7,6 +7,7 @@
 import { State, INTERACTING_STATES, EXPECTED_ERRORS, BlurReason, Timing } from '../constants.js';
 import { getSwitchState } from '../shared/satellite-state.js';
 import { CHIME_WAKE } from '../audio/chime.js';
+import { onTTSComplete } from '../card/events.js';
 
 /**
  * Run-start: binaryHandlerId is already set from the init event.
@@ -89,6 +90,12 @@ export function handleWakeWordEnd(mgr, eventData) {
     mgr.intentErrorBarTimeout = null;
   }
 
+  // Cancel any pending image linger timeout from previous interaction
+  if (mgr.card._imageLingerTimeout) {
+    clearTimeout(mgr.card._imageLingerTimeout);
+    mgr.card._imageLingerTimeout = null;
+  }
+
   mgr.card.chat.clear();
   mgr.shouldContinue = false;
   mgr.continueConversationId = null;
@@ -137,7 +144,7 @@ export function handleSttEnd(mgr, eventData) {
 export function handleIntentProgress(mgr, eventData) {
   const { tts } = mgr.card;
 
-  if (eventData.tts_start_streaming && tts.streamingUrl && !tts.isPlaying) {
+  if (eventData.tts_start_streaming && tts.streamingUrl && !tts.isPlaying && !mgr.card._videoPlaying) {
     mgr.log.log('tts', 'Streaming TTS started — playing early');
     mgr.card.setState(State.TTS);
     tts.play(tts.streamingUrl);
@@ -145,6 +152,24 @@ export function handleIntentProgress(mgr, eventData) {
   }
 
   if (!eventData.chat_log_delta) return;
+
+  // Handle tool results (e.g., image search, video search)
+  if (eventData.chat_log_delta.role === 'tool_result') {
+    const toolResult = eventData.chat_log_delta.tool_result;
+    const results = toolResult?.results;
+    if (Array.isArray(results)) {
+      const videos = results.filter(r => r.video_id);
+      if (videos.length > 0) {
+        mgr.card.chat.addVideos(videos, !!toolResult.auto_play);
+      }
+      const images = results.filter(r => r.image_url && !r.video_id);
+      if (images.length > 0) {
+        mgr.card.chat.addImages(images, !!toolResult.auto_display);
+      }
+    }
+    return;
+  }
+
   const chunk = eventData.chat_log_delta.content;
   if (typeof chunk !== 'string') return;
 
@@ -206,6 +231,8 @@ export function handleTtsEnd(mgr, eventData) {
   if (mgr.suppressTTS) {
     mgr.suppressTTS = false;
     mgr.log.log('tts', 'TTS suppressed (intent error)');
+    // Still run cleanup so blur/chat don't stay stuck on screen
+    onTTSComplete(mgr.card, true);
     mgr.restart(0);
     return;
   }
@@ -223,7 +250,12 @@ export function handleTtsEnd(mgr, eventData) {
   const url = eventData.tts_output?.url || eventData.tts_output?.url_path || null;
   if (url) {
     tts.storeTtsEndUrl(url);
-    tts.play(url);
+    if (!mgr.card._videoPlaying) {
+      tts.play(url);
+    } else {
+      // Video is playing — skip TTS but still run cleanup so UI doesn't get stuck
+      onTTSComplete(mgr.card, false);
+    }
   }
 
   mgr.restart(0);

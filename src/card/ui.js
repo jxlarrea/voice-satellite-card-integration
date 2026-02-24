@@ -48,6 +48,8 @@ export class UIManager {
       '<svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>' +
       '</button>' +
       '<div class="vs-chat-container"></div>' +
+      '<div class="vs-image-panel"><div class="vs-panel-scroll"></div></div>' +
+      '<div class="vs-lightbox"><img class="vs-lightbox-img" /><iframe class="vs-lightbox-iframe" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div>' +
       '<div class="vs-rainbow-bar"></div>';
 
     document.body.appendChild(ui);
@@ -133,6 +135,16 @@ export class UIManager {
       this._globalUI.classList.remove('reactive-mode');
       if (reactive) this._card.analyser.stop();
     }
+  }
+
+  /**
+   * Stop only the reactive bar (analyser + class) without hiding the bar.
+   */
+  stopReactive() {
+    if (!this._globalUI) return;
+    const bar = this._globalUI.querySelector('.vs-rainbow-bar');
+    bar.classList.remove('reactive');
+    this._card.analyser.stop();
   }
 
   // ─── Start Button ─────────────────────────────────────────────────
@@ -269,15 +281,250 @@ export class UIManager {
   }
 
   /**
-   * Clear all chat messages.
+   * Show the image panel with a 2-column grid of images.
+   * @param {Array<{image_url: string, thumbnail_url?: string, title?: string}>} results
+   * @param {boolean} [autoDisplay=false] - If true, auto-open lightbox with first image
+   */
+  showImagePanel(results, autoDisplay) {
+    if (!this._globalUI) return;
+    const panel = this._globalUI.querySelector('.vs-image-panel');
+    const scroll = panel.querySelector('.vs-panel-scroll');
+
+    const items = results;
+    const single = items.length === 1;
+
+    const grid = document.createElement('div');
+    grid.className = single ? 'vs-image-grid single' : 'vs-image-grid';
+
+    let loaded = 0;
+    for (const result of items) {
+      const img = document.createElement('img');
+      img.className = 'vs-panel-img';
+      img.src = result.thumbnail_url || result.image_url;
+      img.alt = result.title || '';
+      img.loading = 'eager';
+      img.onerror = () => {
+        img.remove();
+        if (!grid.hasChildNodes()) {
+          panel.classList.remove('visible');
+          this._globalUI.classList.remove('has-images');
+        }
+      };
+      const fullSrc = result.image_url;
+      img.addEventListener('click', () => this.showLightbox(fullSrc));
+      img.style.cursor = 'pointer';
+      grid.appendChild(img);
+      loaded++;
+    }
+
+    if (loaded === 0) return;
+
+    // Cancel linger timeout on first scroll — user is browsing
+    if (!scroll._vsScrollHandler) {
+      scroll._vsScrollHandler = () => {
+        if (this._card._imageLingerTimeout) {
+          clearTimeout(this._card._imageLingerTimeout);
+          this._card._imageLingerTimeout = null;
+        }
+      };
+      scroll.addEventListener('scroll', scroll._vsScrollHandler, { passive: true });
+    }
+
+    scroll.appendChild(grid);
+    panel.classList.add('visible');
+    this._globalUI.classList.add('has-images');
+
+    // Auto-display: open lightbox with first image immediately
+    if (autoDisplay && items.length > 0) {
+      this.showLightbox(items[0].image_url);
+    }
+  }
+
+  showVideoPanel(results, autoPlay) {
+    if (!this._globalUI) return;
+    const panel = this._globalUI.querySelector('.vs-image-panel');
+    const scroll = panel.querySelector('.vs-panel-scroll');
+
+    const grid = document.createElement('div');
+    grid.className = 'vs-video-grid';
+
+    let loaded = 0;
+    for (const result of results) {
+      const card = document.createElement('div');
+      card.className = 'vs-video-card';
+
+      // Thumbnail wrapper with duration badge
+      const thumbWrap = document.createElement('div');
+      thumbWrap.className = 'vs-video-thumb-wrap';
+
+      const thumb = document.createElement('img');
+      thumb.className = 'vs-video-thumb';
+      thumb.src = result.thumbnail_url || '';
+      thumb.alt = result.title || '';
+      thumb.loading = 'eager';
+      thumb.onerror = () => card.remove();
+      thumbWrap.appendChild(thumb);
+
+      if (result.duration) {
+        const badge = document.createElement('span');
+        badge.className = 'vs-video-duration';
+        badge.textContent = this._parseDuration(result.duration);
+        thumbWrap.appendChild(badge);
+      }
+
+      card.appendChild(thumbWrap);
+
+      // Video info
+      const info = document.createElement('div');
+      info.className = 'vs-video-info';
+
+      const title = document.createElement('div');
+      title.className = 'vs-video-title';
+      title.textContent = result.title || '';
+      info.appendChild(title);
+
+      const channel = document.createElement('div');
+      channel.className = 'vs-video-channel';
+      channel.textContent = result.channel_name || '';
+      info.appendChild(channel);
+
+      card.appendChild(info);
+
+      const videoId = result.video_id;
+      card.addEventListener('click', () => this.showVideoLightbox(videoId));
+      card.style.cursor = 'pointer';
+      grid.appendChild(card);
+      loaded++;
+    }
+
+    if (loaded === 0) return;
+
+    // Cancel linger timeout on first scroll — user is browsing
+    if (!scroll._vsScrollHandler) {
+      scroll._vsScrollHandler = () => {
+        if (this._card._imageLingerTimeout) {
+          clearTimeout(this._card._imageLingerTimeout);
+          this._card._imageLingerTimeout = null;
+        }
+      };
+      scroll.addEventListener('scroll', scroll._vsScrollHandler, { passive: true });
+    }
+
+    scroll.appendChild(grid);
+    panel.classList.add('visible');
+    this._globalUI.classList.add('has-images');
+
+    // Auto-play: open lightbox with first video immediately
+    if (autoPlay && results.length > 0) {
+      this.showVideoLightbox(results[0].video_id);
+    }
+  }
+
+  /**
+   * Returns true if the image panel is currently visible.
+   */
+  hasVisibleImages() {
+    if (!this._globalUI) return false;
+    const panel = this._globalUI.querySelector('.vs-image-panel');
+    return panel && panel.classList.contains('visible');
+  }
+
+  showLightbox(src) {
+    if (!this._globalUI) return;
+    const lb = this._globalUI.querySelector('.vs-lightbox');
+    const img = lb.querySelector('.vs-lightbox-img');
+    const iframe = lb.querySelector('.vs-lightbox-iframe');
+    // Image mode — hide iframe, show img
+    iframe.style.display = 'none';
+    iframe.removeAttribute('src');
+    img.style.display = '';
+    img.src = src;
+    lb.classList.add('visible');
+    // Cancel the linger timeout — UI stays until user double-taps
+    if (this._card._imageLingerTimeout) {
+      clearTimeout(this._card._imageLingerTimeout);
+      this._card._imageLingerTimeout = null;
+    }
+    // Tap lightbox to close it and return to the panel
+    if (!lb._vsCloseHandler) {
+      lb._vsCloseHandler = () => this.hideLightbox();
+      lb.addEventListener('click', lb._vsCloseHandler);
+    }
+  }
+
+  showVideoLightbox(videoId) {
+    if (!this._globalUI) return;
+    // Stop TTS if already playing, and suppress future TTS for this interaction
+    if (this._card.tts.isPlaying) this._card.tts.stop();
+    this._card._videoPlaying = true;
+    const lb = this._globalUI.querySelector('.vs-lightbox');
+    const img = lb.querySelector('.vs-lightbox-img');
+    const iframe = lb.querySelector('.vs-lightbox-iframe');
+    // Video mode — hide img, show iframe
+    img.style.display = 'none';
+    img.src = '';
+    iframe.style.display = 'block';
+    iframe.src = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1`;
+    lb.classList.add('visible');
+    // Cancel the linger timeout — UI stays until user double-taps
+    if (this._card._imageLingerTimeout) {
+      clearTimeout(this._card._imageLingerTimeout);
+      this._card._imageLingerTimeout = null;
+    }
+    // Tap lightbox to close it and return to the panel
+    if (!lb._vsCloseHandler) {
+      lb._vsCloseHandler = () => this.hideLightbox();
+      lb.addEventListener('click', lb._vsCloseHandler);
+    }
+  }
+
+  hideLightbox() {
+    if (!this._globalUI) return;
+    this._card._videoPlaying = false;
+    const lb = this._globalUI.querySelector('.vs-lightbox');
+    lb.classList.remove('visible');
+    lb.querySelector('.vs-lightbox-img').src = '';
+    lb.querySelector('.vs-lightbox-img').style.display = '';
+    const iframe = lb.querySelector('.vs-lightbox-iframe');
+    iframe.removeAttribute('src');
+    iframe.style.display = 'none';
+  }
+
+  _parseDuration(iso) {
+    const m = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(iso);
+    if (!m) return iso;
+    const h = parseInt(m[1] || '0', 10);
+    const min = parseInt(m[2] || '0', 10);
+    const sec = parseInt(m[3] || '0', 10);
+    if (h > 0) return `${h}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    return `${min}:${String(sec).padStart(2, '0')}`;
+  }
+
+  isLightboxVisible() {
+    if (!this._globalUI) return false;
+    const lb = this._globalUI.querySelector('.vs-lightbox');
+    return lb && lb.classList.contains('visible');
+  }
+
+  /**
+   * Clear all chat messages and the image panel.
    */
   clearChat() {
     if (!this._globalUI) return;
     const container = this._globalUI.querySelector('.vs-chat-container');
-    while (container.firstChild) {
-      container.removeChild(container.firstChild);
-    }
+    while (container.firstChild) container.removeChild(container.firstChild);
     container.classList.remove('visible');
+
+    const panel = this._globalUI.querySelector('.vs-image-panel');
+    if (panel) {
+      const scroll = panel.querySelector('.vs-panel-scroll');
+      if (scroll) {
+        while (scroll.firstChild) scroll.removeChild(scroll.firstChild);
+      }
+      panel.classList.remove('visible');
+    }
+    this._globalUI.classList.remove('has-images');
+    this.hideLightbox();
   }
 
   /**

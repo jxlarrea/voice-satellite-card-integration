@@ -196,18 +196,18 @@
 /* Chat Container — left-aligned, Nest Hub style */
 #voice-satellite-ui .vs-chat-container {
   position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 7.5%;
+  right: 7.5%;
   bottom: 72px;
   display: none;
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
-  max-width: 85%;
-  width: 85%;
+  width: auto;
   z-index: 10001;
   pointer-events: none;
   overflow: visible;
+  transition: left 0.4s ease, right 0.4s ease;
 }
 
 #voice-satellite-ui .vs-chat-container.visible {
@@ -220,6 +220,9 @@
 }
 
 #voice-satellite-ui .vs-chat-container.announcement-mode {
+  left: 50% !important;
+  right: auto !important;
+  width: 85%;
   top: 50% !important;
   bottom: auto !important;
   transform: translate(-50%, -50%);
@@ -404,4 +407,170 @@
     transform: translate(-50%, -50%) scale(1.04);
     box-shadow: 0 2px 6px rgba(60, 64, 67, 0.15), 0 12px 32px rgba(66, 133, 244, 0.2);
   }
+}
+
+/* Image Panel — right-side slide-in panel for tool results */
+#voice-satellite-ui .vs-image-panel {
+  position: fixed;
+  top: 50%;
+  right: 40px;
+  transform: translateY(-50%);
+  width: 45%;
+  max-height: 70vh;
+  overflow: hidden;
+  z-index: 10001;
+  pointer-events: none;
+  display: none;
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 12px;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.15), 0 8px 24px rgba(60, 64, 67, 0.15);
+}
+
+#voice-satellite-ui .vs-panel-scroll {
+  overflow-y: auto;
+  max-height: calc(70vh - 24px);
+  padding-right: 8px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(60, 64, 67, 0.35) transparent;
+}
+
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-thumb {
+  background: rgba(60, 64, 67, 0.35);
+  border-radius: 3px;
+}
+
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(60, 64, 67, 0.5);
+}
+
+#voice-satellite-ui .vs-image-panel.visible {
+  display: block;
+  pointer-events: auto;
+}
+
+#voice-satellite-ui .vs-image-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+}
+
+#voice-satellite-ui .vs-image-grid.single {
+  grid-template-columns: 1fr;
+}
+
+#voice-satellite-ui .vs-image-grid.single .vs-panel-img {
+  aspect-ratio: auto;
+  max-height: calc(70vh - 24px);
+  object-fit: contain;
+}
+
+#voice-satellite-ui .vs-panel-img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 12px;
+  opacity: 0;
+  animation: google-fade-in 0.3s ease forwards;
+}
+
+/* Lightbox — fullscreen image viewer */
+#voice-satellite-ui .vs-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.92);
+}
+
+#voice-satellite-ui .vs-lightbox.visible {
+  display: flex;
+}
+
+#voice-satellite-ui .vs-lightbox-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+#voice-satellite-ui .vs-lightbox-iframe {
+  width: 90vw;
+  max-width: 1200px;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  display: none;
+}
+
+/* Video grid */
+#voice-satellite-ui .vs-video-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  width: 100%;
+}
+
+#voice-satellite-ui .vs-video-card {
+  cursor: pointer;
+}
+
+#voice-satellite-ui .vs-video-thumb-wrap {
+  position: relative;
+  width: 100%;
+}
+
+#voice-satellite-ui .vs-video-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+#voice-satellite-ui .vs-video-duration {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+#voice-satellite-ui .vs-video-info {
+  padding: 8px 4px 0;
+}
+
+#voice-satellite-ui .vs-video-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1a1a1a;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+#voice-satellite-ui .vs-video-channel {
+  font-size: 12px;
+  color: #666;
+  margin-top: 2px;
+}
+
+/* Chat narrows when image panel is open */
+#voice-satellite-ui.has-images .vs-chat-container {
+  right: calc(45% + 80px);
 }

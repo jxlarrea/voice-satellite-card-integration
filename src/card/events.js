@@ -126,21 +126,36 @@ export function onTTSComplete(card, playbackFailed) {
     return;
   }
 
-  // Normal completion
+  // Normal completion — skip done chime on error (error chime already played)
   const isRemote = !!card.ttsTarget;
-  if (getSwitchState(card.hass, card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+  if (!playbackFailed && getSwitchState(card.hass, card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
     card.tts.playChime('done');
   }
 
-  card.chat.clear();
-  card.ui.hideBlurOverlay(BlurReason.PIPELINE);
-  card.ui.updateForState(card.currentState, card.pipeline.serviceUnavailable, false);
-  syncSatelliteState(card, 'IDLE');
+  const cleanup = () => {
+    card._imageLingerTimeout = null;
+    // User is actively browsing images — don't auto-dismiss
+    if (card.ui.isLightboxVisible()) return;
+    card.chat.clear();
+    card.ui.hideBlurOverlay(BlurReason.PIPELINE);
+    card.ui.updateForState(card.currentState, card.pipeline.serviceUnavailable, false);
+    syncSatelliteState(card, 'IDLE');
 
-  // Play any queued notifications
-  card.announcement.playQueued();
-  card.askQuestion.playQueued();
-  card.startConversation.playQueued();
+    // Play any queued notifications
+    card.announcement.playQueued();
+    card.askQuestion.playQueued();
+    card.startConversation.playQueued();
+  };
+
+  // When images are showing, keep the visual UI for 30 seconds
+  // Stop only the mic reactivity so the bar doesn't respond to audio
+  if (card.ui.hasVisibleImages()) {
+    card.ui.stopReactive();
+    if (card._imageLingerTimeout) clearTimeout(card._imageLingerTimeout);
+    card._imageLingerTimeout = setTimeout(cleanup, 30000);
+  } else {
+    cleanup();
+  }
 }
 
 /**

@@ -57,6 +57,14 @@ export class ChatManager {
     this._card.ui.addChatMessage(text, 'user');
   }
 
+  addImages(results, autoDisplay) {
+    this._card.ui.showImagePanel(results, autoDisplay);
+  }
+
+  addVideos(results, autoPlay) {
+    this._card.ui.showVideoPanel(results, autoPlay);
+  }
+
   addAssistant(text) {
     this._streamEl = this._card.ui.addChatMessage(text, 'assistant');
     this._fadeSpans = null;

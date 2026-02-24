@@ -47,8 +47,15 @@ export class VisibilityManager {
       // would otherwise fire after resume and double-restart the pipeline.
       this._card.askQuestion.cancel();
 
-      if (INTERACTING_STATES.includes(this._card.currentState)) {
-        this._log.log('visibility', 'Tab hidden during interaction — cleaning up UI');
+      const isInteracting = INTERACTING_STATES.includes(this._card.currentState);
+      const isLingering = this._card._imageLingerTimeout || this._card.ui.hasVisibleImages() || this._card.ui.isLightboxVisible();
+
+      if (isInteracting || isLingering) {
+        this._log.log('visibility', `Tab hidden — cleaning up UI (interacting=${isInteracting}, lingering=${!!isLingering})`);
+        if (this._card._imageLingerTimeout) {
+          clearTimeout(this._card._imageLingerTimeout);
+          this._card._imageLingerTimeout = null;
+        }
         this._card.chat.clear();
         this._card.ui.hideBlurOverlay(BlurReason.PIPELINE);
         this._card.pipeline.clearContinueState();
