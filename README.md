@@ -5,7 +5,7 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-blue.svg?style=for-the-badge)](https://www.hacs.xyz/docs/faq/custom_repositories/)
 [![Downloads](https://img.shields.io/github/downloads/jxlarrea/voice-satellite-card-integration/total?style=for-the-badge&label=Downloads&color=red)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
 [![version](https://shields.io/github/v/release/jxlarrea/voice-satellite-card-integration?style=for-the-badge&color=orange)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
-[![Latest Release](https://img.shields.io/badge/dynamic/json?style=for-the-badge&color=41BDF5&logo=home-assistant&label=home%20assistant&suffix=%20installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/custom_integrations.json&query=$.voice_satellite.total)](https://analytics.home-assistant.io/custom_integrations.json)
+[![Latest Release](https://img.shields.io/badge/dynamic/json?style=for-the-badge&color=41BDF5&logo=home-assistant&label=home%20assistant&cacheSeconds=15600&url=https://analytics.home-assistant.io/custom_integrations.json&query=$.voice_satellite.total)](https://analytics.home-assistant.io/custom_integrations.json)
 [![Build](https://img.shields.io/github/actions/workflow/status/jxlarrea/voice-satellite-card-integration/release.yml?style=for-the-badge&label=Build)](https://github.com/jxlarrea/voice-satellite-card-integration/actions/workflows/release.yml)
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jxlarrea)
