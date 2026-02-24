@@ -56,6 +56,7 @@ voice-satellite-card-integration/
 │   │   ├── ui.js                         ← UIManager (overlay, bar, blur, start button, chat, timer DOM)
 │   │   ├── chat.js                       ← ChatManager (bubbles, streaming fade)
 │   │   ├── double-tap.js                 ← DoubleTapHandler (cancel with touch dedup)
+│   │   ├── entity-picker.js              ← Per-device satellite override (localStorage, picker overlay)
 │   │   └── visibility.js                 ← VisibilityManager (tab pause/resume)
 │   │
 │   ├── audio/                            ← Audio capture + chimes + media playback + analysis
@@ -259,29 +260,40 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
 1. Clears any pending disconnect timeout
 2. Renders the hidden Shadow DOM container
 3. If this is an editor preview, renders the static preview and returns
-4. Ensures the global UI exists
-5. Sets up visibility change listener
-6. If no singleton is active and we have a connection, starts listening
+4. **Browser satellite override:** If `satellite_entity` is empty and `browser_satellite_override` is enabled, attempts `resolveEntity(hass)` to resolve from localStorage. If resolved, injects the entity and continues. Otherwise returns early (picker shows from `set hass`).
+5. Ensures the global UI exists
+6. Sets up visibility change listener
+7. If no singleton is active and we have a connection, starts listening
 
 **`disconnectedCallback()`** — Called when HA removes the element (e.g., view navigation):
-- Sets a 100ms grace period (`DISCONNECT_GRACE`) before tearing down. This prevents the pipeline from restarting when the user simply switches views.
+1. If a picker overlay or deferred observer is pending (`_pickerTeardown`), cancels it and nulls the reference. This prevents a stale instance's deferred picker from firing after HA recreates the card.
+2. Sets a 100ms grace period (`DISCONNECT_GRACE`) before tearing down. This prevents the pipeline from restarting when the user simply switches views.
 
 **`set hass(hass)`** — Called by HA when state updates arrive:
 1. Editor previews return immediately
 2. If this is the active owner: updates TimerManager, checks remote TTS playback state (`tts.checkRemotePlayback`), and retries satellite subscription if needed
-3. If not yet started: acquires connection, ensures global UI, starts listening
+3. If not yet started:
+   - **Browser satellite override:** If `satellite_entity` is empty and `browser_satellite_override` is enabled, attempts `resolveEntity(hass)`. If resolved, injects the entity. If not (and `hass.entities` is populated and no picker is already showing), calls `_showEntityPicker(hass)` and returns.
+   - Acquires connection, ensures global UI, starts listening
 
 **`setConfig(config)`** — Called when the user saves config in the editor:
 1. Captures whether satellite_entity was previously empty
 2. Resolves skin via `getSkin(config.skin)` → stored as `_activeSkin`
 3. Merges config with defaults
 4. Updates logger debug flag
-5. Applies styles to the global UI (skin CSS injection, opacity, text scale, custom CSS)
-6. Updates editor preview if in preview context
-7. Propagates config to the active singleton instance
-8. **Config reactivity:** If satellite_entity was just configured (empty → value), triggers startup without requiring a page reload
+5. **Browser satellite override:** If `browser_satellite_override` is enabled, localStorage takes full control — injects the stored entity if present, otherwise clears `satellite_entity` (so the startup path in `set hass` shows the picker). If override is disabled, clears localStorage via `clearStoredEntity()`.
+6. Applies styles to the global UI (skin CSS injection, opacity, text scale, custom CSS)
+7. Updates editor preview if in preview context
+8. Propagates config to the active singleton instance
+9. **Config reactivity:** If satellite_entity was just configured (empty → value), triggers startup without requiring a page reload
 
 **Gotcha — Config reactivity:** When a user adds a satellite entity in the editor and saves, `set hass` may have already returned early (before `_hasStarted` is set) because `satellite_entity` was empty at the time. `setConfig` detects this transition and triggers startup directly.
+
+**`_showEntityPicker(hass)`** — Shows the picker overlay (may be deferred if HA's editor dialog is blocking). On entity selection:
+1. Displaces any stale singleton owner (stops its pipeline, mic, TTS, timers; tears down satellite subscription; releases singleton)
+2. Injects the selected entity into config, sets `_isLocalStorageEntity = true`
+3. Uses the current `this._hass` (falls back to captured `hass`) for the connection
+4. Starts the pipeline via `startListening(this)`
 
 ### 5.2 Event Delegation
 
@@ -564,7 +576,7 @@ Events flow from `voice_satellite/run_pipeline` → `card.onPipelineMessage()` �
 | `stt-start` | (inline) | Set state STT |
 | `stt-end` | `handleSttEnd` | Show transcription bubble, invoke askQuestionCallback if set |
 | `intent-start` | (inline) | Set state INTENT |
-| `intent-progress` | `handleIntentProgress` | Stream response text, start streaming TTS, route `tool_result` (image/video search results — §16A) |
+| `intent-progress` | `handleIntentProgress` | Stream response text, start streaming TTS, route `tool_result` (image/video/web search, Wikipedia — §16A) |
 | `intent-end` | `handleIntentEnd` | Show final response, handle continue_conversation, handle errors |
 | `tts-start` | (inline) | Set state TTS |
 | `tts-end` | `handleTtsEnd` | Play TTS audio (if not already streaming), restart pipeline |
@@ -773,6 +785,8 @@ Handles browser tab show/hide transitions.
 
 **Idempotent setup:** `setup()` checks `this._handler` before registering to prevent double-registration. Called from both `connectedCallback` (for DOM-attached instances) and `startListening` after `claim()` (for the owner instance that may never receive `connectedCallback`).
 
+**`teardown()`** — Removes the visibility change listener, clears the debounce timer, and resets `_isPaused`. Used during full lifecycle resets (e.g., entity picker re-selection).
+
 ### Tab Hidden
 1. Cancel any in-progress ask_question flow (prevents cleanup timers firing after resume)
 2. If in an active interaction OR media is lingering: clear image linger timeout, clear chat, hide blur, clear continue state, stop TTS
@@ -798,6 +812,85 @@ The `isLingering` check is evaluated alongside `isInteracting`. If either is tru
 5. Otherwise: refresh satellite subscription and restart pipeline
 
 **Pipeline generation counter:** `stop()` increments `_pipelineGen`; `start()` captures the current gen and checks after each `await`. If a stale `start()` (from a throttled background-tab timeout) detects a gen mismatch, it aborts without clobbering the current subscription.
+
+---
+
+## 14A. Entity Picker (`card/entity-picker.js`)
+
+Self-contained module for the per-device satellite override feature. Handles localStorage CRUD, entity discovery, HA dialog detection, and the picker overlay UI.
+
+### Purpose
+
+When multiple wall-mounted tablets share a single dashboard, each device needs to use a different satellite entity. The `browser_satellite_override` config option enables per-device entity selection via a browser popup, with the choice persisted in localStorage.
+
+### localStorage CRUD
+
+- **Key:** `vs-satellite-entity`
+- `getStoredEntity()` → reads from localStorage, returns `string | null`. Catches exceptions for private browsing.
+- `setStoredEntity(entityId)` → saves to localStorage.
+- `clearStoredEntity()` → removes from localStorage. Called when `browser_satellite_override` is disabled in `setConfig()`.
+
+### Entity Discovery
+
+`discoverSatelliteEntities(hass)` — Filters `hass.entities` for entries where `platform === 'voice_satellite'` AND `entityId.startsWith('assist_satellite.')`. Returns `[{entity_id, friendly_name}]` sorted alphabetically by name. Friendly names are read from `hass.states[entityId].attributes.friendly_name`.
+
+### Entity Resolution
+
+`resolveEntity(hass)` — Resolution chain:
+1. Check localStorage → validate entity still exists in `hass.entities` → return if valid, clear if stale
+2. Auto-select if exactly one satellite entity exists (saves to localStorage, returns immediately — no picker shown)
+3. Return `null` (caller should show picker)
+
+### HA Dialog Detection
+
+When HA's card editor dialog is open, it uses `<dialog>.showModal()` which puts the editor in the browser's **top layer**. This makes everything else in the document non-interactive regardless of z-index. HA also sets `inert` on `<home-assistant-main>` within its shadow DOM.
+
+Two helper functions handle this:
+
+- `isHADialogBlocking()` — Checks if `<home-assistant-main>` inside `<home-assistant>`'s shadow root has the `inert` attribute. Returns `true` when any HA modal dialog is open.
+- `waitForDialogClose(callback)` — Sets up a `MutationObserver` watching for the `inert` attribute to be removed from `<home-assistant-main>`. Calls the callback when the dialog closes. Returns the observer (for cleanup).
+
+### Picker Overlay
+
+`showPicker(hass, onSelect)` — Entry point. Returns a teardown function.
+
+**Deferred mode:** If `isHADialogBlocking()` is true, the picker is deferred via `waitForDialogClose()`. The returned teardown cancels the pending observer. When the dialog closes, the observer fires and `doShowPicker()` is called. The teardown function handles both states (pending observer OR active overlay).
+
+**Immediate mode:** If no dialog is blocking, calls `doShowPicker()` directly.
+
+`doShowPicker(hass, onSelect)` — Creates the overlay:
+1. Injects picker styles into `document.head` (once, cached via `pickerStyleEl`)
+2. Creates a fullscreen `div.vs-picker-overlay` appended to `document.body`
+3. Builds entity list from `discoverSatelliteEntities(hass)` as `<button>` elements
+4. If no entities found, shows "No voice satellites found" message
+5. Click handler: matches `.vs-picker-item` → saves to localStorage → removes overlay → calls `onSelect(entityId)`
+
+### Styling
+
+The picker uses HA theme CSS variables with dark fallbacks, so it automatically matches the user's light/dark theme:
+
+| Element | Variable | Fallback |
+|---------|----------|----------|
+| Card background | `--ha-card-background` / `--card-background-color` | `#1c1c1e` |
+| Card border radius | `--ha-card-border-radius` | `16px` |
+| Card shadow | `--ha-card-box-shadow` | `0 8px 32px rgba(0,0,0,0.5)` |
+| Title/item text | `--primary-text-color` | `#fff` |
+| Subtitle/empty text | `--secondary-text-color` | `#999` |
+| Item background | `--secondary-background-color` | `#2c2c2e` |
+| Item border / hover | `--divider-color` | `#3a3a3c` |
+| Active border accent | `--primary-color` | `#48484a` |
+| Font family | `--ha-font-family` | system font stack |
+
+The overlay uses `position: fixed; inset: 0; z-index: 2147483647` with a blurred dark backdrop.
+
+### Singleton Displacement
+
+When the picker callback fires after a user selection, the card's `_showEntityPicker` method checks if a stale singleton owner exists (e.g., a previous card instance that HA destroyed during editor close). If so, it performs a full teardown on the stale owner via `window.__vsSingleton.instance`:
+- `pipeline.stop()`, `audio.stopMicrophone()`, `tts.stop()`, `timer.destroy()`
+- `teardownSatelliteSubscription()`
+- `singleton.release()`
+
+This prevents duplicate pipelines and allows the new instance to claim singleton ownership.
 
 ---
 
@@ -831,6 +924,8 @@ Manages chat message state. All DOM operations delegate to UIManager.
 - `assistant` — Response bubble (styled by skin CSS)
 - `announcement` — Notification message (styled by skin CSS, always centered)
 
+**Chat bubble max-height:** Assistant/announcement bubbles have `max-height: 70vh` with `overflow-y: auto` and thin scrollbar, allowing longer responses (e.g., web search summaries, Wikipedia articles) to remain readable without overflowing the viewport. This value is consistent across all four skins.
+
 **Streaming text fade:** During `intent-progress` streaming, the last 24 characters fade from opaque to transparent using per-character `<span>` elements with decreasing opacity. When the final text arrives in `intent-end`, the full text replaces the faded version.
 
 **Layout modes:**
@@ -843,7 +938,7 @@ Manages chat message state. All DOM operations delegate to UIManager.
 
 ## 16A. Rich Media System (Experimental)
 
-The card supports displaying image and video search results from LLM tool calls. This requires the external [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration, which registers custom tools with the conversational AI agent. Results arrive as `tool_result` payloads inside `intent-progress` pipeline events.
+The card supports displaying image search, video search, web search, and Wikipedia results from LLM tool calls. This requires the external [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration, which registers custom tools with the conversational AI agent. Results arrive as `tool_result` payloads inside `intent-progress` pipeline events.
 
 **Requirement:** The HA Assist pipeline must use a conversational AI agent (e.g., OpenAI, Google Generative AI). The built-in Home Assistant agent does not support LLM tool calls.
 
@@ -853,13 +948,15 @@ The card supports displaying image and video search results from LLM tool calls.
 LLM tool call → intent-progress (tool_result) → handleIntentProgress
   → filter by video_id → chat.addVideos() → ui.showVideoPanel()
   → filter by image_url → chat.addImages() → ui.showImagePanel()
+  → featured_image    → chat.addImages([{image_url}], false, true) → ui.showImagePanel(featured=true)
 ```
 
 The `intent-progress` event carries `chat_log_delta` with `role: 'tool_result'`. The `tool_result` object contains:
-- `results[]` — Array of search results
+- `results[]` — Array of search results (image/video search)
 - `auto_display` (images) / `auto_play` (videos) — Boolean flag for auto-opening lightbox
+- `featured_image` — Single image URL string (web search / Wikipedia)
 
-**Result routing:** Results with `video_id` are routed to the video path. Results with `image_url` (and no `video_id`) are routed to the image path. This allows mixed results to route correctly (though unlikely in practice).
+**Result routing:** Results with `video_id` are routed to the video path. Results with `image_url` (and no `video_id`) are routed to the image path. If `featured_image` is present (no `results[]` array needed), it is routed to the image panel in featured mode. This allows mixed results to route correctly (though unlikely in practice).
 
 ### 16A.2 Image Search
 
@@ -872,12 +969,14 @@ The `intent-progress` event carries `chat_log_delta` with `role: 'tool_result'`.
 }
 ```
 
-`showImagePanel(results, autoDisplay)`:
+`showImagePanel(results, autoDisplay, featured)`:
 1. Creates a `.vs-image-grid` container (`.single` class for single-result layout)
 2. For each result: creates `<img>` with `thumbnail_url` (falls back to `image_url`)
 3. Click handler → `showLightbox(image_url)` opens full-size image
 4. `onerror` removes the failed image; if grid is empty, hides the panel
-5. If `autoDisplay`, opens lightbox with the first image immediately
+5. Toggles `.featured` class on panel and `.has-featured` on global UI (see §16A.4A)
+6. If not featured, adds `.has-images` class (normal image search layout)
+7. If `autoDisplay`, opens lightbox with the first image immediately
 
 ### 16A.3 Video Search
 
@@ -905,7 +1004,50 @@ The `intent-progress` event carries `chat_log_delta` with `role: 'tool_result'`.
 - `PT5M8S` → `"5:08"`
 - Regex: `/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/`
 
-### 16A.4 Inner Scroll Wrapper
+### 16A.4 Web Search & Wikipedia (Featured Image)
+
+Web search and Wikipedia tool calls return a single featured image (e.g., a Wikipedia article's main photo or a web result's Open Graph image) rather than an array of search results. This uses the same image panel but in a narrower "featured" layout that sits alongside the chat response without dominating the screen.
+
+**Tool result format:**
+```json
+{
+  "featured_image": "https://upload.wikimedia.org/wikipedia/commons/..."
+}
+```
+
+**Routing in `handleIntentProgress`:**
+```js
+if (toolResult?.featured_image) {
+  mgr.card.chat.addImages([{ image_url: toolResult.featured_image }], false, true);
+}
+```
+
+The `featured_image` string is wrapped into the same `[{image_url}]` array format used by image search, then passed with `featured=true`. This reuses the existing image panel infrastructure without a separate code path.
+
+**Featured vs. normal image panel:**
+
+| Aspect | Normal (image search) | Featured (web/wiki) |
+|--------|-----------------------|---------------------|
+| Panel width | 45% | 25% |
+| Chat container offset | `right: calc(45% + 80px)` | `right: calc(25% + 80px)` |
+| CSS class on panel | `.visible` | `.visible.featured` |
+| CSS class on global UI | `.has-images` | `.has-featured` |
+| Auto-display lightbox | Controlled by `auto_display` | Never (always `false`) |
+| `hasVisibleImages()` | Returns `true` | Returns `false` (excluded via `!panel.classList.contains('featured')`) |
+
+**Why `hasVisibleImages()` excludes featured:** This method gates whether TTS-end should defer dismissal for image browsing. Featured images are passive context alongside a text response — they don't represent a browsing session that should delay pipeline restart.
+
+**Skin CSS (all skins):** Each skin defines the featured layout:
+```css
+#voice-satellite-ui.has-featured .vs-chat-container {
+  right: calc(25% + 80px);
+}
+#voice-satellite-ui .vs-image-panel.featured {
+  width: 25%;
+}
+```
+
+### 16A.5 Inner Scroll Wrapper
 
 The media panel uses a two-layer structure for proper scrollbar positioning:
 
@@ -969,6 +1111,8 @@ if (card.ui.hasVisibleImages()) {
   cleanup();  // Immediate dismiss
 }
 ```
+
+**Featured images skip linger:** `hasVisibleImages()` returns `false` when the panel has the `.featured` class (web search / Wikipedia). Featured images are passive conversational context displayed alongside a text response — they are not browsable media that the user needs time to explore. The `cleanup()` path runs immediately, dismissing the UI normally after TTS completes.
 
 The linger timeout is cancelled by:
 - **User scrolling** the media panel (browsing results)
@@ -1135,6 +1279,7 @@ State changes are synced to the integration entity via `voice_satellite/update_s
 |-----|------|---------|-------------|
 | **Behavior** ||||
 | `satellite_entity` | string | `''` | **Required.** Integration satellite entity ID (e.g., `assist_satellite.kitchen_tablet`) |
+| `browser_satellite_override` | bool | `false` | Per-device satellite override. When enabled, localStorage takes full control of entity selection, overriding the YAML entity. A picker popup appears on each device for initial selection. See §14A. |
 | `debug` | bool | `false` | Enable debug logging to browser console |
 | **Microphone Processing** ||||
 | `noise_suppression` | bool | `true` | WebRTC noise suppression |
@@ -1167,10 +1312,10 @@ The editor uses HA's `ha-form` schema system. Each section is defined in its own
 
 | File | Section |
 |------|---------|
-| `behavior.js` | Satellite entity selector (required), debug toggle, microphone processing expandable |
+| `behavior.js` | Satellite entity selector (required), microphone processing expandable, browser satellite override toggle, debug toggle |
 | `skin.js` | Appearance expandable: skin selector dropdown, reactive bar toggle, text scale slider, background opacity slider, custom CSS textarea |
 
-The editor assembler (`editor/index.js`) concatenates `behaviorSchema`, `skinSchema`, `microphoneSchema`, and `debugSchema`, then merges all label/helper maps into `getConfigForm()`. The skin dropdown options are populated dynamically from the skin registry via `getSkinOptions()`.
+The editor assembler (`editor/index.js`) concatenates `behaviorSchema`, `skinSchema`, `microphoneSchema`, and `debugSchema`, then merges all label/helper maps into `getConfigForm()`. The skin dropdown options are populated dynamically from the skin registry via `getSkinOptions()`. The `browser_satellite_override` toggle and `debug` toggle are both in `debugSchema` (rendered after microphone processing).
 
 ### 19.3 Preview
 
@@ -1362,7 +1507,7 @@ When recreating or modifying this card, verify:
 **Singleton & UI:**
 - [ ] `window.__vsSingleton` for cross-bundle state (`instance`, `active`, `starting`)
 - [ ] `isStarting()`/`setStarting()` startup lock prevents concurrent start races
-- [ ] `disconnectedCallback` 100ms grace period for view switch detection
+- [ ] `disconnectedCallback` cancels `_pickerTeardown` before 100ms grace period for view switch detection
 - [ ] Config propagated to active instance via `propagateConfig`
 - [ ] Config reactivity: startup triggered when satellite_entity goes from empty to set
 - [ ] Blur uses reference counting with `BlurReason` strings
@@ -1371,6 +1516,10 @@ When recreating or modifying this card, verify:
 
 **Rich Media (Experimental — §16A):**
 - [ ] `intent-progress` with `role: 'tool_result'` routes to image/video handlers
+- [ ] `intent-progress` with `featured_image` routes to image panel in featured mode (narrower 25% layout)
+- [ ] `hasVisibleImages()` excludes featured panels (returns `false` when `.featured` class present)
+- [ ] Featured images skip the 30-second linger timeout (conversational context, not browsable media)
+- [ ] Chat bubble `max-height: 70vh` across all skins for longer responses (web search, Wikipedia)
 - [ ] Video results filtered by `video_id`, image results filtered by `image_url && !video_id`
 - [ ] `showImagePanel`: 2-column grid (`.single` class for 1 result), `onerror` removes failed images
 - [ ] `showVideoPanel`: video cards with thumbnail, duration badge, title, channel name
@@ -1387,6 +1536,20 @@ When recreating or modifying this card, verify:
 - [ ] Visibility handler checks `isLingering` independently of `INTERACTING_STATES` for tab-hide cleanup
 - [ ] `clearChat()` also clears panel scroll children, hides panel, removes `has-images` class, hides lightbox
 - [ ] `hideLightbox()` clears iframe `src` to stop video playback
+
+**Entity Picker (§14A):**
+- [ ] localStorage key is `vs-satellite-entity`
+- [ ] `resolveEntity()` validates stored entity against `hass.entities`, clears stale entries
+- [ ] Auto-selects when exactly one satellite entity exists (no picker shown)
+- [ ] `setConfig()`: when override enabled, localStorage takes full control; when disabled, `clearStoredEntity()` called
+- [ ] Picker only shows from `set hass()` startup path (when `_hasStarted` is false), never from `setConfig()`
+- [ ] `isEditorPreview()` guard prevents picker/override logic on preview instances
+- [ ] `isHADialogBlocking()` checks `inert` attribute on `<home-assistant-main>` in HA's shadow DOM
+- [ ] Picker deferred via `MutationObserver` when HA dialog is open, shown when dialog closes
+- [ ] `disconnectedCallback` cancels pending picker observer (`_pickerTeardown`) to prevent double-picker
+- [ ] Picker callback displaces stale singleton owner before calling `startListening`
+- [ ] Picker uses HA theme CSS variables (`--ha-card-background`, `--primary-text-color`, etc.) with dark fallbacks
+- [ ] `discoverSatelliteEntities()` filters by `platform === 'voice_satellite'` AND `assist_satellite.` prefix
 
 **Media Player:**
 - [ ] `MediaPlayerManager` receives commands via `dispatchSatelliteEvent` → `handleCommand`

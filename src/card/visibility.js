@@ -29,6 +29,18 @@ export class VisibilityManager {
     document.addEventListener('visibilitychange', this._handler);
   }
 
+  teardown() {
+    if (this._handler) {
+      document.removeEventListener('visibilitychange', this._handler);
+      this._handler = null;
+    }
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+    this._isPaused = false;
+  }
+
   // --- Private ---
 
   _handleChange() {

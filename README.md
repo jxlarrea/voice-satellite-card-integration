@@ -122,6 +122,22 @@ satellite_entity: assist_satellite.kitchen_tablet
 
 The card will start listening automatically using your configured pipeline.
 
+### Per-Device Satellite Override
+
+If you share a single dashboard across multiple wall-mounted tablets, each device needs to use a different satellite entity. Normally this requires a separate dashboard or view per device. The **Per-device satellite override** option solves this by letting each browser pick its own satellite at runtime.
+
+When enabled, a popup appears on each device asking the user to select which satellite to use. The selection is saved in the browser's local storage, so it persists across page reloads and only needs to be set once per device. This overrides whatever `satellite_entity` is configured in the card YAML.
+
+```yaml
+type: custom:voice-satellite-card
+satellite_entity: assist_satellite.kitchen_tablet
+browser_satellite_override: true
+```
+
+If only one satellite entity exists, it is auto-selected without showing the popup.
+
+To change the selected satellite on a device, clear the browser's local storage for your Home Assistant URL, or toggle the option off and on again.
+
 ### Visual Editor
 
 All options are available in the visual card editor with a live preview that updates as you change settings.
@@ -133,6 +149,7 @@ type: custom:voice-satellite-card
 
 # Behavior
 satellite_entity: ''               # (Required) assist_satellite entity from the integration
+browser_satellite_override: false  # Per-device satellite selection via browser popup
 debug: false                       # Show debug info in browser console
 
 # Appearance

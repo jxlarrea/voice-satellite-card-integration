@@ -26,11 +26,13 @@ export const microphoneSchema = [
 ];
 
 export const debugSchema = [
+  { name: 'browser_satellite_override', selector: { boolean: {} } },
   { name: 'debug', selector: { boolean: {} } },
 ];
 
 export const behaviorLabels = {
   satellite_entity: 'Satellite entity',
+  browser_satellite_override: 'Per-device satellite override',
   debug: 'Debug logging',
   noise_suppression: 'Noise suppression',
   echo_cancellation: 'Echo cancellation',
@@ -40,5 +42,6 @@ export const behaviorLabels = {
 
 export const behaviorHelpers = {
   satellite_entity: 'Required. Install the Voice Satellite Card Integration: https://github.com/jxlarrea/voice-satellite-card-integration',
+  browser_satellite_override: 'For shared dashboards across multiple devices. When enabled, each device selects its own satellite via a browser popup, overriding the entity configured above.',
   voice_isolation: 'AI-based voice isolation, currently only available in Chrome',
 };

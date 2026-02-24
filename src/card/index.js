@@ -27,8 +27,9 @@ import * as singleton from '../shared/singleton.js';
 import { setState, handleStartClick, startListening, onTTSComplete, handlePipelineMessage } from './events.js';
 import { syncSatelliteState } from './comms.js';
 import { getSelectEntityId, getNumberState } from '../shared/satellite-state.js';
-import { subscribeSatelliteEvents } from '../shared/satellite-subscription.js';
+import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
+import { getStoredEntity, clearStoredEntity, resolveEntity, showPicker } from './entity-picker.js';
 
 export class VoiceSatelliteCard extends HTMLElement {
   constructor() {
@@ -42,6 +43,8 @@ export class VoiceSatelliteCard extends HTMLElement {
     this._connection = null;
     this._hasStarted = false;
     this._disconnectTimeout = null;
+    this._pickerTeardown = null;
+    this._isLocalStorageEntity = false;
 
     // Logger (shared by all managers)
     this._logger = new Logger();
@@ -113,7 +116,19 @@ export class VoiceSatelliteCard extends HTMLElement {
         return;
       }
 
-      if (!this._config.satellite_entity) return;
+      if (!this._config.satellite_entity) {
+        if (this._config.browser_satellite_override && this._hass?.entities) {
+          const resolved = resolveEntity(this._hass);
+          if (resolved) {
+            this._config.satellite_entity = resolved;
+            this._isLocalStorageEntity = true;
+          } else {
+            return; // picker shows from set hass()
+          }
+        } else {
+          return;
+        }
+      }
 
       this._ui.ensureGlobalUI();
       this._visibility.setup();
@@ -125,6 +140,10 @@ export class VoiceSatelliteCard extends HTMLElement {
   }
 
   disconnectedCallback() {
+    if (this._pickerTeardown) {
+      this._pickerTeardown();
+      this._pickerTeardown = null;
+    }
     this._disconnectTimeout = setTimeout(() => {
       // Still active instance but truly disconnected — keep running via global UI
     }, Timing.DISCONNECT_GRACE);
@@ -137,6 +156,22 @@ export class VoiceSatelliteCard extends HTMLElement {
     this._config = Object.assign({}, DEFAULT_CONFIG, config);
     this._activeSkin = skin;
     this._logger.debug = this._config.debug;
+
+    // When browser_satellite_override is on, localStorage takes full control
+    if (this._config.browser_satellite_override) {
+      const stored = getStoredEntity();
+      if (stored) {
+        this._config.satellite_entity = stored;
+        this._isLocalStorageEntity = true;
+      } else {
+        // No localStorage yet — clear entity so startup path shows picker
+        this._config.satellite_entity = '';
+        this._isLocalStorageEntity = false;
+      }
+    } else {
+      clearStoredEntity();
+      this._isLocalStorageEntity = false;
+    }
 
     if (this._ui.element) {
       this._ui.applyStyles();
@@ -188,7 +223,24 @@ export class VoiceSatelliteCard extends HTMLElement {
 
     if (this._hasStarted) return;
     if (!hass?.connection) return;
-    if (!this._config.satellite_entity) return;
+
+    if (!this._config.satellite_entity) {
+      if (this._config.browser_satellite_override) {
+        const resolved = resolveEntity(hass);
+        if (resolved) {
+          this._config.satellite_entity = resolved;
+          this._isLocalStorageEntity = true;
+        } else if (hass.entities && Object.keys(hass.entities).length > 0 && !this._pickerTeardown) {
+          this._showEntityPicker(hass);
+          return;
+        } else {
+          return;
+        }
+      } else {
+        return;
+      }
+    }
+
     if (singleton.isStarting()) return;
     if (singleton.isActive() && !singleton.isOwner(this)) return;
 
@@ -212,6 +264,35 @@ export class VoiceSatelliteCard extends HTMLElement {
   onTTSComplete(playbackFailed) { onTTSComplete(this, playbackFailed); }
 
   // --- Private ---
+
+  _showEntityPicker(hass) {
+    this._pickerTeardown = showPicker(hass, (entityId) => {
+      this._pickerTeardown = null;
+      this._config.satellite_entity = entityId;
+      this._isLocalStorageEntity = true;
+
+      // Displace stale singleton owner (previous instance HA destroyed)
+      if (singleton.isActive() && !singleton.isOwner(this)) {
+        const stale = window.__vsSingleton?.instance;
+        if (stale) {
+          try {
+            stale.pipeline.stop();
+            stale.audio.stopMicrophone();
+            stale.tts.stop();
+            stale.timer.destroy();
+          } catch (_) { /* zombie instance */ }
+        }
+        teardownSatelliteSubscription();
+        singleton.release();
+      }
+
+      const currentHass = this._hass || hass;
+      this._connection = currentHass.connection;
+      this._ui.ensureGlobalUI();
+      this._hasStarted = true;
+      startListening(this);
+    });
+  }
 
   _render() {
     if (!this.shadowRoot) {

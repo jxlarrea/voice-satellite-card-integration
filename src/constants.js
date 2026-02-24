@@ -62,6 +62,7 @@ export const Timing = {
 export const DEFAULT_CONFIG = {
   // Behavior
   satellite_entity: '',
+  browser_satellite_override: false,
   debug: false,
 
   // Microphone Processing
