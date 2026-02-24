@@ -398,6 +398,8 @@ The card supports displaying image and video search results inline during voice 
 
 ### Image Search
 
+![Screenshot_20260223_202424_Fully Kiosk Browser](https://github.com/user-attachments/assets/bad9d374-4ecb-4572-86da-1993a400b368)
+
 Ask your assistant to search for images:
 
 - *"Show me images of golden retrievers"*
@@ -406,6 +408,8 @@ Ask your assistant to search for images:
 Results appear as a thumbnail grid in the media panel. Tap any image to view it fullscreen in a lightbox. The panel stays visible for 30 seconds after TTS completes, and can be dismissed at any time with a double-tap, double-click, or the Escape key.
 
 ### Video Search
+
+![Screenshot_20260223_202336_Fully Kiosk Browser](https://github.com/user-attachments/assets/010f9501-e637-470a-97be-3ecf1585d884)
 
 Ask your assistant to search for videos:
 
