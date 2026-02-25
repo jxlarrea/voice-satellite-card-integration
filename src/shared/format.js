@@ -59,8 +59,8 @@ export function formatLargeNumber(value, currency = 'USD') {
  */
 export function formatChange(change, percentChange, currency = 'USD') {
   if (change == null) return '';
-  const sign = change >= 0 ? '+' : '';
+  const sign = change >= 0 ? '+' : '-';
   const price = formatPrice(Math.abs(change), currency);
-  const pct = percentChange != null ? ` (${sign}${percentChange.toFixed(2)}%)` : '';
-  return `${sign}${change >= 0 ? '' : '-'}${price}${pct}`;
+  const pct = percentChange != null ? ` (${sign}${Math.abs(percentChange).toFixed(2)}%)` : '';
+  return `${sign}${price}${pct}`;
 }

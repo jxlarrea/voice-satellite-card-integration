@@ -276,7 +276,7 @@
 }
 
 #voice-satellite-ui .vs-chat-msg.assistant {
-  font-size: calc(42px * var(--vs-text-scale, 1));
+  font-size: calc(36px * var(--vs-text-scale, 1));
   color: #FFFFFF;
   font-weight: bold;
   align-self: center;
@@ -288,7 +288,7 @@
 }
 
 #voice-satellite-ui .vs-chat-msg.announcement {
-  font-size: calc(42px * var(--vs-text-scale, 1));
+  font-size: calc(36px * var(--vs-text-scale, 1));
   color: #FFFFFF;
   font-weight: bold;
   align-self: center;
@@ -324,6 +324,7 @@
 .vs-timer-pill {
   position: relative;
   overflow: hidden;
+  contain: content;
   font-size: calc(34px * var(--vs-text-scale, 1));
   color: #FFFFFF;
   font-weight: bold;
@@ -676,7 +677,7 @@
 #voice-satellite-ui .vs-weather-row {
   display: flex;
   align-items: center;
-  padding: 10px 4px;
+  padding: 6px 4px;
 }
 
 #voice-satellite-ui .vs-weather-row-time {

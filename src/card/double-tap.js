@@ -22,16 +22,8 @@ export class DoubleTapHandler {
 
   setup() {
     this._handler = (e) => {
-      const isActive = INTERACTING_STATES.includes(this._card.currentState) || this._card.tts.isPlaying;
-      const isImageLinger = !!this._card._imageLingerTimeout || this._card.ui.isLightboxVisible() || this._card.ui.hasVisibleImages();
-      const isTimerAlert = this._card.timer.alertActive;
-      const isNotification = this._card.announcement.playing
-        || this._card.askQuestion.playing
-        || this._card.startConversation.playing
-        || this._card.announcement.clearTimeoutId
-        || this._card.startConversation.clearTimeoutId;
-
-      if (!isActive && !isImageLinger && !isTimerAlert && !isNotification) return;
+      const state = this._getInteractionState();
+      if (!state) return;
 
       const now = Date.now();
 
@@ -43,7 +35,7 @@ export class DoubleTapHandler {
 
       if (timeSinceLastTap < Timing.DOUBLE_TAP_THRESHOLD && timeSinceLastTap > 0) {
         e.preventDefault();
-        this._cancel(isTimerAlert, isNotification);
+        this._cancel(state.isTimerAlert, state.isNotification);
       }
     };
 
@@ -54,20 +46,26 @@ export class DoubleTapHandler {
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
 
-      const isActive = INTERACTING_STATES.includes(this._card.currentState) || this._card.tts.isPlaying;
-      const isImageLinger = !!this._card._imageLingerTimeout || this._card.ui.isLightboxVisible() || this._card.ui.hasVisibleImages();
-      const isTimerAlert = this._card.timer.alertActive;
-      const isNotification = this._card.announcement.playing
-        || this._card.askQuestion.playing
-        || this._card.startConversation.playing
-        || this._card.announcement.clearTimeoutId
-        || this._card.startConversation.clearTimeoutId;
-
-      if (!isActive && !isImageLinger && !isTimerAlert && !isNotification) return;
+      const state = this._getInteractionState();
+      if (!state) return;
 
       e.preventDefault();
-      this._cancel(isTimerAlert, isNotification);
+      this._cancel(state.isTimerAlert, state.isNotification);
     });
+  }
+
+  _getInteractionState() {
+    const isActive = INTERACTING_STATES.includes(this._card.currentState) || this._card.tts.isPlaying;
+    const isImageLinger = !!this._card._imageLingerTimeout || this._card.ui.isLightboxVisible() || this._card.ui.hasVisibleImages();
+    const isTimerAlert = this._card.timer.alertActive;
+    const isNotification = this._card.announcement.playing
+      || this._card.askQuestion.playing
+      || this._card.startConversation.playing
+      || this._card.announcement.clearTimeoutId
+      || this._card.startConversation.clearTimeoutId;
+
+    if (!isActive && !isImageLinger && !isTimerAlert && !isNotification) return null;
+    return { isTimerAlert, isNotification };
   }
 
   _cancel(isTimerAlert, isNotification) {

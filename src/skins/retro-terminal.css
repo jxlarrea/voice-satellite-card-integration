@@ -325,6 +325,7 @@
 .vs-timer-pill {
   position: relative;
   overflow: hidden;
+  contain: content;
   font-size: calc(42px * var(--vs-text-scale, 1));
   color: #33ff33;
   font-weight: bold;
@@ -687,7 +688,7 @@
 #voice-satellite-ui .vs-weather-row {
   display: flex;
   align-items: center;
-  padding: 10px 4px;
+  padding: 6px 4px;
 }
 
 #voice-satellite-ui .vs-weather-row-time {

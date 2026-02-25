@@ -269,7 +269,7 @@ export function playMediaFor(mgr, urlPath, logPrefix, onDone) {
     onStart: () => {
       mgr.log.log(logPrefix, 'Media playback started');
       mgr.card.mediaPlayer.notifyAudioStart('notification');
-      if (mgr.card._activeSkin?.reactiveBar && mgr.card.config.reactive_bar !== false && mgr.currentAudio) {
+      if (mgr.card.isReactiveBarEnabled && mgr.currentAudio) {
         mgr.card.analyser.attachAudio(mgr.currentAudio, mgr.card.audio.audioContext);
       }
     },

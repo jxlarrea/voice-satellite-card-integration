@@ -640,7 +640,9 @@ The card watches the satellite entity's state via `subscribeToEntity()` (HA's `s
 
 Timers can be cancelled two ways:
 - **Voice:** "Cancel the timer" → HA's intent system processes it normally
-- **Double-tap:** Double-tapping a timer pill sends `voice_satellite/cancel_timer` to the integration, which calls `timer_manager.cancel_timer(timer_id)` on HA's intent system. The pill is removed immediately (optimistic UI) while the server-side cancel propagates.
+- **Double-tap:** Double-tapping a timer pill sends `voice_satellite/cancel_timer` to the integration, which calls `timer_manager.cancel_timer(timer_id)` on HA's intent system. The pill is removed immediately (optimistic UI) while the server-side cancel propagates. A "done" chime plays as audio confirmation.
+
+Timer alert dismissal (double-tap on alert overlay) also plays a "done" chime before clearing the alert.
 
 ### 9.3 Timer UI
 
@@ -1342,6 +1344,15 @@ On reactive state entry, `reconnectMic()` switches the analyser to mic input. Wh
 
 The Default and Google Home skins use `@property --vs-gp` (registered via `@property` at-rule) to animate `background-position` on both the bar and its `::after` glow pseudo-element simultaneously, ensuring perfect gradient color sync between the bar and its glow. All `transition` durations on reactive properties are set to `0.05s linear` for near-instant response to audio level changes.
 
+**GPU compositing hints:** All five skins apply CSS hints to offload animation to the GPU and isolate layout:
+- `.vs-rainbow-bar` — `will-change: filter, opacity` (pre-allocates GPU layer for reactive bar); `contain: strict` (isolates layout/paint)
+- `.vs-rainbow-bar.reactive` — `transform: translateZ(0)` on Alexa, Siri, Retro Terminal (forces compositing layer for skins without `scaleY` transforms)
+- `.vs-blur-overlay` — `will-change: opacity` (keeps blur overlay on GPU during fade transitions)
+- `.vs-chat-container` — `contain: content` (isolates streaming text mutations from triggering global layout)
+- `.vs-timer-pill` — `contain: content` (isolates per-second countdown updates)
+
+**Analyser throttle:** The reactive bar's CSS transitions are 50ms, so updating at 60fps is wasteful. The analyser tick loop skips frames closer than 32ms apart (~30fps cap), halving `getByteFrequencyData()` calls with no visible difference.
+
 ### Start Button
 Floating mic button with pulse animation. Shows on initial load, microphone permission denied, microphone not found, or generic mic error.
 
@@ -1371,6 +1382,7 @@ Each skin is a JS module exporting a definition object:
   reactiveBar: true,      // Whether this skin supports reactive (audio-driven) bar
   overlayColor: [0, 0, 0],// RGB for blur overlay background
   defaultOpacity: 0.3,    // Default blur overlay opacity (0–1)
+  fontURL: '...',         // Google Fonts URL (loaded via @import in CSS + <link> in preview)
   previewCSS: '...',      // Imported CSS for editor preview rendering
 }
 ```
@@ -1379,7 +1391,7 @@ Each skin is a JS module exporting a definition object:
 
 | Skin | ID | Overlay Color | Default Opacity | Description |
 |------|----|--------------|-----------------|-------------|
-| Default | `default` | `[0, 0, 0]` (black) | 0.3 | Rainbow gradient bar, dark overlay |
+| Default | `default` | `[255, 255, 255]` (white) | 0.85 | Rainbow gradient bar, light overlay, DM Sans font |
 | Alexa | `alexa` | `[0, 8, 20]` (dark blue) | 0.7 | Cyan accent glow, Echo Show-inspired |
 | Google Home | `google-home` | `[255, 255, 255]` (white) | 0.75 | 4-color palette, Material Design, frosted overlay |
 | Retro Terminal | `retro-terminal` | `[0, 10, 0]` (deep green-black) | 0.92 | Green phosphor CRT aesthetic, monospace font, scanlines, bezel frame |
@@ -1403,13 +1415,15 @@ On `setConfig()`, the card resolves the skin via `getSkin(config.skin)` and stor
 
 ### 17A.6 Reactive Bar Opt-In
 
-The reactive bar (audio-level-driven animation) requires **both** the skin and the user config to agree:
+The reactive bar (audio-level-driven animation) requires **both** the skin and the user config to agree. This is centralized in a single getter on the card class:
 
 ```javascript
-const reactive = this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false;
+get isReactiveBarEnabled() {
+  return !!this._activeSkin?.reactiveBar && this._config.reactive_bar !== false;
+}
 ```
 
-This check appears in:
+All call sites use `this._card.isReactiveBarEnabled` instead of repeating the condition:
 - `updateForState()` — Determines whether to start the analyser tick loop
 - `showBarForNotification()` — Enables reactive mode during notification playback
 - `AudioManager.startMicrophone()` — Decides whether to connect mic to analyser
@@ -1511,7 +1525,10 @@ The preview shows:
 - Sample chat bubbles ("What's the temperature outside?" / "It's currently 75°F and sunny.")
 - Timer pill with mock countdown (00:04:32)
 
-All preview elements respect the current config for live style updates.
+All preview elements respect the current config for live style updates:
+- **Text scale:** `--vs-text-scale` CSS variable set as inline style on the preview container from `config.text_scale`. All font sizes in preview CSS use `calc(Xpx * var(--vs-text-scale, 1))`.
+- **Background opacity:** The blur overlay's `background` is computed inline from `skin.overlayColor` and `config.background_opacity` (falling back to `skin.defaultOpacity`), overriding the skin preview CSS default.
+- **Font:** Skins with `fontURL` inject a `<link>` element into `document.head` for Google Fonts loading.
 
 ---
 
@@ -1675,6 +1692,7 @@ When recreating or modifying this card, verify:
 - [ ] Mic analyser never connected to `AudioContext.destination` (feedback prevention)
 - [ ] `_activeAnalyser` pointer switches between mic and audio analysers
 - [ ] `reconnectMic()` is a no-op while `_mediaSourceNode` is set (prevents mid-playback switch)
+- [ ] 30fps throttle: tick loop skips frames < 32ms apart (halves `getByteFrequencyData` calls)
 - [ ] `useReactive` flag in UI state config: only WAKE_WORD_DETECTED, STT, TTS are reactive; INTENT uses CSS animation
 
 **Notifications:**
@@ -1765,7 +1783,11 @@ When recreating or modifying this card, verify:
 - [ ] CSS injected into `<style id="voice-satellite-styles">` by `_injectSkinCSS()`
 - [ ] `background_opacity` falls back to `skin.defaultOpacity` when unset in config
 - [ ] `overlayColor` from skin definition sets blur overlay `rgba()` background
-- [ ] Reactive bar requires both `_activeSkin.reactiveBar` and `config.reactive_bar !== false`
+- [ ] Reactive bar check centralized in `card.isReactiveBarEnabled` getter (used in 7 call sites)
+- [ ] GPU hints: `will-change`/`contain` on bar, overlay, chat, timer pills; `translateZ(0)` on reactive bar (Alexa, Siri, Retro Terminal)
+- [ ] Timer pill cancel plays "done" chime; timer alert dismiss plays "done" chime
+- [ ] Preview respects `text_scale` (via `--vs-text-scale` inline style) and `background_opacity` (via inline `rgba()` on blur)
+- [ ] Skins with `fontURL` load Google Fonts via `@import` in CSS (live card) and `<link>` injection (preview)
 - [ ] Editor skin dropdown populated dynamically from `getSkinOptions()`
 - [ ] Each skin has paired preview CSS for editor preview rendering
 

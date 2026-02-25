@@ -130,11 +130,11 @@ export class UIManager {
     if (!config.barVisible && (this._card._imageLingerTimeout || this._card._videoPlaying || this.isLightboxVisible())) return;
 
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
+    if (bar.classList.contains('error-mode')) this.clearErrorBar();
 
-    const reactive = this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false;
+    const reactive = this._card.isReactiveBarEnabled;
 
     if (config.barVisible) {
-      if (bar.classList.contains('error-mode')) this.clearErrorBar();
       bar.classList.add('visible');
       bar.classList.remove('connecting', 'listening', 'processing', 'speaking', 'reactive');
       if (config.animation) {
@@ -150,7 +150,6 @@ export class UIManager {
         this._globalUI.classList.remove('reactive-mode');
       }
     } else {
-      if (bar.classList.contains('error-mode')) this.clearErrorBar();
       bar.classList.remove('visible', 'connecting', 'listening', 'processing', 'speaking', 'reactive');
       this._globalUI.classList.remove('reactive-mode');
       if (reactive) this._card.analyser.stop();
@@ -235,7 +234,7 @@ export class UIManager {
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     if (!bar) return false;
     const wasVisible = bar.classList.contains('visible');
-    const reactive = this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false;
+    const reactive = this._card.isReactiveBarEnabled;
     bar.classList.add('visible', 'speaking');
     if (reactive) {
       bar.classList.add('reactive');
@@ -255,7 +254,7 @@ export class UIManager {
     if (!bar) return;
     bar.classList.remove('speaking', 'reactive');
     this._globalUI.classList.remove('reactive-mode');
-    if (this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false) this._card.analyser.stop();
+    if (this._card.isReactiveBarEnabled) this._card.analyser.stop();
     if (!wasVisible) {
       bar.classList.remove('visible');
     }
@@ -850,10 +849,10 @@ export class UIManager {
     this.ensureTimerContainer();
 
     // Remove pills for timers that no longer exist
+    const activeIds = new Set(timers.map((t) => t.id));
     const existing = this._timerContainer.querySelectorAll('.vs-timer-pill');
     for (const pill of existing) {
-      const pillId = pill.getAttribute('data-timer-id');
-      if (!timers.some((t) => t.id === pillId)) {
+      if (!activeIds.has(pill.getAttribute('data-timer-id'))) {
         pill.parentNode.removeChild(pill);
       }
     }
@@ -988,8 +987,12 @@ export class UIManager {
 
 function _attachDoubleTap(el, callback) {
   let lastTap = 0;
+  let lastTouchTime = 0;
   const handler = (e) => {
     const now = Date.now();
+    // Touch/click deduplication — skip synthetic click that follows a recent touch
+    if (e.type === 'touchstart') lastTouchTime = now;
+    if (e.type === 'click' && (now - lastTouchTime) < 400) return;
     if (now - lastTap < Timing.DOUBLE_TAP_THRESHOLD && now - lastTap > 0) {
       e.preventDefault();
       e.stopPropagation();

@@ -67,6 +67,7 @@ export class TimerManager {
   set alertActive(val) { this._alertActive = val; }
 
   dismissAlert() {
+    this._card.tts.playChime('done');
     this.clearAlert();
   }
 
@@ -166,6 +167,7 @@ export class TimerManager {
     this._log.log('timer', `Cancelling timer: ${timerId}`);
 
     sendCancelTimer(this._card, timerId);
+    this._card.tts.playChime('done');
 
     // Remove pill with animation immediately for responsive UI
     removePill(this, timerId);

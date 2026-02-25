@@ -45,15 +45,19 @@ export function renderPreview(shadowRoot, config) {
     link.href = skin.fontURL;
     document.head.appendChild(link);
   }
+  const scale = (config.text_scale || 100) / 100;
+  const skinDefault = Math.round((skin.defaultOpacity ?? 1) * 100);
+  const bgOpacity = (config.background_opacity ?? skinDefault) / 100;
+  const [r, g, b] = skin.overlayColor || [0, 0, 0];
   shadowRoot.innerHTML = `
     <style>
       ${baseCSS}
       ${skin.previewCSS || ''}
     </style>
     <div class="preview-background"></div>
-    <div class="preview-container">
+    <div class="preview-container" style="--vs-text-scale:${scale}">
       <div class="preview-label">Preview</div>
-      <div class="preview-blur"></div>
+      <div class="preview-blur" style="background:rgba(${r},${g},${b},${bgOpacity})"></div>
       <div class="preview-bar"></div>
       <div class="preview-chat">
         <div class="preview-msg user">What's the temperature outside?</div>

@@ -25,7 +25,7 @@
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 }
 .preview-msg.user {
-  font-size: 32px;
+  font-size: calc(32px * var(--vs-text-scale, 1));
   color: rgba(255, 255, 255, 0.55);
   font-weight: 300;
   background: none;
@@ -36,7 +36,7 @@
   text-align: center;
 }
 .preview-msg.assistant {
-  font-size: 42px;
+  font-size: calc(36px * var(--vs-text-scale, 1));
   color: #FFFFFF;
   font-weight: bold;
   background: none;

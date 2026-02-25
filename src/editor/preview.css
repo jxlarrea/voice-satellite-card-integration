@@ -107,7 +107,7 @@
   align-items: center;
   gap: 8px;
   overflow: hidden;
-  font-size: 30px;
+  font-size: calc(30px * var(--vs-text-scale, 1));
   font-weight: bold;
   padding: 16px;
 }

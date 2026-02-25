@@ -305,6 +305,7 @@
 .vs-timer-pill {
   position: relative;
   overflow: hidden;
+  contain: content;
   font-size: calc(28px * var(--vs-text-scale, 1));
   color: #3c4043;
   font-weight: bold;
@@ -655,7 +656,7 @@
 #voice-satellite-ui .vs-weather-row {
   display: flex;
   align-items: center;
-  padding: 10px 4px;
+  padding: 6px 4px;
 }
 
 #voice-satellite-ui .vs-weather-row-time {
@@ -676,7 +677,7 @@
   font-weight: 500;
   color: #202124;
   text-align: right;
-  min-width: 48px;
+  min-width: 56px;
 }
 
 /* Financial — borderless floating content over blur overlay */

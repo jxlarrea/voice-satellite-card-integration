@@ -30,7 +30,7 @@
 }
 
 .preview-msg.user {
-  font-size: 34px;
+  font-size: calc(34px * var(--vs-text-scale, 1));
   color: #1a8c1a;
   background: none;
   border: none;
@@ -45,7 +45,7 @@
 }
 
 .preview-msg.assistant {
-  font-size: 38px;
+  font-size: calc(38px * var(--vs-text-scale, 1));
   color: #33ff33;
   font-weight: bold;
   background: none;

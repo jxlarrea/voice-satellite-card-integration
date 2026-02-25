@@ -1,7 +1,7 @@
 /* Default Skin — Editor Preview Overrides */
 
 .preview-container {
-  font-family: Roboto, Noto, sans-serif;
+  font-family: 'DM Sans', Roboto, Noto, sans-serif;
 }
 
 .preview-blur {
@@ -24,7 +24,7 @@
 }
 
 .preview-msg.user {
-  font-size: 30px;
+  font-size: calc(30px * var(--vs-text-scale, 1));
   color: rgba(50, 50, 50, 0.65);
   background: none;
   border: none;
@@ -37,7 +37,7 @@
 }
 
 .preview-msg.assistant {
-  font-size: 34px;
+  font-size: calc(30px * var(--vs-text-scale, 1));
   color: #333333;
   font-weight: 400;
   background: none;

@@ -114,7 +114,7 @@ export class TtsManager {
         this._log.log('tts', 'Playback started successfully');
         this._pendingTtsEndUrl = null;
         this._card.mediaPlayer.notifyAudioStart('tts');
-        if (this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false && this._currentAudio) {
+        if (this._card.isReactiveBarEnabled && this._currentAudio) {
           this._card.analyser.attachAudio(this._currentAudio, this._card.audio.audioContext);
         }
       },

@@ -100,6 +100,9 @@ export class VoiceSatelliteCard extends HTMLElement {
   get announcementDisplayDuration() {
     return getNumberState(this._hass, this._config.satellite_entity, 'announcement_display_duration', 3.5);
   }
+  get isReactiveBarEnabled() {
+    return !!this._activeSkin?.reactiveBar && this._config.reactive_bar !== false;
+  }
 
   // --- HTMLElement Lifecycle ---
 
@@ -177,7 +180,7 @@ export class VoiceSatelliteCard extends HTMLElement {
       this._ui.applyStyles();
 
       // If reactive bar was just enabled and mic is already running, attach analyser
-      const reactive = skin.reactiveBar && this._config.reactive_bar !== false;
+      const reactive = this.isReactiveBarEnabled;
       if (reactive && this._audio._sourceNode && this._audio._audioContext) {
         this._analyser.attachMic(this._audio._sourceNode, this._audio._audioContext);
       } else if (!reactive) {

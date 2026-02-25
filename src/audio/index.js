@@ -69,7 +69,7 @@ export class AudioManager {
     this._log.log('mic', `Actual sample rate: ${this._actualSampleRate}`);
 
     // Tap mic into analyser for reactive bar (parallel connection — doesn't disrupt pipeline)
-    if (this._card._activeSkin?.reactiveBar && this._card.config.reactive_bar !== false) {
+    if (this._card.isReactiveBarEnabled) {
       this._card.analyser.attachMic(this._sourceNode, this._audioContext);
     }
 
