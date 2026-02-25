@@ -1,13 +1,14 @@
 # <img width="48" height="48" alt="icon" src="https://github.com/user-attachments/assets/31b4a789-bae3-4428-a543-85063f17109c" /> Voice Satellite Card for Home Assistant
 
-Transform any browser into a full-featured voice satellite for Home Assistant's Assist. This single package includes both a **Lovelace card** and a **custom integration** that work together to give your browser-based devices true satellite identity — with feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/), including wake word detection, timers, announcements, conversations, and more.
-
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-blue.svg?style=for-the-badge)](https://www.hacs.xyz/docs/faq/custom_repositories/)
 [![Downloads](https://img.shields.io/github/downloads/jxlarrea/voice-satellite-card-integration/total?style=for-the-badge&label=Downloads&color=red)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
 [![version](https://shields.io/github/v/release/jxlarrea/voice-satellite-card-integration?style=for-the-badge&color=orange)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/jxlarrea/voice-satellite-card-integration/release.yml?style=for-the-badge&label=Build)](https://github.com/jxlarrea/voice-satellite-card-integration/actions/workflows/release.yml)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jxlarrea)
 
+Transform any browser into a full-featured voice satellite for Home Assistant's Assist. This single package includes both a **Lovelace card** and a **custom integration** that work together to give your browser-based devices true satellite identity — with feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/), including wake word detection, timers, announcements, conversations, and more.
+
+## Screenshots
 <p align="center">
  <img src="https://github.com/user-attachments/assets/4a6ca843-af42-4854-8d42-daa84c469855" alt="Assist" width="49%"/>
  <img src="https://github.com/user-attachments/assets/64a59c56-a2e8-434f-a814-ad36248b624b" alt="Video Search" width="49%"/>
