@@ -1217,6 +1217,7 @@ if (toolName?.includes('financial-data__get_financial_data') && toolResult?.quer
 | alexa | #FFF bold | #00e676 | #ff5252 | white 50% | rgba(0,202,255,0.15) |
 | google-home | #202124 | #0f9d58 | #ea4335 | #80868b | rgba(60,64,67,0.08) |
 | retro-terminal | #33ff33+glow | #33ff33+glow | #ff3333+glow | green 50% | rgba(51,255,51,0.1) |
+| siri | #FFF 600 | #34D399 | #F87171 | white 50% | rgba(255,255,255,0.1) |
 
 ### 16A.7 Inner Scroll Wrapper
 
@@ -1327,6 +1328,7 @@ On reactive state entry, `reconnectMic()` switches the analyser to mic input. Wh
 | Alexa | `::after` pseudo-element with `filter: blur()` and `opacity` for cyan glow halo; no `scaleY` — bar stays fixed height |
 | Google Home | `scaleY` for bar height + `::after` pseudo-element with `filter: blur()` and `opacity` for 4-color glow, gradient synced via `@property --vs-gp` |
 | Retro Terminal | `filter: drop-shadow()` for outer glow + `box-shadow: inset` for inner glow around the full-screen border frame; no `scaleY` or `::after` |
+| Siri | `filter: drop-shadow()` for outer glow + `box-shadow: inset` for inner glow around full-screen conic-gradient border; gradient rotates via `@property --siri-angle` |
 
 The Default and Google Home skins use `@property --vs-gp` (registered via `@property` at-rule) to animate `background-position` on both the bar and its `::after` glow pseudo-element simultaneously, ensuring perfect gradient color sync between the bar and its glow. All `transition` durations on reactive properties are set to `0.05s linear` for near-instant response to audio level changes.
 
@@ -1345,7 +1347,7 @@ Timer pills, alert overlay, progress bar updates, expired pill animations — al
 
 ### 17A.1 Overview
 
-Skins define the complete visual theme — activity bar, blur overlay, chat bubbles, timer pills, and animations. All visual styling is owned by skins via CSS; the card has no hardcoded gradient colors or layout values. Four built-in skins ship with the card.
+Skins define the complete visual theme — activity bar, blur overlay, chat bubbles, timer pills, and animations. All visual styling is owned by skins via CSS; the card has no hardcoded gradient colors or layout values. Five built-in skins ship with the card.
 
 ### 17A.2 Skin Definition
 
@@ -1371,8 +1373,9 @@ Each skin is a JS module exporting a definition object:
 | Alexa | `alexa` | `[0, 8, 20]` (dark blue) | 0.7 | Cyan accent glow, Echo Show-inspired |
 | Google Home | `google-home` | `[255, 255, 255]` (white) | 0.75 | 4-color palette, Material Design, frosted overlay |
 | Retro Terminal | `retro-terminal` | `[0, 10, 0]` (deep green-black) | 0.92 | Green phosphor CRT aesthetic, monospace font, scanlines, bezel frame |
+| Siri | `siri` | `[0, 0, 0]` (black) | 0.5 | Full-screen gradient border glow, Apple system font, frosted glass elements |
 
-All four skins have `reactiveBar: true`.
+All five skins have `reactiveBar: true`.
 
 ### 17A.4 Skin Registry (`skins/index.js`)
 

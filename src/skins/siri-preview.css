@@ -1,0 +1,63 @@
+/* Siri Skin — Editor Preview Overrides */
+
+.preview-container {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+}
+
+.preview-label {
+  color: rgba(255, 255, 255, 0.3);
+}
+.preview-blur {
+  background: rgba(0, 0, 0, 0.5);
+}
+.preview-bar {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  height: auto;
+  background: none;
+  border: 2px solid;
+  border-image: conic-gradient(#8B5CF6, #3B82F6, #06B6D4, #EC4899, #8B5CF6) 1;
+  box-shadow: 0 0 16px 4px rgba(139, 92, 246, 0.3);
+}
+.preview-chat {
+  align-items: center;
+}
+.preview-msg {
+  box-shadow: none;
+}
+.preview-msg.user {
+  font-size: 30px;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 300;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  border-radius: 0;
+  align-self: center;
+  text-align: center;
+}
+.preview-msg.assistant {
+  font-size: 38px;
+  color: #FFFFFF;
+  font-weight: 500;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  border-radius: 0;
+  align-self: center;
+  text-align: center;
+}
+.preview-timer {
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+.preview-timer-progress {
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.25), rgba(236, 72, 153, 0.25));
+  opacity: 1;
+}

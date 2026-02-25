@@ -75,7 +75,7 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 - **Works Across Views** - Pipeline stays active when switching dashboard views.
 - **Auto-Start** - Automatically begins listening on page load (with fallback button).
 - **Visual Feedback** - Themed gradient activity bar shows listening/processing/speaking states with optional reactive audio-level animation.
-- **Skins** - Built-in skins (Default, Alexa, Google Home, Retro Terminal) that theme the activity bar, text display, timers, and overlay. Customizable with CSS overrides.
+- **Skins** - Built-in skins (Default, Alexa, Google Home, Retro Terminal, Siri) that theme the activity bar, text display, timers, and overlay. Customizable with CSS overrides.
 - **Transcription & Response Display** - Shows what was understood and the assistant's response with real-time streaming.
 - **Continue Conversation** - When the assistant asks a follow-up question, the card automatically listens for a response without requiring the wake word again. Conversation history is displayed on screen.
 - **Timers** - Voice-activated timers with on-screen countdown pills, alert chimes, and cancel via double-tap or voice.
@@ -157,7 +157,7 @@ browser_satellite_override: false  # Per-device satellite selection via browser 
 debug: false                       # Show debug info in browser console
 
 # Appearance
-skin: default                      # 'default', 'alexa', 'google-home', or 'retro-terminal'
+skin: default                      # 'default', 'alexa', 'google-home', 'retro-terminal', or 'siri'
 reactive_bar: true                 # Activity bar reacts to audio levels
 text_scale: 100                    # Scale all text 50-200%
 background_opacity: 100            # Override skin's default overlay opacity (0-100%)
@@ -388,6 +388,7 @@ The card includes a skin system that themes the entire UI — activity bar, text
 | **Alexa** | Cyan glow bar, dark overlay, centered bold text, Echo-inspired design |
 | **Google Home** | Four-color Google gradient bar, left-aligned text, light overlay, Nest-inspired design |
 | **Retro Terminal** | Green phosphor CRT aesthetic with scanlines, bezel frame, monospace font, and screen-edge glow |
+| **Siri** | Full-screen gradient border glow (purple → blue → teal → pink), dark frosted overlay, centered clean text, Apple-inspired design |
 
 ![screenshot](https://github.com/user-attachments/assets/728b03ac-1084-4198-8c47-93ca80edc171)
 

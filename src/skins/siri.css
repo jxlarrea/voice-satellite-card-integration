@@ -1,66 +1,39 @@
-/* Retro Terminal Skin — Green phosphor CRT aesthetic */
+/* Siri Skin — iOS 18 edge glow aesthetic */
 
-@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap');
 
-/* Font */
-#voice-satellite-ui {
-  font-family: 'VT323', 'Courier New', monospace;
+/* Animatable custom property for rotating border gradient */
+@property --siri-angle {
+  syntax: '<angle>';
+  inherits: true;
+  initial-value: 0deg;
 }
 
-/* Blur Overlay — near-black with CRT bezel frame */
+/* Font — Inter (closest open-source match to SF Pro) */
+#voice-satellite-ui {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+}
+
+/* Blur Overlay — dark frosted glass */
 #voice-satellite-ui .vs-blur-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   opacity: 0;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.4s ease;
   z-index: 9999;
   pointer-events: none;
-  border-radius: 0;
-  box-shadow:
-    inset 0 0 0 12px #111,
-    inset 0 0 0 14px #2a2a2a,
-    inset 0 0 0 16px #111,
-    inset 0 0 80px 20px rgba(0, 0, 0, 0.7);
 }
 
 #voice-satellite-ui .vs-blur-overlay.visible {
   opacity: 1;
 }
 
-/* Scanline overlay */
-#voice-satellite-ui .vs-blur-overlay::before {
-  content: '';
-  position: absolute;
-  inset: 16px;
-  border-radius: 0;
-  background:
-    repeating-linear-gradient(
-      transparent,
-      transparent 2px,
-      rgba(0, 0, 0, 0.12) 2px,
-      rgba(0, 0, 0, 0.12) 4px
-    );
-  pointer-events: none;
-  z-index: 1;
-}
-
-/* CRT vignette — deep curved-glass darkening at edges */
-#voice-satellite-ui .vs-blur-overlay::after {
-  content: '';
-  position: absolute;
-  inset: 16px;
-  border-radius: 0;
-  background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.5) 100%);
-  pointer-events: none;
-  z-index: 2;
-}
-
-/* Start Button — green phosphor */
+/* Start Button — Siri gradient accent */
 #voice-satellite-ui .vs-start-btn {
   position: fixed;
   bottom: 20px;
@@ -68,58 +41,61 @@
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: #33ff33;
+  background: linear-gradient(135deg, #8B5CF6, #3B82F6, #06B6D4, #EC4899);
+  background-size: 300% 300%;
   border: none;
   cursor: pointer;
   display: none;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 16px rgba(51, 255, 51, 0.4);
+  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
   z-index: 10001;
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
 #voice-satellite-ui .vs-start-btn.visible {
   display: flex;
-  animation: terminal-btn-pulse 2.5s ease-in-out infinite;
+  animation: siri-btn-pulse 2.5s ease-in-out infinite;
 }
 
 #voice-satellite-ui .vs-start-btn:hover {
   transform: scale(1.1);
-  box-shadow: 0 0 24px rgba(51, 255, 51, 0.6);
+  box-shadow: 0 6px 28px rgba(139, 92, 246, 0.6);
   animation: none;
 }
 
 #voice-satellite-ui .vs-start-btn svg {
   width: 28px;
   height: 28px;
-  fill: #0a0a0a;
+  fill: white;
 }
 
-@keyframes terminal-btn-pulse {
+@keyframes siri-btn-pulse {
   0%, 100% {
     transform: scale(1);
-    box-shadow: 0 0 16px rgba(51, 255, 51, 0.4);
+    box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
   }
   50% {
     transform: scale(1.06);
-    box-shadow: 0 0 28px rgba(51, 255, 51, 0.7);
+    box-shadow: 0 6px 32px rgba(139, 92, 246, 0.7);
+    background-position: 100% 100%;
   }
 }
 
-/* Bar — green phosphor frame tracing the inner CRT bezel edge */
+/* Bar — full-screen border glow (iOS 18 Siri edge glow) */
 #voice-satellite-ui .vs-rainbow-bar {
   position: fixed;
-  top: 18px;
-  left: 18px;
-  right: 18px;
-  bottom: 18px;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   height: auto;
   background: none;
-  border: 2px solid #33ff33;
-  filter: drop-shadow(0 0 8px rgba(51, 255, 51, 0.5));
+  border: 3px solid;
+  border-image: conic-gradient(from var(--siri-angle), #8B5CF6, #3B82F6, #06B6D4, #EC4899, #8B5CF6) 1;
+  filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.7)) drop-shadow(0 0 2px rgba(59, 130, 246, 0.5));
   opacity: 0;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.4s ease;
   z-index: 10000;
   pointer-events: none;
 }
@@ -129,80 +105,85 @@
 }
 
 #voice-satellite-ui .vs-rainbow-bar.connecting {
-  animation: terminal-breathe 2s ease-in-out infinite;
+  animation: siri-breathe 2.5s ease-in-out infinite;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.listening {
-  animation: terminal-pulse 2s ease-in-out infinite;
+  animation: siri-rotate 4s linear infinite;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.processing {
-  animation: terminal-flicker 0.15s steps(2) infinite;
+  animation: siri-rotate 0.8s linear infinite;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.speaking {
-  animation: terminal-glow 1.5s ease-in-out infinite;
+  animation: siri-rotate 2s linear infinite;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.error-mode {
-  border-color: #ff3333;
-  filter: drop-shadow(0 0 8px rgba(255, 51, 51, 0.5));
-  animation: terminal-flicker 0.15s steps(2) infinite;
+  border-image: conic-gradient(from var(--siri-angle), #EF4444, #F87171, #EF4444) 1;
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.8)) drop-shadow(0 0 3px rgba(239, 68, 68, 0.5));
+  animation: siri-rotate 2s linear infinite;
   opacity: 1;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.error-flash {
-  animation: terminal-error-flash 0.15s ease-in-out 3;
+  animation: siri-error-flash 0.15s ease-in-out 3;
 }
 
 /* Reactive Bar — audio-driven glow intensity around the frame */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   overflow: visible;
   transition: filter 0.05s linear, box-shadow 0.05s linear;
-  filter: drop-shadow(0 0 calc(4px + 16px * var(--vs-audio-level, 0)) rgba(51, 255, 51, calc(0.4 + 0.4 * var(--vs-audio-level, 0))));
+  filter: drop-shadow(0 0 calc(4px + 12px * var(--vs-audio-level, 0)) rgba(139, 92, 246, calc(0.7 + 0.3 * var(--vs-audio-level, 0))))
+         drop-shadow(0 0 calc(2px + 6px * var(--vs-audio-level, 0)) rgba(59, 130, 246, calc(0.5 + 0.3 * var(--vs-audio-level, 0))));
   box-shadow:
-    inset 0 0 calc(6px + 30px * var(--vs-audio-level, 0)) rgba(51, 255, 51, calc(0.08 + 0.2 * var(--vs-audio-level, 0)));
+    inset 0 0 calc(6px + 20px * var(--vs-audio-level, 0)) rgba(139, 92, 246, calc(0.1 + 0.2 * var(--vs-audio-level, 0)));
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.listening {
+  animation: siri-rotate 4s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.processing {
+  animation: siri-rotate 0.8s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.speaking {
+  animation: siri-rotate 2s linear infinite;
 }
 
 /* Keyframes — bar states */
-@keyframes terminal-breathe {
+@keyframes siri-breathe {
   0%, 100% {
     opacity: 0.3;
-    filter: drop-shadow(0 0 4px rgba(51, 255, 51, 0.3));
+    filter: drop-shadow(0 0 4px rgba(139, 92, 246, 0.4)) drop-shadow(0 0 2px rgba(59, 130, 246, 0.3));
   }
   50% {
     opacity: 0.7;
-    filter: drop-shadow(0 0 12px rgba(51, 255, 51, 0.6));
+    filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.75)) drop-shadow(0 0 3px rgba(59, 130, 246, 0.5));
   }
 }
 
-@keyframes terminal-pulse {
-  0%, 100% {
-    filter: drop-shadow(0 0 8px rgba(51, 255, 51, 0.4));
-  }
-  50% {
-    filter: drop-shadow(0 0 20px rgba(51, 255, 51, 0.8));
-  }
+@keyframes siri-rotate {
+  0%   { --siri-angle: 0deg; }
+  100% { --siri-angle: 360deg; }
 }
 
-@keyframes terminal-flicker {
-  0% { opacity: 1; }
-  50% { opacity: 0.6; }
-  100% { opacity: 1; }
-}
-
-@keyframes terminal-glow {
-  0%, 100% {
-    filter: drop-shadow(0 0 8px rgba(51, 255, 51, 0.5));
-  }
-  50% {
-    filter: drop-shadow(0 0 16px rgba(51, 255, 51, 0.7));
-  }
-}
-
-@keyframes terminal-error-flash {
+@keyframes siri-error-flash {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+
+@keyframes siri-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Chat Container */
@@ -210,11 +191,11 @@
   position: fixed;
   left: 7.5%;
   right: 7.5%;
-  bottom: 100px;
+  bottom: 60px;
   display: none;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
   width: auto;
   z-index: 10001;
   pointer-events: none;
@@ -240,67 +221,51 @@
   transform: translate(-50%, -50%);
 }
 
-/* Chat Messages — raw terminal text, no bubbles */
+/* Chat Messages — clean Apple text, no bubbles */
 #voice-satellite-ui .vs-chat-msg {
-  max-width: 90%;
+  max-width: 85%;
   opacity: 0;
-  animation: terminal-fade-in 0.25s ease forwards;
+  animation: siri-fade-in 0.35s ease forwards;
   word-wrap: break-word;
   background: none;
   border: none;
   box-shadow: none;
   padding: 4px 0;
   border-radius: 0;
-  text-shadow: 0 0 8px rgba(51, 255, 51, 0.4);
 }
 
 #voice-satellite-ui .vs-chat-msg.user {
-  font-size: calc(42px * var(--vs-text-scale, 1));
-  color: #1a8c1a;
-  font-weight: normal;
+  font-size: calc(30px * var(--vs-text-scale, 1));
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 300;
   font-style: normal;
-  align-self: flex-start;
-  text-align: left;
-}
-
-#voice-satellite-ui .vs-chat-msg.user::before {
-  content: '> ';
+  align-self: center;
+  text-align: center;
 }
 
 #voice-satellite-ui .vs-chat-msg.assistant {
-  font-size: calc(48px * var(--vs-text-scale, 1));
-  color: #33ff33;
-  font-weight: bold;
+  font-size: calc(38px * var(--vs-text-scale, 1));
+  color: #FFFFFF;
+  font-weight: 500;
   font-style: normal;
-  align-self: flex-start;
-  text-align: left;
+  align-self: center;
+  text-align: center;
   max-height: 70vh;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(51, 255, 51, 0.3) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 #voice-satellite-ui .vs-chat-msg.announcement {
-  font-size: calc(48px * var(--vs-text-scale, 1));
-  color: #33ff33;
-  font-weight: bold;
+  font-size: calc(38px * var(--vs-text-scale, 1));
+  color: #FFFFFF;
+  font-weight: 500;
   font-style: normal;
-  align-self: flex-start;
-  text-align: left;
+  align-self: center;
+  text-align: center;
 }
 
-@keyframes terminal-fade-in {
-  0% {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Timer Container */
+/* Timer Container — top-right */
 .vs-timer-container {
   position: fixed;
   top: 12px;
@@ -310,23 +275,25 @@
   gap: 8px;
   z-index: 10001;
   pointer-events: none;
-  font-family: 'VT323', 'Courier New', monospace;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
 }
 
-/* Timer Pills — green border on dark */
+/* Timer Pills — frosted glass */
 .vs-timer-pill {
   position: relative;
   overflow: hidden;
-  font-size: calc(42px * var(--vs-text-scale, 1));
-  color: #33ff33;
-  font-weight: bold;
+  font-size: calc(34px * var(--vs-text-scale, 1));
+  color: #FFFFFF;
+  font-weight: 600;
   font-style: normal;
-  background: rgba(0, 10, 0, 0.9);
-  border: 2px solid rgba(51, 255, 51, 0.4);
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   padding: 14px 18px;
-  border-radius: 4px;
-  box-shadow: 0 0 12px rgba(51, 255, 51, 0.15);
-  animation: terminal-timer-fade-in 0.3s ease forwards;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  animation: siri-timer-fade-in 0.3s ease forwards;
   pointer-events: auto;
   cursor: default;
   user-select: none;
@@ -338,7 +305,7 @@
   top: 0;
   left: 0;
   height: 100%;
-  background: rgba(51, 255, 51, 0.2);
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.25), rgba(236, 72, 153, 0.25));
   opacity: 1;
   transition: width 1s linear;
   pointer-events: none;
@@ -361,10 +328,10 @@
 }
 
 .vs-timer-pill.vs-timer-expired {
-  animation: terminal-timer-fade-out 0.4s ease forwards;
+  animation: siri-timer-fade-out 0.4s ease forwards;
 }
 
-/* Timer Finished Alert */
+/* Timer Finished Alert — frosted glass with gradient glow */
 .vs-timer-alert {
   position: fixed;
   top: 50%;
@@ -373,18 +340,20 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: calc(42px * var(--vs-text-scale, 1));
-  font-family: 'VT323', 'Courier New', monospace;
-  color: #33ff33;
-  font-weight: bold;
+  font-size: calc(34px * var(--vs-text-scale, 1));
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+  color: #FFFFFF;
+  font-weight: 600;
   font-style: normal;
-  background: rgba(0, 10, 0, 0.95);
-  border: 2px solid rgba(51, 255, 51, 0.5);
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(236, 72, 153, 0.4);
   padding: 18px 24px;
-  border-radius: 4px;
-  box-shadow: 0 0 24px rgba(51, 255, 51, 0.2);
+  border-radius: 16px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.3), 0 0 20px rgba(236, 72, 153, 0.2);
   z-index: 10002;
-  animation: terminal-alert-pulse 1.5s ease-in-out infinite;
+  animation: siri-alert-pulse 1.5s ease-in-out infinite;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -397,7 +366,7 @@
   font-size: 1.2em;
 }
 
-@keyframes terminal-timer-fade-in {
+@keyframes siri-timer-fade-in {
   0% {
     opacity: 0;
     transform: translateY(8px);
@@ -408,7 +377,7 @@
   }
 }
 
-@keyframes terminal-timer-fade-out {
+@keyframes siri-timer-fade-out {
   0% {
     opacity: 1;
     transform: translateY(0);
@@ -419,18 +388,18 @@
   }
 }
 
-@keyframes terminal-alert-pulse {
+@keyframes siri-alert-pulse {
   0%, 100% {
     transform: translate(-50%, -50%) scale(1);
-    box-shadow: 0 0 24px rgba(51, 255, 51, 0.2);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.3), 0 0 20px rgba(236, 72, 153, 0.2);
   }
   50% {
     transform: translate(-50%, -50%) scale(1.03);
-    box-shadow: 0 0 36px rgba(51, 255, 51, 0.4);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.3), 0 0 32px rgba(139, 92, 246, 0.3);
   }
 }
 
-/* Image Panel — right-side slide-in panel for tool results */
+/* Image Panel — frosted glass card */
 #voice-satellite-ui .vs-image-panel {
   position: fixed;
   top: 50%;
@@ -442,11 +411,13 @@
   z-index: 10001;
   pointer-events: none;
   display: none;
-  background: rgba(0, 10, 0, 0.9);
-  border: 2px solid rgba(51, 255, 51, 0.4);
-  border-radius: 0;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
   padding: 12px;
-  box-shadow: 0 0 16px rgba(51, 255, 51, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 #voice-satellite-ui .vs-panel-scroll {
@@ -455,7 +426,7 @@
   padding-right: 8px;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  scrollbar-color: rgba(51, 255, 51, 0.4) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 #voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar {
@@ -467,12 +438,12 @@
 }
 
 #voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-thumb {
-  background: rgba(51, 255, 51, 0.4);
+  background: rgba(255, 255, 255, 0.2);
   border-radius: 3px;
 }
 
 #voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(51, 255, 51, 0.6);
+  background: rgba(255, 255, 255, 0.35);
 }
 
 #voice-satellite-ui .vs-image-panel.visible {
@@ -501,13 +472,12 @@
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
-  border-radius: 0;
-  border: 1px solid rgba(51, 255, 51, 0.2);
+  border-radius: 10px;
   opacity: 0;
-  animation: terminal-fade-in 0.25s ease forwards;
+  animation: siri-fade-in 0.35s ease forwards;
 }
 
-/* Lightbox — fullscreen image viewer */
+/* Lightbox — fullscreen image/video viewer */
 #voice-satellite-ui .vs-lightbox {
   position: fixed;
   inset: 0;
@@ -515,7 +485,7 @@
   display: none;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 5, 0, 0.95);
+  background: rgba(0, 0, 0, 0.92);
 }
 
 #voice-satellite-ui .vs-lightbox.visible {
@@ -526,16 +496,14 @@
   max-width: 90vw;
   max-height: 90vh;
   object-fit: contain;
-  border: 2px solid rgba(51, 255, 51, 0.3);
-  border-radius: 0;
+  border-radius: 10px;
 }
 
 #voice-satellite-ui .vs-lightbox-iframe {
   width: 90vw;
   max-width: 1200px;
   aspect-ratio: 16 / 9;
-  border: 2px solid rgba(51, 255, 51, 0.3);
-  border-radius: 0;
+  border-radius: 10px;
   display: none;
 }
 
@@ -560,22 +528,19 @@
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: cover;
-  border: 1px solid rgba(51, 255, 51, 0.2);
-  border-radius: 0;
+  border-radius: 10px;
 }
 
 #voice-satellite-ui .vs-video-duration {
   position: absolute;
   bottom: 8px;
   right: 8px;
-  background: rgba(0, 10, 0, 0.9);
-  color: #33ff33;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
   padding: 2px 6px;
-  border: 1px solid rgba(51, 255, 51, 0.3);
-  border-radius: 0;
+  border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
-  font-family: 'VT323', 'Courier New', monospace;
 }
 
 #voice-satellite-ui .vs-video-info {
@@ -585,8 +550,7 @@
 #voice-satellite-ui .vs-video-title {
   font-size: 14px;
   font-weight: 500;
-  color: #33ff33;
-  font-family: 'VT323', 'Courier New', monospace;
+  color: #fff;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -595,8 +559,7 @@
 
 #voice-satellite-ui .vs-video-channel {
   font-size: 12px;
-  color: rgba(51, 255, 51, 0.5);
-  font-family: 'VT323', 'Courier New', monospace;
+  color: rgba(255, 255, 255, 0.5);
   margin-top: 2px;
 }
 
@@ -624,6 +587,8 @@
   padding: 0;
   box-shadow: none;
   border: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 #voice-satellite-ui .vs-weather-card {
@@ -641,32 +606,31 @@
   width: 96px;
   height: 96px;
   flex-shrink: 0;
-  filter: brightness(0) saturate(100%) invert(76%) sepia(85%) saturate(4000%) hue-rotate(85deg) brightness(110%);
+  filter: brightness(0) invert(1);
 }
 
 #voice-satellite-ui .vs-weather-temp {
-  font-size: calc(58px * var(--vs-text-scale, 1));
-  font-weight: bold;
-  color: #33ff33;
+  font-size: calc(52px * var(--vs-text-scale, 1));
+  font-weight: 600;
+  color: #FFFFFF;
   line-height: 1.1;
-  text-shadow: 0 0 8px rgba(51, 255, 51, 0.4);
 }
 
 #voice-satellite-ui .vs-weather-condition {
-  font-size: calc(24px * var(--vs-text-scale, 1));
-  color: #1a8c1a;
+  font-size: calc(22px * var(--vs-text-scale, 1));
+  color: rgba(139, 92, 246, 0.8);
   margin-top: 4px;
 }
 
 #voice-satellite-ui .vs-weather-humidity {
-  font-size: calc(20px * var(--vs-text-scale, 1));
-  color: rgba(51, 255, 51, 0.5);
+  font-size: calc(18px * var(--vs-text-scale, 1));
+  color: rgba(255, 255, 255, 0.5);
   margin-top: 4px;
 }
 
 #voice-satellite-ui .vs-weather-divider {
   height: 1px;
-  background: rgba(51, 255, 51, 0.2);
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.3), rgba(236, 72, 153, 0.3));
   margin: 12px 0;
 }
 
@@ -683,24 +647,23 @@
 
 #voice-satellite-ui .vs-weather-row-time {
   width: 30%;
-  font-size: calc(20px * var(--vs-text-scale, 1));
-  color: #1a8c1a;
+  font-size: calc(18px * var(--vs-text-scale, 1));
+  color: rgba(139, 92, 246, 0.6);
   flex-shrink: 0;
 }
 
 #voice-satellite-ui .vs-weather-row-cond {
   flex: 1;
-  font-size: calc(20px * var(--vs-text-scale, 1));
-  color: rgba(51, 255, 51, 0.7);
+  font-size: calc(18px * var(--vs-text-scale, 1));
+  color: rgba(255, 255, 255, 0.7);
 }
 
 #voice-satellite-ui .vs-weather-row-temp {
-  font-size: calc(24px * var(--vs-text-scale, 1));
-  font-weight: bold;
-  color: #33ff33;
+  font-size: calc(22px * var(--vs-text-scale, 1));
+  font-weight: 600;
+  color: #FFFFFF;
   text-align: right;
   min-width: 56px;
-  text-shadow: 0 0 6px rgba(51, 255, 51, 0.3);
 }
 
 /* Financial — borderless floating content over blur overlay */
@@ -710,6 +673,8 @@
   padding: 0;
   box-shadow: none;
   border: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 #voice-satellite-ui .vs-financial-card {
@@ -732,64 +697,58 @@
 }
 
 #voice-satellite-ui .vs-financial-name {
-  font-size: calc(22px * var(--vs-text-scale, 1));
-  color: #33ff33;
+  font-size: calc(20px * var(--vs-text-scale, 1));
+  color: #FFFFFF;
   flex: 1;
   min-width: 0;
-  text-shadow: 0 0 6px rgba(51, 255, 51, 0.3);
 }
 
 #voice-satellite-ui .vs-financial-badge {
-  font-size: calc(14px * var(--vs-text-scale, 1));
-  color: rgba(51, 255, 51, 0.7);
-  background: rgba(51, 255, 51, 0.1);
+  font-size: calc(12px * var(--vs-text-scale, 1));
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.1);
   padding: 2px 8px;
-  border-radius: 0;
-  border: 1px solid rgba(51, 255, 51, 0.3);
+  border-radius: 4px;
   flex-shrink: 0;
 }
 
 #voice-satellite-ui .vs-financial-price {
-  font-size: calc(52px * var(--vs-text-scale, 1));
-  font-weight: bold;
-  color: #33ff33;
+  font-size: calc(48px * var(--vs-text-scale, 1));
+  font-weight: 600;
+  color: #FFFFFF;
   padding: 4px 4px 0;
   line-height: 1.1;
-  text-shadow: 0 0 8px rgba(51, 255, 51, 0.4);
 }
 
 #voice-satellite-ui .vs-financial-change {
-  font-size: calc(24px * var(--vs-text-scale, 1));
+  font-size: calc(22px * var(--vs-text-scale, 1));
   padding: 4px 4px 8px;
 }
 
 #voice-satellite-ui .vs-financial-change.up {
-  color: #33ff33;
-  text-shadow: 0 0 6px rgba(51, 255, 51, 0.4);
+  color: #34D399;
 }
 
 #voice-satellite-ui .vs-financial-change.down {
-  color: #ff3333;
-  text-shadow: 0 0 6px rgba(255, 51, 51, 0.4);
+  color: #F87171;
 }
 
 #voice-satellite-ui .vs-financial-details {
-  font-size: calc(18px * var(--vs-text-scale, 1));
-  color: rgba(51, 255, 51, 0.5);
+  font-size: calc(16px * var(--vs-text-scale, 1));
+  color: rgba(255, 255, 255, 0.5);
   padding: 8px 4px;
 }
 
 #voice-satellite-ui .vs-financial-conversion {
-  font-size: calc(46px * var(--vs-text-scale, 1));
-  font-weight: bold;
-  color: #33ff33;
+  font-size: calc(42px * var(--vs-text-scale, 1));
+  font-weight: 600;
+  color: #FFFFFF;
   padding: 16px 4px 8px;
   line-height: 1.2;
-  text-shadow: 0 0 8px rgba(51, 255, 51, 0.4);
 }
 
 #voice-satellite-ui .vs-financial-rate {
-  font-size: calc(22px * var(--vs-text-scale, 1));
-  color: rgba(51, 255, 51, 0.5);
+  font-size: calc(20px * var(--vs-text-scale, 1));
+  color: rgba(255, 255, 255, 0.5);
   padding: 4px 4px;
 }

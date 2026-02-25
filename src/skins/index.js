@@ -6,12 +6,14 @@ import { defaultSkin } from './default.js';
 import { alexaSkin } from './alexa.js';
 import { googleHomeSkin } from './google-home.js';
 import { retroTerminalSkin } from './retro-terminal.js';
+import { siriSkin } from './siri.js';
 /** All registered skins keyed by id */
 const SKINS = {
   [defaultSkin.id]: defaultSkin,
   [alexaSkin.id]: alexaSkin,
   [googleHomeSkin.id]: googleHomeSkin,
   [retroTerminalSkin.id]: retroTerminalSkin,
+  [siriSkin.id]: siriSkin,
 };
 
 /**

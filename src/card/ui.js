@@ -512,10 +512,17 @@ export class UIManager {
         timeEl.className = 'vs-weather-row-time';
         if (data.forecast_type === 'hourly') {
           timeEl.textContent = entry.time || '';
-        } else if (data.forecast_type === 'twice_daily') {
-          timeEl.textContent = (entry.date || '') + (entry.is_daytime === false ? ' Night' : ' Day');
         } else {
-          timeEl.textContent = entry.date || '';
+          const raw = entry.date || '';
+          const parsed = raw ? new Date(raw + 'T00:00') : null;
+          const short = parsed && !isNaN(parsed)
+            ? new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(parsed)
+            : raw.length > 3 ? raw.slice(0, 3) : raw;
+          if (data.forecast_type === 'twice_daily') {
+            timeEl.textContent = short + (entry.is_daytime === false ? ' Night' : ' Day');
+          } else {
+            timeEl.textContent = short;
+          }
         }
         row.appendChild(timeEl);
 
