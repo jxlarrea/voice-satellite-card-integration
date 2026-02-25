@@ -260,7 +260,8 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
 1. Clears any pending disconnect timeout
 2. Renders the hidden Shadow DOM container
 3. If this is an editor preview, renders the static preview and returns
-4. **Browser satellite override:** If `satellite_entity` is empty and `browser_satellite_override` is enabled, attempts `resolveEntity(hass)` to resolve from localStorage. If resolved, injects the entity and continues. Otherwise returns early (picker shows from `set hass`).
+4. If `_deviceDisabled` is true (device explicitly disabled via picker), returns immediately.
+5. **Browser satellite override:** If `satellite_entity` is empty and `browser_satellite_override` is enabled, attempts `resolveEntity(hass)`. If `DISABLED_VALUE`, sets `_deviceDisabled` and returns. If resolved, injects the entity and continues. Otherwise returns early (picker shows from `set hass`).
 5. Ensures the global UI exists
 6. Sets up visibility change listener
 7. If no singleton is active and we have a connection, starts listening
@@ -273,7 +274,8 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
 1. Editor previews return immediately
 2. If this is the active owner: updates TimerManager, checks remote TTS playback state (`tts.checkRemotePlayback`), and retries satellite subscription if needed
 3. If not yet started:
-   - **Browser satellite override:** If `satellite_entity` is empty and `browser_satellite_override` is enabled, attempts `resolveEntity(hass)`. If resolved, injects the entity. If not (and `hass.entities` is populated and no picker is already showing), calls `_showEntityPicker(hass)` and returns.
+   - If `_deviceDisabled`, returns immediately (no pipeline, no mic)
+   - **Browser satellite override:** If `satellite_entity` is empty and `browser_satellite_override` is enabled, attempts `resolveEntity(hass)`. If `DISABLED_VALUE`, sets `_deviceDisabled` and returns. If resolved, injects the entity. If not (and `hass.entities` is populated and no picker is already showing), calls `_showEntityPicker(hass)` and returns.
    - Acquires connection, ensures global UI, starts listening
 
 **`setConfig(config)`** — Called when the user saves config in the editor:
@@ -281,7 +283,7 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
 2. Resolves skin via `getSkin(config.skin)` → stored as `_activeSkin`
 3. Merges config with defaults
 4. Updates logger debug flag
-5. **Browser satellite override:** If `browser_satellite_override` is enabled, localStorage takes full control — injects the stored entity if present, otherwise clears `satellite_entity` (so the startup path in `set hass` shows the picker). If override is disabled, clears localStorage via `clearStoredEntity()`.
+5. **Browser satellite override:** If `browser_satellite_override` is enabled, localStorage takes full control — if stored value is `DISABLED_VALUE`, sets `_deviceDisabled = true` and clears entity; if stored entity is valid, injects it; otherwise clears `satellite_entity` (so the startup path in `set hass` shows the picker). If override is disabled, clears localStorage via `clearStoredEntity()` and resets `_deviceDisabled`.
 6. Applies styles to the global UI (skin CSS injection, opacity, text scale, custom CSS)
 7. Updates editor preview if in preview context
 8. Propagates config to the active singleton instance
@@ -833,6 +835,7 @@ When multiple wall-mounted tablets share a single dashboard, each device needs t
 - `getStoredEntity()` → reads from localStorage, returns `string | null`. Catches exceptions for private browsing.
 - `setStoredEntity(entityId)` → saves to localStorage.
 - `clearStoredEntity()` → removes from localStorage. Called when `browser_satellite_override` is disabled in `setConfig()`.
+- `isDeviceDisabled()` → returns `true` if stored value is `DISABLED_VALUE` (`'__disabled__'`).
 
 ### Entity Discovery
 
@@ -841,7 +844,7 @@ When multiple wall-mounted tablets share a single dashboard, each device needs t
 ### Entity Resolution
 
 `resolveEntity(hass)` — Resolution chain:
-1. Check localStorage → validate entity still exists in `hass.entities` → return if valid, clear if stale
+1. Check localStorage → if `DISABLED_VALUE`, return it as-is (device explicitly disabled) → if valid entity in `hass.entities`, return → if stale, clear
 2. Auto-select if exactly one satellite entity exists (saves to localStorage, returns immediately — no picker shown)
 3. Return `null` (caller should show picker)
 
@@ -867,7 +870,8 @@ Two helper functions handle this:
 2. Creates a fullscreen `div.vs-picker-overlay` appended to `document.body`
 3. Builds entity list from `discoverSatelliteEntities(hass)` as `<button>` elements
 4. If no entities found, shows "No voice satellites found" message
-5. Click handler: matches `.vs-picker-item` → saves to localStorage → removes overlay → calls `onSelect(entityId)`
+5. Adds a red "Disable on this device" button (`.vs-picker-disable`) below the entity list — stores `DISABLED_VALUE` in localStorage, sets `_deviceDisabled = true` on the card, and bails without starting the pipeline
+6. Click handler: matches `.vs-picker-item` or `.vs-picker-disable` → saves to localStorage → removes overlay → calls `onSelect(entityId)`
 
 ### Styling
 
@@ -884,6 +888,9 @@ The picker uses HA theme CSS variables with dark fallbacks, so it automatically 
 | Item border / hover | `--divider-color` | `#3a3a3c` |
 | Active border accent | `--primary-color` | `#48484a` |
 | Font family | `--ha-font-family` | system font stack |
+| Disable button bg | — | `rgba(255, 59, 48, 0.15)` |
+| Disable button text | — | `#ff3b30` |
+| Disable button border | — | `rgba(255, 59, 48, 0.3)` |
 
 The overlay uses `position: fixed; inset: 0; z-index: 2147483647` with a blurred dark backdrop.
 
@@ -1752,8 +1759,11 @@ When recreating or modifying this card, verify:
 **Entity Picker (§14A):**
 - [ ] localStorage key is `vs-satellite-entity`
 - [ ] `resolveEntity()` validates stored entity against `hass.entities`, clears stale entries
+- [ ] `resolveEntity()` returns `DISABLED_VALUE` as-is when device is explicitly disabled
 - [ ] Auto-selects when exactly one satellite entity exists (no picker shown)
 - [ ] `setConfig()`: when override enabled, localStorage takes full control; when disabled, `clearStoredEntity()` called
+- [ ] `_deviceDisabled` flag checked in `setConfig()`, `connectedCallback()`, and `set hass()` — prevents pipeline start
+- [ ] Picker shows "Disable on this device" red button; stores `DISABLED_VALUE`, sets `_deviceDisabled = true`
 - [ ] Picker only shows from `set hass()` startup path (when `_hasStarted` is false), never from `setConfig()`
 - [ ] `isEditorPreview()` guard prevents picker/override logic on preview instances
 - [ ] `isHADialogBlocking()` checks `inert` attribute on `<home-assistant-main>` in HA's shadow DOM

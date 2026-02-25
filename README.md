@@ -140,7 +140,9 @@ browser_satellite_override: true
 
 If only one satellite entity exists, it is auto-selected without showing the popup.
 
-To change the selected satellite on a device, toggle the option off and on again.
+The popup also includes a **Disable on this device** option for devices where you don't want the satellite to activate at all (e.g., phones, desktop browsers). Disabled devices will not prompt for microphone access or start any voice pipeline.
+
+To change the selected satellite or re-enable a disabled device, toggle the option off and on again in the card editor.
 
 ### Visual Editor
 
