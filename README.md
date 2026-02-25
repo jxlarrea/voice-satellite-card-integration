@@ -80,7 +80,7 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 - **Ask Question** - Receive `assist_satellite.ask_question` calls that speak a question, capture the user's voice response, and match it against predefined answers using hassil sentence templates. Returns structured results to the calling automation.
 - **Screensaver Control** - Automatically dismisses a configured screensaver entity when a voice interaction begins.
 - **Media Player Entity** - Each satellite exposes a `media_player` entity. Volume is controlled via the entity's volume slider in HA and applies to all audio (chimes, TTS, announcements). Supports `tts.speak` and `media_player.play_media` targeting from automations.
-- **LLM Tools** *(Experimental)* - Enhance your voice assistant with visual tools: search for images and YouTube videos displayed in a media panel, get web search results with featured images, and look up Wikipedia articles with summaries and images. Requires the [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration.
+- **LLM Tools** *(Experimental)* - Enhance your voice assistant with visual tools: search for images and YouTube videos displayed in a media panel, get web search results with featured images, look up Wikipedia articles with summaries and images, view weather forecasts with current conditions and scrollable daily/hourly rows, and check stock prices, crypto prices, and currency conversions with color-coded change indicators. Requires the [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration.
 
 ## Prerequisites
 
@@ -440,7 +440,7 @@ Results appear as video cards showing the thumbnail, duration, title, and channe
 Ask your assistant to search the web:
 
 - *"Search the web for Home Assistant 2025 new features"*
-- *"Look up the weather forecast for this weekend"*
+- *"Look up the latest SpaceX launch"*
 
 The assistant responds with a summary of the search results. If the search returns a relevant featured image, it is displayed alongside the response.
 
@@ -452,6 +452,29 @@ Ask your assistant to look up topics on Wikipedia:
 - *"Look up the history of the Roman Empire"*
 
 The assistant responds with a summary from the Wikipedia article. If the article includes a main image, it is displayed alongside the response.
+
+### Weather Forecast
+
+Ask your assistant about the weather:
+
+- *"What's the weather today?"*
+- *"What's the forecast for this week?"*
+
+The assistant responds with a spoken summary while displaying a weather card in the media panel showing the current temperature, condition, humidity, and a scrollable forecast (hourly, daily, or twice-daily depending on the range requested). The weather icon is sourced from Google Weather SVGs via Home Assistant. The weather card uses the same featured panel layout as web search and Wikipedia — it appears alongside the chat response and dismisses immediately after TTS completes (no 30-second linger).
+
+### Financial Data
+
+Ask your assistant about stocks, crypto, or currency conversions:
+
+- *"What's Apple's stock price?"*
+- *"How much is Bitcoin right now?"*
+- *"Convert 100 USD to EUR"*
+
+**Stocks and crypto** display a financial card showing the company or coin name, exchange badge, current price, color-coded change indicator (green with up arrow for gains, red with down arrow for losses), and key details like open/high/low prices or market cap. If available, a logo is displayed alongside the name.
+
+**Currency conversions** display the converted amount prominently with the exchange rate below.
+
+The financial card uses the same featured panel layout as weather — it appears alongside the chat response and dismisses immediately after TTS completes.
 
 ## Troubleshooting
 

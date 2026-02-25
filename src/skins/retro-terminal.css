@@ -434,9 +434,9 @@
 #voice-satellite-ui .vs-image-panel {
   position: fixed;
   top: 50%;
-  right: 40px;
+  right: 7.5%;
   transform: translateY(-50%);
-  width: 45%;
+  width: 30%;
   max-height: 70vh;
   overflow: hidden;
   z-index: 10001;
@@ -602,13 +602,195 @@
 
 /* Chat narrows when image panel is open */
 #voice-satellite-ui.has-images .vs-chat-container {
-  right: calc(45% + 80px);
+  right: calc(37.5% + 40px);
+}
+#voice-satellite-ui.has-featured .vs-chat-container {
+  right: calc(32.5% + 40px);
 }
 
-#voice-satellite-ui.has-featured .vs-chat-container {
-  right: calc(25% + 80px);
+#voice-satellite-ui.has-images .vs-chat-msg,
+#voice-satellite-ui.has-featured .vs-chat-msg {
+  max-width: 100%;
 }
 
 #voice-satellite-ui .vs-image-panel.featured {
   width: 25%;
+}
+
+/* Weather — borderless floating content over blur overlay */
+#voice-satellite-ui .vs-image-panel.weather {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  border: none;
+}
+
+#voice-satellite-ui .vs-weather-card {
+  padding: 8px 0;
+}
+
+#voice-satellite-ui .vs-weather-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 4px;
+}
+
+#voice-satellite-ui .vs-weather-icon {
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+  filter: brightness(0) saturate(100%) invert(76%) sepia(85%) saturate(4000%) hue-rotate(85deg) brightness(110%);
+}
+
+#voice-satellite-ui .vs-weather-temp {
+  font-size: calc(58px * var(--vs-text-scale, 1));
+  font-weight: bold;
+  color: #33ff33;
+  line-height: 1.1;
+  text-shadow: 0 0 8px rgba(51, 255, 51, 0.4);
+}
+
+#voice-satellite-ui .vs-weather-condition {
+  font-size: calc(24px * var(--vs-text-scale, 1));
+  color: #1a8c1a;
+  margin-top: 4px;
+}
+
+#voice-satellite-ui .vs-weather-humidity {
+  font-size: calc(20px * var(--vs-text-scale, 1));
+  color: rgba(51, 255, 51, 0.5);
+  margin-top: 4px;
+}
+
+#voice-satellite-ui .vs-weather-divider {
+  height: 1px;
+  background: rgba(51, 255, 51, 0.2);
+  margin: 12px 0;
+}
+
+#voice-satellite-ui .vs-weather-forecast {
+  display: flex;
+  flex-direction: column;
+}
+
+#voice-satellite-ui .vs-weather-row {
+  display: flex;
+  align-items: center;
+  padding: 10px 4px;
+}
+
+#voice-satellite-ui .vs-weather-row-time {
+  width: 30%;
+  font-size: calc(20px * var(--vs-text-scale, 1));
+  color: #1a8c1a;
+  flex-shrink: 0;
+}
+
+#voice-satellite-ui .vs-weather-row-cond {
+  flex: 1;
+  font-size: calc(20px * var(--vs-text-scale, 1));
+  color: rgba(51, 255, 51, 0.7);
+}
+
+#voice-satellite-ui .vs-weather-row-temp {
+  font-size: calc(24px * var(--vs-text-scale, 1));
+  font-weight: bold;
+  color: #33ff33;
+  text-align: right;
+  min-width: 56px;
+  text-shadow: 0 0 6px rgba(51, 255, 51, 0.3);
+}
+
+/* Financial — borderless floating content over blur overlay */
+#voice-satellite-ui .vs-image-panel.financial {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  border: none;
+}
+
+#voice-satellite-ui .vs-financial-card {
+  padding: 8px 0;
+}
+
+#voice-satellite-ui .vs-financial-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+}
+
+#voice-satellite-ui .vs-financial-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  filter: brightness(0) saturate(100%) invert(76%) sepia(85%) saturate(4000%) hue-rotate(85deg) brightness(110%);
+}
+
+#voice-satellite-ui .vs-financial-name {
+  font-size: calc(22px * var(--vs-text-scale, 1));
+  color: #33ff33;
+  flex: 1;
+  min-width: 0;
+  text-shadow: 0 0 6px rgba(51, 255, 51, 0.3);
+}
+
+#voice-satellite-ui .vs-financial-badge {
+  font-size: calc(14px * var(--vs-text-scale, 1));
+  color: rgba(51, 255, 51, 0.7);
+  background: rgba(51, 255, 51, 0.1);
+  padding: 2px 8px;
+  border-radius: 0;
+  border: 1px solid rgba(51, 255, 51, 0.3);
+  flex-shrink: 0;
+}
+
+#voice-satellite-ui .vs-financial-price {
+  font-size: calc(52px * var(--vs-text-scale, 1));
+  font-weight: bold;
+  color: #33ff33;
+  padding: 4px 4px 0;
+  line-height: 1.1;
+  text-shadow: 0 0 8px rgba(51, 255, 51, 0.4);
+}
+
+#voice-satellite-ui .vs-financial-change {
+  font-size: calc(24px * var(--vs-text-scale, 1));
+  padding: 4px 4px 8px;
+}
+
+#voice-satellite-ui .vs-financial-change.up {
+  color: #33ff33;
+  text-shadow: 0 0 6px rgba(51, 255, 51, 0.4);
+}
+
+#voice-satellite-ui .vs-financial-change.down {
+  color: #ff3333;
+  text-shadow: 0 0 6px rgba(255, 51, 51, 0.4);
+}
+
+#voice-satellite-ui .vs-financial-details {
+  font-size: calc(18px * var(--vs-text-scale, 1));
+  color: rgba(51, 255, 51, 0.5);
+  padding: 8px 4px;
+}
+
+#voice-satellite-ui .vs-financial-conversion {
+  font-size: calc(46px * var(--vs-text-scale, 1));
+  font-weight: bold;
+  color: #33ff33;
+  padding: 16px 4px 8px;
+  line-height: 1.2;
+  text-shadow: 0 0 8px rgba(51, 255, 51, 0.4);
+}
+
+#voice-satellite-ui .vs-financial-rate {
+  font-size: calc(22px * var(--vs-text-scale, 1));
+  color: rgba(51, 255, 51, 0.5);
+  padding: 4px 4px;
 }

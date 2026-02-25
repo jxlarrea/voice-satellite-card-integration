@@ -8,7 +8,25 @@
  */
 
 import { Timing } from '../constants.js';
-import { formatTime } from '../shared/format.js';
+import { formatTime, formatPrice, formatLargeNumber, formatChange } from '../shared/format.js';
+
+const CONDITION_LABELS = {
+  'sunny': 'Sunny',
+  'cloudy': 'Cloudy',
+  'rainy': 'Rainy',
+  'snowy': 'Snowy',
+  'partlycloudy': 'Partly Cloudy',
+  'pouring': 'Heavy Rain',
+  'lightning': 'Thunderstorm',
+  'lightning-rainy': 'Thunderstorm',
+  'fog': 'Foggy',
+  'hail': 'Hail',
+  'snowy-rainy': 'Sleet',
+  'windy': 'Windy',
+  'windy-variant': 'Windy',
+  'clear-night': 'Clear Night',
+  'exceptional': 'Unusual',
+};
 
 export class UIManager {
   constructor(card) {
@@ -424,6 +442,210 @@ export class UIManager {
   }
 
   /**
+   * Show weather forecast in the media panel (featured mode).
+   * @param {object} data - Weather tool result
+   */
+  showWeatherPanel(data) {
+    if (!this._globalUI) return;
+    const panel = this._globalUI.querySelector('.vs-image-panel');
+    const scroll = panel.querySelector('.vs-panel-scroll');
+
+    const card = document.createElement('div');
+    card.className = 'vs-weather-card';
+
+    // --- Current conditions header ---
+    const header = document.createElement('div');
+    header.className = 'vs-weather-header';
+
+    if (data.condition_icon) {
+      const icon = document.createElement('img');
+      icon.className = 'vs-weather-icon';
+      icon.src = data.condition_icon;
+      icon.alt = '';
+      icon.onerror = () => icon.remove();
+      header.appendChild(icon);
+    }
+
+    const info = document.createElement('div');
+    info.className = 'vs-weather-info';
+
+    if (data.current_temperature) {
+      const temp = document.createElement('div');
+      temp.className = 'vs-weather-temp';
+      temp.textContent = data.current_temperature;
+      info.appendChild(temp);
+    }
+
+    const conditionKey = data.forecast?.[0]?.condition || '';
+    const conditionLabel = CONDITION_LABELS[conditionKey] || conditionKey;
+    if (conditionLabel) {
+      const cond = document.createElement('div');
+      cond.className = 'vs-weather-condition';
+      cond.textContent = conditionLabel;
+      info.appendChild(cond);
+    }
+
+    if (data.current_humidity) {
+      const hum = document.createElement('div');
+      hum.className = 'vs-weather-humidity';
+      hum.textContent = `Humidity: ${data.current_humidity}`;
+      info.appendChild(hum);
+    }
+
+    header.appendChild(info);
+    card.appendChild(header);
+
+    // --- Forecast rows ---
+    if (Array.isArray(data.forecast) && data.forecast.length > 0) {
+      const divider = document.createElement('div');
+      divider.className = 'vs-weather-divider';
+      card.appendChild(divider);
+
+      const list = document.createElement('div');
+      list.className = 'vs-weather-forecast';
+
+      for (const entry of data.forecast) {
+        const row = document.createElement('div');
+        row.className = 'vs-weather-row';
+
+        const timeEl = document.createElement('span');
+        timeEl.className = 'vs-weather-row-time';
+        if (data.forecast_type === 'hourly') {
+          timeEl.textContent = entry.time || '';
+        } else if (data.forecast_type === 'twice_daily') {
+          timeEl.textContent = (entry.date || '') + (entry.is_daytime === false ? ' Night' : ' Day');
+        } else {
+          timeEl.textContent = entry.date || '';
+        }
+        row.appendChild(timeEl);
+
+        const condEl = document.createElement('span');
+        condEl.className = 'vs-weather-row-cond';
+        condEl.textContent = CONDITION_LABELS[entry.condition] || entry.condition || '';
+        row.appendChild(condEl);
+
+        const tempEl = document.createElement('span');
+        tempEl.className = 'vs-weather-row-temp';
+        tempEl.textContent = entry.temperature != null ? `${entry.temperature}°` : '';
+        row.appendChild(tempEl);
+
+        list.appendChild(row);
+      }
+
+      card.appendChild(list);
+    }
+
+    scroll.appendChild(card);
+
+    // Featured mode — no linger timeout
+    panel.classList.add('weather', 'featured', 'visible');
+    this._globalUI.classList.add('has-featured');
+  }
+
+  /**
+   * Show financial data (stock/crypto/currency) in the media panel (featured mode).
+   * @param {object} data - Financial tool result
+   */
+  showFinancialPanel(data) {
+    if (!this._globalUI) return;
+    const panel = this._globalUI.querySelector('.vs-image-panel');
+    const scroll = panel.querySelector('.vs-panel-scroll');
+
+    const card = document.createElement('div');
+    card.className = 'vs-financial-card';
+
+    const cur = data.currency || 'USD';
+
+    if (data.query_type === 'currency') {
+      // --- Currency conversion layout ---
+      const conversion = document.createElement('div');
+      conversion.className = 'vs-financial-conversion';
+      const amt = data.amount != null ? data.amount : '';
+      const converted = data.converted_amount != null ? data.converted_amount : '';
+      conversion.textContent = `${amt} ${data.from_currency || ''} = ${converted} ${data.to_currency || ''}`;
+      card.appendChild(conversion);
+
+      if (data.rate != null) {
+        const rate = document.createElement('div');
+        rate.className = 'vs-financial-rate';
+        rate.textContent = `1 ${data.from_currency || ''} = ${data.rate} ${data.to_currency || ''}`;
+        card.appendChild(rate);
+      }
+    } else {
+      // --- Stock / Crypto layout ---
+
+      // Header: logo + name + badge
+      const header = document.createElement('div');
+      header.className = 'vs-financial-header';
+
+      if (data.featured_image) {
+        const logo = document.createElement('img');
+        logo.className = 'vs-financial-logo';
+        logo.src = data.featured_image;
+        logo.alt = '';
+        logo.onerror = () => logo.remove();
+        header.appendChild(logo);
+      }
+
+      const name = document.createElement('div');
+      name.className = 'vs-financial-name';
+      name.textContent = `${data.name || ''} ${data.symbol ? '(' + data.symbol + ')' : ''}`.trim();
+      header.appendChild(name);
+
+      if (data.exchange) {
+        const badge = document.createElement('span');
+        badge.className = 'vs-financial-badge';
+        badge.textContent = data.exchange.split(' - ')[0].trim();
+        header.appendChild(badge);
+      }
+
+      card.appendChild(header);
+
+      // Price
+      if (data.current_price != null) {
+        const price = document.createElement('div');
+        price.className = 'vs-financial-price';
+        price.textContent = formatPrice(data.current_price, cur);
+        card.appendChild(price);
+      }
+
+      // Change indicator
+      if (data.change != null) {
+        const change = document.createElement('div');
+        change.className = 'vs-financial-change';
+        const arrow = data.change >= 0 ? '\u25B2 ' : '\u25BC ';
+        change.textContent = arrow + formatChange(data.change, data.percent_change, cur);
+        change.classList.add(data.change >= 0 ? 'up' : 'down');
+        card.appendChild(change);
+      }
+
+      // Detail row
+      const parts = [];
+      if (data.query_type === 'crypto') {
+        if (data.high != null) parts.push(`24h High: ${formatPrice(data.high, cur)}`);
+        if (data.low != null) parts.push(`24h Low: ${formatPrice(data.low, cur)}`);
+        if (data.market_cap != null) parts.push(`MCap: ${formatLargeNumber(data.market_cap, cur)}`);
+      } else {
+        if (data.open != null) parts.push(`Open: ${formatPrice(data.open, cur)}`);
+        if (data.high != null) parts.push(`High: ${formatPrice(data.high, cur)}`);
+        if (data.low != null) parts.push(`Low: ${formatPrice(data.low, cur)}`);
+      }
+      if (parts.length > 0) {
+        const details = document.createElement('div');
+        details.className = 'vs-financial-details';
+        details.textContent = parts.join(' \u00B7 ');
+        card.appendChild(details);
+      }
+    }
+
+    scroll.appendChild(card);
+
+    // Featured mode — no linger timeout
+    panel.classList.add('financial', 'featured', 'visible');
+    this._globalUI.classList.add('has-featured');
+  }
+
+  /**
    * Returns true if the image panel is currently visible.
    */
   hasVisibleImages() {
@@ -524,7 +746,7 @@ export class UIManager {
       if (scroll) {
         while (scroll.firstChild) scroll.removeChild(scroll.firstChild);
       }
-      panel.classList.remove('visible', 'featured');
+      panel.classList.remove('visible', 'featured', 'weather', 'financial');
     }
     this._globalUI.classList.remove('has-images', 'has-featured');
     this.hideLightbox();

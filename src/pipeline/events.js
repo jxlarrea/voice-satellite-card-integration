@@ -153,9 +153,26 @@ export function handleIntentProgress(mgr, eventData) {
 
   if (!eventData.chat_log_delta) return;
 
-  // Handle tool results (e.g., image search, video search)
+  // Handle tool results (e.g., image search, video search, weather, financial)
   if (eventData.chat_log_delta.role === 'tool_result') {
     const toolResult = eventData.chat_log_delta.tool_result;
+    const toolName = eventData.chat_log_delta.tool_name
+      || eventData.chat_log_delta.tool_call?.tool_name;
+
+    // Weather forecast — show weather card in media panel
+    // Tool name is prefixed by HA integration: voice-satellite-card-weather-forecast__get_weather_forecast
+    if (toolName?.endsWith('get_weather_forecast') && toolResult?.forecast && !toolResult.error) {
+      mgr.card.chat.addWeather(toolResult);
+      return;
+    }
+
+    // Financial data — show stock/crypto/currency card in media panel
+    // Tool name: voice-satellite-card-financial-data__get_financial_data
+    if (toolName?.includes('financial-data__get_financial_data') && toolResult?.query_type && !toolResult.error) {
+      mgr.card.chat.addFinancial(toolResult);
+      return;
+    }
+
     const results = toolResult?.results;
     if (Array.isArray(results)) {
       const videos = results.filter(r => r.video_id);

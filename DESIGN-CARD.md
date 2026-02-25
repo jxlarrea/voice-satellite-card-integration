@@ -117,7 +117,7 @@ voice-satellite-card-integration/
 │   │   ├── satellite-state.js            ← Pure entity lookups (getSatelliteAttr, getSwitchState, getSelectEntityId, getNumberState)
 │   │   ├── notification-comms.js         ← Shared ACK WebSocket call
 │   │   ├── entity-subscription.js        ← HA state_changed subscription pattern
-│   │   └── format.js                     ← Time formatting utility
+│   │   └── format.js                     ← Time + financial formatting utilities
 │   │
 │   └── editor/                           ← Config editor + preview
 │       ├── index.js                      ← getConfigForm() schema assembler
@@ -413,7 +413,7 @@ See also: [home-assistant/core#159262](https://github.com/home-assistant/core/is
 
 ### 7.5 Video Playback TTS Suppression
 
-When a video is playing in the lightbox (`card._videoPlaying === true`), TTS audio is suppressed at both play sites in the pipeline event handlers. See §16A.6 for the full `_videoPlaying` flag design.
+When a video is playing in the lightbox (`card._videoPlaying === true`), TTS audio is suppressed at both play sites in the pipeline event handlers. See §16A.9 for the full `_videoPlaying` flag design.
 
 ### 7.6 TTS Retry Mechanism
 
@@ -576,7 +576,7 @@ Events flow from `voice_satellite/run_pipeline` → `card.onPipelineMessage()` �
 | `stt-start` | (inline) | Set state STT |
 | `stt-end` | `handleSttEnd` | Show transcription bubble, invoke askQuestionCallback if set |
 | `intent-start` | (inline) | Set state INTENT |
-| `intent-progress` | `handleIntentProgress` | Stream response text, start streaming TTS, route `tool_result` (image/video/web search, Wikipedia — §16A) |
+| `intent-progress` | `handleIntentProgress` | Stream response text, start streaming TTS, route `tool_result` (image/video/web search, Wikipedia, weather — §16A) |
 | `intent-end` | `handleIntentEnd` | Show final response, handle continue_conversation, handle errors |
 | `tts-start` | (inline) | Set state TTS |
 | `tts-end` | `handleTtsEnd` | Play TTS audio (if not already streaming), restart pipeline |
@@ -938,7 +938,7 @@ Manages chat message state. All DOM operations delegate to UIManager.
 
 ## 16A. Rich Media System (Experimental)
 
-The card supports displaying image search, video search, web search, and Wikipedia results from LLM tool calls. This requires the external [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration, which registers custom tools with the conversational AI agent. Results arrive as `tool_result` payloads inside `intent-progress` pipeline events.
+The card supports displaying image search, video search, web search, Wikipedia, weather forecast, and financial data results from LLM tool calls. This requires the external [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration, which registers custom tools with the conversational AI agent. Results arrive as `tool_result` payloads inside `intent-progress` pipeline events.
 
 **Requirement:** The HA Assist pipeline must use a conversational AI agent (e.g., OpenAI, Google Generative AI). The built-in Home Assistant agent does not support LLM tool calls.
 
@@ -946,15 +946,21 @@ The card supports displaying image search, video search, web search, and Wikiped
 
 ```
 LLM tool call → intent-progress (tool_result) → handleIntentProgress
-  → filter by video_id → chat.addVideos() → ui.showVideoPanel()
-  → filter by image_url → chat.addImages() → ui.showImagePanel()
-  → featured_image    → chat.addImages([{image_url}], false, true) → ui.showImagePanel(featured=true)
+  → endsWith('get_weather_forecast')              → chat.addWeather()    → ui.showWeatherPanel()
+  → includes('financial-data__get_financial_data') → chat.addFinancial()  → ui.showFinancialPanel()
+  → filter by video_id                            → chat.addVideos()     → ui.showVideoPanel()
+  → filter by image_url                           → chat.addImages()     → ui.showImagePanel()
+  → featured_image                                → chat.addImages([{image_url}], false, true) → ui.showImagePanel(featured=true)
 ```
 
 The `intent-progress` event carries `chat_log_delta` with `role: 'tool_result'`. The `tool_result` object contains:
 - `results[]` — Array of search results (image/video search)
 - `auto_display` (images) / `auto_play` (videos) — Boolean flag for auto-opening lightbox
 - `featured_image` — Single image URL string (web search / Wikipedia)
+- `forecast[]` — Weather forecast array (weather forecast tool — see §16A.5)
+- `query_type`, `current_price`, `change`, `percent_change`, etc. — Financial data fields (financial data tool — see §16A.6)
+
+**Result routing priority:** Weather is checked first (by `tool_name.endsWith('get_weather_forecast')`), then financial data (by `tool_name.includes('financial-data__get_financial_data')`), then video (`video_id`), then image (`image_url && !video_id`), then featured image (`featured_image`).
 
 **Result routing:** Results with `video_id` are routed to the video path. Results with `image_url` (and no `video_id`) are routed to the image path. If `featured_image` is present (no `results[]` array needed), it is routed to the image panel in featured mode. This allows mixed results to route correctly (though unlikely in practice).
 
@@ -1026,10 +1032,11 @@ The `featured_image` string is wrapped into the same `[{image_url}]` array forma
 
 **Featured vs. normal image panel:**
 
-| Aspect | Normal (image search) | Featured (web/wiki) |
-|--------|-----------------------|---------------------|
-| Panel width | 45% | 25% |
-| Chat container offset | `right: calc(45% + 80px)` | `right: calc(25% + 80px)` |
+| Aspect | Normal (image search) | Featured (web/wiki/weather/financial) |
+|--------|-----------------------|---------------------------------------|
+| Panel width | 30% | 25% |
+| Chat container offset | `right: calc(37.5% + 40px)` | `right: calc(32.5% + 40px)` |
+| Chat message max-width | `100%` (overridden from default 85%) | `100%` (overridden from default 85%) |
 | CSS class on panel | `.visible` | `.visible.featured` |
 | CSS class on global UI | `.has-images` | `.has-featured` |
 | Auto-display lightbox | Controlled by `auto_display` | Never (always `false`) |
@@ -1037,17 +1044,181 @@ The `featured_image` string is wrapped into the same `[{image_url}]` array forma
 
 **Why `hasVisibleImages()` excludes featured:** This method gates whether TTS-end should defer dismissal for image browsing. Featured images are passive context alongside a text response — they don't represent a browsing session that should delay pipeline restart.
 
-**Skin CSS (all skins):** Each skin defines the featured layout:
+**Skin CSS (all skins):** Each skin defines the panel layout. Image search uses a wider offset than featured panels since the image panel (30%) is wider than the featured panel (25%). When any media panel is open, chat messages expand to fill the narrowed container:
 ```css
+#voice-satellite-ui.has-images .vs-chat-container {
+  right: calc(37.5% + 40px);
+}
 #voice-satellite-ui.has-featured .vs-chat-container {
-  right: calc(25% + 80px);
+  right: calc(32.5% + 40px);
+}
+#voice-satellite-ui.has-images .vs-chat-msg,
+#voice-satellite-ui.has-featured .vs-chat-msg {
+  max-width: 100%;
 }
 #voice-satellite-ui .vs-image-panel.featured {
   width: 25%;
 }
 ```
 
-### 16A.5 Inner Scroll Wrapper
+### 16A.5 Weather Forecast
+
+The `get_weather_forecast` tool returns current conditions and a forecast array. The card displays a weather widget in the media panel using the same featured panel infrastructure as web search / Wikipedia.
+
+**Tool detection in `handleIntentProgress`:**
+```js
+const toolName = eventData.chat_log_delta.tool_name
+  || eventData.chat_log_delta.tool_call?.tool_name;
+
+if (toolName?.endsWith('get_weather_forecast') && toolResult?.forecast && !toolResult.error) {
+  mgr.card.chat.addWeather(toolResult);
+  return;
+}
+```
+
+**HA tool name prefixing:** Home Assistant prefixes tool names with the integration name + `__` (e.g., `voice-satellite-card-weather-forecast__get_weather_forecast`). Detection uses `.endsWith('get_weather_forecast')` to match regardless of prefix.
+
+**Tool result format:**
+```json
+{
+  "current_temperature": 29,
+  "current_humidity": 87,
+  "condition_icon": "https://www.gstatic.com/images/icons/material/system/2x/rainy_24px.svg",
+  "forecast_type": "daily",
+  "forecast": [
+    { "date": "2026-02-24", "condition": "rainy", "temperature_low": 23, "temperature_high": 30, "humidity": 81 },
+    { "date": "2026-02-25", "condition": "rainy", "temperature_low": 23, "temperature_high": 28, "humidity": 65 }
+  ]
+}
+```
+
+**Routing:** `chat.addWeather(data)` → `ui.showWeatherPanel(data)`.
+
+**DOM structure built by `showWeatherPanel(data)`:**
+```
+.vs-weather-card
+  .vs-weather-header          (flex row: icon + info)
+    img.vs-weather-icon       (96×96, src=condition_icon, onerror→remove)
+    .vs-weather-info
+      .vs-weather-temp        (current_temperature — large text)
+      .vs-weather-condition   (first forecast entry's condition → label via CONDITION_LABELS map)
+      .vs-weather-humidity    ("Humidity: XX%")
+  .vs-weather-divider         (1px line)
+  .vs-weather-forecast
+    .vs-weather-row ×N        (3-column flex row)
+      span.vs-weather-row-time   (time or date)
+      span.vs-weather-row-cond   (condition label)
+      span.vs-weather-row-temp   (temperature)
+```
+
+**`CONDITION_LABELS` constant** (module-level in `ui.js`): Maps HA condition values to display labels — `partlycloudy` → "Partly Cloudy", `lightning-rainy` → "Thunderstorm", `snowy-rainy` → "Sleet", etc. (15 entries).
+
+**Forecast time display:** Varies by `forecast_type`:
+- `hourly` — uses `entry.time`
+- `daily` — uses `entry.date`
+- `twice_daily` — uses `entry.date` + " Day" or " Night" based on `entry.is_daytime`
+
+**Temperature display:** If both `temperature_low` and `temperature_high` exist, shows "low - high°". Otherwise shows whichever single value is present with "°" suffix.
+
+**Panel behavior:** Uses featured mode — `panel.classList.add('weather', 'featured', 'visible')` and `globalUI.classList.add('has-featured')`. Since `hasVisibleImages()` excludes `.featured`, no 30-second linger timeout applies — the UI dismisses immediately after TTS completes.
+
+**Weather panel CSS (`.vs-image-panel.weather`):** Strips all container styles (`background: none`, no shadow/border/padding) so content floats directly over the blur overlay, matching the borderless aesthetic of the chat bubbles. Inherits the 25% width from `.vs-image-panel.featured`. Each skin applies its own color palette to the weather elements.
+
+**Cleanup:** `clearChat()` empties `.vs-panel-scroll` and removes `visible`/`featured`/`weather`/`financial` from the panel.
+
+### 16A.6 Financial Data
+
+The `get_financial_data` tool returns stock prices, crypto prices, or currency conversions. The card displays a financial widget in the media panel using the same featured panel infrastructure as weather.
+
+**Tool detection in `handleIntentProgress`:**
+```js
+if (toolName?.includes('financial-data__get_financial_data') && toolResult?.query_type && !toolResult.error) {
+  mgr.card.chat.addFinancial(toolResult);
+  return;
+}
+```
+
+**HA tool name prefixing:** Uses `.includes('financial-data__get_financial_data')` since the full tool name is `voice-satellite-card-financial-data__get_financial_data`.
+
+**Tool result format (stock/crypto):**
+```json
+{
+  "query_type": "stock",
+  "name": "Apple Inc",
+  "symbol": "AAPL",
+  "exchange": "NASDAQ",
+  "current_price": 245.55,
+  "change": 2.15,
+  "percent_change": 0.88,
+  "currency": "USD",
+  "open": 243.40,
+  "high": 246.10,
+  "low": 242.30,
+  "market_cap": 3750000000000,
+  "featured_image": "https://logo.clearbit.com/apple.com"
+}
+```
+
+**Tool result format (currency):**
+```json
+{
+  "query_type": "currency",
+  "from_currency": "USD",
+  "to_currency": "EUR",
+  "amount": 100,
+  "converted_amount": 92.15,
+  "exchange_rate": 0.921543
+}
+```
+
+**Routing:** `chat.addFinancial(data)` → `ui.showFinancialPanel(data)`.
+
+**Formatting utilities (`shared/format.js`):**
+- `formatPrice(value, currency)` — Locale-aware currency formatting via `Intl.NumberFormat`. Uses 6 decimal places for sub-$1 values (crypto), 2 for $1+.
+- `formatLargeNumber(value, currency)` — Abbreviates large numbers: `3750000000000` → `$3.75T`. Suffixes: M, B, T.
+- `formatChange(change, percentChange, currency)` — Formats change with sign prefix and optional percent: `+$2.15 (+0.88%)`.
+
+**DOM structure built by `showFinancialPanel(data)` — Stock/Crypto:**
+```
+.vs-financial-card
+  .vs-financial-header          (flex row: logo + name + badge)
+    img.vs-financial-logo       (32px rounded, src=featured_image, onerror→remove)
+    .vs-financial-name          ("Apple Inc (AAPL)")
+    span.vs-financial-badge     ("NASDAQ" or "Crypto")
+  .vs-financial-price           (large text: "$245.55")
+  .vs-financial-change.up|.down (colored: "▲ +$2.15 (+0.88%)" or "▼ -$1.50 (-0.61%)")
+  .vs-financial-details         ("Open: $243.40 · High: $246.10 · Low: $242.30")
+```
+
+**DOM structure — Currency:**
+```
+.vs-financial-card
+  .vs-financial-conversion      (large: "100 USD = 92.15 EUR")
+  .vs-financial-rate            (smaller: "1 USD = 0.921543 EUR")
+```
+
+**Change indicator:** The `.vs-financial-change` element gets `.up` class (green + ▲) when `change > 0`, `.down` class (red + ▼) when `change < 0`. Colors are skin-specific.
+
+**Badge text:** Uses `data.exchange`, truncated to first word before ` - ` for long exchange names. Crypto uses `"Crypto"` as badge text.
+
+**Logo handling:** `featured_image` is used as logo `src`. An `onerror` handler removes the `<img>` element if the logo fails to load — the card renders normally without it.
+
+**Detail row:**
+- Stock: `Open · High · Low` (only present fields shown, separated by ` · `)
+- Crypto: `24h High · 24h Low` + optional `MCap: formatLargeNumber(market_cap)`
+
+**Panel behavior:** Uses featured mode — `panel.classList.add('financial', 'featured', 'visible')` and `globalUI.classList.add('has-featured')`. Since `hasVisibleImages()` excludes `.featured`, no 30-second linger timeout applies.
+
+**Financial panel CSS (`.vs-image-panel.financial`):** Strips all container styles (same pattern as `.weather`) so content floats over the blur overlay. Inherits 25% width from `.vs-image-panel.featured`. Each skin applies its own color palette:
+
+| Skin | Price | Up color | Down color | Details | Badge bg |
+|------|-------|----------|------------|---------|----------|
+| default | #333 | #16a34a | #dc2626 | #888 | rgba(0,0,0,0.06) |
+| alexa | #FFF bold | #00e676 | #ff5252 | white 50% | rgba(0,202,255,0.15) |
+| google-home | #202124 | #0f9d58 | #ea4335 | #80868b | rgba(60,64,67,0.08) |
+| retro-terminal | #33ff33+glow | #33ff33+glow | #ff3333+glow | green 50% | rgba(51,255,51,0.1) |
+
+### 16A.7 Inner Scroll Wrapper
 
 The media panel uses a two-layer structure for proper scrollbar positioning:
 
@@ -1065,7 +1236,7 @@ The media panel uses a two-layer structure for proper scrollbar positioning:
 
 **Scroll-cancels-linger:** A `scroll` event listener on `.vs-panel-scroll` clears the `_imageLingerTimeout` — once the user starts browsing results, the auto-dismiss timer is cancelled.
 
-### 16A.5 Lightbox
+### 16A.8 Lightbox
 
 Two modes sharing a single `.vs-lightbox` container:
 
@@ -1075,7 +1246,7 @@ Two modes sharing a single `.vs-lightbox` container:
 
 **Video mode** (`showVideoLightbox(videoId)`):
 - Hides img, shows `<iframe>` with `src="https://www.youtube-nocookie.com/embed/{videoId}?autoplay=1"`
-- Stops TTS if playing and sets `_videoPlaying = true` (see §16A.6)
+- Stops TTS if playing and sets `_videoPlaying = true` (see §16A.9)
 - Tap to close → clears iframe `src` to stop playback, sets `_videoPlaying = false`
 
 **Gotcha — `youtube-nocookie.com`:** Standard `youtube.com/embed` triggers error 153 in some contexts. Using `youtube-nocookie.com` avoids this (enhanced privacy mode, no tracking cookies).
@@ -1084,7 +1255,7 @@ Two modes sharing a single `.vs-lightbox` container:
 
 Both modes cancel the linger timeout on open (UI stays until user dismisses). Close handler is registered once (`_vsCloseHandler` guard on the lightbox element).
 
-### 16A.6 `_videoPlaying` Flag
+### 16A.9 `_videoPlaying` Flag
 
 Bridges the timing gap between video lightbox open and TTS events. When a video is playing in the lightbox, TTS audio must not play over it.
 
@@ -1098,7 +1269,7 @@ Bridges the timing gap between video lightbox open and TTS events. When a video 
   - Normal TTS (`tts-end`): calls `onTTSComplete(card, false)` instead of `tts.play()` to run cleanup without audio
 - Checked at streaming TTS early-start in `handleIntentProgress`: skips `tts.play()` if `_videoPlaying`
 
-### 16A.7 Image Linger Timeout
+### 16A.10 Image Linger Timeout
 
 After TTS completes, if images/videos are visible, the UI lingers for 30 seconds before auto-dismissing:
 
@@ -1515,11 +1686,17 @@ When recreating or modifying this card, verify:
 - [ ] Escape key dismisses active interactions, media linger, timer alerts, and notifications (same priority as double-tap)
 
 **Rich Media (Experimental — §16A):**
-- [ ] `intent-progress` with `role: 'tool_result'` routes to image/video handlers
+- [ ] `intent-progress` with `role: 'tool_result'` routes to weather/image/video handlers (weather checked first by tool name)
 - [ ] `intent-progress` with `featured_image` routes to image panel in featured mode (narrower 25% layout)
+- [ ] `intent-progress` with `get_weather_forecast` tool (matched via `.endsWith()`) routes to `chat.addWeather()` → `ui.showWeatherPanel()`
+- [ ] Weather panel uses featured mode (`.weather.featured` classes, `has-featured` on global UI) — no linger timeout
+- [ ] Weather panel strips container styles (`background: none`, no shadow/border/padding) — content floats over blur overlay
+- [ ] `CONDITION_LABELS` maps HA condition values to display labels (15 entries)
+- [ ] Forecast time varies by type: `entry.time` (hourly), `entry.date` (daily), `entry.date` + Day/Night (twice_daily)
 - [ ] `hasVisibleImages()` excludes featured panels (returns `false` when `.featured` class present)
-- [ ] Featured images skip the 30-second linger timeout (conversational context, not browsable media)
+- [ ] Featured images and weather skip the 30-second linger timeout (conversational context, not browsable media)
 - [ ] Chat bubble `max-height: 70vh` across all skins for longer responses (web search, Wikipedia)
+- [ ] Chat messages expand to `max-width: 100%` when media panel is open (`.has-images` / `.has-featured`)
 - [ ] Video results filtered by `video_id`, image results filtered by `image_url && !video_id`
 - [ ] `showImagePanel`: 2-column grid (`.single` class for 1 result), `onerror` removes failed images
 - [ ] `showVideoPanel`: video cards with thumbnail, duration badge, title, channel name
@@ -1534,7 +1711,7 @@ When recreating or modifying this card, verify:
 - [ ] Lightbox blocks linger cleanup (`isLightboxVisible()` returns early from cleanup function)
 - [ ] `auto_display` (images) / `auto_play` (videos) flags auto-open lightbox with first result
 - [ ] Visibility handler checks `isLingering` independently of `INTERACTING_STATES` for tab-hide cleanup
-- [ ] `clearChat()` also clears panel scroll children, hides panel, removes `has-images` class, hides lightbox
+- [ ] `clearChat()` also clears panel scroll children, hides panel, removes `has-images`/`has-featured` classes, removes `weather`/`featured` from panel, hides lightbox
 - [ ] `hideLightbox()` clears iframe `src` to stop video playback
 
 **Entity Picker (§14A):**

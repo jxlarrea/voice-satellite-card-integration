@@ -66,6 +66,14 @@ export class ChatManager {
     this._card.ui.showVideoPanel(results, autoPlay);
   }
 
+  addWeather(weatherData) {
+    this._card.ui.showWeatherPanel(weatherData);
+  }
+
+  addFinancial(data) {
+    this._card.ui.showFinancialPanel(data);
+  }
+
   addAssistant(text) {
     this._streamEl = this._card.ui.addChatMessage(text, 'assistant');
     this._fadeSpans = null;
