@@ -10,7 +10,12 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jxlarrea)
 
-![screenshot](https://github.com/user-attachments/assets/728b03ac-1084-4198-8c47-93ca80edc171)
+<p align="center">
+ <img src="https://github.com/user-attachments/assets/4a6ca843-af42-4854-8d42-daa84c469855" alt="Assist" width="49%"/>
+ <img src="https://github.com/user-attachments/assets/64a59c56-a2e8-434f-a814-ad36248b624b" alt="Video Search" width="49%"/>
+    <img src="https://github.com/user-attachments/assets/bf7ad673-2aec-4c26-9a5f-5ff5f254c33a" alt="Weather" width="49%"/>
+  <img src="https://github.com/user-attachments/assets/88eb4d51-ba64-453d-875b-0ed8f02f644c" alt="Stocks" width="49%"/>
+</p>
 
 ## Table of Contents
 
@@ -384,6 +389,8 @@ The card includes a skin system that themes the entire UI — activity bar, text
 | **Alexa** | Cyan glow bar, dark overlay, centered bold text, Echo-inspired design |
 | **Google Home** | Four-color Google gradient bar, left-aligned text, light overlay, Nest-inspired design |
 | **Retro Terminal** | Green phosphor CRT aesthetic with scanlines, bezel frame, monospace font, and screen-edge glow |
+
+![screenshot](https://github.com/user-attachments/assets/728b03ac-1084-4198-8c47-93ca80edc171)
 
 ### Appearance Options
 
