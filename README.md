@@ -455,6 +455,8 @@ The assistant responds with a summary from the Wikipedia article. If the article
 
 ### Weather Forecast
 
+![Weather](https://github.com/user-attachments/assets/f0e0766e-f570-4892-b0bc-e532c0ce80c9)
+
 Ask your assistant about the weather:
 
 - *"What's the weather today?"*
@@ -463,6 +465,8 @@ Ask your assistant about the weather:
 The assistant responds with a spoken summary while displaying a weather card in the media panel showing the current temperature, condition, humidity, and a scrollable forecast (hourly, daily, or twice-daily depending on the range requested). The weather icon is sourced from Google Weather SVGs via Home Assistant. The weather card uses the same featured panel layout as web search and Wikipedia — it appears alongside the chat response and dismisses immediately after TTS completes (no 30-second linger).
 
 ### Financial Data
+
+![Stocks](https://github.com/user-attachments/assets/e3e25cde-fe6b-4c21-9131-582fa7db3a5e)
 
 Ask your assistant about stocks, crypto, or currency conversions:
 
