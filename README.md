@@ -380,6 +380,8 @@ The entity supports play, pause, resume, stop, volume set, and volume mute — a
 
 The card includes a skin system that themes the entire UI — activity bar, text display, timers, and background overlay. Select a skin in the card editor under **Appearance**.
 
+![skins](https://github.com/user-attachments/assets/436029a8-c199-4773-b50f-428598e66ff4)
+
 ### Built-in Skins
 
 | Skin | Description |
@@ -389,8 +391,6 @@ The card includes a skin system that themes the entire UI — activity bar, text
 | **Google Home** | Four-color Google gradient bar, left-aligned text, light overlay, Nest-inspired design |
 | **Retro Terminal** | Green phosphor CRT aesthetic with scanlines, bezel frame, monospace font, and screen-edge glow |
 | **Siri** | Full-screen gradient border glow (purple → blue → teal → pink), dark frosted overlay, centered clean text, Apple-inspired design |
-
-![screenshot](https://github.com/user-attachments/assets/728b03ac-1084-4198-8c47-93ca80edc171)
 
 ### Appearance Options
 
