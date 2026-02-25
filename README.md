@@ -506,17 +506,10 @@ The financial card uses the same featured panel layout as weather — it appears
 
 1. Check that TTS is configured in your Assist pipeline.
 2. Check browser audio permissions.
-3. Check Fully Kiosk settings: If using Fully Kiosk, ensure that **Web Content Settings** → **Autoplay Audio** is enabled.
+3. If **using Fully Kiosk**, ensure that **Web Content Settings** → **Autoplay Audio** is enabled.
+4. The **Home Assistant Companion App** may block audio autoplay by default, ensure that **Settings** → **Companion App** → **Other settings** → **Autoplay videos** is enabled.
 
-### No TTS audio on Home Assistant Companion App
-
-The Home Assistant Companion App uses a WebView that may block audio autoplay by default. To enable TTS playback:
-
-1. Open the Companion App
-2. Go to Settings → Companion App → Other settings
-3. Enable **Autoplay videos**
-
-Without this setting, the card will still function (wake word detection, speech-to-text, and visual feedback all work normally) but TTS audio won't play. The UI will clean up gracefully after the interaction completes.
+Without these settings, the card will still function (wake word detection, speech-to-text, and visual feedback all work normally) but TTS audio won't play. The UI will clean up gracefully after the interaction completes.
 
 ### Card not visible
 
