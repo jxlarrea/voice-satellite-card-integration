@@ -29,7 +29,7 @@ import { syncSatelliteState } from './comms.js';
 import { getSelectEntityId, getNumberState } from '../shared/satellite-state.js';
 import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
-import { getStoredEntity, clearStoredEntity, resolveEntity, showPicker } from './entity-picker.js';
+import { getStoredEntity, clearStoredEntity, resolveEntity, showPicker, DISABLED_VALUE, isDeviceDisabled } from './entity-picker.js';
 
 export class VoiceSatelliteCard extends HTMLElement {
   constructor() {
@@ -119,10 +119,15 @@ export class VoiceSatelliteCard extends HTMLElement {
         return;
       }
 
+      if (this._deviceDisabled) return;
+
       if (!this._config.satellite_entity) {
         if (this._config.browser_satellite_override && this._hass?.entities) {
           const resolved = resolveEntity(this._hass);
-          if (resolved) {
+          if (resolved === DISABLED_VALUE) {
+            this._deviceDisabled = true;
+            return;
+          } else if (resolved) {
             this._config.satellite_entity = resolved;
             this._isLocalStorageEntity = true;
           } else {
@@ -163,17 +168,24 @@ export class VoiceSatelliteCard extends HTMLElement {
     // When browser_satellite_override is on, localStorage takes full control
     if (this._config.browser_satellite_override) {
       const stored = getStoredEntity();
-      if (stored) {
+      if (stored === DISABLED_VALUE) {
+        this._config.satellite_entity = '';
+        this._isLocalStorageEntity = false;
+        this._deviceDisabled = true;
+      } else if (stored) {
         this._config.satellite_entity = stored;
         this._isLocalStorageEntity = true;
+        this._deviceDisabled = false;
       } else {
         // No localStorage yet — clear entity so startup path shows picker
         this._config.satellite_entity = '';
         this._isLocalStorageEntity = false;
+        this._deviceDisabled = false;
       }
     } else {
       clearStoredEntity();
       this._isLocalStorageEntity = false;
+      this._deviceDisabled = false;
     }
 
     if (this._ui.element) {
@@ -225,12 +237,16 @@ export class VoiceSatelliteCard extends HTMLElement {
     }
 
     if (this._hasStarted) return;
+    if (this._deviceDisabled) return;
     if (!hass?.connection) return;
 
     if (!this._config.satellite_entity) {
       if (this._config.browser_satellite_override) {
         const resolved = resolveEntity(hass);
-        if (resolved) {
+        if (resolved === DISABLED_VALUE) {
+          this._deviceDisabled = true;
+          return;
+        } else if (resolved) {
           this._config.satellite_entity = resolved;
           this._isLocalStorageEntity = true;
         } else if (hass.entities && Object.keys(hass.entities).length > 0 && !this._pickerTeardown) {
@@ -271,6 +287,12 @@ export class VoiceSatelliteCard extends HTMLElement {
   _showEntityPicker(hass) {
     this._pickerTeardown = showPicker(hass, (entityId) => {
       this._pickerTeardown = null;
+
+      if (entityId === DISABLED_VALUE) {
+        this._deviceDisabled = true;
+        return;
+      }
+
       this._config.satellite_entity = entityId;
       this._isLocalStorageEntity = true;
 

@@ -7,6 +7,7 @@
  */
 
 const STORAGE_KEY = 'vs-satellite-entity';
+export const DISABLED_VALUE = '__disabled__';
 
 // --- localStorage CRUD ---
 
@@ -28,6 +29,10 @@ export function clearStoredEntity() {
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch (_) { /* private browsing */ }
+}
+
+export function isDeviceDisabled() {
+  return getStoredEntity() === DISABLED_VALUE;
 }
 
 // --- Entity Discovery ---
@@ -54,6 +59,8 @@ export function discoverSatelliteEntities(hass) {
 export function resolveEntity(hass) {
   const stored = getStoredEntity();
   if (stored) {
+    // Device explicitly disabled — return as-is
+    if (stored === DISABLED_VALUE) return DISABLED_VALUE;
     // Validate entity still exists
     if (hass.entities?.[stored]) {
       return stored;
@@ -176,6 +183,28 @@ const PICKER_CSS = `
   padding: 16px 0;
   line-height: 1.5;
 }
+.vs-picker-disable {
+  display: block;
+  width: 100%;
+  padding: 14px 16px;
+  margin-top: 8px;
+  background: rgba(255, 59, 48, 0.15);
+  border: 1px solid rgba(255, 59, 48, 0.3);
+  border-radius: 10px;
+  color: #ff3b30;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.vs-picker-disable:hover {
+  background: rgba(255, 59, 48, 0.25);
+}
+.vs-picker-disable:active {
+  background: rgba(255, 59, 48, 0.35);
+  border-color: rgba(255, 59, 48, 0.5);
+}
 `;
 
 let pickerStyleEl = null;
@@ -235,11 +264,12 @@ function doShowPicker(hass, onSelect) {
       <div class="vs-picker-title">Voice Satellite Card</div>
       <div class="vs-picker-subtitle">Per-device satellite override is enabled. Select the satellite to use on this device.</div>
       <div class="vs-picker-list">${listHTML}</div>
+      <button class="vs-picker-disable" data-entity="${DISABLED_VALUE}">Disable on this device</button>
     </div>
   `;
 
   overlay.addEventListener('click', (e) => {
-    const btn = e.target.closest('.vs-picker-item');
+    const btn = e.target.closest('.vs-picker-item') || e.target.closest('.vs-picker-disable');
     if (!btn) return;
     const entityId = btn.dataset.entity;
     setStoredEntity(entityId);
