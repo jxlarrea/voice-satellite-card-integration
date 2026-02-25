@@ -1324,7 +1324,7 @@ On reactive state entry, `reconnectMic()` switches the analyser to mic input. Wh
 
 | Skin | Reactive technique |
 |------|--------------------|
-| Default | `scaleY` for bar height + `::after` pseudo-element with `filter: blur()` and `opacity` for glow, gradient position synced via `@property --vs-gp` |
+| Default | `scaleY` for bar height + `::after` pseudo-element with `filter: blur()` and audio-level-driven `opacity` (`calc(var(--vs-audio-level) * 2.5)`) for glow, gradient position synced via `@property --vs-gp` |
 | Alexa | `::after` pseudo-element with `filter: blur()` and `opacity` for cyan glow halo; no `scaleY` — bar stays fixed height |
 | Google Home | `scaleY` for bar height + `::after` pseudo-element with `filter: blur()` and `opacity` for 4-color glow, gradient synced via `@property --vs-gp` |
 | Retro Terminal | `filter: drop-shadow()` for outer glow + `box-shadow: inset` for inner glow around the full-screen border frame; no `scaleY` or `::after` |
@@ -1373,7 +1373,7 @@ Each skin is a JS module exporting a definition object:
 | Alexa | `alexa` | `[0, 8, 20]` (dark blue) | 0.7 | Cyan accent glow, Echo Show-inspired |
 | Google Home | `google-home` | `[255, 255, 255]` (white) | 0.75 | 4-color palette, Material Design, frosted overlay |
 | Retro Terminal | `retro-terminal` | `[0, 10, 0]` (deep green-black) | 0.92 | Green phosphor CRT aesthetic, monospace font, scanlines, bezel frame |
-| Siri | `siri` | `[0, 0, 0]` (black) | 0.5 | Full-screen gradient border glow, Apple system font, frosted glass elements |
+| Siri | `siri` | `[0, 0, 0]` (black) | 0.75 | Full-screen gradient border glow, Inter/Apple system font, frosted glass elements |
 
 All five skins have `reactiveBar: true`.
 

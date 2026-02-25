@@ -27,6 +27,7 @@
   transition: opacity 0.3s ease;
   z-index: 9999;
   pointer-events: none;
+  will-change: opacity;
 }
 
 #voice-satellite-ui .vs-blur-overlay.visible {
@@ -94,6 +95,8 @@
   transition: opacity 0.3s ease;
   z-index: 10000;
   pointer-events: none;
+  will-change: filter, opacity;
+  contain: layout style;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.visible {
@@ -204,6 +207,7 @@
   align-items: flex-start;
   gap: 8px;
   width: auto;
+  contain: content;
   z-index: 10001;
   pointer-events: none;
   overflow: visible;
@@ -308,6 +312,7 @@
   background: #ffffff;
   border: none;
   padding: 14px 18px;
+  contain: content;
   border-radius: 18px;
   box-shadow: 0 1px 3px rgba(60, 64, 67, 0.15), 0 4px 8px rgba(60, 64, 67, 0.1);
   animation: google-timer-fade-in 0.3s ease forwards;

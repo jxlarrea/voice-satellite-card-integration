@@ -27,6 +27,7 @@
   transition: opacity 0.4s ease;
   z-index: 9999;
   pointer-events: none;
+  will-change: opacity;
 }
 
 #voice-satellite-ui .vs-blur-overlay.visible {
@@ -91,13 +92,15 @@
   bottom: 0;
   height: auto;
   background: none;
-  border: 3px solid;
+  border: 5px solid;
   border-image: conic-gradient(from var(--siri-angle), #8B5CF6, #3B82F6, #06B6D4, #EC4899, #8B5CF6) 1;
   filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.7)) drop-shadow(0 0 2px rgba(59, 130, 246, 0.5));
   opacity: 0;
   transition: opacity 0.4s ease;
   z-index: 10000;
   pointer-events: none;
+  will-change: filter, opacity;
+  contain: layout style;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.visible {
@@ -114,6 +117,7 @@
 
 #voice-satellite-ui .vs-rainbow-bar.processing {
   animation: siri-rotate 0.8s linear infinite;
+  filter: drop-shadow(0 0 4px rgba(139, 92, 246, 0.7)) drop-shadow(0 0 2px rgba(59, 130, 246, 0.5));
 }
 
 #voice-satellite-ui .vs-rainbow-bar.speaking {
@@ -137,8 +141,7 @@
   transition: filter 0.05s linear, box-shadow 0.05s linear;
   filter: drop-shadow(0 0 calc(4px + 12px * var(--vs-audio-level, 0)) rgba(139, 92, 246, calc(0.7 + 0.3 * var(--vs-audio-level, 0))))
          drop-shadow(0 0 calc(2px + 6px * var(--vs-audio-level, 0)) rgba(59, 130, 246, calc(0.5 + 0.3 * var(--vs-audio-level, 0))));
-  box-shadow:
-    inset 0 0 calc(6px + 20px * var(--vs-audio-level, 0)) rgba(139, 92, 246, calc(0.1 + 0.2 * var(--vs-audio-level, 0)));
+  transform: translateZ(0);
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive.listening {
@@ -197,6 +200,7 @@
   align-items: center;
   gap: 12px;
   width: auto;
+  contain: content;
   z-index: 10001;
   pointer-events: none;
   overflow: visible;
@@ -291,6 +295,7 @@
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.15);
   padding: 14px 18px;
+  contain: content;
   border-radius: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
   animation: siri-timer-fade-in 0.3s ease forwards;

@@ -18,6 +18,7 @@
   transition: opacity 0.4s ease;
   z-index: 9999;
   pointer-events: none;
+  will-change: opacity;
 }
 
 #voice-satellite-ui .vs-blur-overlay.visible {
@@ -86,6 +87,8 @@
   transition: opacity 0.4s ease;
   z-index: 10000;
   pointer-events: none;
+  will-change: filter, opacity;
+  contain: layout style;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.visible {
@@ -122,6 +125,7 @@
 /* Reactive Bar — audio-driven glow, speed varies by state */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   overflow: visible;
+  transform: translateZ(0);
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive::after {
@@ -221,6 +225,7 @@
   align-items: center;
   gap: 10px;
   width: auto;
+  contain: content;
   z-index: 10001;
   pointer-events: none;
   overflow: visible;
@@ -326,6 +331,7 @@
   background: rgba(10, 22, 40, 0.9);
   border: 2px solid rgba(0, 202, 255, 0.35);
   padding: 14px 18px;
+  contain: content;
   border-radius: 16px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   animation: alexa-timer-fade-in 0.3s ease forwards;

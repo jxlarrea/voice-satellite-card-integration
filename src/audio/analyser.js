@@ -34,6 +34,7 @@ export class AnalyserManager {
     this._barEl = null;
     this._visibilityHandler = null;
     this._lastLevel = -1;
+    this._lastTick = 0;
   }
 
   /**
@@ -213,6 +214,14 @@ export class AnalyserManager {
       this._rafId = null;
       return;
     }
+
+    // Cap at ~30 fps — CSS transitions (50ms) smooth the gaps
+    const now = performance.now();
+    if (now - this._lastTick < 32) {
+      this._rafId = requestAnimationFrame(() => this._tick());
+      return;
+    }
+    this._lastTick = now;
 
     this._activeAnalyser.getByteFrequencyData(this._dataArray);
 
