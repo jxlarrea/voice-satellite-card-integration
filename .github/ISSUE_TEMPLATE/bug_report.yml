@@ -15,7 +15,7 @@ body:
       options:
         - label: I am accessing Home Assistant over **HTTPS** (or localhost). Microphone access requires a secure context.
           required: true
-        - label: I have granted **microphone permission** when prompted by the browser (a user gesture like tapping the mic button is required to trigger the permission prompt; in Fully Kiosk, enable **Web Content Settings → Enable Microphone Access** and **Autoplay Audio**)
+        - label: I have granted **microphone permission** when prompted by the browser (a user gesture like tapping the mic button is required to trigger the permission prompt; in **Fully Kiosk**, enable **Web Content Settings → Enable Microphone Access** and **Autoplay Audio**; in **Home Assistant Companion App**, enable **Settings → Companion App → Autoplay Videos**)
           required: true
         - label: I have added at least one device via **Settings > Devices & Services > Add Integration > Voice Satellite Card**.
           required: true
