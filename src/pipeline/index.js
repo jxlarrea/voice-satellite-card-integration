@@ -413,6 +413,14 @@ export class PipelineManager {
 
   finishRunEnd() {
     this._pendingRunEnd = false;
+
+    // A linger timeout, video, or lightbox is active — let it handle cleanup
+    if (this._card._imageLingerTimeout || this._card._videoPlaying || this._card.ui.isLightboxVisible()) {
+      this._log.log('pipeline', 'Linger/video/lightbox active — deferring cleanup');
+      if (!this._serviceUnavailable) this.restart(0);
+      return;
+    }
+
     this._card.chat.clear();
     this._card.ui.hideBlurOverlay(BlurReason.PIPELINE);
     this._card.setState(State.IDLE);

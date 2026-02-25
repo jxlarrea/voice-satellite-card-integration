@@ -126,6 +126,8 @@ export class UIManager {
     if (!config) return;
     if (serviceUnavailable && !config.barVisible) return;
     if (ttsPlaying && !config.barVisible) return;
+    // Don't hide the bar while a linger timeout or video/lightbox is active
+    if (!config.barVisible && (this._card._imageLingerTimeout || this._card._videoPlaying || this.isLightboxVisible())) return;
 
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
 

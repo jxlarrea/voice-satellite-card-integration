@@ -601,6 +601,8 @@ The done chime after TTS playback follows the same pattern.
 
 When `run-end` arrives while TTS is playing, `pendingRunEnd = true`. The cleanup is deferred. When `onTTSComplete()` eventually fires, it handles the full cleanup. `finishRunEnd()` clears chat, hides blur, sets state to IDLE, then restarts pipeline (unless `serviceUnavailable` is true, in which case retry is already scheduled).
 
+**Linger/video guard:** `finishRunEnd()` also defers cleanup when a linger timeout is active (`_imageLingerTimeout`), a video is playing (`_videoPlaying`), or the lightbox is visible (`isLightboxVisible()`). In these cases it skips chat/blur/state cleanup and only restarts the pipeline, letting the linger timeout or user dismissal handle the UI teardown.
+
 ### 8.8 Wake-Phase Run-End Restart
 
 When `run-end` arrives during the wake_word phase without a preceding error, the pipeline is restarted immediately via `restart(0)` instead of proceeding with normal cleanup.
@@ -1279,10 +1281,16 @@ After TTS completes, if images/videos are visible, the UI lingers for 30 seconds
 if (card.ui.hasVisibleImages()) {
   card.ui.stopReactive();  // Stop mic reactivity on bar
   card._imageLingerTimeout = setTimeout(cleanup, 30000);
+} else if (playbackFailed) {
+  // TTS failed (e.g. autoplay blocked) — keep response visible
+  card.ui.stopReactive();
+  card._imageLingerTimeout = setTimeout(cleanup, Timing.TTS_FAILED_LINGER);  // 5s
 } else {
   cleanup();  // Immediate dismiss
 }
 ```
+
+**TTS failure linger:** When the browser blocks TTS autoplay (`playbackFailed = true`), the response text lingers for 5 seconds (`TTS_FAILED_LINGER`) so the user can read the LLM response. Without this, the interaction would dismiss instantly because the TTS error fires as immediate completion.
 
 **Featured images skip linger:** `hasVisibleImages()` returns `false` when the panel has the `.featured` class (web search / Wikipedia). Featured images are passive conversational context displayed alongside a text response — they are not browsable media that the user needs time to explore. The `cleanup()` path runs immediately, dismissing the UI normally after TTS completes.
 
@@ -1319,6 +1327,8 @@ State-driven animation speeds:
 - `TTS` — reactive (audio output levels)
 
 On reactive state entry, `reconnectMic()` switches the analyser to mic input. When TTS `attachAudio()` fires, the analyser switches to audio output. INTENT uses CSS animation only because no meaningful audio data flows during intent processing.
+
+**Bar-hide guard:** `updateForState()` refuses to hide the bar (states with `barVisible: false`) when any of these are active: TTS is playing, a linger timeout is set (`_imageLingerTimeout`), a video is playing (`_videoPlaying`), or the lightbox is visible. This prevents the pipeline restart (which transitions to LISTENING/IDLE) from prematurely hiding the bar during TTS-failed linger, image linger, or video playback.
 
 **Reactive bar rendering — GPU-accelerated glow:** All skins use GPU-composited properties (`filter`, `opacity`, `box-shadow`) driven by `--vs-audio-level` to avoid layout thrashing. The specific technique varies by skin:
 
@@ -1549,6 +1559,7 @@ All timing values are centralized in `constants.js`:
 | `PLAYBACK_WATCHDOG` | 30000ms | Interval for stall-detection watchdog (checks `audio.currentTime` progression) |
 | `RECONNECT_DELAY` | 2000ms | Delay before restarting pipeline after reconnect |
 | `INTENT_ERROR_DISPLAY` | 3000ms | How long to show error bar for intent errors |
+| `TTS_FAILED_LINGER` | 5000ms | How long to keep response text visible when TTS playback fails (e.g. autoplay blocked) |
 | `NO_MEDIA_DISPLAY` | 3000ms | Delay before completing text-only announcements |
 | `ASK_QUESTION_CLEANUP` | 2000ms | Safety timeout for sendAnswer promise |
 | `ASK_QUESTION_STT_SAFETY` | 30000ms | Safety timeout if STT never produces a result |
@@ -1711,7 +1722,10 @@ When recreating or modifying this card, verify:
 - [ ] `_videoPlaying` flag: set by `showVideoLightbox`, cleared by `hideLightbox`
 - [ ] `_videoPlaying` suppresses TTS at both play sites (streaming in `handleIntentProgress`, normal in `handleTtsEnd`)
 - [ ] Image linger: 30s timeout after TTS, cancelled by scroll/lightbox/wake-word/tab-hide/double-tap/Escape
+- [ ] TTS-failed linger: 5s timeout (`TTS_FAILED_LINGER`) keeps response visible when browser blocks autoplay
 - [ ] Lightbox blocks linger cleanup (`isLightboxVisible()` returns early from cleanup function)
+- [ ] `updateForState` refuses to hide bar during linger timeout, video playback, or lightbox
+- [ ] `finishRunEnd` defers cleanup during linger timeout, video playback, or lightbox
 - [ ] `auto_display` (images) / `auto_play` (videos) flags auto-open lightbox with first result
 - [ ] Visibility handler checks `isLingering` independently of `INTERACTING_STATES` for tab-hide cleanup
 - [ ] `clearChat()` also clears panel scroll children, hides panel, removes `has-images`/`has-featured` classes, removes `weather`/`featured` from panel, hides lightbox

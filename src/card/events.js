@@ -7,7 +7,7 @@
  * Uses ONLY public accessors on the card instance.
  */
 
-import { State, INTERACTING_STATES, BlurReason } from '../constants.js';
+import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
 import { syncSatelliteState } from './comms.js';
 import * as singleton from '../shared/singleton.js';
 import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
@@ -153,6 +153,12 @@ export function onTTSComplete(card, playbackFailed) {
     card.ui.stopReactive();
     if (card._imageLingerTimeout) clearTimeout(card._imageLingerTimeout);
     card._imageLingerTimeout = setTimeout(cleanup, 30000);
+  } else if (playbackFailed) {
+    // TTS failed (e.g. autoplay blocked) — keep response visible so the user can read it
+    card.logger.log('tts', 'Playback failed — lingering response text');
+    card.ui.stopReactive();
+    if (card._imageLingerTimeout) clearTimeout(card._imageLingerTimeout);
+    card._imageLingerTimeout = setTimeout(cleanup, Timing.TTS_FAILED_LINGER);
   } else {
     cleanup();
   }
