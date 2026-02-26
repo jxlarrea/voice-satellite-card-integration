@@ -392,6 +392,8 @@ The entity supports play, pause, resume, stop, volume set, and volume mute — a
 
 `voice-satellite-mini-card` is a text-first, normal Home Assistant card variant of the Voice Satellite Card. It uses the same integration and voice pipeline stack, but renders a local UI inside the card instead of the fullscreen/global overlay.
 
+![minicard](https://github.com/user-attachments/assets/72dfb522-632d-43ed-ad24-02fc0706de74)
+
 ### Modes
 
 - **Compact** - Single-line status + conversation text with marquee scrolling when content overflows
