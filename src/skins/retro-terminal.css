@@ -169,6 +169,7 @@
   box-shadow:
     inset 0 0 calc(6px + 30px * var(--vs-audio-level, 0)) rgba(51, 255, 51, calc(0.08 + 0.2 * var(--vs-audio-level, 0)));
   transform: translateZ(0);
+  will-change: filter, box-shadow;
 }
 
 /* Keyframes — bar states */

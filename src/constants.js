@@ -77,4 +77,5 @@ export const DEFAULT_CONFIG = {
   custom_css: '',
   text_scale: 100,
   reactive_bar: true,
+  reactive_bar_update_interval_ms: 33,
 };

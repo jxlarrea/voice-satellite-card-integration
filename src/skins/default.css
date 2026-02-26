@@ -135,6 +135,8 @@
   transform: scaleY(calc(1 + 1 * var(--vs-audio-level, 0)));
   overflow: visible;
   background-position: var(--vs-gp) 50%;
+  transform: translateZ(0) scaleY(calc(1 + 1 * var(--vs-audio-level, 0)));
+  will-change: transform;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive::after {
@@ -150,6 +152,7 @@
   transform: scale(1.1, 3);
   z-index: -1;
   pointer-events: none;
+  will-change: opacity, transform;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive.listening {

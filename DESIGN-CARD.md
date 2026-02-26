@@ -259,7 +259,7 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
 | Manager | Purpose |
 |---------|---------|
 | `AudioManager` | Microphone, AudioWorklet, send interval |
-| `AnalyserManager` | Dual-analyser for reactive bar (mic + audio FFT) |
+| `AnalyserManager` | Dual-analyser for reactive bar (mic + audio time-domain level meter) |
 | `TtsManager` | TTS playback (browser + remote), chime facade |
 | `MediaPlayerManager` | Media player entity bridge (volume, playback, state sync) |
 | `PipelineManager` | Pipeline lifecycle (start/stop/restart/retry/mute) |
@@ -461,16 +461,22 @@ Mic path:    getUserMedia → sourceNode → _micAnalyser  (dead end — no dest
 Audio path:  <audio> → createMediaElementSource → _audioAnalyser → destination (speakers)
 ```
 
-- `_micAnalyser` — Connected to the mic source node but **never** connected to `AudioContext.destination`. It only provides FFT data for the reactive bar. Feedback is structurally impossible because there is no audio path from mic to speakers through this node.
+- `_micAnalyser` — Connected to the mic source node but **never** connected to `AudioContext.destination`. It only provides analyser data for the reactive bar. Feedback is structurally impossible because there is no audio path from mic to speakers through this node.
 - `_audioAnalyser` — Routes TTS/notification audio through to `destination` for playback. Connected only during active audio playback via `attachAudio()`.
-- `_activeAnalyser` — Pointer that determines which node `_tick()` reads FFT data from. Defaults to mic; switches to audio during playback; reverts to mic when audio detaches.
+- `_activeAnalyser` — Pointer that determines which node `_tick()` reads analyser data from. Defaults to mic; switches to audio during playback; reverts to mic when audio detaches.
 
 **Key methods:**
 - `attachMic(sourceNode, audioContext)` — One-time setup: creates `_micAnalyser`, connects mic source. Sets as active if no audio is playing.
 - `attachAudio(audioEl, audioContext)` — Creates `_audioAnalyser`, routes `<audio>` element through it to destination. Switches `_activeAnalyser` to audio.
 - `detachAudio()` — Disconnects audio routing, reverts `_activeAnalyser` to mic.
 - `reconnectMic()` — Switches `_activeAnalyser` back to mic. **No-op guard:** Skips if `_mediaSourceNode` is still set, preventing mid-playback switches (e.g., `updateForState` fires for TTS state).
-- `start(barEl)` / `stop()` — Start/stop the `requestAnimationFrame` tick loop that writes `--vs-audio-level` CSS variable (RMS volume, 0–1 range, 2× boost for visual responsiveness).
+- `start(barEl)` / `stop()` — Start/stop the `requestAnimationFrame` tick loop that writes `--vs-audio-level` CSS variable (time-domain mean absolute amplitude mapped to 0–1 and quantized to reduce redundant CSS writes).
+
+**Current analysis/timing behavior (v5.7.x):**
+- Uses `getByteTimeDomainData()` (not `getByteFrequencyData()`), because the reactive bar only needs a loudness proxy.
+- `fftSize = 128` for lower analyser work on low-spec wall tablets.
+- Update cadence is configurable via `reactive_bar_update_interval_ms` (default `33ms`, minimum `17ms` ~= 60fps cap; `50ms` recommended for slow tablets).
+- In `debug` mode, `AnalyserManager` logs 1-second perf/jitter stats (`int`, `effFps`, `ticks`, `avg/max`, `gapAvg/gapMax`, `late`) to help tune device performance.
 
 ### 6.5 Media Playback
 
@@ -783,7 +789,7 @@ All three managers use the same playback flow:
 After playback:
 1. ACK to integration (`announce_finished`)
 2. Restart pipeline (HA cancels the running pipeline when triggering announcements)
-3. After configurable delay (`announcementDisplayDuration` — from integration number entity, default 3.5s): clear UI, then either play done chime or play queued notification
+3. After configurable delay (`announcementDisplayDuration` — from integration number entity, default 5s): clear UI, then either play done chime or play queued notification
 
 **Queued notification priority:** If a notification is queued when the display timer fires, the done chime is skipped and the queued notification plays immediately (it has its own announce chime). Playing the done chime (Web Audio oscillator) concurrently with the announce chime (HTML Audio MP3) causes audio distortion in HA Companion App WebView.
 
@@ -1453,7 +1459,7 @@ The Default and Google Home skins use `@property --vs-gp` (registered via `@prop
 - `.vs-chat-container` — `contain: content` (isolates streaming text mutations from triggering global layout)
 - `.vs-timer-pill` — `contain: content` (isolates per-second countdown updates)
 
-**Analyser throttle:** The reactive bar's CSS transitions are 50ms, so updating at 60fps is wasteful. The analyser tick loop skips frames closer than 32ms apart (~30fps cap), halving `getByteFrequencyData()` calls with no visible difference.
+**Analyser cadence:** Reactive bar updates are throttled by `reactive_bar_update_interval_ms` (default `33ms` ~= 30fps target, min `17ms` ~= 60fps cap). The analyser uses `getByteTimeDomainData()` and quantized level updates to reduce CPU and CSS churn on low-end wall tablets.
 
 ### Start Button
 Floating mic button with pulse animation. Shows on initial load, microphone permission denied, microphone not found, or generic mic error.
@@ -1597,7 +1603,7 @@ State changes are synced to the integration entity via `voice_satellite/update_s
 | Setting | Integration Entity | Type | Default |
 |---------|-------------------|------|---------|
 | TTS Output | Select (`tts_output`) | `select` | `"Browser"` |
-| Announcement Display Duration | Number (`announcement_display_duration`) | `number` | `3.5s` |
+| Announcement Display Duration | Number (`announcement_display_duration`) | `number` | `5s` |
 | Screensaver | Select (`screensaver`) | `select` | `"Disabled"` |
 
 The card reads these via `getSelectEntityId()` and `getNumberState()` (§13) through computed accessors:
@@ -1613,7 +1619,7 @@ The editor uses HA's `ha-form` schema system. Each section is defined in its own
 | File | Section |
 |------|---------|
 | `behavior.js` | Satellite entity selector (required), microphone processing expandable, browser satellite override toggle, debug toggle |
-| `skin.js` | Appearance expandable: skin selector dropdown, reactive bar toggle, text scale slider, background opacity slider, custom CSS textarea |
+| `skin.js` | Appearance expandable: skin selector dropdown, reactive bar toggle, reactive bar update interval (ms), text scale slider, background opacity slider, custom CSS textarea |
 
 The editor assembler (`editor/index.js`) concatenates `behaviorSchema`, `skinSchema`, `microphoneSchema`, and `debugSchema`, then merges all label/helper maps into `getConfigForm()`. The skin dropdown options are populated dynamically from the skin registry via `getSkinOptions()`. The `browser_satellite_override` toggle and `debug` toggle are both in `debugSchema` (rendered after microphone processing).
 
@@ -1794,7 +1800,7 @@ When recreating or modifying this card, verify:
 - [ ] Mic analyser never connected to `AudioContext.destination` (feedback prevention)
 - [ ] `_activeAnalyser` pointer switches between mic and audio analysers
 - [ ] `reconnectMic()` is a no-op while `_mediaSourceNode` is set (prevents mid-playback switch)
-- [ ] 30fps throttle: tick loop skips frames < 32ms apart (halves `getByteFrequencyData` calls)
+- [ ] Reactive bar performance: time-domain analyser (`getByteTimeDomainData()`), configurable interval (`reactive_bar_update_interval_ms`), and debug perf/jitter logs (`effFps`, gaps, late frames)
 - [ ] `useReactive` flag in UI state config: only WAKE_WORD_DETECTED, STT, TTS are reactive; INTENT uses CSS animation
 
 **Notifications:**
@@ -1911,3 +1917,5 @@ When recreating or modifying this card, verify:
 - [ ] Canceling card edit does not replace the live mini card with preview markup
 - [ ] Saving mini card config while active preserves visible status and STT/TTS text on the visible card (non-owner visible replacement mirrors singleton owner mini UI)
 - [ ] Mini editor preview height follows Sections row sizing changes
+
+

@@ -171,6 +171,7 @@ debug: false                       # Show debug info in browser console
 # Appearance
 skin: default                      # 'default', 'alexa', 'google-home', 'retro-terminal', or 'siri'
 reactive_bar: true                 # Activity bar reacts to audio levels
+reactive_bar_update_interval_ms: 33 # Reactive bar update cadence (try 50 on slow tablets)
 text_scale: 100                    # Scale all text 50-200%
 background_opacity: 100            # Override skin's default overlay opacity (0-100%)
 custom_css: ''                     # CSS overrides applied on top of the selected skin
@@ -451,6 +452,7 @@ The card includes a skin system that themes the entire UI — activity bar, text
 |--------|-------------|
 | **Skin** | Select a built-in skin |
 | **Reactive activity bar** | Bar animates in response to mic and audio levels. Disable on slow devices to save resources |
+| **Reactive bar update interval (ms)** | Controls how often audio-reactive level updates are pushed to the bar. Default `33ms` (~30fps). Recommended for slow tablets: `50ms` (~20fps). Minimum `17ms` (~60fps cap). |
 | **Text Scale** | Scale all text (transcriptions, responses, timers) from 50% to 200% |
 | **Background Opacity** | Override the skin's default overlay opacity (0–100%) |
 | **Custom CSS** | Advanced: CSS rules applied on top of the selected skin for fine-tuning colors, fonts, sizes, etc. |

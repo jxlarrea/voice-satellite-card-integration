@@ -29,12 +29,20 @@ export class AnalyserManager {
     // Which analyser _tick() reads from
     this._activeAnalyser = null;
     this._dataArray = null;
+    this._analyserBuffers = new WeakMap();
 
     this._rafId = null;
     this._barEl = null;
     this._visibilityHandler = null;
     this._lastLevel = -1;
     this._lastTick = 0;
+    this._perfWindowStart = 0;
+    this._perfTicks = 0;
+    this._perfComputeMsSum = 0;
+    this._perfComputeMsMax = 0;
+    this._perfGapMsSum = 0;
+    this._perfGapMsMax = 0;
+    this._perfLateGaps = 0;
   }
 
   /**
@@ -55,8 +63,7 @@ export class AnalyserManager {
     }
     // Default to mic analyser when no audio is playing
     if (!this._activeAnalyser) {
-      this._activeAnalyser = this._micAnalyser;
-      this._dataArray = new Uint8Array(this._micAnalyser.frequencyBinCount);
+      this._setActiveAnalyser(this._micAnalyser);
       this._log.log('analyser', 'Active → micAnalyser (initial)');
     }
   }
@@ -100,8 +107,7 @@ export class AnalyserManager {
       this._audioAnalyser.connect(audioContext.destination);
 
       // Switch reactive bar to read from audio analyser during playback
-      this._activeAnalyser = this._audioAnalyser;
-      this._dataArray = new Uint8Array(this._audioAnalyser.frequencyBinCount);
+      this._setActiveAnalyser(this._audioAnalyser);
       this._log.log('analyser', 'Audio → audioAnalyser → destination connected, active → audioAnalyser');
     } catch (e) {
       this._log.log('analyser', `Failed to attach audio: ${e.message}`);
@@ -132,8 +138,7 @@ export class AnalyserManager {
       return;
     }
     if (this._micAnalyser) {
-      this._activeAnalyser = this._micAnalyser;
-      this._dataArray = new Uint8Array(this._micAnalyser.frequencyBinCount);
+      this._setActiveAnalyser(this._micAnalyser);
       this._log.log('analyser', 'Active → micAnalyser (reconnectMic)');
     }
   }
@@ -177,13 +182,22 @@ export class AnalyserManager {
       this._barEl = null;
       this._log.log('analyser', 'Tick loop stopped');
     }
+    this._perfWindowStart = 0;
+    this._perfTicks = 0;
+    this._perfComputeMsSum = 0;
+    this._perfComputeMsMax = 0;
+    this._perfGapMsSum = 0;
+    this._perfGapMsMax = 0;
+    this._perfLateGaps = 0;
   }
 
   // --- Private ---
 
   _createAnalyser(audioContext) {
     const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 256;
+    // Reactive bar only needs coarse loudness, not detailed frequency bins.
+    // Smaller windows reduce analysis work on low-spec tablets.
+    analyser.fftSize = 128;
     analyser.smoothingTimeConstant = 0.6;
     return analyser;
   }
@@ -200,8 +214,7 @@ export class AnalyserManager {
     }
     // Revert to mic analyser if available
     if (this._micAnalyser) {
-      this._activeAnalyser = this._micAnalyser;
-      this._dataArray = new Uint8Array(this._micAnalyser.frequencyBinCount);
+      this._setActiveAnalyser(this._micAnalyser);
       this._log.log('analyser', 'Active → micAnalyser (audio detached)');
     } else {
       this._activeAnalyser = null;
@@ -215,31 +228,86 @@ export class AnalyserManager {
       return;
     }
 
-    // Cap at ~30 fps — CSS transitions (50ms) smooth the gaps
+    // Cap at ~20 fps — CSS transitions smooth the gaps and this saves CPU
+    // significantly on low-end Android wall tablets.
     const now = performance.now();
-    if (now - this._lastTick < 32) {
+    const targetIntervalMs = this._getUpdateIntervalMs();
+    if (now - this._lastTick < targetIntervalMs) {
       this._rafId = requestAnimationFrame(() => this._tick());
       return;
     }
+    const tickGapMs = this._lastTick ? (now - this._lastTick) : 0;
     this._lastTick = now;
+    if (!this._perfWindowStart) this._perfWindowStart = now;
+    const computeStart = performance.now();
 
-    this._activeAnalyser.getByteFrequencyData(this._dataArray);
+    // Use time-domain waveform amplitude for a simple level meter. This is
+    // cheaper than FFT/frequency analysis and visually sufficient here.
+    this._activeAnalyser.getByteTimeDomainData(this._dataArray);
 
-    // Compute RMS volume normalized to 0–1, quantized to 20 steps
-    // to skip redundant CSS updates when the level barely changes.
+    // Compute mean absolute amplitude normalized to 0–1, then quantize to
+    // skip redundant CSS updates when the level barely changes.
     let sum = 0;
     for (let i = 0; i < this._dataArray.length; i++) {
-      const v = this._dataArray[i] / 255;
-      sum += v * v;
+      sum += Math.abs(this._dataArray[i] - 128);
     }
-    const rms = Math.sqrt(sum / this._dataArray.length);
-    const level = Math.min(1, Math.round(Math.min(1, rms * 2) * 20) / 20);
+    const meanAbs = (sum / this._dataArray.length) / 128;
+    const level = Math.min(1, Math.round(Math.min(1, meanAbs * 3.5) * 20) / 20);
 
     if (level !== this._lastLevel) {
       this._lastLevel = level;
       this._barEl.style.setProperty('--vs-audio-level', level.toFixed(2));
     }
 
+    const computeMs = performance.now() - computeStart;
+    this._perfTicks += 1;
+    this._perfComputeMsSum += computeMs;
+    if (computeMs > this._perfComputeMsMax) this._perfComputeMsMax = computeMs;
+    if (tickGapMs > 0) {
+      this._perfGapMsSum += tickGapMs;
+      if (tickGapMs > this._perfGapMsMax) this._perfGapMsMax = tickGapMs;
+      // >75ms means we significantly missed the ~50ms target interval.
+      if (tickGapMs > (targetIntervalMs * 1.5)) this._perfLateGaps += 1;
+    }
+    if (now - this._perfWindowStart >= 1000) {
+      const avgMs = this._perfTicks ? (this._perfComputeMsSum / this._perfTicks) : 0;
+      const gapSamples = Math.max(0, this._perfTicks - 1);
+      const avgGapMs = gapSamples ? (this._perfGapMsSum / gapSamples) : 0;
+      const effFps = avgGapMs > 0 ? (1000 / avgGapMs) : 0;
+      this._log.log(
+        'analyser',
+        `perf 1s: int=${targetIntervalMs}ms effFps=${effFps.toFixed(1)} ticks=${this._perfTicks} avg=${avgMs.toFixed(2)}ms max=${this._perfComputeMsMax.toFixed(2)}ms gapAvg=${avgGapMs.toFixed(1)}ms gapMax=${this._perfGapMsMax.toFixed(1)}ms late=${this._perfLateGaps} analyser=${this._activeAnalyser === this._audioAnalyser ? 'audio' : 'mic'}`,
+      );
+      this._perfWindowStart = now;
+      this._perfTicks = 0;
+      this._perfComputeMsSum = 0;
+      this._perfComputeMsMax = 0;
+      this._perfGapMsSum = 0;
+      this._perfGapMsMax = 0;
+      this._perfLateGaps = 0;
+    }
+
     this._rafId = requestAnimationFrame(() => this._tick());
+  }
+
+  _setActiveAnalyser(analyser) {
+    this._activeAnalyser = analyser;
+    if (!analyser) {
+      this._dataArray = null;
+      return;
+    }
+    let buf = this._analyserBuffers.get(analyser);
+    if (!buf || buf.length !== analyser.fftSize) {
+      buf = new Uint8Array(analyser.fftSize);
+      this._analyserBuffers.set(analyser, buf);
+    }
+    this._dataArray = buf;
+  }
+
+  _getUpdateIntervalMs() {
+    const raw = Number(this._card?.config?.reactive_bar_update_interval_ms);
+    if (!Number.isFinite(raw)) return 33;
+    // Cap at 60fps max (minimum interval ~16.67ms, rounded to 17ms).
+    return Math.max(17, raw);
   }
 }

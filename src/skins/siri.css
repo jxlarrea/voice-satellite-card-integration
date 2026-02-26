@@ -138,10 +138,11 @@
 /* Reactive Bar — audio-driven glow intensity around the frame */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   overflow: visible;
-  transition: filter 0.05s linear, box-shadow 0.05s linear;
+  transition: filter 0.05s linear;
   filter: drop-shadow(0 0 calc(4px + 12px * var(--vs-audio-level, 0)) rgba(139, 92, 246, calc(0.7 + 0.3 * var(--vs-audio-level, 0))))
          drop-shadow(0 0 calc(2px + 6px * var(--vs-audio-level, 0)) rgba(59, 130, 246, calc(0.5 + 0.3 * var(--vs-audio-level, 0))));
   transform: translateZ(0);
+  will-change: filter;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive.listening {

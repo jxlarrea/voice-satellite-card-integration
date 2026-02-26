@@ -113,9 +113,11 @@ export default {
       text_scale: 'Text Scale',
       background_opacity: 'Background Opacity',
       reactive_bar: 'Reactive activity bar',
+      reactive_bar_update_interval_ms: 'Reactive bar update interval',
       custom_css: 'Custom CSS',
       helper_background_opacity: "If not set, the skin's default opacity level will be used",
       helper_reactive_bar: 'Activity bar reacts to audio levels. Disable on slow devices to save resources.',
+      helper_reactive_bar_update_interval_ms: 'Lower values feel smoother but use more CPU. Minimum 17ms (~60fps), default 33ms (~30fps). Recommended for slow tablets: 50ms (~20fps).',
       helper_custom_css: 'Advanced: CSS overrides applied on top of the selected skin',
     },
     preview: {

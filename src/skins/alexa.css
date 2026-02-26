@@ -126,6 +126,7 @@
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   overflow: visible;
   transform: translateZ(0);
+  will-change: background-position;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive::after {
@@ -134,19 +135,17 @@
   inset: 0;
   background: linear-gradient(90deg, #00CAFF, #00E5FF, #00CAFF);
   background-size: 200% 100%;
+  background-position: inherit;
   border-radius: 50%;
   filter: blur(calc(6px + 12px * var(--vs-audio-level, 0)));
   opacity: calc(var(--vs-audio-level, 0) * 2.5);
   transform: scale(1.05, 2);
   z-index: -1;
   pointer-events: none;
+  will-change: opacity, transform;
 }
 
 #voice-satellite-ui .vs-rainbow-bar.reactive.listening {
-  animation: alexa-shimmer 3s linear infinite;
-}
-
-#voice-satellite-ui .vs-rainbow-bar.reactive.listening::after {
   animation: alexa-shimmer 3s linear infinite;
 }
 
@@ -154,17 +153,10 @@
   animation: alexa-shimmer 1s linear infinite;
 }
 
-#voice-satellite-ui .vs-rainbow-bar.reactive.processing::after {
-  animation: alexa-shimmer 1s linear infinite;
-}
-
 #voice-satellite-ui .vs-rainbow-bar.reactive.speaking {
   animation: alexa-shimmer 4s linear infinite;
 }
 
-#voice-satellite-ui .vs-rainbow-bar.reactive.speaking::after {
-  animation: alexa-shimmer 4s linear infinite;
-}
 
 @keyframes alexa-breathe {
   0%, 100% {
