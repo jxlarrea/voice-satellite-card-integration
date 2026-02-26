@@ -5,6 +5,7 @@
  */
 
 import { DEFAULT_CONFIG } from '../constants.js';
+import { t } from '../i18n/index.js';
 import {
   behaviorSchema,
   microphoneSchema,
@@ -15,7 +16,7 @@ import {
 
 const miniLayoutSchema = [
   {
-    type: 'expandable', name: '', title: 'Layout', flatten: true,
+    type: 'expandable', name: '', title: t(null, 'mini_editor.layout', 'Layout'), flatten: true,
     schema: [
       {
         name: 'mini_mode',
@@ -24,8 +25,8 @@ const miniLayoutSchema = [
           select: {
             mode: 'dropdown',
             options: [
-              { value: 'compact', label: 'Compact' },
-              { value: 'tall', label: 'Tall' },
+              { value: 'compact', label: t(null, 'mini_editor.mode_compact', 'Compact') },
+              { value: 'tall', label: t(null, 'mini_editor.mode_tall', 'Tall') },
             ],
           },
         },
@@ -49,7 +50,7 @@ const miniLayoutSchema = [
 
 const miniAdvancedSchema = [
   {
-    type: 'expandable', name: '', title: 'Advanced', flatten: true,
+    type: 'expandable', name: '', title: t(null, 'mini_editor.advanced', 'Advanced'), flatten: true,
     schema: [
       { name: 'custom_css', selector: { text: { multiline: true } } },
     ],
@@ -58,16 +59,16 @@ const miniAdvancedSchema = [
 
 const labels = {
   ...behaviorLabels,
-  mini_mode: 'Mode',
-  text_scale: 'Text Scale',
-  custom_css: 'Custom CSS Override',
+  mini_mode: t(null, 'mini_editor.mode', 'Mode'),
+  text_scale: t(null, 'mini_editor.text_scale', 'Text Scale'),
+  custom_css: t(null, 'mini_editor.custom_css_override', 'Custom CSS Override'),
 };
 
 const helpers = {
   ...behaviorHelpers,
-  mini_mode: 'Compact is a single scrolling line; Tall shows status and a scrolling transcript.',
-  text_scale: 'Scales text sizes in the mini card while keeping Home Assistant theme typography as the base.',
-  custom_css: 'Advanced: CSS overrides applied inside the mini card shadow DOM',
+  mini_mode: t(null, 'mini_editor.helper_mode', 'Compact is a single scrolling line; Tall shows status and a scrolling transcript.'),
+  text_scale: t(null, 'mini_editor.helper_text_scale', 'Scales text sizes in the mini card while keeping Home Assistant theme typography as the base.'),
+  custom_css: t(null, 'mini_editor.helper_custom_css', 'Advanced: CSS overrides applied inside the mini card shadow DOM'),
 };
 
 export function getMiniConfigForm() {

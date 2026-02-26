@@ -1,0 +1,51 @@
+export default {
+  mini: {
+    state: {
+      service_unavailable: 'Service unavailable',
+      responding: 'Responding',
+      connecting: 'Connecting',
+      wake_word_detected: 'Wake word detected',
+      listening: 'Listening',
+      processing: 'Processing',
+      paused: 'Paused',
+      error: 'Error',
+      waiting_for_wake_word: 'Waiting for wake word',
+      tap_to_start: 'Tap to start',
+    },
+    notification: {
+      question: 'Question',
+      conversation: 'Conversation',
+      announcement: 'Announcement',
+      arrow_suffix: ' →',
+    },
+    timer: {
+      finished: 'Timer finished',
+    },
+    start_button: 'Start',
+  },
+  mini_editor: {
+    layout: 'Layout',
+    advanced: 'Advanced',
+    mode: 'Mode',
+    mode_compact: 'Compact',
+    mode_tall: 'Tall',
+    text_scale: 'Text Scale',
+    custom_css_override: 'Custom CSS Override',
+    helper_mode: 'Compact is a single scrolling line; Tall shows status and a scrolling transcript.',
+    helper_text_scale: 'Scales text sizes in the mini card while keeping Home Assistant theme typography as the base.',
+    helper_custom_css: 'Advanced: CSS overrides applied inside the mini card shadow DOM',
+    preview: {
+      label: 'Preview',
+      responding: 'Responding',
+      compact_user: 'Turn on the kitchen lights',
+      compact_assistant: 'Done. I turned them on.',
+      tall_user_1: 'Turn on the kitchen pantry light.',
+      tall_assistant_1: 'Done. The kitchen pantry light is on.',
+      tall_user_2: 'Set a timer for 5 minutes.',
+      tall_assistant_2: 'Done. Your 5-minute timer has started.',
+      tall_user_3: 'What time is it?',
+      tall_assistant_3: 'It is 7:42 PM.',
+    },
+  },
+};
+

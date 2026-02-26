@@ -7,6 +7,7 @@
  */
 
 import { formatTime } from '../shared/format.js';
+import { t } from '../i18n/index.js';
 
 const MINI_CSS = `
 :host {
@@ -392,7 +393,7 @@ export class MiniUIManager {
             <div class="vs-mini-body">
               <div class="vs-mini-timers"></div>
               <div class="vs-mini-line"></div>
-              <button class="vs-mini-start">Start</button>
+              <button class="vs-mini-start">${this._t('mini.start_button', 'Start')}</button>
               <div class="vs-mini-bar"></div>
               <div class="vs-mini-transcript"></div>
             </div>
@@ -469,7 +470,7 @@ export class MiniUIManager {
     if (this._dotEl) {
       this._dotEl.className = `vs-mini-dot ${status.dot || ''}`;
       this._dotEl.classList.toggle('clickable', !!status.micAction);
-      this._dotEl.title = status.micAction ? 'Tap to start' : '';
+      this._dotEl.title = status.micAction ? this._t('mini.state.tap_to_start', 'Tap to start') : '';
       this._dotEl.innerHTML = status.micAction
         ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>'
         : '';
@@ -677,7 +678,7 @@ export class MiniUIManager {
     if (!this._root) return;
     const alert = document.createElement('div');
     alert.className = 'vs-mini-timer-alert';
-    alert.innerHTML = '<div class="vs-mini-timer-alert-text">⏱ Timer finished</div>';
+    alert.innerHTML = `<div class="vs-mini-timer-alert-text">⏱ ${this._t('mini.timer.finished', 'Timer finished')}</div>`;
     if (onDoubleTap) _attachMiniDoubleTap(alert, onDoubleTap);
     alert.addEventListener('click', () => onDoubleTap?.());
     this._root.appendChild(alert);
@@ -697,32 +698,33 @@ export class MiniUIManager {
   }
 
   _statusFor(state, serviceUnavailable, ttsPlaying) {
-    if (serviceUnavailable) return { label: 'Service unavailable', dot: 'error', showCompactStatus: false };
-    if (ttsPlaying || state === 'TTS') return { label: 'Responding', dot: 'responding', showCompactStatus: false };
+    if (serviceUnavailable) return { label: this._t('mini.state.service_unavailable', 'Service unavailable'), dot: 'error', showCompactStatus: false };
+    if (ttsPlaying || state === 'TTS') return { label: this._t('mini.state.responding', 'Responding'), dot: 'responding', showCompactStatus: false };
     switch (state) {
-      case 'CONNECTING': return { label: 'Connecting', dot: 'connecting', showCompactStatus: false };
-      case 'WAKE_WORD_DETECTED': return { label: 'Wake word detected', dot: 'listening', showCompactStatus: false };
-      case 'STT': return { label: 'Listening', dot: 'listening pulse', showCompactStatus: false };
-      case 'INTENT': return { label: 'Processing', dot: 'processing', showCompactStatus: false };
-      case 'PAUSED': return { label: 'Paused', dot: '', showCompactStatus: false };
-      case 'ERROR': return { label: 'Error', dot: 'error', showCompactStatus: false };
-      case 'LISTENING': return { label: 'Waiting for wake word', dot: 'waiting pulse', showCompactStatus: true };
+      case 'CONNECTING': return { label: this._t('mini.state.connecting', 'Connecting'), dot: 'connecting', showCompactStatus: false };
+      case 'WAKE_WORD_DETECTED': return { label: this._t('mini.state.wake_word_detected', 'Wake word detected'), dot: 'listening', showCompactStatus: false };
+      case 'STT': return { label: this._t('mini.state.listening', 'Listening'), dot: 'listening pulse', showCompactStatus: false };
+      case 'INTENT': return { label: this._t('mini.state.processing', 'Processing'), dot: 'processing', showCompactStatus: false };
+      case 'PAUSED': return { label: this._t('mini.state.paused', 'Paused'), dot: '', showCompactStatus: false };
+      case 'ERROR': return { label: this._t('mini.state.error', 'Error'), dot: 'error', showCompactStatus: false };
+      case 'LISTENING': return { label: this._t('mini.state.waiting_for_wake_word', 'Waiting for wake word'), dot: 'waiting pulse', showCompactStatus: true };
       case 'IDLE':
-      default: return { label: 'Tap to start', dot: '', micAction: true, showCompactStatus: true };
+      default: return { label: this._t('mini.state.tap_to_start', 'Tap to start'), dot: '', micAction: true, showCompactStatus: true };
     }
   }
 
   _getNotificationStatus() {
+    const arrow = this._t('mini.notification.arrow_suffix', ' →');
     if (this._card.askQuestion?.playing) {
-      return { label: 'Question →', dot: 'responding', showCompactStatus: true, kind: 'question' };
+      return { label: `${this._t('mini.notification.question', 'Question')}${arrow}`, dot: 'responding', showCompactStatus: true, kind: 'question' };
     }
     if (this._card.startConversation?.playing) {
-      return { label: 'Conversation →', dot: 'responding', showCompactStatus: true, kind: 'conversation' };
+      return { label: `${this._t('mini.notification.conversation', 'Conversation')}${arrow}`, dot: 'responding', showCompactStatus: true, kind: 'conversation' };
     }
     if (this._card.announcement?.playing) {
-      return { label: 'Announcement →', dot: 'responding', showCompactStatus: true, kind: 'announcement' };
+      return { label: `${this._t('mini.notification.announcement', 'Announcement')}${arrow}`, dot: 'responding', showCompactStatus: true, kind: 'announcement' };
     }
-    return { label: 'Responding', dot: 'responding', showCompactStatus: true };
+    return { label: this._t('mini.state.responding', 'Responding'), dot: 'responding', showCompactStatus: true };
   }
 
   _scrollLineToEnd() {
@@ -838,6 +840,10 @@ export class MiniUIManager {
       this.showStartButton(this._pendingStartButtonReason);
       this._pendingStartButtonReason = undefined;
     }
+  }
+
+  _t(key, fallback, vars) {
+    return t(this._card?.hass, key, fallback, vars);
   }
 }
 

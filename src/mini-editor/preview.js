@@ -6,6 +6,7 @@
 
 import baseCSS from './preview.css';
 import { getMiniGridRows, getMiniModeKey } from '../mini/constants.js';
+import { t } from '../i18n/index.js';
 
 export function renderMiniPreview(shadowRoot, config = {}) {
   _ensureMiniPreviewResizeObserver(shadowRoot);
@@ -14,6 +15,8 @@ export function renderMiniPreview(shadowRoot, config = {}) {
   const rows = _resolvePreviewRows(shadowRoot, mode);
   const previewHeight = _computePreviewHeight(shadowRoot, rows, mode);
   const textScale = (Number(config.text_scale) || 100) / 100;
+  const hass = shadowRoot.host?._hass;
+  const tt = (key, fallback) => t(hass, key, fallback);
   const styleVars = `--vs-mini-preview-rows:${rows};--vs-mini-preview-text-scale:${textScale};${previewHeight ? `--vs-mini-preview-height:${previewHeight}px;` : ''}`;
 
   if (mode === 'compact') {
@@ -24,12 +27,12 @@ export function renderMiniPreview(shadowRoot, config = {}) {
           <div class="vs-mini-preview-surface">
             <div class="vs-mini-preview-header">
               <span class="vs-mini-preview-dot responding"></span>
-              <span class="vs-mini-preview-status">Responding</span>
+              <span class="vs-mini-preview-status">${tt('mini_editor.preview.responding', 'Responding')}</span>
             </div>
             <div class="vs-mini-preview-line">
-              <span class="user">Turn on the kitchen lights</span>
+              <span class="user">${tt('mini_editor.preview.compact_user', 'Turn on the kitchen lights')}</span>
               <span class="vs-mini-preview-sep">\u2192</span>
-              <span class="assistant">Done. I turned them on.</span>
+              <span class="assistant">${tt('mini_editor.preview.compact_assistant', 'Done. I turned them on.')}</span>
             </div>
           </div>
         </ha-card>
@@ -43,21 +46,21 @@ export function renderMiniPreview(shadowRoot, config = {}) {
     <div class="vs-mini-preview-frame">
       <ha-card class="vs-mini-preview-card tall" style="${styleVars}">
         <div class="vs-mini-preview-surface">
-          <div class="vs-mini-preview-label">Preview</div>
+          <div class="vs-mini-preview-label">${tt('mini_editor.preview.label', 'Preview')}</div>
           <div class="vs-mini-preview-header">
             <span class="vs-mini-preview-dot responding"></span>
-            <span class="vs-mini-preview-status">Responding</span>
+            <span class="vs-mini-preview-status">${tt('mini_editor.preview.responding', 'Responding')}</span>
           </div>
           <div class="vs-mini-preview-timers">
             <div class="vs-mini-preview-timer"><span>\u23F1</span><strong>00:04:32</strong></div>
           </div>
           <div class="vs-mini-preview-transcript">
-            <div class="vs-mini-preview-msg user">Turn on the kitchen pantry light.</div>
-            <div class="vs-mini-preview-msg assistant">Done. The kitchen pantry light is on.</div>
-            <div class="vs-mini-preview-msg user">Set a timer for 5 minutes.</div>
-            <div class="vs-mini-preview-msg assistant">Done. Your 5-minute timer has started.</div>
-            <div class="vs-mini-preview-msg user">What time is it?</div>
-            <div class="vs-mini-preview-msg assistant">It is 7:42 PM.</div>
+            <div class="vs-mini-preview-msg user">${tt('mini_editor.preview.tall_user_1', 'Turn on the kitchen pantry light.')}</div>
+            <div class="vs-mini-preview-msg assistant">${tt('mini_editor.preview.tall_assistant_1', 'Done. The kitchen pantry light is on.')}</div>
+            <div class="vs-mini-preview-msg user">${tt('mini_editor.preview.tall_user_2', 'Set a timer for 5 minutes.')}</div>
+            <div class="vs-mini-preview-msg assistant">${tt('mini_editor.preview.tall_assistant_2', 'Done. Your 5-minute timer has started.')}</div>
+            <div class="vs-mini-preview-msg user">${tt('mini_editor.preview.tall_user_3', 'What time is it?')}</div>
+            <div class="vs-mini-preview-msg assistant">${tt('mini_editor.preview.tall_assistant_3', 'It is 7:42 PM.')}</div>
           </div>
         </div>
       </ha-card>
