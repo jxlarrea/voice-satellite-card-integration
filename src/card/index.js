@@ -98,7 +98,7 @@ export class VoiceSatelliteCard extends HTMLElement {
     return getSelectEntityId(this._hass, this._config.satellite_entity, 'tts_output') || '';
   }
   get announcementDisplayDuration() {
-    return getNumberState(this._hass, this._config.satellite_entity, 'announcement_display_duration', 3.5);
+    return getNumberState(this._hass, this._config.satellite_entity, 'announcement_display_duration', 5);
   }
   get isReactiveBarEnabled() {
     return !!this._activeSkin?.reactiveBar && this._config.reactive_bar !== false;

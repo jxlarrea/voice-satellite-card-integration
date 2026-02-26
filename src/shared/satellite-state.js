@@ -57,10 +57,16 @@ export function getNumberState(hass, satelliteId, translationKey, defaultValue) 
         entry.platform === 'voice_satellite' &&
         entry.translation_key === translationKey) {
       const val = parseFloat(hass.states[eid]?.state);
-      return isNaN(val) ? defaultValue : val;
+      if (!isNaN(val)) return val;
+      break;
     }
   }
-  return defaultValue;
+
+  // Fallback to the satellite entity attribute exposed by the integration.
+  // This is more resilient on HA versions/frontends where hass.entities
+  // metadata (translation_key/device cache) may not be ready yet.
+  const attrVal = parseFloat(getSatelliteAttr(hass, satelliteId, translationKey));
+  return isNaN(attrVal) ? defaultValue : attrVal;
 }
 
 /**

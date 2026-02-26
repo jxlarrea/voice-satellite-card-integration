@@ -50,7 +50,7 @@ export class AnnouncementManager {
     // Restart immediately so wake word detection resumes.
     this._card.pipeline.restart(0);
 
-    const clearDelay = (this._card.announcementDisplayDuration || 3.5) * 1000;
+    const clearDelay = (this._card.announcementDisplayDuration || 5) * 1000;
     this.clearTimeoutId = setTimeout(() => {
       clearNotificationUI(this);
       this.playing = false;
