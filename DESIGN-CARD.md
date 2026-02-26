@@ -2,9 +2,14 @@
 
 ## 1. Overview
 
-Voice Satellite Card is a custom Home Assistant Lovelace card that turns any browser into a full-featured voice satellite with feature parity with physical devices like the Home Assistant Voice Preview Edition. It captures microphone audio, routes it through the integration's `voice_satellite/run_pipeline` WebSocket subscription to Home Assistant's Assist pipeline, and plays back TTS responses — all without leaving the HA dashboard.
+Voice Satellite Card is a custom Home Assistant Lovelace package that turns any browser into a full-featured voice satellite with feature parity with physical devices like the Home Assistant Voice Preview Edition. It includes two card variants:
 
-The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel into a single `voice-satellite-card.js` for deployment. The card is invisible (`getCardSize() = 0`). All visual feedback is rendered via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes.
+- `voice-satellite-card` — fullscreen/global overlay UI rendered on `document.body`
+- `voice-satellite-mini-card` — normal in-card text-first UI (`compact` and `tall` modes)
+
+Both variants capture microphone audio, route it through the integration's `voice_satellite/run_pipeline` WebSocket subscription to Home Assistant's Assist pipeline, and play back TTS responses — all without leaving the HA dashboard.
+
+The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel into a single `voice-satellite-card.js` for deployment. The fullscreen card is invisible (`getCardSize() = 0`) and renders visual feedback via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes. The mini card renders locally inside its own Shadow DOM as a standard `ha-card`.
 
 **Architecture note:** The card routes ALL pipeline communication through the integration's `voice_satellite/run_pipeline` WebSocket subscription. There is no anonymous/standalone pipeline mode.
 
@@ -15,7 +20,7 @@ See [DESIGN-INTEGRATION.md](DESIGN-INTEGRATION.md) for the integration-side desi
 ## 2. High-Level Flow
 
 1. The card acquires the browser microphone via `getUserMedia`.
-2. Audio is captured via AudioWorklet (or ScriptProcessor fallback), resampled to 16 kHz mono PCM, and sent as binary WebSocket frames every 100 ms.
+2. Audio is captured via AudioWorklet, resampled to 16 kHz mono PCM, and sent as binary WebSocket frames every 100 ms.
 3. The integration's `voice_satellite/run_pipeline` subscription routes audio through the HA Assist pipeline (wake word → STT → intent → TTS) and relays events back to the card.
 4. The card receives pipeline events, updates visual feedback (gradient bar, transcription/response bubbles), and plays the TTS audio.
 5. When TTS playback begins, the pipeline is immediately restarted so it listens for the next wake word while audio plays (barge-in support). If the conversation agent signals `continue_conversation`, the card skips the wake word stage and restarts in STT mode for multi-turn dialogues.
@@ -62,7 +67,7 @@ voice-satellite-card-integration/
 │   ├── audio/                            ← Audio capture + chimes + media playback + analysis
 │   │   ├── index.js                      ← AudioManager (mic, worklet, send interval)
 │   │   ├── analyser.js                   ← AnalyserManager (dual-analyser for reactive bar)
-│   │   ├── processing.js                 ← AudioWorklet/ScriptProcessor setup, resample, buffer
+│   │   ├── processing.js                 ← AudioWorklet setup, resample, buffer
 │   │   ├── comms.js                      ← Binary WebSocket audio transmission
 │   │   ├── chime.js                      ← Web Audio API chime generation (all chime patterns)
 │   │   └── media-playback.js             ← HTML Audio element playback + URL normalization
@@ -135,6 +140,15 @@ voice-satellite-card-integration/
 └── package-lock.json
 ```
 
+**Module Structure Addendum â€” Mini Card (added after initial full-card architecture):**
+
+- `src/mini/index.js` â€” `VoiceSatelliteMiniCard` orchestrator (normal `ha-card` UI, no fullscreen overlay)
+- `src/mini/ui.js` â€” `MiniUIManager` local card UI (compact/tall layouts, transcript line/list, timer badges, timer alert, local start affordance)
+- `src/mini/constants.js` â€” Shared mini grid sizing defaults/limits used by runtime + mini editor preview (`compact`/`tall`)
+- `src/mini-editor/index.js` â€” Mini card visual editor schema assembler (`mini_mode`, `text_scale`, `custom_css`, behavior/mic/debug)
+- `src/mini-editor/preview.js` â€” Static mini editor preview renderer (no live mic/pipeline) with Sections row-size-aware height
+- `src/mini-editor/preview.css` â€” Mini editor preview styles (separate CSS file, same design direction as runtime mini UI)
+
 ### 3.2 Layering Principles
 
 The codebase enforces strict separation of concerns:
@@ -191,6 +205,8 @@ Centralized logging controlled by `config.debug`. All managers receive a referen
 
 ### 3.4 Global UI
 
+This section applies to the fullscreen `voice-satellite-card` variant only. The mini card renders locally inside the card's Shadow DOM via `MiniUIManager` (`ha-card.vs-mini-card-shell`).
+
 The card renders nothing in its own Shadow DOM (just a hidden `<div>`). All visible UI lives in a single `#voice-satellite-ui` element appended to `document.body`:
 
 ```html
@@ -223,11 +239,13 @@ This design ensures the UI persists when the user navigates between dashboard vi
 
 ## 4. Entry Point
 
-`src/index.js` registers the custom element and announces the card to HA's card picker:
+`src/index.js` registers both custom elements and announces them to HA's card picker:
 
 ```javascript
 customElements.define('voice-satellite-card', VoiceSatelliteCard);
+customElements.define('voice-satellite-mini-card', VoiceSatelliteMiniCard);
 window.customCards.push({ type: 'voice-satellite-card', ... });
+window.customCards.push({ type: 'voice-satellite-mini-card', ... });
 ```
 
 A styled console log shows the card version on load (`__VERSION__` is injected at build time from `package.json` via Webpack's DefinePlugin).
@@ -236,7 +254,7 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
 
 ## 5. Card Orchestrator (`card/index.js`)
 
-`VoiceSatelliteCard` extends `HTMLElement` and composes 13 managers:
+`VoiceSatelliteCard` extends `HTMLElement` and composes 14 managers:
 
 | Manager | Purpose |
 |---------|---------|
@@ -307,6 +325,81 @@ The card delegates all event handling to free functions in `card/events.js`:
 - `onTTSComplete(card, playbackFailed)` — Handles post-TTS cleanup: continue conversation, done chime, clear UI, play queued notifications
 - `handlePipelineMessage(card, message)` — Dispatches pipeline events by type to PipelineManager handlers (with guards for paused/restarting)
 
+### 5.3 Mini Card Orchestrator (`mini/index.js`)
+
+`VoiceSatelliteMiniCard` is a second orchestrator that reuses the same shared managers (`AudioManager`, `PipelineManager`, `TtsManager`, `TimerManager`, notifications, media player bridge, etc.) but swaps the fullscreen/global UI for a local in-card UI (`MiniUIManager`).
+
+**Key differences from `VoiceSatelliteCard`:**
+
+- Renders a local `ha-card` UI in its own Shadow DOM (no `document.body` overlay)
+- Uses `MiniUIManager` (`src/mini/ui.js`) instead of `UIManager`
+- Reuses `ChatManager`, `DoubleTapHandler`, `VisibilityManager`, and shared `card/events.js`
+- Registers a different visual editor (`src/mini-editor/*`) with a static preview
+- Exposes `getGridOptions()` for Sections dashboards (row sizing) and behaves like a normal Lovelace card
+
+**Mini card modes:**
+
+- `compact` — Single-row status + transcript line (horizontal marquee for overflow)
+- `tall` — Status row + scrollable transcript + timer badges inside the card
+- `getGridOptions()` defaults (Sections) — `compact` fixed at 1 row; `tall` default 3 rows, min 2, max 12
+
+**Mini card lifecycle / startup differences:**
+
+- The mini card still participates in singleton ownership (`window.__vsSingleton`) because mic/pipeline access must remain single-owner across all variants.
+- Auto-start is deferred to `connectedCallback()` (not `set hass()` for unattached duplicates) so the visible instance owns the mic gesture fallback UI.
+- `connectedCallback()` performs an additional deferred pass before auto-starting to reduce editor-clone races (HA editor wrappers can attach after the custom element).
+- Reattach path (`connectedCallback()` on an already-started owner) preserves current runtime state and repaints the local UI instead of forcing `IDLE`.
+- `disconnectedCallback()` intentionally does **not** tear down the active session after the grace period (mirrors fullscreen card behavior for editor/view rebuild churn).
+
+**Mini card editor / preview behavior (critical):**
+
+- HA card editor creates duplicate instances (preview + transient clones).
+- The mini card uses a **static preview renderer** (`mini-editor/preview.js`) in the actual editor preview container to avoid starting mic/pipeline/audio in the editor.
+- Preview detection is stricter than the fullscreen card: it requires editor context *and* a dedicated preview wrapper (to avoid replacing the live card with preview markup during editor transitions).
+- Editor preview sizing in Sections mode reads the editor grid cell row count/height (`.card`, `--row-size`) so the preview grows/shrinks with row changes.
+- Mini editor preview uses the same row defaults/limits as runtime (`src/mini/constants.js`) to prevent runtime/preview drift.
+
+**Mini card save/cancel edge case (HA editor):**
+
+When saving/canceling in the HA editor, HA can replace the visible mini-card element while leaving the singleton owner (and active pipeline) on another instance. To keep the visible card usable without forcing a restart:
+
+- non-owner visible mini instances mirror the singleton owner's local UI state
+- mirrored content includes status, transcript (compact line / tall transcript), and timer badges
+- mirroring uses DOM cloning (`cloneNode`) rather than `innerHTML`
+- a `MutationObserver` watches the owner mini UI and schedules mirror refreshes via `requestAnimationFrame`
+
+This is mini-card specific complexity caused by HA editor instance churn + singleton side effects.
+
+### 5.4 Mini UI (`mini/ui.js`)
+
+`MiniUIManager` implements the subset/superset of the `UIManager` API needed by shared managers, but all DOM stays local to the card's Shadow DOM.
+
+**Design constraints:**
+
+- Uses HA theme variables for colors, radius, and typography (with fallbacks)
+- No skins, no fullscreen blur/lightbox/media panel
+- Supports `custom_css` overrides (mini editor) and `text_scale`
+- Timer methods are fully implemented (compact = soonest timer badge, tall = all timer badges)
+
+**Compact mode behavior:**
+
+- Layout: `[status dot/mic button] [status label (selective)] [conversation line]`
+- Idle state uses a tappable circular mic icon and label `Tap to start`
+- Status label is only shown in compact mode for idle / wake-word waiting (and notification overrides)
+- Conversation text uses a one-way marquee that scrolls to the end and stays there (no bounce)
+- TTS cleanup linger hook keeps text visible briefly if marquee is actively scrolling
+
+**Tall mode behavior:**
+
+- Status row + timer badges + scrollable transcript region
+- Transcript auto-scrolls to latest content
+- Uses internal scrolling (not card growth) in row-sized layouts
+- Masonry-specific CSS provides a default tall min-height because Masonry has no row sizing
+
+**Notification status override:**
+
+During `announcement`, `start_conversation`, and `ask_question`, the mini card overrides the normal pipeline status line with a notification label (`Announcement`, `Conversation`, `Ask question`) so it does not misleadingly show `Waiting for wake word`.
+
 ---
 
 ## 6. Audio System (`audio/`)
@@ -317,7 +410,7 @@ Manages the microphone lifecycle:
 
 1. **Acquisition** — `startMicrophone()` creates an AudioContext (16 kHz requested), gets `getUserMedia` with configurable constraints (noise suppression, echo cancellation, auto gain control, voice isolation).
 
-2. **Capture** — Tries AudioWorklet first (inline processor via Blob URL), falls back to ScriptProcessor (2048 buffer). Both push `Float32Array` chunks to `audioBuffer`.
+2. **Capture** — Uses AudioWorklet (inline processor via Blob URL) and pushes `Float32Array` chunks to `audioBuffer`.
 
 3. **Send loop** — `startSending(binaryHandlerIdGetter)` starts a 100ms `setInterval` that:
    - Combines all buffered chunks into one `Float32Array`
@@ -794,6 +887,8 @@ Handles browser tab show/hide transitions.
 **`teardown()`** — Removes the visibility change listener, clears the debounce timer, and resets `_isPaused`. Used during full lifecycle resets (e.g., entity picker re-selection).
 
 ### Tab Hidden
+**Idle/no-session guard (mini-card UX):** If the card is `IDLE` and there is no active pipeline subscription (`pipeline.binaryHandlerId` falsy) and no TTS playback, the visibility handler returns early instead of entering `PAUSED`. This preserves the mini card's idle mic-button start affordance when the user switches tabs before first start (common when browsers block auto-start pending a user gesture).
+
 1. Cancel any in-progress ask_question flow (prevents cleanup timers firing after resume)
 2. If in an active interaction OR media is lingering: clear image linger timeout, clear chat, hide blur, clear continue state, stop TTS
 3. After 500ms debounce: set state PAUSED, disable audio tracks
@@ -1809,3 +1904,10 @@ When recreating or modifying this card, verify:
 **Version:**
 - [ ] Single source of truth: `package.json` → `scripts/sync-version.js` propagates to `manifest.json` + `const.py`
 - [ ] `__VERSION__` injected into JS via Webpack DefinePlugin
+
+**Mini Card / HA Editor (Sections) Regression Checks:**
+- [ ] Mini card editor preview is static HTML/CSS only (no live pipeline/audio/subscriptions)
+- [ ] Entering edit mode before starting the mini card does not start a pipeline from preview/transient clones
+- [ ] Canceling card edit does not replace the live mini card with preview markup
+- [ ] Saving mini card config while active preserves visible status and STT/TTS text on the visible card (non-owner visible replacement mirrors singleton owner mini UI)
+- [ ] Mini editor preview height follows Sections row sizing changes

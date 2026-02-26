@@ -167,10 +167,33 @@ export class AudioManager {
     }
     if (this._audioContext.state === 'suspended') {
       this._log.log('mic', 'Resuming suspended AudioContext');
-      await this._audioContext.resume();
+      // Chrome may keep resume() pending (no reject) until a user gesture.
+      // Timeout so startup can fall back to the explicit start button UI.
+      await this._resumeAudioContextWithTimeout();
     }
     if (this._audioContext.state !== 'running') {
       throw new Error(`AudioContext failed to start: ${this._audioContext.state}`);
+    }
+  }
+
+  async _resumeAudioContextWithTimeout() {
+    const ctx = this._audioContext;
+    if (!ctx || ctx.state !== 'suspended') return;
+
+    let timeoutId = null;
+    try {
+      await Promise.race([
+        ctx.resume(),
+        new Promise((_, reject) => {
+          timeoutId = setTimeout(() => {
+            const err = new Error('AudioContext resume timed out waiting for user gesture');
+            err.name = 'NotAllowedError';
+            reject(err);
+          }, 800);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 }

@@ -77,9 +77,21 @@ export async function startListening(card) {
   } catch (e) {
     const msg = e?.message || JSON.stringify(e);
     card.logger.error('pipeline', `Failed to start: ${msg}`);
+    const errText = `${e?.name || ''} ${e?.message || ''}`.toLowerCase();
 
     let reason = 'error';
-    if (e.name === 'NotAllowedError') {
+    if (
+      e.name === 'NotAllowedError'
+      || (
+        (errText.includes('audio context') || errText.includes('audiocontext'))
+        && (
+          errText.includes('failed to start')
+          || errText.includes('not allowed')
+          || errText.includes('user gesture')
+          || errText.includes('suspended')
+        )
+      )
+    ) {
       reason = 'not-allowed';
       card.logger.log('mic', 'Access denied — browser requires user gesture');
     } else if (e.name === 'NotFoundError') {
@@ -146,6 +158,18 @@ export function onTTSComplete(card, playbackFailed) {
     card.askQuestion.playQueued();
     card.startConversation.playQueued();
   };
+
+  // Mini-card hook: keep the text visible briefly while a compact marquee is
+  // actively scrolling, so the user can finish reading after TTS ends.
+  const customLingerMs = typeof card.ui?.getTtsLingerTimeoutMs === 'function'
+    ? card.ui.getTtsLingerTimeoutMs()
+    : 0;
+  if (customLingerMs > 0) {
+    card.ui.stopReactive();
+    if (card._imageLingerTimeout) clearTimeout(card._imageLingerTimeout);
+    card._imageLingerTimeout = setTimeout(cleanup, customLingerMs);
+    return;
+  }
 
   // When images are showing, keep the visual UI for 30 seconds
   // Stop only the mic reactivity so the bar doesn't respond to audio

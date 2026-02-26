@@ -26,6 +26,7 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 - [Setup](#setup)
 - [Integration](#integration)
 - [Usage](#usage)
+- [Mini Card](#mini-card)
 - [Skins](#skins)
 - [Experimental: LLM Tools](#experimental-llm-tools)
 - [Troubleshooting](#troubleshooting)
@@ -75,6 +76,7 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 - **Works Across Views** - Pipeline stays active when switching dashboard views.
 - **Auto-Start** - Automatically begins listening on page load (with fallback button).
 - **Visual Feedback** - Themed gradient activity bar shows listening/processing/speaking states with optional reactive audio-level animation.
+- **Mini Card (Text-First UI)** - Optional `voice-satellite-mini-card` for a normal in-dashboard card layout (compact or tall) without the fullscreen overlay.
 - **Skins** - Built-in skins (Default, Alexa, Google Home, Retro Terminal, Siri) that theme the activity bar, text display, timers, and overlay. Customizable with CSS overrides.
 - **Transcription & Response Display** - Shows what was understood and the assistant's response with real-time streaming.
 - **Continue Conversation** - When the assistant asks a follow-up question, the card automatically listens for a response without requiring the wake word again. Conversation history is displayed on screen.
@@ -125,6 +127,14 @@ satellite_entity: assist_satellite.kitchen_tablet
 ```
 
 The card will start listening automatically using your configured pipeline.
+
+If you prefer a normal in-dashboard card instead of the fullscreen overlay UI, use the mini card:
+
+```yaml
+type: custom:voice-satellite-mini-card
+satellite_entity: assist_satellite.kitchen_tablet
+mini_mode: compact # or tall
+```
 
 ### Per-Device Satellite Override
 
@@ -378,6 +388,45 @@ data:
 
 The entity supports play, pause, resume, stop, volume set, and volume mute — all controllable from the HA UI or automations.
 
+## Mini Card
+
+`voice-satellite-mini-card` is a text-first, normal Home Assistant card variant of the Voice Satellite Card. It uses the same integration and voice pipeline stack, but renders a local UI inside the card instead of the fullscreen/global overlay.
+
+### Modes
+
+- **Compact** - Single-line status + conversation text with marquee scrolling when content overflows
+- **Tall** - Status row + scrolling transcript + timer badges inside the card
+
+### Mini Card Features
+
+- Home Assistant theme colors, radius, and typography variables
+- `text_scale` support plus `custom_css` override
+- Timers, announcements, `ask_question`, and `start_conversation` status/text feedback
+- Static editor preview (no live mic/pipeline in the card editor)
+- Works in Sections and Masonry dashboards
+
+### Mini Card Configuration Reference
+
+```yaml
+type: custom:voice-satellite-mini-card
+
+# Behavior
+satellite_entity: ''               # (Required) assist_satellite entity from the integration
+browser_satellite_override: false  # Per-device satellite selection via browser popup
+debug: false                       # Show debug info in browser console
+
+# Mini Layout
+mini_mode: compact                 # 'compact' or 'tall'
+text_scale: 100                    # Scale text 50-200%
+custom_css: ''                     # CSS overrides inside the mini card shadow DOM
+
+# Microphone Processing
+noise_suppression: true            # Enable noise suppression
+echo_cancellation: true            # Enable echo cancellation
+auto_gain_control: true            # Enable automatic gain control
+voice_isolation: false             # AI-based voice isolation (Chrome only)
+```
+
 ## Skins
 
 The card includes a skin system that themes the entire UI — activity bar, text display, timers, and background overlay. Select a skin in the card editor under **Appearance**.
@@ -528,3 +577,4 @@ Contributions are welcome. Please feel free to submit issues or pull requests.
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
+

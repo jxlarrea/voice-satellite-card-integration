@@ -53,6 +53,15 @@ export class VisibilityManager {
     if (!this._card.isOwner) return;
 
     if (document.hidden) {
+      const hasActivePipeline = !!this._card.pipeline?.binaryHandlerId;
+      const hasActivePlayback = !!this._card.tts?.isPlaying;
+      const isIdleNoSession = this._card.currentState === State.IDLE && !hasActivePipeline && !hasActivePlayback;
+      if (isIdleNoSession) {
+        // Nothing active to pause yet (common on mini card before first user
+        // gesture in browsers that block mic startup). Keep the idle/start UI.
+        return;
+      }
+
       this._isPaused = true;
 
       // Cancel any in-progress ask_question flow — its cleanup timer

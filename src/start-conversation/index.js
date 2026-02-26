@@ -10,7 +10,6 @@ import {
   initNotificationState,
   dequeueNotification,
   playNotification,
-  clearNotificationUI,
 } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
 import { BlurReason } from '../constants.js';
@@ -46,8 +45,22 @@ export class StartConversationManager {
 
     sendAck(this._card, ann.id, LOG);
 
-    // Clear announcement UI and enter listening mode
-    clearNotificationUI(this);
+    // Partial notification cleanup: clear only announcement-specific state and
+    // blur. Do not restore/hide the speaking bar here; the pipeline restart
+    // immediately transitions into STT/listening and a bar hide/show cycle can
+    // cause a visible chat bubble reflow flicker in start_conversation.
+    if (this.clearTimeoutId) {
+      clearTimeout(this.clearTimeoutId);
+      this.clearTimeoutId = null;
+    }
+    this._card.ui.setAnnouncementMode(false);
+    this._card.ui.clearAnnouncementBubbles();
+    this._card.ui.hideBlurOverlay(BlurReason.ANNOUNCEMENT);
+    // MiniUIManager uses restoreBar() to clear its notification status
+    // override, but calling restoreBar() here causes a fullscreen-card bar
+    // flicker. Clear the override explicitly when supported.
+    this._card.ui.clearNotificationStatusOverride?.();
+
     this.playing = false;
     this._card.ui.showBlurOverlay(BlurReason.PIPELINE);
 
