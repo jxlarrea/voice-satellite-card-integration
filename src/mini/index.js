@@ -59,6 +59,7 @@ export class VoiceSatelliteMiniCard extends HTMLElement {
       mini_mode: 'compact',
       skin: 'default',
     });
+    this._configuredMiniMode = null;
     this._hass = null;
     this._connection = null;
     this._hasStarted = false;
@@ -209,6 +210,7 @@ export class VoiceSatelliteMiniCard extends HTMLElement {
   }
 
   setConfig(config) {
+    this._configuredMiniMode = config?.mini_mode ?? null;
     const hadEntity = !!this._config.satellite_entity;
     this._config = Object.assign({}, DEFAULT_CONFIG, { mini_mode: 'compact' }, config);
     this._logger.debug = this._config.debug;
@@ -316,11 +318,21 @@ export class VoiceSatelliteMiniCard extends HTMLElement {
   }
 
   getCardSize() {
-    return getMiniGridRows(this._config.mini_mode).default;
+    return getMiniGridRows(this._configuredMiniMode || 'tall').default;
   }
 
   getGridOptions() {
-    const rows = getMiniGridRows(this._config.mini_mode);
+    // HA can query grid options before setConfig() runs; avoid inheriting the
+    // constructor's compact default (fixed 1 row) in that transient state.
+    const rows = getMiniGridRows(this._configuredMiniMode || 'tall');
+    if (isEditorPreview(this) && this._configuredMiniMode !== 'compact') {
+      return {
+        rows: rows.default,
+        min_rows: 1,
+        max_rows: 12,
+        columns: 12,
+      };
+    }
     return {
       rows: rows.default,
       min_rows: rows.min,

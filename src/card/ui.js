@@ -9,23 +9,24 @@
 
 import { Timing } from '../constants.js';
 import { formatTime, formatPrice, formatLargeNumber, formatChange } from '../shared/format.js';
+import { t } from '../i18n/index.js';
 
-const CONDITION_LABELS = {
-  'sunny': 'Sunny',
-  'cloudy': 'Cloudy',
-  'rainy': 'Rainy',
-  'snowy': 'Snowy',
-  'partlycloudy': 'Partly Cloudy',
-  'pouring': 'Heavy Rain',
-  'lightning': 'Thunderstorm',
-  'lightning-rainy': 'Thunderstorm',
-  'fog': 'Foggy',
-  'hail': 'Hail',
-  'snowy-rainy': 'Sleet',
-  'windy': 'Windy',
-  'windy-variant': 'Windy',
-  'clear-night': 'Clear Night',
-  'exceptional': 'Unusual',
+const CONDITION_LABEL_KEYS = {
+  'sunny': 'full.ui.weather.conditions.sunny',
+  'cloudy': 'full.ui.weather.conditions.cloudy',
+  'rainy': 'full.ui.weather.conditions.rainy',
+  'snowy': 'full.ui.weather.conditions.snowy',
+  'partlycloudy': 'full.ui.weather.conditions.partlycloudy',
+  'pouring': 'full.ui.weather.conditions.pouring',
+  'lightning': 'full.ui.weather.conditions.lightning',
+  'lightning-rainy': 'full.ui.weather.conditions.lightning-rainy',
+  'fog': 'full.ui.weather.conditions.fog',
+  'hail': 'full.ui.weather.conditions.hail',
+  'snowy-rainy': 'full.ui.weather.conditions.snowy-rainy',
+  'windy': 'full.ui.weather.conditions.windy',
+  'windy-variant': 'full.ui.weather.conditions.windy-variant',
+  'clear-night': 'full.ui.weather.conditions.clear-night',
+  'exceptional': 'full.ui.weather.conditions.exceptional',
 };
 
 export class UIManager {
@@ -84,7 +85,7 @@ export class UIManager {
 
     const btn = ui.querySelector('.vs-start-btn');
     btn.classList.add('visible');
-    btn.title = 'Tap to start voice assistant';
+    btn.title = this._t('full.ui.start.title_default', 'Tap to start voice assistant');
 
     this._flushPendingStartButton();
   }
@@ -177,11 +178,11 @@ export class UIManager {
     btn.classList.add('visible');
 
     const titles = {
-      'not-allowed': 'Tap to enable microphone',
-      'not-found': 'No microphone found',
-      'not-readable': 'Microphone unavailable - tap to retry',
+      'not-allowed': this._t('full.ui.start.title_not_allowed', 'Tap to enable microphone'),
+      'not-found': this._t('full.ui.start.title_not_found', 'No microphone found'),
+      'not-readable': this._t('full.ui.start.title_not_readable', 'Microphone unavailable - tap to retry'),
     };
-    btn.title = titles[reason] || 'Tap to start voice assistant';
+    btn.title = titles[reason] || this._t('full.ui.start.title_default', 'Tap to start voice assistant');
   }
 
   hideStartButton() {
@@ -478,7 +479,7 @@ export class UIManager {
     }
 
     const conditionKey = data.forecast?.[0]?.condition || '';
-    const conditionLabel = CONDITION_LABELS[conditionKey] || conditionKey;
+    const conditionLabel = this._conditionLabel(conditionKey);
     if (conditionLabel) {
       const cond = document.createElement('div');
       cond.className = 'vs-weather-condition';
@@ -489,7 +490,7 @@ export class UIManager {
     if (data.current_humidity) {
       const hum = document.createElement('div');
       hum.className = 'vs-weather-humidity';
-      hum.textContent = `Humidity: ${data.current_humidity}`;
+      hum.textContent = this._t('full.ui.weather.humidity', 'Humidity: {value}', { value: data.current_humidity });
       info.appendChild(hum);
     }
 
@@ -520,7 +521,9 @@ export class UIManager {
             ? new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(parsed)
             : raw.length > 3 ? raw.slice(0, 3) : raw;
           if (data.forecast_type === 'twice_daily') {
-            timeEl.textContent = short + (entry.is_daytime === false ? ' Night' : ' Day');
+            timeEl.textContent = `${short} ${entry.is_daytime === false
+              ? this._t('full.ui.weather.night', 'Night')
+              : this._t('full.ui.weather.day', 'Day')}`;
           } else {
             timeEl.textContent = short;
           }
@@ -529,7 +532,7 @@ export class UIManager {
 
         const condEl = document.createElement('span');
         condEl.className = 'vs-weather-row-cond';
-        condEl.textContent = CONDITION_LABELS[entry.condition] || entry.condition || '';
+        condEl.textContent = this._conditionLabel(entry.condition);
         row.appendChild(condEl);
 
         const tempEl = document.createElement('span');
@@ -630,13 +633,13 @@ export class UIManager {
       // Detail row
       const parts = [];
       if (data.query_type === 'crypto') {
-        if (data.high != null) parts.push(`24h High: ${formatPrice(data.high, cur)}`);
-        if (data.low != null) parts.push(`24h Low: ${formatPrice(data.low, cur)}`);
-        if (data.market_cap != null) parts.push(`MCap: ${formatLargeNumber(data.market_cap, cur)}`);
+        if (data.high != null) parts.push(this._t('full.ui.financial.detail_24h_high', '24h High: {value}', { value: formatPrice(data.high, cur) }));
+        if (data.low != null) parts.push(this._t('full.ui.financial.detail_24h_low', '24h Low: {value}', { value: formatPrice(data.low, cur) }));
+        if (data.market_cap != null) parts.push(this._t('full.ui.financial.detail_market_cap', 'MCap: {value}', { value: formatLargeNumber(data.market_cap, cur) }));
       } else {
-        if (data.open != null) parts.push(`Open: ${formatPrice(data.open, cur)}`);
-        if (data.high != null) parts.push(`High: ${formatPrice(data.high, cur)}`);
-        if (data.low != null) parts.push(`Low: ${formatPrice(data.low, cur)}`);
+        if (data.open != null) parts.push(this._t('full.ui.financial.detail_open', 'Open: {value}', { value: formatPrice(data.open, cur) }));
+        if (data.high != null) parts.push(this._t('full.ui.financial.detail_high', 'High: {value}', { value: formatPrice(data.high, cur) }));
+        if (data.low != null) parts.push(this._t('full.ui.financial.detail_low', 'Low: {value}', { value: formatPrice(data.low, cur) }));
       }
       if (parts.length > 0) {
         const details = document.createElement('div');
@@ -980,6 +983,16 @@ export class UIManager {
       this.showStartButton(this._pendingStartButtonReason);
       this._pendingStartButtonReason = undefined;
     }
+  }
+
+  _conditionLabel(conditionKey) {
+    if (!conditionKey) return '';
+    const key = CONDITION_LABEL_KEYS[conditionKey];
+    return key ? this._t(key, conditionKey) : conditionKey;
+  }
+
+  _t(key, fallback, vars) {
+    return t(this._card?.hass, key, fallback, vars);
   }
 }
 

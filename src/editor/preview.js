@@ -8,6 +8,7 @@
 
 import { getSkin } from '../skins/index.js';
 import baseCSS from './preview.css';
+import { t } from '../i18n/index.js';
 
 /**
  * Detect whether this card element is inside the HA card editor preview.
@@ -38,6 +39,8 @@ export function isEditorPreview(el) {
  * @param {object} config
  */
 export function renderPreview(shadowRoot, config) {
+  const hass = shadowRoot.host?._hass;
+  const tt = (key, fallback) => t(hass, key, fallback);
   const skin = getSkin(config.skin || 'default');
   if (skin.fontURL && !document.querySelector(`link[href="${skin.fontURL}"]`)) {
     const link = document.createElement('link');
@@ -56,12 +59,12 @@ export function renderPreview(shadowRoot, config) {
     </style>
     <div class="preview-background"></div>
     <div class="preview-container" style="--vs-text-scale:${scale}">
-      <div class="preview-label">Preview</div>
+      <div class="preview-label">${tt('editor.preview.label', 'Preview')}</div>
       <div class="preview-blur" style="background:rgba(${r},${g},${b},${bgOpacity})"></div>
       <div class="preview-bar"></div>
       <div class="preview-chat">
-        <div class="preview-msg user">What's the temperature outside?</div>
-        <div class="preview-msg assistant">It's currently 75\u00B0F and sunny.</div>
+        <div class="preview-msg user">${tt('editor.preview.user_question', "What's the temperature outside?")}</div>
+        <div class="preview-msg assistant">${tt('editor.preview.assistant_answer', "It's currently 75°F and sunny.")}</div>
       </div>
       <div class="preview-timer">
         <div class="preview-timer-progress"></div>

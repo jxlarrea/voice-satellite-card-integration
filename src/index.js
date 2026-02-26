@@ -6,6 +6,7 @@
 import { VERSION } from './constants.js';
 import { VoiceSatelliteCard } from './card';
 import { VoiceSatelliteMiniCard } from './mini/index.js';
+import { t } from './i18n/index.js';
 
 if (!customElements.get('voice-satellite-card')) {
   customElements.define('voice-satellite-card', VoiceSatelliteCard);
@@ -17,17 +18,17 @@ if (!customElements.get('voice-satellite-mini-card')) {
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'voice-satellite-card',
-  name: 'Voice Satellite Card',
-  description: 'Transform your browser into a voice satellite for Home Assistant Assist',
+  name: t(null, 'cards.full_name', 'Voice Satellite Card'),
+  description: t(null, 'cards.full_description', 'Transform your browser into a voice satellite for Home Assistant Assist'),
   preview: false,
-  documentationURL: 'https://github.com/owner/voice-satellite-card',
+  documentationURL: 'https://github.com/jxlarrea/voice-satellite-card-integration',
 });
 window.customCards.push({
   type: 'voice-satellite-mini-card',
-  name: 'Voice Satellite Mini Card',
-  description: 'Text-only in-card voice satellite (compact or tall)',
+  name: t(null, 'cards.mini_name', 'Voice Satellite Mini Card'),
+  description: t(null, 'cards.mini_description', 'Text-only in-card voice satellite (compact or tall)'),
   preview: false,
-  documentationURL: 'https://github.com/owner/voice-satellite-card',
+  documentationURL: 'https://github.com/jxlarrea/voice-satellite-card-integration',
 });
 
 console.info(

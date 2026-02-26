@@ -23,8 +23,8 @@ ha-card.vs-mini-card-shell {
   overflow: hidden;
   background: var(--ha-card-background, var(--card-background-color, transparent));
   border-radius: var(--ha-card-border-radius, 12px);
-  border: none;
-  box-shadow: none;
+  border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color, rgba(127,127,127,0.2)));
+  box-shadow: var(--ha-card-box-shadow, none);
 }
 ha-card.vs-mini-card-shell.tall {
   height: 100%;
