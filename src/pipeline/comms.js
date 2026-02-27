@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Pipeline Comms
+ * Voice Satellite Card - Pipeline Comms
  *
  * WebSocket operations for the pipeline: run subscription
  * and reconnect handling.
@@ -35,11 +35,11 @@ export function setupReconnectListener(card, pipeline, connection, listenerRef) 
   if (listenerRef.listener) return;
 
   listenerRef.listener = () => {
-    card.logger.log('pipeline', 'Connection reconnected  -  resetting retry state');
+    card.logger.log('pipeline', 'Connection reconnected - resetting retry state');
     pipeline.resetRetryState();
     card.ui.clearErrorBar();
     if (card.visibility.isPaused) {
-      card.logger.log('pipeline', 'Tab is paused  -  deferring restart to resume');
+      card.logger.log('pipeline', 'Tab is paused - deferring restart to resume');
       return;
     }
     setTimeout(() => pipeline.restart(0), Timing.RECONNECT_DELAY);

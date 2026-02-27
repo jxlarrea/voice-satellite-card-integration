@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Notification Comms
+ * Voice Satellite Card - Notification Comms
  *
  * Shared WebSocket calls for satellite notification features
  * (announcement, ask-question, start-conversation).
@@ -16,7 +16,7 @@
 export function sendAck(card, announceId, logPrefix) {
   const { connection, config } = card;
   if (!connection || !config.satellite_entity) {
-    card.logger.error(logPrefix, 'Cannot ACK  -  no connection or entity');
+    card.logger.error(logPrefix, 'Cannot ACK - no connection or entity');
     return;
   }
 

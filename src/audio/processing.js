@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Audio Processing
+ * Voice Satellite Card - Audio Processing
  *
  * AudioWorklet/ScriptProcessor setup, resampling, and buffer management.
  */
@@ -36,7 +36,7 @@ export async function setupAudioWorklet(mgr, sourceNode) {
     mgr.audioBuffer.push(e.data);
   };
   sourceNode.connect(mgr.workletNode);
-  // Connect through a silent gain node  -  keeps the graph alive for processing
+  // Connect through a silent gain node - keeps the graph alive for processing
   // without routing mic audio to speakers (which would cause feedback).
   const silentGain = mgr.audioContext.createGain();
   silentGain.gain.value = 0;

@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Entity Subscription Utility
+ * Voice Satellite Card - Entity Subscription Utility
  *
  * Shared subscription pattern for watching HA entity state changes.
  * Used by TimerManager and AnnouncementManager.
@@ -21,7 +21,7 @@ export function subscribeToEntity(manager, connection, entityId, onAttrs, logTag
     manager._reconnectListener = () => {
       if (!manager.card.isOwner) return;
 
-      manager.log.log(logTag, 'Connection reconnected  -  re-subscribing');
+      manager.log.log(logTag, 'Connection reconnected - re-subscribing');
       if (manager._unsubscribe) {
         try { manager._unsubscribe(); } catch (_) { /* cleanup */ }
         manager._unsubscribe = null;

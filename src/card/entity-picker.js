@@ -49,13 +49,13 @@ export function discoverSatelliteEntities(hass) {
 export function resolveEntity(hass) {
   const stored = getStoredEntity();
   if (stored) {
-    // Device explicitly disabled  -  return as-is
+    // Device explicitly disabled - return as-is
     if (stored === DISABLED_VALUE) return DISABLED_VALUE;
     // Validate entity still exists
     if (hass.entities?.[stored]) {
       return stored;
     }
-    // Stale  -  clear it
+    // Stale - clear it
     clearStoredEntity();
   }
 

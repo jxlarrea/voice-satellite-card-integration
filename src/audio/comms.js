@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Audio Comms
+ * Voice Satellite Card - Audio Comms
  *
  * Binary PCM audio transmission via WebSocket.
  */

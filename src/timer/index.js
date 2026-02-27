@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  TimerManager
+ * Voice Satellite Card - TimerManager
  *
  * Watches the satellite entity's active_timers attribute and renders
  * countdown pill overlays.

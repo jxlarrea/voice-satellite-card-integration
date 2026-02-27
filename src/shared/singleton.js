@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Singleton State
+ * Voice Satellite Card - Singleton State
  *
  * Manages the single-instance guarantee. Only one card instance
  * can be active at a time (owns the mic + pipeline).
@@ -40,13 +40,13 @@ export function setStarting(val) {
   state.starting = !!val;
 }
 
-/** Claim ownership  -  called after successful mic + pipeline start */
+/** Claim ownership - called after successful mic + pipeline start */
 export function claim(card) {
   state.instance = card;
   state.active = true;
 }
 
-/** Release ownership  -  called when the card is displaced or torn down */
+/** Release ownership - called when the card is displaced or torn down */
 export function release() {
   state.instance = null;
   state.active = false;

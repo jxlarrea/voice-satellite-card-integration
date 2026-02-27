@@ -10,12 +10,12 @@ export class ChatManager {
     this._streamEl = null;
     this._streamedResponse = '';
 
-    // Reusable fade span pool  -  avoids creating/destroying 24 DOM nodes per update
+    // Reusable fade span pool - avoids creating/destroying 24 DOM nodes per update
     this._fadeSpans = null;
     this._solidNode = null;
     this._fadeContainer = null;
 
-    // RAF coalescing  -  multiple rapid stream chunks produce one DOM write per frame
+    // RAF coalescing - multiple rapid stream chunks produce one DOM write per frame
     this._pendingText = null;
     this._rafId = null;
   }
@@ -123,7 +123,7 @@ export class ChatManager {
     const solid = text.slice(0, text.length - FADE_LEN);
     const tail = text.slice(text.length - FADE_LEN);
 
-    // Update text nodes in-place  -  no innerHTML, no DOM creation/destruction
+    // Update text nodes in-place - no innerHTML, no DOM creation/destruction
     this._solidNode.textContent = solid;
     for (let i = 0; i < FADE_LEN; i++) {
       this._fadeSpans[i].textContent = i < tail.length ? tail[i] : '';

@@ -116,10 +116,10 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._pipeline_msg_id: int | None = None  # WS message ID for send_event
         self._pipeline_task: asyncio.Task | None = None  # Current pipeline task
         self._pipeline_audio_queue: asyncio.Queue | None = None
-        self._pipeline_gen: int = 0  # Generation counter  -  filters orphaned events
+        self._pipeline_gen: int = 0  # Generation counter - filters orphaned events
         self._pipeline_run_started: bool = False  # Gate: block events until run-start
 
-        # Satellite event subscription (Phase 2  -  direct push to card)
+        # Satellite event subscription (Phase 2 - direct push to card)
         self._satellite_subscribers: list[tuple] = []
 
         # Screensaver keep-alive
@@ -583,7 +583,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             self._question_match_event.set()
             return None
 
-        # Phase 1 complete  -  card has ACK'd announcement and entered
+        # Phase 1 complete - card has ACK'd announcement and entered
         # STT-only mode. Now wait for the transcribed answer.
 
         # Re-start keep-alive for Phase 2 (async_announce's finally may
@@ -628,7 +628,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 self._question_match_event.set()
                 return answer
 
-            # No answers provided or hassil unavailable  -  return raw
+            # No answers provided or hassil unavailable - return raw
             self._question_match_result = {
                 "matched": False, "id": None,
             }
@@ -659,7 +659,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             # _question_match_event fires but before this finally runs.
             # It will be overwritten on the next ask_question call.
             self.async_write_ha_state()
-            # Stop keep-alive  -  card is done with the question flow
+            # Stop keep-alive - card is done with the question flow
             current = self.hass.states.get(self.entity_id)
             if not current or current.state == "idle":
                 self._stop_screensaver_keepalive()
@@ -861,7 +861,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         conversation_id: str | None = None,
         extra_system_prompt: str | None = None,
     ) -> None:
-        """Run a bridged pipeline  -  relay events back to the card via WS.
+        """Run a bridged pipeline - relay events back to the card via WS.
 
         Called by the ws_run_pipeline handler. Audio comes in via the queue,
         pipeline events go back through connection.send_event().
@@ -914,7 +914,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 end_stage=stage_map.get(end_stage, PipelineStage.TTS),
             )
         finally:
-            # Only clear if we're still the active generation  -  a newer
+            # Only clear if we're still the active generation - a newer
             # run may have already claimed these fields.
             if self._pipeline_gen == my_gen:
                 self._pipeline_connection = None
@@ -923,7 +923,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
     @callback
     def on_pipeline_event(self, event) -> None:
-        """Handle pipeline events  -  relay to card if bridged pipeline active."""
+        """Handle pipeline events - relay to card if bridged pipeline active."""
         event_type = getattr(event, "type", str(event))
         event_type_str = str(event_type)
 
@@ -999,13 +999,13 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             self._update_media_player_availability()
             if self._announce_event is not None:
                 _LOGGER.debug(
-                    "No subscribers left  -  releasing pending announcement for '%s'",
+                    "No subscribers left - releasing pending announcement for '%s'",
                     self._satellite_name,
                 )
                 self._announce_event.set()
             if self._question_event is not None:
                 _LOGGER.debug(
-                    "No subscribers left  -  releasing pending question for '%s'",
+                    "No subscribers left - releasing pending question for '%s'",
                     self._satellite_name,
                 )
                 self._question_event.set()
@@ -1017,7 +1017,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         """Push an event to all satellite subscribers."""
         if not self._satellite_subscribers:
             _LOGGER.warning(
-                "No satellite subscribers for '%s'  -  cannot push %s event",
+                "No satellite subscribers for '%s' - cannot push %s event",
                 self._satellite_name,
                 event_type,
             )

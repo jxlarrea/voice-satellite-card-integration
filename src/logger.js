@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Logger
+ * Voice Satellite Card - Logger
  *
  * Centralised logging controlled by config.debug flag.
  * All managers receive a reference to this logger from the card.

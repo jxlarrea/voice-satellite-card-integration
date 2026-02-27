@@ -1,8 +1,8 @@
 /**
- * Voice Satellite Card  -  TTS Comms
+ * Voice Satellite Card - TTS Comms
  *
  * Remote media player service calls for TTS playback.
- * Pure comms  -  no timer scheduling or manager state mutation.
+ * Pure comms - no timer scheduling or manager state mutation.
  */
 
 /**

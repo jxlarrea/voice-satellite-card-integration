@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Editor Assembler
+ * Voice Satellite Card - Editor Assembler
  *
  * Combines all editor sections and their labels/helpers
  * into the schema returned by getConfigForm().

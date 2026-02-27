@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  AnnouncementManager
+ * Voice Satellite Card - AnnouncementManager
  *
  * Simple announcements: plays chime + media, shows message bubble,
  * ACKs the integration, then auto-clears after configured duration.
@@ -55,7 +55,7 @@ export class AnnouncementManager {
       clearNotificationUI(this);
       this.playing = false;
 
-      // Skip done chime when a queued notification is waiting  -  the next
+      // Skip done chime when a queued notification is waiting - the next
       // notification starts with its own announce chime and overlapping
       // audio from Web Audio + HTML Audio causes distortion in WebView.
       if (this.queued) {

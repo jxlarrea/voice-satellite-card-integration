@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  UIManager
+ * Voice Satellite Card - UIManager
  *
  * Single owner of ALL DOM manipulation in the card.
  * Manages: global overlay, rainbow bar, blur overlay, start button,
@@ -105,7 +105,7 @@ export class UIManager {
   updateForState(state, serviceUnavailable, ttsPlaying) {
     if (!this._globalUI) return;
 
-    // Don't touch the bar while a notification is playing  -  it manages its own bar state
+    // Don't touch the bar while a notification is playing - it manages its own bar state
     const notifPlaying = this._card.announcement.playing
       || this._card.askQuestion.playing
       || this._card.startConversation.playing;
@@ -331,7 +331,7 @@ export class UIManager {
 
     if (loaded === 0) return;
 
-    // Cancel linger timeout on first scroll  -  user is browsing
+    // Cancel linger timeout on first scroll - user is browsing
     if (!scroll._vsScrollHandler) {
       scroll._vsScrollHandler = () => {
         if (this._card._imageLingerTimeout) {
@@ -413,7 +413,7 @@ export class UIManager {
 
     if (loaded === 0) return;
 
-    // Cancel linger timeout on first scroll  -  user is browsing
+    // Cancel linger timeout on first scroll - user is browsing
     if (!scroll._vsScrollHandler) {
       scroll._vsScrollHandler = () => {
         if (this._card._imageLingerTimeout) {
@@ -539,7 +539,7 @@ export class UIManager {
 
     scroll.appendChild(card);
 
-    // Featured mode  -  no linger timeout
+    // Featured mode - no linger timeout
     panel.classList.add('weather', 'featured', 'visible');
     this._globalUI.classList.add('has-featured');
   }
@@ -642,7 +642,7 @@ export class UIManager {
 
     scroll.appendChild(card);
 
-    // Featured mode  -  no linger timeout
+    // Featured mode - no linger timeout
     panel.classList.add('financial', 'featured', 'visible');
     this._globalUI.classList.add('has-featured');
   }
@@ -661,13 +661,13 @@ export class UIManager {
     const lb = this._globalUI.querySelector('.vs-lightbox');
     const img = lb.querySelector('.vs-lightbox-img');
     const iframe = lb.querySelector('.vs-lightbox-iframe');
-    // Image mode  -  hide iframe, show img
+    // Image mode - hide iframe, show img
     iframe.style.display = 'none';
     iframe.removeAttribute('src');
     img.style.display = '';
     img.src = src;
     lb.classList.add('visible');
-    // Cancel the linger timeout  -  UI stays until user double-taps
+    // Cancel the linger timeout - UI stays until user double-taps
     if (this._card._imageLingerTimeout) {
       clearTimeout(this._card._imageLingerTimeout);
       this._card._imageLingerTimeout = null;
@@ -687,13 +687,13 @@ export class UIManager {
     const lb = this._globalUI.querySelector('.vs-lightbox');
     const img = lb.querySelector('.vs-lightbox-img');
     const iframe = lb.querySelector('.vs-lightbox-iframe');
-    // Video mode  -  hide img, show iframe
+    // Video mode - hide img, show iframe
     img.style.display = 'none';
     img.src = '';
     iframe.style.display = 'block';
     iframe.src = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1`;
     lb.classList.add('visible');
-    // Cancel the linger timeout  -  UI stays until user double-taps
+    // Cancel the linger timeout - UI stays until user double-taps
     if (this._card._imageLingerTimeout) {
       clearTimeout(this._card._imageLingerTimeout);
       this._card._imageLingerTimeout = null;
@@ -994,7 +994,7 @@ function _attachDoubleTap(el, callback) {
   let lastTouchTime = 0;
   const handler = (e) => {
     const now = Date.now();
-    // Touch/click deduplication  -  skip synthetic click that follows a recent touch
+    // Touch/click deduplication - skip synthetic click that follows a recent touch
     if (e.type === 'touchstart') lastTouchTime = now;
     if (e.type === 'click' && (now - lastTouchTime) < 400) return;
     if (now - lastTap < Timing.DOUBLE_TAP_THRESHOLD && now - lastTap > 0) {

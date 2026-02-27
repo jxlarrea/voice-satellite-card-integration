@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Pipeline Events
+ * Voice Satellite Card - Pipeline Events
  *
  * Handlers for all pipeline event types (run-start through error).
  */
@@ -11,7 +11,7 @@ import { onTTSComplete } from '../card/events.js';
 
 /**
  * Run-start: binaryHandlerId is already set from the init event.
- * Server-side run-start doesn't include runner_data  -  only pipeline,
+ * Server-side run-start doesn't include runner_data - only pipeline,
  * language, conversation_id, satellite_id, and tts_output.
  * @param {import('./index.js').PipelineManager} mgr
  */
@@ -22,13 +22,13 @@ export function handleRunStart(mgr, eventData) {
   if (mgr.continueMode) {
     mgr.continueMode = false;
     mgr.card.setState(State.STT);
-    mgr.log.log('pipeline', `Running (continue conversation)  -  binary handler ID: ${mgr.binaryHandlerId}`);
+    mgr.log.log('pipeline', `Running (continue conversation) - binary handler ID: ${mgr.binaryHandlerId}`);
     mgr.log.log('pipeline', 'Listening for speech...');
     return;
   }
 
   mgr.card.setState(State.LISTENING);
-  mgr.log.log('pipeline', `Running  -  binary handler ID: ${mgr.binaryHandlerId}`);
+  mgr.log.log('pipeline', `Running - binary handler ID: ${mgr.binaryHandlerId}`);
   mgr.log.log('pipeline', 'Listening for wake word...');
 }
 
@@ -69,7 +69,7 @@ export function handleWakeWordEnd(mgr, eventData) {
     return;
   }
 
-  // Valid wake word  -  service healthy
+  // Valid wake word - service healthy
   if (mgr.recoveryTimeout) {
     clearTimeout(mgr.recoveryTimeout);
     mgr.recoveryTimeout = null;
@@ -105,7 +105,7 @@ export function handleWakeWordEnd(mgr, eventData) {
   // Check the integration's wake_sound switch (default: on)
   const wakeSound = getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false;
   if (wakeSound) {
-    // Stop sending audio during the chime  -  echo cancellation isn't
+    // Stop sending audio during the chime - echo cancellation isn't
     // perfect and the chime can leak into the mic, causing VAD to
     // interpret it as speech and close STT prematurely.
     const audio = mgr.card.audio;
@@ -145,7 +145,7 @@ export function handleIntentProgress(mgr, eventData) {
   const { tts } = mgr.card;
 
   if (eventData.tts_start_streaming && tts.streamingUrl && !tts.isPlaying && !mgr.card._videoPlaying) {
-    mgr.log.log('tts', 'Streaming TTS started  -  playing early');
+    mgr.log.log('tts', 'Streaming TTS started - playing early');
     mgr.card.setState(State.TTS);
     tts.play(tts.streamingUrl);
     tts.streamingUrl = null;
@@ -159,14 +159,14 @@ export function handleIntentProgress(mgr, eventData) {
     const toolName = eventData.chat_log_delta.tool_name
       || eventData.chat_log_delta.tool_call?.tool_name;
 
-    // Weather forecast  -  show weather card in media panel
+    // Weather forecast - show weather card in media panel
     // Tool name is prefixed by HA integration: voice-satellite-card-weather-forecast__get_weather_forecast
     if (toolName?.endsWith('get_weather_forecast') && toolResult?.forecast && !toolResult.error) {
       mgr.card.chat.addWeather(toolResult);
       return;
     }
 
-    // Financial data  -  show stock/crypto/currency card in media panel
+    // Financial data - show stock/crypto/currency card in media panel
     // Tool name: voice-satellite-card-financial-data__get_financial_data
     if (toolName?.includes('financial-data__get_financial_data') && toolResult?.query_type && !toolResult.error) {
       mgr.card.chat.addFinancial(toolResult);
@@ -184,7 +184,7 @@ export function handleIntentProgress(mgr, eventData) {
         mgr.card.chat.addImages(images, !!toolResult.auto_display);
       }
     }
-    // Featured image from web search / Wikipedia  -  narrower panel
+    // Featured image from web search / Wikipedia - narrower panel
     if (toolResult?.featured_image) {
       mgr.card.chat.addImages([{ image_url: toolResult.featured_image }], false, true);
     }
@@ -239,7 +239,7 @@ export function handleIntentEnd(mgr, eventData) {
     if (eventData.intent_output.continue_conversation === true) {
       mgr.shouldContinue = true;
       mgr.continueConversationId = eventData.intent_output.conversation_id || null;
-      mgr.log.log('pipeline', `Continue conversation requested  -  id: ${mgr.continueConversationId}`);
+      mgr.log.log('pipeline', `Continue conversation requested - id: ${mgr.continueConversationId}`);
     }
   } catch (_) { /* ignore */ }
 
@@ -263,7 +263,7 @@ export function handleTtsEnd(mgr, eventData) {
     // Store tts-end URL as retry fallback for the in-progress streaming playback
     const endUrl = eventData.tts_output?.url || eventData.tts_output?.url_path || null;
     if (endUrl) tts.storeTtsEndUrl(endUrl);
-    mgr.log.log('tts', 'Streaming TTS already playing  -  skipping duplicate playback');
+    mgr.log.log('tts', 'Streaming TTS already playing - skipping duplicate playback');
     mgr.restart(0);
     return;
   }
@@ -274,7 +274,7 @@ export function handleTtsEnd(mgr, eventData) {
     if (!mgr.card._videoPlaying) {
       tts.play(url);
     } else {
-      // Video is playing  -  skip TTS but still run cleanup so UI doesn't get stuck
+      // Video is playing - skip TTS but still run cleanup so UI doesn't get stuck
       onTTSComplete(mgr.card, false);
     }
   }
@@ -288,13 +288,13 @@ export function handleRunEnd(mgr) {
   mgr.binaryHandlerId = null;
 
   if (mgr.isRestarting) {
-    mgr.log.log('pipeline', 'Restart already in progress  -  skipping run-end restart');
+    mgr.log.log('pipeline', 'Restart already in progress - skipping run-end restart');
     return;
   }
 
   // If ask_question just completed, the announcement manager handles cleanup
   if (mgr.askQuestionHandled) {
-    mgr.log.log('pipeline', 'Ask question handled  -  announcement manager owns cleanup');
+    mgr.log.log('pipeline', 'Ask question handled - announcement manager owns cleanup');
     mgr.askQuestionHandled = false;
     return;
   }
@@ -306,7 +306,7 @@ export function handleRunEnd(mgr) {
   }
 
   if (mgr.card.tts.isPlaying) {
-    mgr.log.log('ui', 'TTS playing  -  deferring cleanup');
+    mgr.log.log('ui', 'TTS playing - deferring cleanup');
     mgr.pendingRunEnd = true;
     return;
   }
@@ -319,19 +319,19 @@ export function handleError(mgr, errorData) {
   const errorCode = errorData.code || '';
   const errorMessage = errorData.message || '';
 
-  mgr.log.log('error', `${errorCode}  -  ${errorMessage}`);
+  mgr.log.log('error', `${errorCode} - ${errorMessage}`);
 
   // If an ask_question callback is pending, invoke it with empty string on error
   if (mgr.askQuestionCallback) {
     const cb = mgr.askQuestionCallback;
     mgr.askQuestionCallback = null;
-    mgr.log.log('pipeline', `Ask question error (${errorCode})  -  sending empty answer`);
+    mgr.log.log('pipeline', `Ask question error (${errorCode}) - sending empty answer`);
     cb('');
     return;
   }
 
   if (EXPECTED_ERRORS.includes(errorCode)) {
-    mgr.log.log('pipeline', `Expected error: ${errorCode}  -  restarting`);
+    mgr.log.log('pipeline', `Expected error: ${errorCode} - restarting`);
 
     if (INTERACTING_STATES.includes(mgr.card.currentState)) {
       mgr.log.log('ui', 'Cleaning up interaction UI after expected error');
@@ -350,7 +350,7 @@ export function handleError(mgr, errorData) {
     return;
   }
 
-  mgr.log.error('error', `Unexpected: ${errorCode}  -  ${errorMessage}`);
+  mgr.log.error('error', `Unexpected: ${errorCode} - ${errorMessage}`);
 
   const wasInteracting = INTERACTING_STATES.includes(mgr.card.currentState);
   mgr.binaryHandlerId = null;

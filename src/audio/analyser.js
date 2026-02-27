@@ -1,9 +1,9 @@
 /**
- * Voice Satellite Card  -  AnalyserManager
+ * Voice Satellite Card - AnalyserManager
  *
  * Provides real-time audio level analysis for reactive bar animations.
- * Uses two separate AnalyserNodes  -  one for microphone input, one for
- * audio output (TTS / notifications)  -  so the mic can never be routed
+ * Uses two separate AnalyserNodes - one for microphone input, one for
+ * audio output (TTS / notifications) - so the mic can never be routed
  * to the speakers through the analyser graph.
  *
  * The mic analyser is never connected to AudioContext.destination;
@@ -47,7 +47,7 @@ export class AnalyserManager {
 
   /**
    * Connect analyser as a parallel tap on the mic source node.
-   * The mic analyser is never connected to destination  -  it only
+   * The mic analyser is never connected to destination - it only
    * provides FFT data for the reactive bar.
    */
   attachMic(sourceNode, audioContext) {
@@ -91,7 +91,7 @@ export class AnalyserManager {
    * analysis. createMediaElementSource reroutes audio through the Web
    * Audio graph, so we connect through to destination for audibility.
    *
-   * Uses a separate analyser from the mic  -  the mic analyser has no
+   * Uses a separate analyser from the mic - the mic analyser has no
    * path to destination, so feedback is structurally impossible.
    */
   attachAudio(audioEl, audioContext) {
@@ -127,14 +127,14 @@ export class AnalyserManager {
    * The mic source stays connected to its analyser at all times  - 
    * this just changes which analyser _tick() reads FFT data from.
    *
-   * No-op while audio is routed through the audio analyser  -  callers
+   * No-op while audio is routed through the audio analyser - callers
    * like updateForState fire for all bar-visible states (including TTS),
    * and switching away from the audio analyser mid-playback would make
    * the bar show mic levels instead of TTS levels.
    */
   reconnectMic() {
     if (this._mediaSourceNode) {
-      this._log.log('analyser', 'reconnectMic skipped  -  audio still attached');
+      this._log.log('analyser', 'reconnectMic skipped - audio still attached');
       return;
     }
     if (this._micAnalyser) {
@@ -228,7 +228,7 @@ export class AnalyserManager {
       return;
     }
 
-    // Cap at ~20 fps  -  CSS transitions smooth the gaps and this saves CPU
+    // Cap at ~20 fps - CSS transitions smooth the gaps and this saves CPU
     // significantly on low-end Android wall tablets.
     const now = performance.now();
     const targetIntervalMs = this._getUpdateIntervalMs();

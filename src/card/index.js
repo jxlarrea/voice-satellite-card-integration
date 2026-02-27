@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Main Card Class
+ * Voice Satellite Card - Main Card Class
  *
  * Thin orchestrator that owns the managers and wires them together.
  * All real work is delegated to composition-based managers.
@@ -49,7 +49,7 @@ export class VoiceSatelliteCard extends HTMLElement {
     // Logger (shared by all managers)
     this._logger = new Logger();
 
-    // Composition  -  managers
+    // Composition - managers
     this._audio = new AudioManager(this);
     this._analyser = new AnalyserManager(this);
     this._tts = new TtsManager(this);
@@ -153,7 +153,7 @@ export class VoiceSatelliteCard extends HTMLElement {
       this._pickerTeardown = null;
     }
     this._disconnectTimeout = setTimeout(() => {
-      // Still active instance but truly disconnected  -  keep running via global UI
+      // Still active instance but truly disconnected - keep running via global UI
     }, Timing.DISCONNECT_GRACE);
   }
 
@@ -177,7 +177,7 @@ export class VoiceSatelliteCard extends HTMLElement {
         this._isLocalStorageEntity = true;
         this._deviceDisabled = false;
       } else {
-        // No localStorage yet  -  clear entity so startup path shows picker
+        // No localStorage yet - clear entity so startup path shows picker
         this._config.satellite_entity = '';
         this._isLocalStorageEntity = false;
         this._deviceDisabled = false;

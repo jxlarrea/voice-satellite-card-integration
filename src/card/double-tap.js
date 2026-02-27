@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  DoubleTapHandler
+ * Voice Satellite Card - DoubleTapHandler
  *
  * Detects double-taps on the document to cancel active interactions.
  * Also supports Escape key and includes touch/click deduplication.
@@ -27,7 +27,7 @@ export class DoubleTapHandler {
 
       const now = Date.now();
 
-      // Touch/click deduplication  -  skip synthetic click that follows a recent touch
+      // Touch/click deduplication - skip synthetic click that follows a recent touch
       if (e.type === 'touchstart') this._lastTouchTime = now;
       if (e.type === 'click' && (now - this._lastTouchTime) < 400) return;
       const timeSinceLastTap = now - this._lastTapTime;
@@ -70,13 +70,13 @@ export class DoubleTapHandler {
 
   _cancel(isTimerAlert, isNotification) {
     if (isTimerAlert) {
-      this._log.log('ui', 'Cancel detected  -  dismissing timer alert');
+      this._log.log('ui', 'Cancel detected - dismissing timer alert');
       this._card.timer.dismissAlert();
       return;
     }
 
     if (isNotification) {
-      this._log.log('ui', 'Cancel detected  -  dismissing notification');
+      this._log.log('ui', 'Cancel detected - dismissing notification');
       for (const mgr of [this._card.announcement, this._card.askQuestion, this._card.startConversation]) {
         if (!mgr.playing && !mgr.clearTimeoutId) continue;
         if (mgr.currentAnnounceId) {
@@ -96,7 +96,7 @@ export class DoubleTapHandler {
       return;
     }
 
-    this._log.log('ui', 'Cancel detected  -  cancelling interaction');
+    this._log.log('ui', 'Cancel detected - cancelling interaction');
 
     // Cancel image linger timeout if active
     if (this._card._imageLingerTimeout) {

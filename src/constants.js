@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Constants
+ * Voice Satellite Card - Constants
  */
 
 /* global __VERSION__ */

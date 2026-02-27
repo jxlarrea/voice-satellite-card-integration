@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  TtsManager
+ * Voice Satellite Card - TtsManager
  *
  * Handles TTS playback (browser + remote media player), chimes via Web Audio API,
  * and streaming TTS early-start support.
@@ -30,7 +30,7 @@ export class TtsManager {
     this._streamingUrl = null;
     this._playbackWatchdog = null;
 
-    // Retry fallback  -  tts-end URL stored for retry on playback failure
+    // Retry fallback - tts-end URL stored for retry on playback failure
     this._pendingTtsEndUrl = null;
 
     // Remote media player state monitoring
@@ -53,23 +53,23 @@ export class TtsManager {
     const url = buildMediaUrl(urlPath);
     this._playing = true;
 
-    // Remote media player target  -  monitor entity state for completion
+    // Remote media player target - monitor entity state for completion
     const ttsTarget = this._card.ttsTarget;
     if (ttsTarget) {
       this._remoteTarget = ttsTarget;
       this._remoteSawPlaying = false;
       playRemote(this._card, url);
 
-      // Safety timeout  -  if state monitoring never fires, clean up after 2 minutes
+      // Safety timeout - if state monitoring never fires, clean up after 2 minutes
       this._endTimer = setTimeout(() => {
         this._endTimer = null;
-        this._log.log('tts', 'Remote safety timeout  -  forcing completion');
+        this._log.log('tts', 'Remote safety timeout - forcing completion');
         this._onComplete();
       }, REMOTE_SAFETY_TIMEOUT);
       return;
     }
 
-    // Browser playback  -  watchdog checks audio is progressing
+    // Browser playback - watchdog checks audio is progressing
     this._lastWatchdogTime = 0;
     this._playbackWatchdog = setInterval(() => {
       if (!this._playing || !this._currentAudio) {
@@ -79,10 +79,10 @@ export class TtsManager {
       const now = this._currentAudio.currentTime;
       if (now > this._lastWatchdogTime) {
         this._lastWatchdogTime = now;
-        return; // Audio is progressing  -  all good
+        return; // Audio is progressing - all good
       }
-      // Audio stalled  -  force completion
-      this._log.log('tts', 'Playback watchdog: audio stalled  -  forcing completion');
+      // Audio stalled - force completion
+      this._log.log('tts', 'Playback watchdog: audio stalled - forcing completion');
       this._clearWatchdog();
       this._onComplete();
     }, Timing.PLAYBACK_WATCHDOG);
@@ -98,7 +98,7 @@ export class TtsManager {
         this._log.error('tts', `URL: ${url}`);
         this._clearWatchdog();
 
-        // Retry once  -  the TTS proxy token may not have been ready yet
+        // Retry once - the TTS proxy token may not have been ready yet
         if (!isRetry && this._pendingTtsEndUrl) {
           const retryUrl = this._pendingTtsEndUrl;
           this._pendingTtsEndUrl = null;
@@ -181,7 +181,7 @@ export class TtsManager {
   }
 
   /**
-   * Called from card's set hass()  -  monitors remote media player entity state
+   * Called from card's set hass() - monitors remote media player entity state
    * to detect when TTS playback finishes.
    * @param {object} hass
    */
@@ -201,7 +201,7 @@ export class TtsManager {
     // Only complete once we've confirmed it was playing first,
     // to avoid false triggers during the brief delay before playback starts
     if (this._remoteSawPlaying) {
-      this._log.log('tts', `Remote player stopped (state: ${state})  -  completing`);
+      this._log.log('tts', `Remote player stopped (state: ${state}) - completing`);
       this._onComplete();
     }
   }
@@ -219,7 +219,7 @@ export class TtsManager {
    * @param {boolean} [playbackFailed]
    */
   _onComplete(playbackFailed) {
-    this._log.log('tts', `Complete  -  cleaning up UI${playbackFailed ? ' (playback failed)' : ''}`);
+    this._log.log('tts', `Complete - cleaning up UI${playbackFailed ? ' (playback failed)' : ''}`);
     this._card.analyser.detachAudio();
     this._currentAudio = null;
     this._playing = false;

@@ -39,14 +39,14 @@ class JSModuleRegistration:
         await self._async_register_path()
 
         if self.lovelace is None:
-            _LOGGER.warning("Lovelace not available  -  cannot auto-register card resource")
+            _LOGGER.warning("Lovelace not available - cannot auto-register card resource")
             return
 
         if self.resource_mode == MODE_STORAGE:
             await self._async_wait_for_lovelace_resources()
         else:
             _LOGGER.info(
-                "Lovelace is in YAML mode  -  add this resource manually: "
+                "Lovelace is in YAML mode - add this resource manually: "
                 "url: %s/%s, type: module",
                 URL_BASE,
                 JS_FILENAME,

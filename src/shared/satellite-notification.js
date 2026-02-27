@@ -13,7 +13,7 @@ let _visibilityListenerAdded = false;
 
 /**
  * Whether a satellite event is queued for replay when the tab becomes visible.
- * Used by VisibilityManager to skip its own pipeline restart  -  the replayed
+ * Used by VisibilityManager to skip its own pipeline restart - the replayed
  * event's flow will manage the pipeline instead.
  */
 export function hasPendingSatelliteEvent() {
@@ -29,7 +29,7 @@ function _onVisibilityChange() {
   _pendingEvent = null;
   _pendingCard = null;
 
-  card.logger.log('satellite-notify', `Tab visible  -  replaying queued event #${event.data.id}`);
+  card.logger.log('satellite-notify', `Tab visible - replaying queued event #${event.data.id}`);
   dispatchSatelliteEvent(card, event);
 }
 
@@ -44,7 +44,7 @@ function _onVisibilityChange() {
 export function dispatchSatelliteEvent(card, event) {
   const { type, data } = event;
 
-  // media_player events don't have an id field  -  route early
+  // media_player events don't have an id field - route early
   if (type === 'media_player') {
     card.mediaPlayer.handleCommand(data);
     return;
@@ -52,11 +52,11 @@ export function dispatchSatelliteEvent(card, event) {
 
   if (!data || !data.id) return;
 
-  // Queue events while the tab is hidden  -  audio can't play and UI state
+  // Queue events while the tab is hidden - audio can't play and UI state
   // gets corrupted.  Only keep the latest event (newer replaces older).
   // When the tab becomes visible, the queued event is replayed.
   if (document.visibilityState === 'hidden') {
-    card.logger.log('satellite-notify', `Event #${data.id} queued  -  tab hidden`);
+    card.logger.log('satellite-notify', `Event #${data.id} queued - tab hidden`);
     _pendingEvent = event;
     _pendingCard = card;
     if (!_visibilityListenerAdded) {
@@ -79,13 +79,13 @@ export function dispatchSatelliteEvent(card, event) {
 }
 
 function _deliverToManager(mgr, ann, logPrefix) {
-  // Dedup check (monotonic IDs  -  safety net for duplicate events)
+  // Dedup check (monotonic IDs - safety net for duplicate events)
   if (ann.id <= _lastAnnounceId) return;
 
   if (mgr.playing) {
     if (!mgr.queued || mgr.queued.id !== ann.id) {
       mgr.queued = ann;
-      mgr.log.log(logPrefix, `Notification #${ann.id} queued  -  still displaying`);
+      mgr.log.log(logPrefix, `Notification #${ann.id} queued - still displaying`);
     }
     return;
   }
@@ -96,7 +96,7 @@ function _deliverToManager(mgr, ann, logPrefix) {
   if (pipelineBusy || mgr.card.tts.isPlaying) {
     if (!mgr.queued || mgr.queued.id !== ann.id) {
       mgr.queued = ann;
-      mgr.log.log(logPrefix, `Notification #${ann.id} queued  -  pipeline busy (${cardState})`);
+      mgr.log.log(logPrefix, `Notification #${ann.id} queued - pipeline busy (${cardState})`);
     }
     return;
   }
@@ -160,7 +160,7 @@ export function playNotification(mgr, ann, onComplete, logPrefix) {
 
   // Pre-announcement
   if (ann.preannounce === false) {
-    mgr.log.log(logPrefix, 'Preannounce disabled  -  skipping chime');
+    mgr.log.log(logPrefix, 'Preannounce disabled - skipping chime');
     _playMain(mgr, ann, onComplete, logPrefix);
   } else {
     const hasPreAnnounce = ann.preannounce_media_id && ann.preannounce_media_id !== '';
@@ -205,7 +205,7 @@ function _playMain(mgr, ann, onComplete, logPrefix) {
     mgr.log.log(logPrefix, `Playing media: ${mediaUrl}`);
     playMediaFor(mgr, mediaUrl, logPrefix, () => onComplete(ann));
   } else {
-    mgr.log.log(logPrefix, 'No media  -  completing after message display');
+    mgr.log.log(logPrefix, 'No media - completing after message display');
     setTimeout(() => onComplete(ann), Timing.NO_MEDIA_DISPLAY);
   }
 }

@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Editor: Behavior & Microphone
+ * Voice Satellite Card - Editor: Behavior & Microphone
  */
 
 import { t } from '../i18n/index.js';

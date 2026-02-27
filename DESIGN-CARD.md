@@ -1,13 +1,13 @@
-# Voice Satellite Card  -  Design Document
+# Voice Satellite Card - Design Document
 
 ## 1. Overview
 
 Voice Satellite Card is a custom Home Assistant Lovelace package that turns any browser into a full-featured voice satellite with feature parity with physical devices like the Home Assistant Voice Preview Edition. It includes two card variants:
 
-- `voice-satellite-card`  -  fullscreen/global overlay UI rendered on `document.body`
-- `voice-satellite-mini-card`  -  normal in-card text-first UI (`compact` and `tall` modes)
+- `voice-satellite-card` - fullscreen/global overlay UI rendered on `document.body`
+- `voice-satellite-mini-card` - normal in-card text-first UI (`compact` and `tall` modes)
 
-Both variants capture microphone audio, route it through the integration's `voice_satellite/run_pipeline` WebSocket subscription to Home Assistant's Assist pipeline, and play back TTS responses  -  all without leaving the HA dashboard.
+Both variants capture microphone audio, route it through the integration's `voice_satellite/run_pipeline` WebSocket subscription to Home Assistant's Assist pipeline, and play back TTS responses - all without leaving the HA dashboard.
 
 The source is organized as ES6 modules in `src/`, bundled via Webpack + Babel into a single `voice-satellite-card.js` for deployment. The fullscreen card is invisible (`getCardSize() = 0`) and renders visual feedback via a global overlay appended to `document.body`, outside HA's Shadow DOM, so it persists across dashboard view changes. The mini card renders locally inside its own Shadow DOM as a standard `ha-card`.
 
@@ -31,7 +31,7 @@ See [DESIGN-INTEGRATION.md](DESIGN-INTEGRATION.md) for the integration-side desi
 | Channel | Direction | Purpose |
 |---------|-----------|---------|
 | `voice_satellite/run_pipeline` | Card -> Integration -> Card | Bridged pipeline: card sends audio, receives pipeline events |
-| `voice_satellite/subscribe_events` | Integration -> Card | Push notifications: announcements, start_conversation, ask_question. Also drives entity availability  -  the integration marks the entity as unavailable when no subscriber is connected. |
+| `voice_satellite/subscribe_events` | Integration -> Card | Push notifications: announcements, start_conversation, ask_question. Also drives entity availability - the integration marks the entity as unavailable when no subscriber is connected. |
 | `voice_satellite/update_state` | Card -> Integration | Sync card's pipeline state to the entity (idle/listening/processing/responding) |
 | `voice_satellite/announce_finished` | Card -> Integration | ACK that announcement playback completed (unblocks integration's `async_announce`) |
 | `voice_satellite/question_answered` | Card -> Integration | Submit STT transcription for hassil matching |
@@ -153,17 +153,17 @@ voice-satellite-card-integration/
 
 The codebase enforces strict separation of concerns:
 
-1. **Pure helpers** (`shared/`)  -  No side effects, no state. Functions like `getSwitchState()`, `formatTime()`, `applyBubbleStyle()` are pure lookups or transformations.
+1. **Pure helpers** (`shared/`) - No side effects, no state. Functions like `getSwitchState()`, `formatTime()`, `applyBubbleStyle()` are pure lookups or transformations.
 
-2. **Comms modules** (`*/comms.js`)  -  WebSocket calls and HA service calls. No DOM, no state, no timers. Each function takes explicit parameters and returns results or fires callbacks. All comms files document "Uses ONLY public accessors on the card instance."
+2. **Comms modules** (`*/comms.js`) - WebSocket calls and HA service calls. No DOM, no state, no timers. Each function takes explicit parameters and returns results or fires callbacks. All comms files document "Uses ONLY public accessors on the card instance."
 
-3. **Event modules** (`*/events.js`)  -  Transform pipeline/entity events into state changes and UI updates. Access manager state via the `mgr` parameter's public accessors. No WebSocket calls.
+3. **Event modules** (`*/events.js`) - Transform pipeline/entity events into state changes and UI updates. Access manager state via the `mgr` parameter's public accessors. No WebSocket calls.
 
-4. **Manager classes** (`*/index.js`)  -  Own feature-specific state, wire up subscriptions, delegate to event/comms/UI helpers. All managers receive the card instance via constructor injection.
+4. **Manager classes** (`*/index.js`) - Own feature-specific state, wire up subscriptions, delegate to event/comms/UI helpers. All managers receive the card instance via constructor injection.
 
-5. **UIManager** (`card/ui.js`)  -  The **single owner** of all DOM manipulation. No other module creates, modifies, or removes DOM elements. Other modules request DOM changes through UIManager's public API (e.g., `addChatMessage()`, `showBlurOverlay()`, `syncTimerPills()`).
+5. **UIManager** (`card/ui.js`) - The **single owner** of all DOM manipulation. No other module creates, modifies, or removes DOM elements. Other modules request DOM changes through UIManager's public API (e.g., `addChatMessage()`, `showBlurOverlay()`, `syncTimerPills()`).
 
-6. **Card orchestrator** (`card/index.js`)  -  Thin composition root. Creates all managers, exposes public accessors, delegates lifecycle methods. Contains no business logic.
+6. **Card orchestrator** (`card/index.js`) - Thin composition root. Creates all managers, exposes public accessors, delegates lifecycle methods. Contains no business logic.
 
 ### 3.3 Singleton Pattern
 
@@ -184,22 +184,22 @@ window.__vsSingleton = {
 ```
 
 Key operations:
-- `claim(card)`  -  called after successful mic + pipeline start
-- `isOwner(card)`  -  returns true if no instance is active OR the given card is the owner
-- `isActive()`  -  returns true only after `claim()` succeeds
-- `isStarting()` / `setStarting(val)`  -  startup lock flag, prevents race conditions when multiple cards try to start simultaneously (e.g., view switch during startup)
-- `propagateConfig(card)`  -  when a secondary card calls `setConfig()`, the config is forwarded to the active instance so live config changes take effect
+- `claim(card)` - called after successful mic + pipeline start
+- `isOwner(card)` - returns true if no instance is active OR the given card is the owner
+- `isActive()` - returns true only after `claim()` succeeds
+- `isStarting()` / `setStarting(val)` - startup lock flag, prevents race conditions when multiple cards try to start simultaneously (e.g., view switch during startup)
+- `propagateConfig(card)` - when a secondary card calls `setConfig()`, the config is forwarded to the active instance so live config changes take effect
 
 **Gotcha:** Before `claim()`, `isOwner()` returns true for all cards (since `instance` is null). The `isActive()` check gates subscriptions so they only fire after a card has successfully started.
 
-**Gotcha  -  card-mod duplicate instances:** Card-mod patches HA's `_loadElement` and creates two card instances. Instance #1 receives `setConfig` + `set hass` (and may start the pipeline) but never receives `connectedCallback`. Instance #2 is the DOM-attached element. The `VisibilityManager` ownership guard (`if (!this._card.isOwner) return`) prevents the non-owner instance's visibility handler from interfering with the active pipeline. Additionally, `visibility.setup()` is called from `startListening()` after `claim()` to guarantee the owner always has a visibility handler, even if `connectedCallback` never fired.
+**Gotcha - card-mod duplicate instances:** Card-mod patches HA's `_loadElement` and creates two card instances. Instance #1 receives `setConfig` + `set hass` (and may start the pipeline) but never receives `connectedCallback`. Instance #2 is the DOM-attached element. The `VisibilityManager` ownership guard (`if (!this._card.isOwner) return`) prevents the non-owner instance's visibility handler from interfering with the active pipeline. Additionally, `visibility.setup()` is called from `startListening()` after `claim()` to guarantee the owner always has a visibility handler, even if `connectedCallback` never fired.
 
 ### 3.5 Logger (`logger.js`)
 
 Centralized logging controlled by `config.debug`. All managers receive a reference to the shared Logger instance from the card.
 
-- `log(category, msg, data?)`  -  Gated by `_debug` flag. Silent in production unless debug is enabled.
-- `error(category, msg, data?)`  -  Always logs (not gated). Errors are never suppressed.
+- `log(category, msg, data?)` - Gated by `_debug` flag. Silent in production unless debug is enabled.
+- `error(category, msg, data?)` - Always logs (not gated). Errors are never suppressed.
 - Console output format: `[VS][category] message`
 - The `debug` setter is updated by `setConfig()` whenever the config changes.
 
@@ -228,12 +228,12 @@ The card renders nothing in its own Shadow DOM (just a hidden `<div>`). All visi
 ```
 
 **Key containers:**
-- `.vs-image-panel`  -  Fixed-position media panel (right side). Contains `.vs-panel-scroll` inner wrapper for scrollbar positioning. Holds image grids and video card grids.
-- `.vs-lightbox`  -  Full-screen overlay for viewing full-size images or playing YouTube videos via iframe embed. Tap to dismiss.
+- `.vs-image-panel` - Fixed-position media panel (right side). Contains `.vs-panel-scroll` inner wrapper for scrollbar positioning. Holds image grids and video card grids.
+- `.vs-lightbox` - Full-screen overlay for viewing full-size images or playing YouTube videos via iframe embed. Tap to dismiss.
 
 Timer pills live in a separate `#voice-satellite-timers` container, also on `document.body`.
 
-This design ensures the UI persists when the user navigates between dashboard views  -  HA destroys and recreates custom elements on navigation, but the global overlay remains.
+This design ensures the UI persists when the user navigates between dashboard views - HA destroys and recreates custom elements on navigation, but the global overlay remains.
 
 ---
 
@@ -274,7 +274,7 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
 
 ### 5.1 Lifecycle
 
-**`connectedCallback()`**  -  Called when HA inserts the element:
+**`connectedCallback()`** - Called when HA inserts the element:
 1. Clears any pending disconnect timeout
 2. Renders the hidden Shadow DOM container
 3. If this is an editor preview, renders the static preview and returns
@@ -284,11 +284,11 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
 6. Sets up visibility change listener
 7. If no singleton is active and we have a connection, starts listening
 
-**`disconnectedCallback()`**  -  Called when HA removes the element (e.g., view navigation):
+**`disconnectedCallback()`** - Called when HA removes the element (e.g., view navigation):
 1. If a picker overlay or deferred observer is pending (`_pickerTeardown`), cancels it and nulls the reference. This prevents a stale instance's deferred picker from firing after HA recreates the card.
 2. Sets a 100ms grace period (`DISCONNECT_GRACE`) before tearing down. This prevents the pipeline from restarting when the user simply switches views.
 
-**`set hass(hass)`**  -  Called by HA when state updates arrive:
+**`set hass(hass)`** - Called by HA when state updates arrive:
 1. Editor previews return immediately
 2. If this is the active owner: updates TimerManager, checks remote TTS playback state (`tts.checkRemotePlayback`), and retries satellite subscription if needed
 3. If not yet started:
@@ -296,20 +296,20 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
    - **Browser satellite override:** If `satellite_entity` is empty and `browser_satellite_override` is enabled, attempts `resolveEntity(hass)`. If `DISABLED_VALUE`, sets `_deviceDisabled` and returns. If resolved, injects the entity. If not (and `hass.entities` is populated and no picker is already showing), calls `_showEntityPicker(hass)` and returns.
    - Acquires connection, ensures global UI, starts listening
 
-**`setConfig(config)`**  -  Called when the user saves config in the editor:
+**`setConfig(config)`** - Called when the user saves config in the editor:
 1. Captures whether satellite_entity was previously empty
 2. Resolves skin via `getSkin(config.skin)` -> stored as `_activeSkin`
 3. Merges config with defaults
 4. Updates logger debug flag
-5. **Browser satellite override:** If `browser_satellite_override` is enabled, localStorage takes full control  -  if stored value is `DISABLED_VALUE`, sets `_deviceDisabled = true` and clears entity; if stored entity is valid, injects it; otherwise clears `satellite_entity` (so the startup path in `set hass` shows the picker). If override is disabled, clears localStorage via `clearStoredEntity()` and resets `_deviceDisabled`.
+5. **Browser satellite override:** If `browser_satellite_override` is enabled, localStorage takes full control - if stored value is `DISABLED_VALUE`, sets `_deviceDisabled = true` and clears entity; if stored entity is valid, injects it; otherwise clears `satellite_entity` (so the startup path in `set hass` shows the picker). If override is disabled, clears localStorage via `clearStoredEntity()` and resets `_deviceDisabled`.
 6. Applies styles to the global UI (skin CSS injection, opacity, text scale, custom CSS)
 7. Updates editor preview if in preview context
 8. Propagates config to the active singleton instance
 9. **Config reactivity:** If satellite_entity was just configured (empty -> value), triggers startup without requiring a page reload
 
-**Gotcha  -  Config reactivity:** When a user adds a satellite entity in the editor and saves, `set hass` may have already returned early (before `_hasStarted` is set) because `satellite_entity` was empty at the time. `setConfig` detects this transition and triggers startup directly.
+**Gotcha - Config reactivity:** When a user adds a satellite entity in the editor and saves, `set hass` may have already returned early (before `_hasStarted` is set) because `satellite_entity` was empty at the time. `setConfig` detects this transition and triggers startup directly.
 
-**`_showEntityPicker(hass)`**  -  Shows the picker overlay (may be deferred if HA's editor dialog is blocking). On entity selection:
+**`_showEntityPicker(hass)`** - Shows the picker overlay (may be deferred if HA's editor dialog is blocking). On entity selection:
 1. Displaces any stale singleton owner (stops its pipeline, mic, TTS, timers; tears down satellite subscription; releases singleton)
 2. Injects the selected entity into config, sets `_isLocalStorageEntity = true`
 3. Uses the current `this._hass` (falls back to captured `hass`) for the connection
@@ -319,11 +319,11 @@ A styled console log shows the card version on load (`__VERSION__` is injected a
 
 The card delegates all event handling to free functions in `card/events.js`:
 
-- `setState(card, newState)`  -  Updates card state, triggers UIManager update, syncs state to integration (with barge-in guard: skips idle/listening sync while TTS is playing)
-- `startListening(card)`  -  Claims singleton, starts mic + pipeline, subscribes to satellite events, sets up double-tap
-- `handleStartClick(card)`  -  Ensures AudioContext on gesture, then calls `startListening`
-- `onTTSComplete(card, playbackFailed)`  -  Handles post-TTS cleanup: continue conversation, done chime, clear UI, play queued notifications
-- `handlePipelineMessage(card, message)`  -  Dispatches pipeline events by type to PipelineManager handlers (with guards for paused/restarting)
+- `setState(card, newState)` - Updates card state, triggers UIManager update, syncs state to integration (with barge-in guard: skips idle/listening sync while TTS is playing)
+- `startListening(card)` - Claims singleton, starts mic + pipeline, subscribes to satellite events, sets up double-tap
+- `handleStartClick(card)` - Ensures AudioContext on gesture, then calls `startListening`
+- `onTTSComplete(card, playbackFailed)` - Handles post-TTS cleanup: continue conversation, done chime, clear UI, play queued notifications
+- `handlePipelineMessage(card, message)` - Dispatches pipeline events by type to PipelineManager handlers (with guards for paused/restarting)
 
 ### 5.3 Mini Card Orchestrator (`mini/index.js`)
 
@@ -339,9 +339,9 @@ The card delegates all event handling to free functions in `card/events.js`:
 
 **Mini card modes:**
 
-- `compact`  -  Single-row status + transcript line (horizontal marquee for overflow)
-- `tall`  -  Status row + scrollable transcript + timer badges inside the card
-- `getGridOptions()` defaults (Sections)  -  `compact` fixed at 1 row; `tall` default 3 rows, min 2, max 12
+- `compact` - Single-row status + transcript line (horizontal marquee for overflow)
+- `tall` - Status row + scrollable transcript + timer badges inside the card
+- `getGridOptions()` defaults (Sections) - `compact` fixed at 1 row; `tall` default 3 rows, min 2, max 12
 
 **Mini card lifecycle / startup differences:**
 
@@ -408,19 +408,19 @@ During `announcement`, `start_conversation`, and `ask_question`, the mini card o
 
 Manages the microphone lifecycle:
 
-1. **Acquisition**  -  `startMicrophone()` creates an AudioContext (16 kHz requested), gets `getUserMedia` with configurable constraints (noise suppression, echo cancellation, auto gain control, voice isolation).
+1. **Acquisition** - `startMicrophone()` creates an AudioContext (16 kHz requested), gets `getUserMedia` with configurable constraints (noise suppression, echo cancellation, auto gain control, voice isolation).
 
-2. **Capture**  -  Uses AudioWorklet (inline processor via Blob URL) and pushes `Float32Array` chunks to `audioBuffer`.
+2. **Capture** - Uses AudioWorklet (inline processor via Blob URL) and pushes `Float32Array` chunks to `audioBuffer`.
 
-3. **Send loop**  -  `startSending(binaryHandlerIdGetter)` starts a 100ms `setInterval` that:
+3. **Send loop** - `startSending(binaryHandlerIdGetter)` starts a 100ms `setInterval` that:
    - Combines all buffered chunks into one `Float32Array`
    - Resamples to 16 kHz if the browser's actual sample rate differs (linear interpolation)
    - Converts to 16-bit PCM (`Int16Array`)
    - Sends as binary WebSocket frame with the handler ID byte prefix
 
-4. **Pause/Resume**  -  On tab hide: disables audio tracks and stops sending. On tab show: flushes stale audio buffer, re-enables tracks, resumes AudioContext if suspended.
+4. **Pause/Resume** - On tab hide: disables audio tracks and stops sending. On tab show: flushes stale audio buffer, re-enables tracks, resumes AudioContext if suspended.
 
-**Gotcha  -  AudioWorklet inline code:** The worklet processor is defined as an inline string, converted to a Blob URL, loaded as a module, then the URL is immediately revoked. This avoids CORS issues with external worklet files in HA's WebView.
+**Gotcha - AudioWorklet inline code:** The worklet processor is defined as an inline string, converted to a Blob URL, loaded as a module, then the URL is immediately revoked. This avoids CORS issues with external worklet files in HA's WebView.
 
 ### 6.2 Binary Audio Protocol
 
@@ -450,27 +450,27 @@ Volume sourced from `card.mediaPlayer.volume` (perceptual curve applied), scaled
 
 ### 6.4 AnalyserManager (`audio/analyser.js`)
 
-Provides real-time audio level data for reactive bar animations via two separate AnalyserNodes  -  a **mic analyser** and an **audio analyser**  -  to structurally prevent open-mic feedback loops.
+Provides real-time audio level data for reactive bar animations via two separate AnalyserNodes - a **mic analyser** and an **audio analyser** - to structurally prevent open-mic feedback loops.
 
 **Problem:** A single AnalyserNode architecture routes audio through `createMediaElementSource` -> analyser -> `AudioContext.destination`. If the mic source is also connected to the same analyser, the mic signal gains a path to the speakers through the Web Audio graph, creating a feedback loop on devices without hardware echo cancellation.
 
-**Solution  -  Dual-analyser architecture:**
+**Solution - Dual-analyser architecture:**
 
 ```
-Mic path:    getUserMedia -> sourceNode -> _micAnalyser  (dead end  -  no destination)
+Mic path:    getUserMedia -> sourceNode -> _micAnalyser  (dead end - no destination)
 Audio path:  <audio> -> createMediaElementSource -> _audioAnalyser -> destination (speakers)
 ```
 
-- `_micAnalyser`  -  Connected to the mic source node but **never** connected to `AudioContext.destination`. It only provides analyser data for the reactive bar. Feedback is structurally impossible because there is no audio path from mic to speakers through this node.
-- `_audioAnalyser`  -  Routes TTS/notification audio through to `destination` for playback. Connected only during active audio playback via `attachAudio()`.
-- `_activeAnalyser`  -  Pointer that determines which node `_tick()` reads analyser data from. Defaults to mic; switches to audio during playback; reverts to mic when audio detaches.
+- `_micAnalyser` - Connected to the mic source node but **never** connected to `AudioContext.destination`. It only provides analyser data for the reactive bar. Feedback is structurally impossible because there is no audio path from mic to speakers through this node.
+- `_audioAnalyser` - Routes TTS/notification audio through to `destination` for playback. Connected only during active audio playback via `attachAudio()`.
+- `_activeAnalyser` - Pointer that determines which node `_tick()` reads analyser data from. Defaults to mic; switches to audio during playback; reverts to mic when audio detaches.
 
 **Key methods:**
-- `attachMic(sourceNode, audioContext)`  -  One-time setup: creates `_micAnalyser`, connects mic source. Sets as active if no audio is playing.
-- `attachAudio(audioEl, audioContext)`  -  Creates `_audioAnalyser`, routes `<audio>` element through it to destination. Switches `_activeAnalyser` to audio.
-- `detachAudio()`  -  Disconnects audio routing, reverts `_activeAnalyser` to mic.
-- `reconnectMic()`  -  Switches `_activeAnalyser` back to mic. **No-op guard:** Skips if `_mediaSourceNode` is still set, preventing mid-playback switches (e.g., `updateForState` fires for TTS state).
-- `start(barEl)` / `stop()`  -  Start/stop the `requestAnimationFrame` tick loop that writes `--vs-audio-level` CSS variable (time-domain mean absolute amplitude mapped to 0-1 and quantized to reduce redundant CSS writes).
+- `attachMic(sourceNode, audioContext)` - One-time setup: creates `_micAnalyser`, connects mic source. Sets as active if no audio is playing.
+- `attachAudio(audioEl, audioContext)` - Creates `_audioAnalyser`, routes `<audio>` element through it to destination. Switches `_activeAnalyser` to audio.
+- `detachAudio()` - Disconnects audio routing, reverts `_activeAnalyser` to mic.
+- `reconnectMic()` - Switches `_activeAnalyser` back to mic. **No-op guard:** Skips if `_mediaSourceNode` is still set, preventing mid-playback switches (e.g., `updateForState` fires for TTS state).
+- `start(barEl)` / `stop()` - Start/stop the `requestAnimationFrame` tick loop that writes `--vs-audio-level` CSS variable (time-domain mean absolute amplitude mapped to 0-1 and quantized to reduce redundant CSS writes).
 
 **Current analysis/timing behavior (v5.7.x):**
 - Uses `getByteTimeDomainData()` (not `getByteFrequencyData()`), because the reactive bar only needs a loudness proxy.
@@ -481,8 +481,8 @@ Audio path:  <audio> -> createMediaElementSource -> _audioAnalyser -> destinatio
 ### 6.5 Media Playback
 
 `media-playback.js` provides two utilities:
-- `buildMediaUrl(path)`  -  Normalizes a URL path: full URLs pass through, root-relative paths are prefixed with `window.location.origin`
-- `playMediaUrl(url, volume, callbacks)`  -  Creates an `<audio>` element, wires `onended`/`onerror` callbacks, returns the element for external stop
+- `buildMediaUrl(path)` - Normalizes a URL path: full URLs pass through, root-relative paths are prefixed with `window.location.origin`
+- `playMediaUrl(url, volume, callbacks)` - Creates an `<audio>` element, wires `onended`/`onerror` callbacks, returns the element for external stop
 
 ---
 
@@ -492,13 +492,13 @@ Audio path:  <audio> -> createMediaElementSource -> _audioAnalyser -> destinatio
 
 Handles two playback targets:
 
-**Browser playback**  -  Creates an HTML Audio element via `playMediaUrl()`. Includes a stall-detection watchdog (`setInterval`) that monitors `audio.currentTime` progression. If the audio stops advancing between intervals, playback is force-completed (workaround for HA Companion App WebView quirks). Unlike a fixed timeout, this supports TTS responses of any length.
+**Browser playback** - Creates an HTML Audio element via `playMediaUrl()`. Includes a stall-detection watchdog (`setInterval`) that monitors `audio.currentTime` progression. If the audio stops advancing between intervals, playback is force-completed (workaround for HA Companion App WebView quirks). Unlike a fixed timeout, this supports TTS responses of any length.
 
-**Remote playback**  -  Calls `media_player.play_media` on the configured `tts_target` entity (resolved from the integration's TTS Output select entity via `getSelectEntityId`). Completion is detected by monitoring the remote entity's state via `checkRemotePlayback()`, which is called from the card's `set hass()` on every state update. The method tracks a `_remoteSawPlaying` flag  -  only completes after the entity has been in `playing`/`buffering` state first (avoids false triggers during the startup delay). A 120-second safety timeout (`REMOTE_SAFETY_TIMEOUT`) forces completion if state monitoring never fires.
+**Remote playback** - Calls `media_player.play_media` on the configured `tts_target` entity (resolved from the integration's TTS Output select entity via `getSelectEntityId`). Completion is detected by monitoring the remote entity's state via `checkRemotePlayback()`, which is called from the card's `set hass()` on every state update. The method tracks a `_remoteSawPlaying` flag - only completes after the entity has been in `playing`/`buffering` state first (avoids false triggers during the startup delay). A 120-second safety timeout (`REMOTE_SAFETY_TIMEOUT`) forces completion if state monitoring never fires.
 
 ### 7.2 Streaming TTS
 
-If the pipeline's `run-start` event includes `tts_output.stream_response: true`, the TTS URL is stored. When `intent-progress` fires with `tts_start_streaming: true`, playback begins immediately  -  before the full TTS audio is generated. This reduces perceived latency. No pipeline restart at this point  -  text chunks are still arriving.
+If the pipeline's `run-start` event includes `tts_output.stream_response: true`, the TTS URL is stored. When `intent-progress` fires with `tts_start_streaming: true`, playback begins immediately - before the full TTS audio is generated. This reduces perceived latency. No pipeline restart at this point - text chunks are still arriving.
 
 ### 7.3 Chime Facade
 
@@ -506,7 +506,7 @@ If the pipeline's `run-start` event includes `tts_output.stream_response: true`,
 
 ### 7.4 Streaming Token Refresh
 
-HA's TTS proxy pre-allocates a streaming token at `run-start` (in `tts_output.url`). The server-side cache evicts tokens based on creation time (not TTS generation time), with a TTL of ~5-10 minutes. If the user doesn't trigger a wake word for longer than the TTL, the token expires and TTS playback fails with a 404/NotSupportedError. The `tts-end` URL uses the **same** token  -  there is no fresh URL available from that pipeline run.
+HA's TTS proxy pre-allocates a streaming token at `run-start` (in `tts_output.url`). The server-side cache evicts tokens based on creation time (not TTS generation time), with a TTL of ~5-10 minutes. If the user doesn't trigger a wake word for longer than the TTL, the token expires and TTS playback fails with a 404/NotSupportedError. The `tts-end` URL uses the **same** token - there is no fresh URL available from that pipeline run.
 
 **Workaround:** PipelineManager starts a `TOKEN_REFRESH_INTERVAL` (4 minute) timer on every `run-start` when a streaming URL is present. If the timer fires and the card is still in LISTENING state (idle wake-word detection), it calls `restart(0)` to get a fresh pipeline subscription with a new token. The ~200ms restart gap during idle listening is imperceptible. The timer is cleared on `wake_word-end` (interaction started) and `stop()` (pipeline torn down).
 
@@ -550,7 +550,7 @@ Bridges the integration's `media_player` entity to the browser. The integration 
 | `volume_set` | Update volume, apply to all active audio (own + TTS + notification) |
 | `volume_mute` | Mute/unmute, apply to all active audio |
 
-**State reporting**  -  `_reportState(state)` sends playback state back to the integration via `voice_satellite/media_player_event`:
+**State reporting** - `_reportState(state)` sends playback state back to the integration via `voice_satellite/media_player_event`:
 
 ```json
 {
@@ -568,8 +568,8 @@ The media player entity reflects ALL audio output from the satellite, not just d
 
 **Mechanism:** `_activeSources` (a `Set`) tracks active audio sources by name (`'tts'`, `'chime'`, `'notification'`, `'announce-chime'`). Callers use:
 
-- `notifyAudioStart(source)`  -  Adds source, reports "playing"
-- `notifyAudioEnd(source)`  -  Removes source. When no sources remain (and no own playback is active), reports "idle" after a 200ms debounce
+- `notifyAudioStart(source)` - Adds source, reports "playing"
+- `notifyAudioEnd(source)` - Removes source. When no sources remain (and no own playback is active), reports "idle" after a 200ms debounce
 
 The debounce prevents flickering during rapid audio transitions (e.g., chime -> TTS gap).
 
@@ -599,11 +599,11 @@ _applyVolumeToExternalAudio(vol) {
 
 ### 7A.4 Entity Lookup
 
-`_getEntityId()` finds the `media_player.*` entity on the same device as the satellite entity. Uses the same `hass.entities` device lookup pattern as `getSwitchState()`  -  searches for a `media_player.*` entity with matching `device_id` and `platform === 'voice_satellite'`.
+`_getEntityId()` finds the `media_player.*` entity on the same device as the satellite entity. Uses the same `hass.entities` device lookup pattern as `getSwitchState()` - searches for a `media_player.*` entity with matching `device_id` and `platform === 'voice_satellite'`.
 
 ### 7A.5 Barge-In
 
-`interrupt()` stops any active media player playback when the wake word is detected or a notification starts playing. Only affects own playback (play/pause/resume commands)  -  external audio sources (TTS, chimes) manage their own lifecycle.
+`interrupt()` stops any active media player playback when the wake word is detected or a notification starts playing. Only affects own playback (play/pause/resume commands) - external audio sources (TTS, chimes) manage their own lifecycle.
 
 ---
 
@@ -614,7 +614,7 @@ _applyVolumeToExternalAudio(vol) {
 The pipeline manager handles the full lifecycle of the bridged pipeline:
 
 **Starting (`start()`):**
-1. Checks mute state  -  if the mute switch is on, shows error bar and polls every 2 seconds until unmuted
+1. Checks mute state - if the mute switch is on, shows error bar and polls every 2 seconds until unmuted
 2. Cleans up any previous subscription
 3. Sets up the reconnect listener
 4. Subscribes to `voice_satellite/run_pipeline` via the integration
@@ -652,11 +652,11 @@ When the mute switch is turned off, the next poll starts the pipeline normally.
 
 The bridged pipeline can receive events from a previous pipeline run that hasn't fully torn down on the server. The manager uses three flags to filter stale events:
 
-- `_runStartReceived`  -  Set to `true` on `run-start`. All events before the first `run-start` for a given subscription are ignored.
-- `_wakeWordPhase`  -  Set `true` on `wake_word-start`, `false` on valid `wake_word-end`. A `run-end` during wake word phase (without error) triggers an automatic pipeline restart (see §8.8).
-- `_errorReceived`  -  Set `true` on `error`. Allows `run-end` to proceed with normal cleanup during wake word phase if an error preceded it.
+- `_runStartReceived` - Set to `true` on `run-start`. All events before the first `run-start` for a given subscription are ignored.
+- `_wakeWordPhase` - Set `true` on `wake_word-start`, `false` on valid `wake_word-end`. A `run-end` during wake word phase (without error) triggers an automatic pipeline restart (see §8.8).
+- `_errorReceived` - Set `true` on `error`. Allows `run-end` to proceed with normal cleanup during wake word phase if an error preceded it.
 
-**Gotcha  -  Empty wake_word-end:** When the pipeline is stopped/restarted, the server sends a `wake_word-end` with empty `wake_word_output`. This is not a real wake word detection  -  the manager ignores it to avoid entering a retry loop.
+**Gotcha - Empty wake_word-end:** When the pipeline is stopped/restarted, the server sends a `wake_word-end` with empty `wake_word_output`. This is not a real wake word detection - the manager ignores it to avoid entering a retry loop.
 
 ### 8.4 Retry Backoff
 
@@ -677,7 +677,7 @@ Events flow from `voice_satellite/run_pipeline` -> `card.onPipelineMessage()` ->
 | `stt-start` | (inline) | Set state STT |
 | `stt-end` | `handleSttEnd` | Show transcription bubble, invoke askQuestionCallback if set |
 | `intent-start` | (inline) | Set state INTENT |
-| `intent-progress` | `handleIntentProgress` | Stream response text, start streaming TTS, route `tool_result` (image/video/web search, Wikipedia, weather  -  §16A) |
+| `intent-progress` | `handleIntentProgress` | Stream response text, start streaming TTS, route `tool_result` (image/video/web search, Wikipedia, weather - §16A) |
 | `intent-end` | `handleIntentEnd` | Show final response, handle continue_conversation, handle errors |
 | `tts-start` | (inline) | Set state TTS |
 | `tts-end` | `handleTtsEnd` | Play TTS audio (if not already streaming), restart pipeline |
@@ -690,13 +690,13 @@ Before playing the wake chime, `handleWakeWordEnd` checks the integration's `wak
 
 The done chime after TTS playback follows the same pattern.
 
-**Chime audio muting:** Echo cancellation isn't perfect on all devices, so chime audio can leak into the microphone and be misinterpreted by VAD as speech  -  causing VAD to close STT prematurely. Two complementary protections exist:
+**Chime audio muting:** Echo cancellation isn't perfect on all devices, so chime audio can leak into the microphone and be misinterpreted by VAD as speech - causing VAD to close STT prematurely. Two complementary protections exist:
 
 1. **Active-pipeline chime guard** (`handleWakeWordEnd`): Stops sending audio before playing the wake chime, resumes after chime duration + 50ms, and flushes the buffer on resume. This covers chimes that play while the pipeline is actively streaming audio to the server.
 
 2. **Pipeline-start buffer discard** (`start()`): Clears the audio buffer immediately before `startSending()` on every pipeline start. The mic worklet keeps buffering audio even when no pipeline is active, so stale audio (including chime residue from ask_question/start_conversation flows) would otherwise be sent to the server as soon as the new pipeline begins. This covers chimes that play *between* pipeline runs (e.g., the wake chime in `_enterSttMode` before `restartContinue`).
 
-**Gotcha  -  getSwitchState lookup:** The function uses `hass.entities` (HA frontend entity registry cache) to find sibling switch entities by `device_id` + `translation_key`. This is more reliable than reading `extra_state_attributes` on the satellite entity, which can be stale if the state_changed listener wasn't set up in time.
+**Gotcha - getSwitchState lookup:** The function uses `hass.entities` (HA frontend entity registry cache) to find sibling switch entities by `device_id` + `translation_key`. This is more reliable than reading `extra_state_attributes` on the satellite entity, which can be stale if the state_changed listener wasn't set up in time.
 
 ### 8.7 Deferred Run-End
 
@@ -717,10 +717,10 @@ If the `run-end` during wake_word phase was preceded by an error (`_errorReceive
 Prevents stale TTS streaming tokens by periodically restarting the pipeline during idle wake-word listening (see §7.4 for root cause).
 
 **Lifecycle:**
-- **Started** in `handleRunStart` after storing the streaming URL  -  only if a streaming URL was allocated
-- **Cleared** in `handleWakeWordEnd` (user interaction started  -  no longer idle)
+- **Started** in `handleRunStart` after storing the streaming URL - only if a streaming URL was allocated
+- **Cleared** in `handleWakeWordEnd` (user interaction started - no longer idle)
 - **Cleared** in `stop()` (pipeline torn down)
-- **Fires** after `TOKEN_REFRESH_INTERVAL` (4 minutes)  -  only executes `restart(0)` if `currentState === LISTENING`, ensuring it never interrupts active interactions, continue-conversation, ask-question, or TTS playback
+- **Fires** after `TOKEN_REFRESH_INTERVAL` (4 minutes) - only executes `restart(0)` if `currentState === LISTENING`, ensuring it never interrupts active interactions, continue-conversation, ask-question, or TTS playback
 
 ---
 
@@ -732,10 +732,10 @@ Timers are managed server-side by HA's intent system. The integration registers 
 
 The card watches the satellite entity's state via `subscribeToEntity()` (HA's `state_changed` event bus). When the `active_timers` attribute changes:
 
-1. **processStateChange**  -  JSON-based dedup prevents duplicate processing. Compares current timer IDs with known IDs to detect additions and removals.
-2. **syncTimers**  -  Creates/updates timer objects with server-side `started_at` (epoch seconds) for accurate elapsed time calculation.
-3. **Tick**  -  A 1-second `setInterval` updates `secondsLeft` for each timer and refreshes pill displays.
-4. **Alert**  -  When timers are removed with `last_timer_event: "finished"`, shows a full-screen alert with looping chime.
+1. **processStateChange** - JSON-based dedup prevents duplicate processing. Compares current timer IDs with known IDs to detect additions and removals.
+2. **syncTimers** - Creates/updates timer objects with server-side `started_at` (epoch seconds) for accurate elapsed time calculation.
+3. **Tick** - A 1-second `setInterval` updates `secondsLeft` for each timer and refreshes pill displays.
+4. **Alert** - When timers are removed with `last_timer_event: "finished"`, shows a full-screen alert with looping chime.
 
 ### 9.2 Timer Cancellation
 
@@ -768,9 +768,9 @@ Three notification features share a common lifecycle defined in `shared/satellit
    - `ask_question: true` -> AskQuestionManager
    - `start_conversation: true` or `type === "start_conversation"` -> StartConversationManager
    - Otherwise -> AnnouncementManager
-3. **Pipeline-busy queuing**  -  If the card is in an active interaction or TTS is playing, the notification is queued. Queued notifications play after `onTTSComplete()` calls `playQueued()`.
-4. **Hidden-tab queuing**  -  If the tab is hidden, events are queued and replayed when the tab becomes visible. Only the latest event is kept.
-5. **Dedup**  -  Monotonic announce IDs prevent duplicate processing.
+3. **Pipeline-busy queuing** - If the card is in an active interaction or TTS is playing, the notification is queued. Queued notifications play after `onTTSComplete()` calls `playQueued()`.
+4. **Hidden-tab queuing** - If the tab is hidden, events are queued and replayed when the tab becomes visible. Only the latest event is kept.
+5. **Dedup** - Monotonic announce IDs prevent duplicate processing.
 
 ### 10.2 Playback Orchestration (`playNotification`)
 
@@ -789,7 +789,7 @@ All three managers use the same playback flow:
 After playback:
 1. ACK to integration (`announce_finished`)
 2. Restart pipeline (HA cancels the running pipeline when triggering announcements)
-3. After configurable delay (`announcementDisplayDuration`  -  from integration number entity, default 5s): clear UI, then either play done chime or play queued notification
+3. After configurable delay (`announcementDisplayDuration` - from integration number entity, default 5s): clear UI, then either play done chime or play queued notification
 
 **Queued notification priority:** If a notification is queued when the display timer fires, the done chime is skipped and the queued notification plays immediately (it has its own announce chime). Playing the done chime (Web Audio oscillator) concurrently with the announce chime (HTML Audio MP3) causes audio distortion in HA Companion App WebView.
 
@@ -799,15 +799,15 @@ After playback:
 1. ACK to integration
 2. Clear announcement UI
 3. Show pipeline blur overlay
-4. `restartContinue(null, { extra_system_prompt })`  -  Restarts pipeline in STT mode, skipping wake word, with the automation's system prompt
+4. `restartContinue(null, { extra_system_prompt })` - Restarts pipeline in STT mode, skipping wake word, with the automation's system prompt
 
 ### 10.5 AskQuestionManager
 
 After playback:
 1. ACK to integration (signals question was played)
 2. Switch from centered announcement mode to interactive mode
-3. Play wake chime (delayed 500ms for chime settle  -  prevents false VAD trigger from mic picking up the chime)
-4. `restartContinue(null, { end_stage: 'stt', onSttEnd })`  -  STT-only pipeline
+3. Play wake chime (delayed 500ms for chime settle - prevents false VAD trigger from mic picking up the chime)
+4. `restartContinue(null, { end_stage: 'stt', onSttEnd })` - STT-only pipeline
 5. On STT result: send answer via `voice_satellite/question_answered`
 6. Integration matches against hassil templates, returns `{ matched, id }`
 7. Play done chime (matched) or error chime + flash bar (unmatched)
@@ -834,11 +834,11 @@ connection.subscribeMessage(onEvent, {
 ```
 
 The subscription is:
-- **Idempotent**  -  No-op if already subscribed
-- **Owner-only**  -  Only the singleton owner subscribes
-- **Reconnect-aware**  -  Re-subscribes on the connection's `ready` event
-- **Refreshable**  -  `refreshSatelliteSubscription()` tears down and re-establishes (called on tab resume to recover from stale connections)
-- **Retry with backoff**  -  If subscription fails (e.g., integration entities not yet loaded after HA reboot), retries with exponential backoff: 2s, 4s, 8s, 16s, 30s (capped). Retry state is reset on successful subscription or full cleanup.
+- **Idempotent** - No-op if already subscribed
+- **Owner-only** - Only the singleton owner subscribes
+- **Reconnect-aware** - Re-subscribes on the connection's `ready` event
+- **Refreshable** - `refreshSatelliteSubscription()` tears down and re-establishes (called on tab resume to recover from stale connections)
+- **Retry with backoff** - If subscription fails (e.g., integration entities not yet loaded after HA reboot), retries with exponential backoff: 2s, 4s, 8s, 16s, 30s (capped). Retry state is reset on successful subscription or full cleanup.
 
 ---
 
@@ -871,8 +871,8 @@ Reads a sibling switch entity's state. The lookup strategy:
 2. **Fallback:** Read `extra_state_attributes` on the satellite entity (may be stale).
 
 Used for:
-- `mute` switch  -  Blocks pipeline start when on
-- `wake_sound` switch  -  Controls chime playback (wake, done chimes)
+- `mute` switch - Blocks pipeline start when on
+- `wake_sound` switch - Controls chime playback (wake, done chimes)
 
 ### `getSelectEntityId(hass, satelliteId, translationKey)`
 Reads a sibling select entity's `entity_id` attribute (the selected option value). Used to resolve the TTS Output select to a `media_player.*` entity ID.
@@ -890,7 +890,7 @@ Handles browser tab show/hide transitions.
 
 **Idempotent setup:** `setup()` checks `this._handler` before registering to prevent double-registration. Called from both `connectedCallback` (for DOM-attached instances) and `startListening` after `claim()` (for the owner instance that may never receive `connectedCallback`).
 
-**`teardown()`**  -  Removes the visibility change listener, clears the debounce timer, and resets `_isPaused`. Used during full lifecycle resets (e.g., entity picker re-selection).
+**`teardown()`** - Removes the visibility change listener, clears the debounce timer, and resets `_isPaused`. Used during full lifecycle resets (e.g., entity picker re-selection).
 
 ### Tab Hidden
 **Idle/no-session guard (mini-card UX):** If the card is `IDLE` and there is no active pipeline subscription (`pipeline.binaryHandlerId` falsy) and no TTS playback, the visibility handler returns early instead of entering `PAUSED`. This preserves the mini card's idle mic-button start affordance when the user switches tabs before first start (common when browsers block auto-start pending a user gesture).
@@ -899,7 +899,7 @@ Handles browser tab show/hide transitions.
 2. If in an active interaction OR media is lingering: clear image linger timeout, clear chat, hide blur, clear continue state, stop TTS
 3. After 500ms debounce: set state PAUSED, disable audio tracks
 
-**Linger detection:** During the image/video linger phase (30s timeout after TTS completes), the card state is `LISTENING`  -  not in `INTERACTING_STATES`. The visibility handler must independently check for lingering UI:
+**Linger detection:** During the image/video linger phase (30s timeout after TTS completes), the card state is `LISTENING` - not in `INTERACTING_STATES`. The visibility handler must independently check for lingering UI:
 
 ```javascript
 const isLingering = this._card._imageLingerTimeout
@@ -909,7 +909,7 @@ const isLingering = this._card._imageLingerTimeout
 
 The `isLingering` check is evaluated alongside `isInteracting`. If either is true, the full UI cleanup runs (clear linger timeout, clear chat, hide blur, stop TTS).
 
-**Gotcha  -  No `pipeline.stop()` on hide:** Calling `stop()` creates a race condition where the server is still cancelling the old pipeline when `resume()` starts a new one, causing `async_accept_pipeline_from_satellite()` to silently fail. The `restart(0)` call in `_resume()` handles the properly sequenced stop->start.
+**Gotcha - No `pipeline.stop()` on hide:** Calling `stop()` creates a race condition where the server is still cancelling the old pipeline when `resume()` starts a new one, causing `async_accept_pipeline_from_satellite()` to silently fail. The `restart(0)` call in `_resume()` handles the properly sequenced stop->start.
 
 ### Tab Visible
 1. Cancel pending restart timeouts via `resetForResume()` BEFORE yielding to the event loop (prevents throttled background-tab `setTimeout` from racing with resume)
@@ -940,13 +940,13 @@ When multiple wall-mounted tablets share a single dashboard, each device needs t
 
 ### Entity Discovery
 
-`discoverSatelliteEntities(hass)`  -  Filters `hass.entities` for entries where `platform === 'voice_satellite'` AND `entityId.startsWith('assist_satellite.')`. Returns `[{entity_id, friendly_name}]` sorted alphabetically by name. Friendly names are read from `hass.states[entityId].attributes.friendly_name`.
+`discoverSatelliteEntities(hass)` - Filters `hass.entities` for entries where `platform === 'voice_satellite'` AND `entityId.startsWith('assist_satellite.')`. Returns `[{entity_id, friendly_name}]` sorted alphabetically by name. Friendly names are read from `hass.states[entityId].attributes.friendly_name`.
 
 ### Entity Resolution
 
-`resolveEntity(hass)`  -  Resolution chain:
+`resolveEntity(hass)` - Resolution chain:
 1. Check localStorage -> if `DISABLED_VALUE`, return it as-is (device explicitly disabled) -> if valid entity in `hass.entities`, return -> if stale, clear
-2. Auto-select if exactly one satellite entity exists (saves to localStorage, returns immediately  -  no picker shown)
+2. Auto-select if exactly one satellite entity exists (saves to localStorage, returns immediately - no picker shown)
 3. Return `null` (caller should show picker)
 
 ### HA Dialog Detection
@@ -955,23 +955,23 @@ When HA's card editor dialog is open, it uses `<dialog>.showModal()` which puts 
 
 Two helper functions handle this:
 
-- `isHADialogBlocking()`  -  Checks if `<home-assistant-main>` inside `<home-assistant>`'s shadow root has the `inert` attribute. Returns `true` when any HA modal dialog is open.
-- `waitForDialogClose(callback)`  -  Sets up a `MutationObserver` watching for the `inert` attribute to be removed from `<home-assistant-main>`. Calls the callback when the dialog closes. Returns the observer (for cleanup).
+- `isHADialogBlocking()` - Checks if `<home-assistant-main>` inside `<home-assistant>`'s shadow root has the `inert` attribute. Returns `true` when any HA modal dialog is open.
+- `waitForDialogClose(callback)` - Sets up a `MutationObserver` watching for the `inert` attribute to be removed from `<home-assistant-main>`. Calls the callback when the dialog closes. Returns the observer (for cleanup).
 
 ### Picker Overlay
 
-`showPicker(hass, onSelect)`  -  Entry point. Returns a teardown function.
+`showPicker(hass, onSelect)` - Entry point. Returns a teardown function.
 
 **Deferred mode:** If `isHADialogBlocking()` is true, the picker is deferred via `waitForDialogClose()`. The returned teardown cancels the pending observer. When the dialog closes, the observer fires and `doShowPicker()` is called. The teardown function handles both states (pending observer OR active overlay).
 
 **Immediate mode:** If no dialog is blocking, calls `doShowPicker()` directly.
 
-`doShowPicker(hass, onSelect)`  -  Creates the overlay:
+`doShowPicker(hass, onSelect)` - Creates the overlay:
 1. Injects picker styles into `document.head` (once, cached via `pickerStyleEl`)
 2. Creates a fullscreen `div.vs-picker-overlay` appended to `document.body`
 3. Builds entity list from `discoverSatelliteEntities(hass)` as `<button>` elements
 4. If no entities found, shows "No voice satellites found" message
-5. Adds a red "Disable on this device" button (`.vs-picker-disable`) below the entity list  -  stores `DISABLED_VALUE` in localStorage, sets `_deviceDisabled = true` on the card, and bails without starting the pipeline
+5. Adds a red "Disable on this device" button (`.vs-picker-disable`) below the entity list - stores `DISABLED_VALUE` in localStorage, sets `_deviceDisabled = true` on the card, and bails without starting the pipeline
 6. Click handler: matches `.vs-picker-item` or `.vs-picker-disable` -> saves to localStorage -> removes overlay -> calls `onSelect(entityId)`
 
 ### Styling
@@ -989,9 +989,9 @@ The picker uses HA theme CSS variables with dark fallbacks, so it automatically 
 | Item border / hover | `--divider-color` | `#3a3a3c` |
 | Active border accent | `--primary-color` | `#48484a` |
 | Font family | `--ha-font-family` | system font stack |
-| Disable button bg |  -  | `rgba(255, 59, 48, 0.15)` |
-| Disable button text |  -  | `#ff3b30` |
-| Disable button border |  -  | `rgba(255, 59, 48, 0.3)` |
+| Disable button bg | - | `rgba(255, 59, 48, 0.15)` |
+| Disable button text | - | `#ff3b30` |
+| Disable button border | - | `rgba(255, 59, 48, 0.3)` |
 
 The overlay uses `position: fixed; inset: 0; z-index: 2147483647` with a blurred dark backdrop.
 
@@ -1032,19 +1032,19 @@ Touch/click deduplication prevents double-firing on touch devices (touchstart fi
 Manages chat message state. All DOM operations delegate to UIManager.
 
 **Bubble types:**
-- `user`  -  Transcription bubble (styled by skin CSS)
-- `assistant`  -  Response bubble (styled by skin CSS)
-- `announcement`  -  Notification message (styled by skin CSS, always centered)
+- `user` - Transcription bubble (styled by skin CSS)
+- `assistant` - Response bubble (styled by skin CSS)
+- `announcement` - Notification message (styled by skin CSS, always centered)
 
 **Chat bubble max-height:** Assistant/announcement bubbles have `max-height: 70vh` with `overflow-y: auto` and thin scrollbar, allowing longer responses (e.g., web search summaries, Wikipedia articles) to remain readable without overflowing the viewport. This value is consistent across all four skins.
 
 **Streaming text fade:** During `intent-progress` streaming, the last 24 characters fade from opaque to transparent using per-character `<span>` elements with decreasing opacity. When the final text arrives in `intent-end`, the full text replaces the faded version.
 
 **Layout modes:**
-- `chat`  -  User bubbles right-aligned, assistant left-aligned
-- `centered`  -  All bubbles centered
+- `chat` - User bubbles right-aligned, assistant left-aligned
+- `centered` - All bubbles centered
 
-**Gotcha  -  `streamEl` must be cleared between turns:** If not reset in `handleIntentEnd` and continue-conversation transitions, streaming text appends to the previous turn's bubble.
+**Gotcha - `streamEl` must be cleared between turns:** If not reset in `handleIntentEnd` and continue-conversation transitions, streaming text appends to the previous turn's bubble.
 
 ---
 
@@ -1066,11 +1066,11 @@ LLM tool call -> intent-progress (tool_result) -> handleIntentProgress
 ```
 
 The `intent-progress` event carries `chat_log_delta` with `role: 'tool_result'`. The `tool_result` object contains:
-- `results[]`  -  Array of search results (image/video search)
-- `auto_display` (images) / `auto_play` (videos)  -  Boolean flag for auto-opening lightbox
-- `featured_image`  -  Single image URL string (web search / Wikipedia)
-- `forecast[]`  -  Weather forecast array (weather forecast tool  -  see §16A.5)
-- `query_type`, `current_price`, `change`, `percent_change`, etc.  -  Financial data fields (financial data tool  -  see §16A.6)
+- `results[]` - Array of search results (image/video search)
+- `auto_display` (images) / `auto_play` (videos) - Boolean flag for auto-opening lightbox
+- `featured_image` - Single image URL string (web search / Wikipedia)
+- `forecast[]` - Weather forecast array (weather forecast tool - see §16A.5)
+- `query_type`, `current_price`, `change`, `percent_change`, etc. - Financial data fields (financial data tool - see §16A.6)
 
 **Result routing priority:** Weather is checked first (by `tool_name.endsWith('get_weather_forecast')`), then financial data (by `tool_name.includes('financial-data__get_financial_data')`), then video (`video_id`), then image (`image_url && !video_id`), then featured image (`featured_image`).
 
@@ -1112,8 +1112,8 @@ The `intent-progress` event carries `chat_log_delta` with `role: 'tool_result'`.
 `showVideoPanel(results, autoPlay)`:
 1. Creates a `.vs-video-grid` container
 2. For each result: creates a `.vs-video-card` with:
-   - `.vs-video-thumb-wrap`  -  Thumbnail image + duration badge overlay
-   - `.vs-video-info`  -  Title (2-line clamp) + channel name
+   - `.vs-video-thumb-wrap` - Thumbnail image + duration badge overlay
+   - `.vs-video-info` - Title (2-line clamp) + channel name
 3. Click handler -> `showVideoLightbox(video_id)` opens YouTube embed
 4. If `autoPlay`, opens lightbox with the first video immediately
 
@@ -1154,7 +1154,7 @@ The `featured_image` string is wrapped into the same `[{image_url}]` array forma
 | Auto-display lightbox | Controlled by `auto_display` | Never (always `false`) |
 | `hasVisibleImages()` | Returns `true` | Returns `false` (excluded via `!panel.classList.contains('featured')`) |
 
-**Why `hasVisibleImages()` excludes featured:** This method gates whether TTS-end should defer dismissal for image browsing. Featured images are passive context alongside a text response  -  they don't represent a browsing session that should delay pipeline restart.
+**Why `hasVisibleImages()` excludes featured:** This method gates whether TTS-end should defer dismissal for image browsing. Featured images are passive context alongside a text response - they don't represent a browsing session that should delay pipeline restart.
 
 **Skin CSS (all skins):** Each skin defines the panel layout. Image search uses a wider offset than featured panels since the image panel (30%) is wider than the featured panel (25%). When any media panel is open, chat messages expand to fill the narrowed container:
 ```css
@@ -1212,7 +1212,7 @@ if (toolName?.endsWith('get_weather_forecast') && toolResult?.forecast && !toolR
   .vs-weather-header          (flex row: icon + info)
     img.vs-weather-icon       (96×96, src=condition_icon, onerror->remove)
     .vs-weather-info
-      .vs-weather-temp        (current_temperature  -  large text)
+      .vs-weather-temp        (current_temperature - large text)
       .vs-weather-condition   (first forecast entry's condition -> label via CONDITION_LABELS map)
       .vs-weather-humidity    ("Humidity: XX%")
   .vs-weather-divider         (1px line)
@@ -1223,16 +1223,16 @@ if (toolName?.endsWith('get_weather_forecast') && toolResult?.forecast && !toolR
       span.vs-weather-row-temp   (temperature)
 ```
 
-**`CONDITION_LABELS` constant** (module-level in `ui.js`): Maps HA condition values to display labels  -  `partlycloudy` -> "Partly Cloudy", `lightning-rainy` -> "Thunderstorm", `snowy-rainy` -> "Sleet", etc. (15 entries).
+**`CONDITION_LABELS` constant** (module-level in `ui.js`): Maps HA condition values to display labels - `partlycloudy` -> "Partly Cloudy", `lightning-rainy` -> "Thunderstorm", `snowy-rainy` -> "Sleet", etc. (15 entries).
 
 **Forecast time display:** Varies by `forecast_type`:
-- `hourly`  -  uses `entry.time`
-- `daily`  -  uses `entry.date`
-- `twice_daily`  -  uses `entry.date` + " Day" or " Night" based on `entry.is_daytime`
+- `hourly` - uses `entry.time`
+- `daily` - uses `entry.date`
+- `twice_daily` - uses `entry.date` + " Day" or " Night" based on `entry.is_daytime`
 
 **Temperature display:** If both `temperature_low` and `temperature_high` exist, shows "low - high°". Otherwise shows whichever single value is present with "°" suffix.
 
-**Panel behavior:** Uses featured mode  -  `panel.classList.add('weather', 'featured', 'visible')` and `globalUI.classList.add('has-featured')`. Since `hasVisibleImages()` excludes `.featured`, no 30-second linger timeout applies  -  the UI dismisses immediately after TTS completes.
+**Panel behavior:** Uses featured mode - `panel.classList.add('weather', 'featured', 'visible')` and `globalUI.classList.add('has-featured')`. Since `hasVisibleImages()` excludes `.featured`, no 30-second linger timeout applies - the UI dismisses immediately after TTS completes.
 
 **Weather panel CSS (`.vs-image-panel.weather`):** Strips all container styles (`background: none`, no shadow/border/padding) so content floats directly over the blur overlay, matching the borderless aesthetic of the chat bubbles. Inherits the 25% width from `.vs-image-panel.featured`. Each skin applies its own color palette to the weather elements.
 
@@ -1286,11 +1286,11 @@ if (toolName?.includes('financial-data__get_financial_data') && toolResult?.quer
 **Routing:** `chat.addFinancial(data)` -> `ui.showFinancialPanel(data)`.
 
 **Formatting utilities (`shared/format.js`):**
-- `formatPrice(value, currency)`  -  Locale-aware currency formatting via `Intl.NumberFormat`. Uses 6 decimal places for sub-$1 values (crypto), 2 for $1+.
-- `formatLargeNumber(value, currency)`  -  Abbreviates large numbers: `3750000000000` -> `$3.75T`. Suffixes: M, B, T.
-- `formatChange(change, percentChange, currency)`  -  Formats change with sign prefix and optional percent: `+$2.15 (+0.88%)`.
+- `formatPrice(value, currency)` - Locale-aware currency formatting via `Intl.NumberFormat`. Uses 6 decimal places for sub-$1 values (crypto), 2 for $1+.
+- `formatLargeNumber(value, currency)` - Abbreviates large numbers: `3750000000000` -> `$3.75T`. Suffixes: M, B, T.
+- `formatChange(change, percentChange, currency)` - Formats change with sign prefix and optional percent: `+$2.15 (+0.88%)`.
 
-**DOM structure built by `showFinancialPanel(data)`  -  Stock/Crypto:**
+**DOM structure built by `showFinancialPanel(data)` - Stock/Crypto:**
 ```
 .vs-financial-card
   .vs-financial-header          (flex row: logo + name + badge)
@@ -1302,7 +1302,7 @@ if (toolName?.includes('financial-data__get_financial_data') && toolResult?.quer
   .vs-financial-details         ("Open: $243.40 · High: $246.10 · Low: $242.30")
 ```
 
-**DOM structure  -  Currency:**
+**DOM structure - Currency:**
 ```
 .vs-financial-card
   .vs-financial-conversion      (large: "100 USD = 92.15 EUR")
@@ -1313,13 +1313,13 @@ if (toolName?.includes('financial-data__get_financial_data') && toolResult?.quer
 
 **Badge text:** Uses `data.exchange`, truncated to first word before ` - ` for long exchange names. Crypto uses `"Crypto"` as badge text.
 
-**Logo handling:** `featured_image` is used as logo `src`. An `onerror` handler removes the `<img>` element if the logo fails to load  -  the card renders normally without it.
+**Logo handling:** `featured_image` is used as logo `src`. An `onerror` handler removes the `<img>` element if the logo fails to load - the card renders normally without it.
 
 **Detail row:**
 - Stock: `Open · High · Low` (only present fields shown, separated by ` · `)
 - Crypto: `24h High · 24h Low` + optional `MCap: formatLargeNumber(market_cap)`
 
-**Panel behavior:** Uses featured mode  -  `panel.classList.add('financial', 'featured', 'visible')` and `globalUI.classList.add('has-featured')`. Since `hasVisibleImages()` excludes `.featured`, no 30-second linger timeout applies.
+**Panel behavior:** Uses featured mode - `panel.classList.add('financial', 'featured', 'visible')` and `globalUI.classList.add('has-featured')`. Since `hasVisibleImages()` excludes `.featured`, no 30-second linger timeout applies.
 
 **Financial panel CSS (`.vs-image-panel.financial`):** Strips all container styles (same pattern as `.weather`) so content floats over the blur overlay. Inherits 25% width from `.vs-image-panel.featured`. Each skin applies its own color palette:
 
@@ -1345,9 +1345,9 @@ The media panel uses a two-layer structure for proper scrollbar positioning:
 
 **Why:** Direct scrollbar styling on the panel via `::-webkit-scrollbar` pseudo-elements does not work in the HA Companion App WebView. The inner wrapper pattern moves the scrollbar inside the rounded container, and `padding-right: 8px` on `.vs-panel-scroll` creates a gap between content and the scrollbar.
 
-**Gotcha  -  `padding-right` vs `margin-right`:** `margin-right` on the scroll wrapper pushes the entire container (including scrollbar) leftward but does NOT create space between content and scrollbar. `padding-right` creates the gap between content and the scrollbar  -  this is what actually works.
+**Gotcha - `padding-right` vs `margin-right`:** `margin-right` on the scroll wrapper pushes the entire container (including scrollbar) leftward but does NOT create space between content and scrollbar. `padding-right` creates the gap between content and the scrollbar - this is what actually works.
 
-**Scroll-cancels-linger:** A `scroll` event listener on `.vs-panel-scroll` clears the `_imageLingerTimeout`  -  once the user starts browsing results, the auto-dismiss timer is cancelled.
+**Scroll-cancels-linger:** A `scroll` event listener on `.vs-panel-scroll` clears the `_imageLingerTimeout` - once the user starts browsing results, the auto-dismiss timer is cancelled.
 
 ### 16A.8 Lightbox
 
@@ -1362,9 +1362,9 @@ Two modes sharing a single `.vs-lightbox` container:
 - Stops TTS if playing and sets `_videoPlaying = true` (see §16A.9)
 - Tap to close -> clears iframe `src` to stop playback, sets `_videoPlaying = false`
 
-**Gotcha  -  `youtube-nocookie.com`:** Standard `youtube.com/embed` triggers error 153 in some contexts. Using `youtube-nocookie.com` avoids this (enhanced privacy mode, no tracking cookies).
+**Gotcha - `youtube-nocookie.com`:** Standard `youtube.com/embed` triggers error 153 in some contexts. Using `youtube-nocookie.com` avoids this (enhanced privacy mode, no tracking cookies).
 
-**Gotcha  -  iframe permissions:** The iframe requires `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"` and `allowfullscreen` for proper YouTube playback within HA's WebView.
+**Gotcha - iframe permissions:** The iframe requires `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"` and `allowfullscreen` for proper YouTube playback within HA's WebView.
 
 Both modes cancel the linger timeout on open (UI stays until user dismisses). Close handler is registered once (`_vsCloseHandler` guard on the lightbox element).
 
@@ -1392,7 +1392,7 @@ if (card.ui.hasVisibleImages()) {
   card.ui.stopReactive();  // Stop mic reactivity on bar
   card._imageLingerTimeout = setTimeout(cleanup, 30000);
 } else if (playbackFailed) {
-  // TTS failed (e.g. autoplay blocked)  -  keep response visible
+  // TTS failed (e.g. autoplay blocked) - keep response visible
   card.ui.stopReactive();
   card._imageLingerTimeout = setTimeout(cleanup, Timing.TTS_FAILED_LINGER);  // 5s
 } else {
@@ -1402,7 +1402,7 @@ if (card.ui.hasVisibleImages()) {
 
 **TTS failure linger:** When the browser blocks TTS autoplay (`playbackFailed = true`), the response text lingers for 5 seconds (`TTS_FAILED_LINGER`) so the user can read the LLM response. Without this, the interaction would dismiss instantly because the TTS error fires as immediate completion.
 
-**Featured images skip linger:** `hasVisibleImages()` returns `false` when the panel has the `.featured` class (web search / Wikipedia). Featured images are passive conversational context displayed alongside a text response  -  they are not browsable media that the user needs time to explore. The `cleanup()` path runs immediately, dismissing the UI normally after TTS completes.
+**Featured images skip linger:** `hasVisibleImages()` returns `false` when the panel has the `.featured` class (web search / Wikipedia). Featured images are passive conversational context displayed alongside a text response - they are not browsable media that the user needs time to explore. The `cleanup()` path runs immediately, dismissing the UI normally after TTS completes.
 
 The linger timeout is cancelled by:
 - **User scrolling** the media panel (browsing results)
@@ -1411,7 +1411,7 @@ The linger timeout is cancelled by:
 - **Tab visibility change** (visibility handler clears it)
 - **Double-tap / Escape** (dismiss handler clears it)
 
-**Gotcha  -  Lightbox blocks cleanup:** If the lightbox is open when the linger timeout fires, the `cleanup` function returns early (`if (card.ui.isLightboxVisible()) return`). The UI stays until the user closes the lightbox and double-taps/presses Escape.
+**Gotcha - Lightbox blocks cleanup:** If the lightbox is open when the linger timeout fires, the `cleanup` function returns early (`if (card.ui.isLightboxVisible()) return`). The UI stays until the user closes the lightbox and double-taps/presses Escape.
 
 ---
 
@@ -1424,28 +1424,28 @@ Multiple features can request the blur overlay simultaneously (pipeline, timer, 
 
 ### Rainbow Bar
 State-driven animation speeds:
-- `listening`  -  3s flow (slow)
-- `processing`  -  0.5s flow (fast)
-- `speaking`  -  2s flow (medium)
-- `error-mode`  -  Red gradient, 2s flow
-- `error-flash`  -  3x flash animation (ask_question unmatched answer)
+- `listening` - 3s flow (slow)
+- `processing` - 0.5s flow (fast)
+- `speaking` - 2s flow (medium)
+- `error-mode` - Red gradient, 2s flow
+- `error-flash` - 3x flash animation (ask_question unmatched answer)
 
 **Reactive mode:** When the skin opts in (`reactiveBar: true`) and the card config allows it (`reactive_bar !== false`), states with `useReactive: true` drive bar visuals from real-time audio levels via the `--vs-audio-level` CSS custom property (0-1). The `useReactive` flag is per-state:
-- `WAKE_WORD_DETECTED`  -  reactive (mic levels)
-- `STT`  -  reactive (mic levels)
-- `INTENT`  -  **not** reactive (CSS-only processing animation)
-- `TTS`  -  reactive (audio output levels)
+- `WAKE_WORD_DETECTED` - reactive (mic levels)
+- `STT` - reactive (mic levels)
+- `INTENT` - **not** reactive (CSS-only processing animation)
+- `TTS` - reactive (audio output levels)
 
 On reactive state entry, `reconnectMic()` switches the analyser to mic input. When TTS `attachAudio()` fires, the analyser switches to audio output. INTENT uses CSS animation only because no meaningful audio data flows during intent processing.
 
 **Bar-hide guard:** `updateForState()` refuses to hide the bar (states with `barVisible: false`) when any of these are active: TTS is playing, a linger timeout is set (`_imageLingerTimeout`), a video is playing (`_videoPlaying`), or the lightbox is visible. This prevents the pipeline restart (which transitions to LISTENING/IDLE) from prematurely hiding the bar during TTS-failed linger, image linger, or video playback.
 
-**Reactive bar rendering  -  GPU-accelerated glow:** All skins use GPU-composited properties (`filter`, `opacity`, `box-shadow`) driven by `--vs-audio-level` to avoid layout thrashing. The specific technique varies by skin:
+**Reactive bar rendering - GPU-accelerated glow:** All skins use GPU-composited properties (`filter`, `opacity`, `box-shadow`) driven by `--vs-audio-level` to avoid layout thrashing. The specific technique varies by skin:
 
 | Skin | Reactive technique |
 |------|--------------------|
 | Default | `scaleY` for bar height + `::after` pseudo-element with `filter: blur()` and audio-level-driven `opacity` (`calc(var(--vs-audio-level) * 2.5)`) for glow, gradient position synced via `@property --vs-gp` |
-| Alexa | `::after` pseudo-element with `filter: blur()` and `opacity` for cyan glow halo; no `scaleY`  -  bar stays fixed height |
+| Alexa | `::after` pseudo-element with `filter: blur()` and `opacity` for cyan glow halo; no `scaleY` - bar stays fixed height |
 | Google Home | `scaleY` for bar height + `::after` pseudo-element with `filter: blur()` and `opacity` for 4-color glow, gradient synced via `@property --vs-gp` |
 | Retro Terminal | `filter: drop-shadow()` for outer glow + `box-shadow: inset` for inner glow around the full-screen border frame; no `scaleY` or `::after` |
 | Siri | `filter: drop-shadow()` for outer glow + `box-shadow: inset` for inner glow around full-screen conic-gradient border; gradient rotates via `@property --siri-angle` |
@@ -1453,11 +1453,11 @@ On reactive state entry, `reconnectMic()` switches the analyser to mic input. Wh
 The Default and Google Home skins use `@property --vs-gp` (registered via `@property` at-rule) to animate `background-position` on both the bar and its `::after` glow pseudo-element simultaneously, ensuring perfect gradient color sync between the bar and its glow. All `transition` durations on reactive properties are set to `0.05s linear` for near-instant response to audio level changes.
 
 **GPU compositing hints:** All five skins apply CSS hints to offload animation to the GPU and isolate layout:
-- `.vs-rainbow-bar`  -  `will-change: filter, opacity` (pre-allocates GPU layer for reactive bar); `contain: strict` (isolates layout/paint)
-- `.vs-rainbow-bar.reactive`  -  `transform: translateZ(0)` on Alexa, Siri, Retro Terminal (forces compositing layer for skins without `scaleY` transforms)
-- `.vs-blur-overlay`  -  `will-change: opacity` (keeps blur overlay on GPU during fade transitions)
-- `.vs-chat-container`  -  `contain: content` (isolates streaming text mutations from triggering global layout)
-- `.vs-timer-pill`  -  `contain: content` (isolates per-second countdown updates)
+- `.vs-rainbow-bar` - `will-change: filter, opacity` (pre-allocates GPU layer for reactive bar); `contain: strict` (isolates layout/paint)
+- `.vs-rainbow-bar.reactive` - `transform: translateZ(0)` on Alexa, Siri, Retro Terminal (forces compositing layer for skins without `scaleY` transforms)
+- `.vs-blur-overlay` - `will-change: opacity` (keeps blur overlay on GPU during fade transitions)
+- `.vs-chat-container` - `contain: content` (isolates streaming text mutations from triggering global layout)
+- `.vs-timer-pill` - `contain: content` (isolates per-second countdown updates)
 
 **Analyser cadence:** Reactive bar updates are throttled by `reactive_bar_update_interval_ms` (default `33ms` ~= 30fps target, min `17ms` ~= 60fps cap). The analyser uses `getByteTimeDomainData()` and quantized level updates to reduce CPU and CSS churn on low-end wall tablets.
 
@@ -1468,7 +1468,7 @@ Floating mic button with pulse animation. Shows on initial load, microphone perm
 Fixed position, centered horizontally. Bottom offset accounts for bar height. `announcement-mode` class centers vertically (for passive announcements). Notification system manages the toggle between announcement mode and normal mode.
 
 ### Timer DOM
-Timer pills, alert overlay, progress bar updates, expired pill animations  -  all coordinated by TimerManager but executed by UIManager.
+Timer pills, alert overlay, progress bar updates, expired pill animations - all coordinated by TimerManager but executed by UIManager.
 
 ---
 
@@ -1476,7 +1476,7 @@ Timer pills, alert overlay, progress bar updates, expired pill animations  -  al
 
 ### 17A.1 Overview
 
-Skins define the complete visual theme  -  activity bar, blur overlay, chat bubbles, timer pills, and animations. All visual styling is owned by skins via CSS; the card has no hardcoded gradient colors or layout values. Five built-in skins ship with the card.
+Skins define the complete visual theme - activity bar, blur overlay, chat bubbles, timer pills, and animations. All visual styling is owned by skins via CSS; the card has no hardcoded gradient colors or layout values. Five built-in skins ship with the card.
 
 ### 17A.2 Skin Definition
 
@@ -1509,17 +1509,17 @@ All five skins have `reactiveBar: true`.
 
 ### 17A.4 Skin Registry (`skins/index.js`)
 
-- `getSkin(id)`  -  Returns skin definition by ID. Falls back to default if ID is unknown.
-- `getSkinOptions()`  -  Returns `{ value, label }[]` for the editor dropdown.
+- `getSkin(id)` - Returns skin definition by ID. Falls back to default if ID is unknown.
+- `getSkinOptions()` - Returns `{ value, label }[]` for the editor dropdown.
 
 ### 17A.5 Skin Application
 
 On `setConfig()`, the card resolves the skin via `getSkin(config.skin)` and stores it as `_activeSkin`. UIManager applies the skin in `applyStyles()`:
 
-1. **`_injectSkinCSS()`**  -  Replaces the `<style id="voice-satellite-styles">` element with the skin's CSS string. All visual theming (bar gradient, bubble styles, animations) comes from this.
-2. **`_applyBackgroundOpacity()`**  -  Sets `--vs-bg-opacity` CSS variable. Uses `config.background_opacity / 100` if set, otherwise falls back to `skin.defaultOpacity`. The overlay color is set from `skin.overlayColor` as an `rgba()` background.
-3. **`_applyTextScale()`**  -  Sets `--vs-text-scale` CSS variable (50-200%).
-4. **`_applyCustomCSS()`**  -  Appends user's `custom_css` overrides in a separate `<style>` element.
+1. **`_injectSkinCSS()`** - Replaces the `<style id="voice-satellite-styles">` element with the skin's CSS string. All visual theming (bar gradient, bubble styles, animations) comes from this.
+2. **`_applyBackgroundOpacity()`** - Sets `--vs-bg-opacity` CSS variable. Uses `config.background_opacity / 100` if set, otherwise falls back to `skin.defaultOpacity`. The overlay color is set from `skin.overlayColor` as an `rgba()` background.
+3. **`_applyTextScale()`** - Sets `--vs-text-scale` CSS variable (50-200%).
+4. **`_applyCustomCSS()`** - Appends user's `custom_css` overrides in a separate `<style>` element.
 
 ### 17A.6 Reactive Bar Opt-In
 
@@ -1532,11 +1532,11 @@ get isReactiveBarEnabled() {
 ```
 
 All call sites use `this._card.isReactiveBarEnabled` instead of repeating the condition:
-- `updateForState()`  -  Determines whether to start the analyser tick loop
-- `showBarForNotification()`  -  Enables reactive mode during notification playback
-- `AudioManager.startMicrophone()`  -  Decides whether to connect mic to analyser
-- `TtsManager.play()`  -  Decides whether to route audio through analyser
-- `satellite-notification.js`  -  Decides whether to attach notification audio to analyser
+- `updateForState()` - Determines whether to start the analyser tick loop
+- `showBarForNotification()` - Enables reactive mode during notification playback
+- `AudioManager.startMicrophone()` - Decides whether to connect mic to analyser
+- `TtsManager.play()` - Decides whether to route audio through analyser
+- `satellite-notification.js` - Decides whether to attach notification audio to analyser
 
 ---
 
@@ -1654,7 +1654,7 @@ All preview elements respect the current config for live style updates:
 }
 ```
 
-All are devDependencies. There are no runtime dependencies  -  the card is a self-contained single-file bundle.
+All are devDependencies. There are no runtime dependencies - the card is a self-contained single-file bundle.
 
 ### 20.2 Build Pipeline
 
@@ -1662,13 +1662,13 @@ All are devDependencies. There are no runtime dependencies  -  the card is a sel
 
 **Babel** transpiles ES6+ features for broader browser support.
 
-**CSS**  -  Each skin's CSS files and the editor preview CSS are imported as raw strings via Webpack's `asset/source` rule. Skin CSS is injected into the document head at runtime by UIManager (`_injectSkinCSS`).
+**CSS** - Each skin's CSS files and the editor preview CSS are imported as raw strings via Webpack's `asset/source` rule. Skin CSS is injected into the document head at runtime by UIManager (`_injectSkinCSS`).
 
 **Version** is defined in `package.json` (single source of truth) and synced to `manifest.json` + `const.py` via `scripts/sync-version.js` (runs as a prebuild/predev hook). Webpack's `DefinePlugin` injects the version into the JS bundle as `__VERSION__`.
 
 **Build commands:**
-- `npm run dev`  -  Production build + xcopy to hassio network share (`\\hassio\config\custom_components\voice_satellite\`)
-- `npm run build`  -  Production build only (for CI/releases)
+- `npm run dev` - Production build + xcopy to hassio network share (`\\hassio\config\custom_components\voice_satellite\`)
+- `npm run build` - Production build only (for CI/releases)
 
 ---
 
@@ -1702,16 +1702,16 @@ All timing values are centralized in `constants.js`:
 ### Expected Pipeline Errors
 
 These errors are normal and trigger a silent restart:
-- `timeout`  -  Pipeline inactivity timeout
-- `wake-word-timeout`  -  Wake word detection timeout
-- `stt-no-text-recognized`  -  VAD ended but no speech detected
-- `duplicate_wake_up_detected`  -  Multiple wake word detections (note: underscores, not dashes  -  HA API inconsistency)
+- `timeout` - Pipeline inactivity timeout
+- `wake-word-timeout` - Wake word detection timeout
+- `stt-no-text-recognized` - VAD ended but no speech detected
+- `duplicate_wake_up_detected` - Multiple wake word detections (note: underscores, not dashes - HA API inconsistency)
 
 If the card was in an interacting state, UI is cleaned up and done chime plays before restart.
 
 ### Intent Errors (response_type === 'error')
 
-When the LLM returns an error response (e.g., tool failure, conversation agent error), `handleIntentEnd` sets `mgr.suppressTTS = true`. When `tts-end` subsequently fires, the handler detects the flag, calls `onTTSComplete(card, true)` for cleanup, and restarts the pipeline  -  without playing TTS audio.
+When the LLM returns an error response (e.g., tool failure, conversation agent error), `handleIntentEnd` sets `mgr.suppressTTS = true`. When `tts-end` subsequently fires, the handler detects the flag, calls `onTTSComplete(card, true)` for cleanup, and restarts the pipeline - without playing TTS audio.
 
 **Why `onTTSComplete` is needed:** Without it, the blur overlay, chat bubbles, and media panel stay stuck on screen. The `playbackFailed = true` parameter suppresses the "done" chime (the error chime was already played by `handleIntentEnd`).
 
@@ -1735,15 +1735,15 @@ The `setupReconnectListener` listens for the connection's `ready` event (HA reco
 
 These are the non-obvious coupling points between the card and the integration:
 
-1. **Pipeline event relay**  -  The integration's `on_pipeline_event()` relays HA pipeline events to the card via `connection.send_event()`. The card expects the same event format as HA's `assist_pipeline/run` but receives it through a different WS subscription (`voice_satellite/run_pipeline`).
+1. **Pipeline event relay** - The integration's `on_pipeline_event()` relays HA pipeline events to the card via `connection.send_event()`. The card expects the same event format as HA's `assist_pipeline/run` but receives it through a different WS subscription (`voice_satellite/run_pipeline`).
 
-2. **Init event**  -  The `voice_satellite/run_pipeline` handler sends a synthetic `{ type: "init", handler_id: N }` event before the real pipeline events. This is how the card gets the binary handler ID for audio transmission. The card blocks on this event before starting audio.
+2. **Init event** - The `voice_satellite/run_pipeline` handler sends a synthetic `{ type: "init", handler_id: N }` event before the real pipeline events. This is how the card gets the binary handler ID for audio transmission. The card blocks on this event before starting audio.
 
-3. **Stale event filtering (both sides)**  -  The integration gates on `_pipeline_run_started` (blocks events before run-start). The card uses `_runStartReceived`, `_wakeWordPhase`, and `_errorReceived` to filter events from overlapping pipeline runs.
+3. **Stale event filtering (both sides)** - The integration gates on `_pipeline_run_started` (blocks events before run-start). The card uses `_runStartReceived`, `_wakeWordPhase`, and `_errorReceived` to filter events from overlapping pipeline runs.
 
-4. **Pipeline stop protocol**  -  When replacing a pipeline run, the integration sends an empty bytes stop signal to the audio queue. It waits for the old task to exit naturally (3s timeout), only force-cancelling as a last resort. Immediate cancellation would race with the stop signal and leave orphaned HA pipeline tasks.
+4. **Pipeline stop protocol** - When replacing a pipeline run, the integration sends an empty bytes stop signal to the audio queue. It waits for the old task to exit naturally (3s timeout), only force-cancelling as a last resort. Immediate cancellation would race with the stop signal and leave orphaned HA pipeline tasks.
 
-5. **Announcement blocking**  -  `async_announce()` blocks until the card sends `announce_finished`. If the card disconnects, `unregister_satellite_subscription()` releases the blocking event to prevent indefinite hangs.
+5. **Announcement blocking** - `async_announce()` blocks until the card sends `announce_finished`. If the card disconnects, `unregister_satellite_subscription()` releases the blocking event to prevent indefinite hangs.
 
 6. **Ask question two-phase flow:**
    - Phase 1: Announcement playback (reuses `async_announce` flow)
@@ -1751,11 +1751,11 @@ These are the non-obvious coupling points between the card and the integration:
    - The `question_answered` WS handler waits for `_question_match_event` to get the hassil result before responding to the card
    - **Race condition:** `_question_match_result` is intentionally NOT cleared in the `finally` block because the asyncio scheduler might run `finally` before the WS handler reads the result
 
-7. **Timer attribute immutability**  -  The integration creates new lists (not in-place mutation) for `_active_timers` on every change. In-place mutation would share the reference with the previously written state, causing HA to suppress the `state_changed` event (old == new).
+7. **Timer attribute immutability** - The integration creates new lists (not in-place mutation) for `_active_timers` on every change. In-place mutation would share the reference with the previously written state, causing HA to suppress the `state_changed` event (old == new).
 
-8. **Screensaver keep-alive**  -  The integration sends `homeassistant.turn_off` every 5 seconds to the configured screensaver entity while the satellite is non-idle. This keeps the screen on during interactions.
+8. **Screensaver keep-alive** - The integration sends `homeassistant.turn_off` every 5 seconds to the configured screensaver entity while the satellite is non-idle. This keeps the screen on during interactions.
 
-9. **State sync ordering**  -  The card skips syncing `idle`/`listening` states while TTS is playing (barge-in scenario). This prevents the integration from showing `idle` while the user is still hearing the response.
+9. **State sync ordering** - The card skips syncing `idle`/`listening` states while TTS is playing (barge-in scenario). This prevents the integration from showing `idle` while the user is still hearing the response.
 
 ---
 
@@ -1773,7 +1773,7 @@ When recreating or modifying this card, verify:
 **Pipeline:**
 - [ ] Pipeline communicates through `voice_satellite/run_pipeline`, not `assist_pipeline/run`
 - [ ] Init event provides binary handler ID (not `runner_data.stt_binary_handler_id`)
-- [ ] No idle timeout  -  server manages pipeline lifecycle
+- [ ] No idle timeout - server manages pipeline lifecycle
 - [ ] Stale event filtering: `_runStartReceived`, `_wakeWordPhase`, `_errorReceived`
 - [ ] Empty `wake_word-end` (no `wake_word_id`) is ignored (pipeline restart artifact)
 - [ ] `isRestarting` flag prevents concurrent restarts
@@ -1786,7 +1786,7 @@ When recreating or modifying this card, verify:
 - [ ] Stall-detection watchdog (`setInterval`) checks `audio.currentTime` progression, force-completes on stall
 - [ ] Done chime controlled by `wake_sound` switch, suppressed for remote TTS and on playback failure
 - [ ] `suppressTTS` flag: `handleIntentEnd` sets on intent error, `handleTtsEnd` skips play and calls `onTTSComplete(card, true)`
-- [ ] `_videoPlaying` flag checked at both TTS play sites  -  suppresses TTS during video lightbox playback
+- [ ] `_videoPlaying` flag checked at both TTS play sites - suppresses TTS during video lightbox playback
 - [ ] Streaming TTS: no restart at `tts_start_streaming`, skip duplicate at `tts-end`
 - [ ] Remote TTS: entity state monitoring via `checkRemotePlayback()` in `set hass()`, not a fixed delay
 - [ ] Remote TTS: `_remoteSawPlaying` guard prevents false completion before playback starts
@@ -1825,12 +1825,12 @@ When recreating or modifying this card, verify:
 - [ ] `chat.streamEl` cleared between conversation turns
 - [ ] Escape key dismisses active interactions, media linger, timer alerts, and notifications (same priority as double-tap)
 
-**Rich Media (Experimental  -  §16A):**
+**Rich Media (Experimental - §16A):**
 - [ ] `intent-progress` with `role: 'tool_result'` routes to weather/image/video handlers (weather checked first by tool name)
 - [ ] `intent-progress` with `featured_image` routes to image panel in featured mode (narrower 25% layout)
 - [ ] `intent-progress` with `get_weather_forecast` tool (matched via `.endsWith()`) routes to `chat.addWeather()` -> `ui.showWeatherPanel()`
-- [ ] Weather panel uses featured mode (`.weather.featured` classes, `has-featured` on global UI)  -  no linger timeout
-- [ ] Weather panel strips container styles (`background: none`, no shadow/border/padding)  -  content floats over blur overlay
+- [ ] Weather panel uses featured mode (`.weather.featured` classes, `has-featured` on global UI) - no linger timeout
+- [ ] Weather panel strips container styles (`background: none`, no shadow/border/padding) - content floats over blur overlay
 - [ ] `CONDITION_LABELS` maps HA condition values to display labels (15 entries)
 - [ ] Forecast time varies by type: `entry.time` (hourly), `entry.date` (daily), `entry.date` + Day/Night (twice_daily)
 - [ ] `hasVisibleImages()` excludes featured panels (returns `false` when `.featured` class present)
@@ -1863,7 +1863,7 @@ When recreating or modifying this card, verify:
 - [ ] `resolveEntity()` returns `DISABLED_VALUE` as-is when device is explicitly disabled
 - [ ] Auto-selects when exactly one satellite entity exists (no picker shown)
 - [ ] `setConfig()`: when override enabled, localStorage takes full control; when disabled, `clearStoredEntity()` called
-- [ ] `_deviceDisabled` flag checked in `setConfig()`, `connectedCallback()`, and `set hass()`  -  prevents pipeline start
+- [ ] `_deviceDisabled` flag checked in `setConfig()`, `connectedCallback()`, and `set hass()` - prevents pipeline start
 - [ ] Picker shows "Disable on this device" red button; stores `DISABLED_VALUE`, sets `_deviceDisabled = true`
 - [ ] Picker only shows from `set hass()` startup path (when `_hasStarted` is false), never from `setConfig()`
 - [ ] `isEditorPreview()` guard prevents picker/override logic on preview instances
@@ -1889,7 +1889,7 @@ When recreating or modifying this card, verify:
 - [ ] Entity lookup via `hass.entities` device_id matching (same pattern as `getSwitchState`)
 
 **Skins:**
-- [ ] All visual styling owned by skin CSS  -  no hardcoded gradient colors or layout values in card
+- [ ] All visual styling owned by skin CSS - no hardcoded gradient colors or layout values in card
 - [ ] Skin resolved via `getSkin(config.skin)` in `setConfig()`, stored as `_activeSkin`
 - [ ] CSS injected into `<style id="voice-satellite-styles">` by `_injectSkinCSS()`
 - [ ] `background_opacity` falls back to `skin.defaultOpacity` when unset in config

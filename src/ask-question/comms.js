@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Ask Question Comms
+ * Voice Satellite Card - Ask Question Comms
  *
  * WebSocket service call for submitting question answers.
  */
@@ -17,7 +17,7 @@ export function sendAnswer(card, announceId, sentence, logPrefix) {
   const log = card.logger;
 
   if (!connection || !config.satellite_entity) {
-    log.error(logPrefix, 'Cannot send answer  -  no connection or entity');
+    log.error(logPrefix, 'Cannot send answer - no connection or entity');
     return Promise.resolve(null);
   }
 
@@ -31,7 +31,7 @@ export function sendAnswer(card, announceId, sentence, logPrefix) {
   return connection.sendMessagePromise(payload).then((result) => {
     const matched = result?.matched;
     const matchId = result?.id;
-    log.log(logPrefix, `Answer sent for #${announceId}: "${sentence}"  -  matched: ${matched}${matchId ? ` (id: ${matchId})` : ''}`);
+    log.log(logPrefix, `Answer sent for #${announceId}: "${sentence}" - matched: ${matched}${matchId ? ` (id: ${matchId})` : ''}`);
     return result;
   }).catch((err) => {
     log.error(logPrefix, `Answer failed: ${err.message || JSON.stringify(err)}`);

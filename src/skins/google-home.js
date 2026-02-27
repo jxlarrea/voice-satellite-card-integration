@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Google Home Skin
+ * Voice Satellite Card - Google Home Skin
  *
  * Light theme with Google's 4-color palette (blue, red, yellow, green),
  * Material Design cards, and a clean frosted overlay.

@@ -1,6 +1,6 @@
 """Number entities for Voice Satellite Card integration.
 
-Announcement display duration  -  how long to show announcement bubbles.
+Announcement display duration - how long to show announcement bubbles.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ class VoiceSatelliteAnnouncementDurationNumber(NumberEntity, RestoreEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        """Return device info  -  same identifiers as the satellite entity."""
+        """Return device info - same identifiers as the satellite entity."""
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
         }

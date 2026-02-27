@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  AudioManager
+ * Voice Satellite Card - AudioManager
  *
  * Handles microphone acquisition, AudioContext management,
  * and audio stream send control.
@@ -68,7 +68,7 @@ export class AudioManager {
     this._actualSampleRate = this._audioContext.sampleRate;
     this._log.log('mic', `Actual sample rate: ${this._actualSampleRate}`);
 
-    // Tap mic into analyser for reactive bar (parallel connection  -  doesn't disrupt pipeline)
+    // Tap mic into analyser for reactive bar (parallel connection - doesn't disrupt pipeline)
     if (this._card.isReactiveBarEnabled) {
       this._card.analyser.attachMic(this._sourceNode, this._audioContext);
     }
@@ -105,7 +105,7 @@ export class AudioManager {
       const handlerId = binaryHandlerIdGetter();
       if (!firstSendLogged && this._audioBuffer.length > 0) {
         firstSendLogged = true;
-        this._log.log('mic', `First audio send  -  handlerId=${handlerId} bufferChunks=${this._audioBuffer.length}`);
+        this._log.log('mic', `First audio send - handlerId=${handlerId} bufferChunks=${this._audioBuffer.length}`);
       }
       sendAudioBuffer(this, handlerId);
     }, 100);
@@ -126,7 +126,7 @@ export class AudioManager {
   }
 
   async resume() {
-    // Discard stale audio accumulated during the hidden period  -  the worklet
+    // Discard stale audio accumulated during the hidden period - the worklet
     // may have kept running (producing silence) while the tab was in the
     // background.  Sending this to the server would clog the wake word engine.
     this._audioBuffer = [];

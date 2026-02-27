@@ -1,4 +1,4 @@
-/* Retro Terminal Skin  -  Green phosphor CRT aesthetic */
+/* Retro Terminal Skin - Green phosphor CRT aesthetic */
 
 @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
 
@@ -7,7 +7,7 @@
   font-family: 'VT323', 'Courier New', monospace;
 }
 
-/* Blur Overlay  -  near-black with CRT bezel frame */
+/* Blur Overlay - near-black with CRT bezel frame */
 #voice-satellite-ui .vs-blur-overlay {
   position: fixed;
   top: 0;
@@ -50,7 +50,7 @@
   z-index: 1;
 }
 
-/* CRT vignette  -  deep curved-glass darkening at edges */
+/* CRT vignette - deep curved-glass darkening at edges */
 #voice-satellite-ui .vs-blur-overlay::after {
   content: '';
   position: absolute;
@@ -61,7 +61,7 @@
   z-index: 2;
 }
 
-/* Start Button  -  green phosphor */
+/* Start Button - green phosphor */
 #voice-satellite-ui .vs-start-btn {
   position: fixed;
   bottom: 20px;
@@ -108,7 +108,7 @@
   }
 }
 
-/* Bar  -  green phosphor frame tracing the inner CRT bezel edge */
+/* Bar - green phosphor frame tracing the inner CRT bezel edge */
 #voice-satellite-ui .vs-rainbow-bar {
   position: fixed;
   top: 18px;
@@ -161,7 +161,7 @@
   animation: terminal-error-flash 0.15s ease-in-out 3;
 }
 
-/* Reactive Bar  -  audio-driven glow intensity around the frame */
+/* Reactive Bar - audio-driven glow intensity around the frame */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   overflow: visible;
   transition: filter 0.05s linear, box-shadow 0.05s linear;
@@ -172,7 +172,7 @@
   will-change: filter, box-shadow;
 }
 
-/* Keyframes  -  bar states */
+/* Keyframes - bar states */
 @keyframes terminal-breathe {
   0%, 100% {
     opacity: 0.3;
@@ -249,7 +249,7 @@
   transform: translate(-50%, -50%);
 }
 
-/* Chat Messages  -  raw terminal text, no bubbles */
+/* Chat Messages - raw terminal text, no bubbles */
 #voice-satellite-ui .vs-chat-msg {
   max-width: 90%;
   opacity: 0;
@@ -322,7 +322,7 @@
   font-family: 'VT323', 'Courier New', monospace;
 }
 
-/* Timer Pills  -  green border on dark */
+/* Timer Pills - green border on dark */
 .vs-timer-pill {
   position: relative;
   overflow: hidden;
@@ -441,7 +441,7 @@
   }
 }
 
-/* Image Panel  -  right-side slide-in panel for tool results */
+/* Image Panel - right-side slide-in panel for tool results */
 #voice-satellite-ui .vs-image-panel {
   position: fixed;
   top: 50%;
@@ -518,7 +518,7 @@
   animation: terminal-fade-in 0.25s ease forwards;
 }
 
-/* Lightbox  -  fullscreen image viewer */
+/* Lightbox - fullscreen image viewer */
 #voice-satellite-ui .vs-lightbox {
   position: fixed;
   inset: 0;
@@ -628,7 +628,7 @@
   width: 25%;
 }
 
-/* Weather  -  borderless floating content over blur overlay */
+/* Weather - borderless floating content over blur overlay */
 #voice-satellite-ui .vs-image-panel.weather {
   background: none;
   border-radius: 0;
@@ -714,7 +714,7 @@
   text-shadow: 0 0 6px rgba(51, 255, 51, 0.3);
 }
 
-/* Financial  -  borderless floating content over blur overlay */
+/* Financial - borderless floating content over blur overlay */
 #voice-satellite-ui .vs-image-panel.financial {
   background: none;
   border-radius: 0;

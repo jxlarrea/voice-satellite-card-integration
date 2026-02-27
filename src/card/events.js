@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  Card Events
+ * Voice Satellite Card - Card Events
  *
  * State transitions, user interactions, pipeline message dispatch,
  * and TTS completion handling.
@@ -63,7 +63,7 @@ export async function startListening(card) {
     singleton.claim(card);
     card.ui.hideStartButton();
 
-    // Ensure visibility handler is on the owner  -  connectedCallback may
+    // Ensure visibility handler is on the owner - connectedCallback may
     // not have fired for this instance (e.g. card-mod creates an extra
     // element that gets config+hass but is never attached to the DOM).
     card.visibility.setup();
@@ -93,7 +93,7 @@ export async function startListening(card) {
       )
     ) {
       reason = 'not-allowed';
-      card.logger.log('mic', 'Access denied  -  browser requires user gesture');
+      card.logger.log('mic', 'Access denied - browser requires user gesture');
     } else if (e.name === 'NotFoundError') {
       reason = 'not-found';
       card.logger.error('mic', 'No microphone found');
@@ -122,13 +122,13 @@ export function onTTSComplete(card, playbackFailed) {
   // If a NEW interaction started during TTS, don't clean up
   const newInteractionStates = [State.WAKE_WORD_DETECTED, State.STT, State.INTENT];
   if (newInteractionStates.includes(card.currentState)) {
-    card.logger.log('tts', 'New interaction in progress  -  skipping cleanup');
+    card.logger.log('tts', 'New interaction in progress - skipping cleanup');
     return;
   }
 
   // Continue conversation (only if TTS played successfully)
   if (!playbackFailed && card.pipeline.shouldContinue && card.pipeline.continueConversationId) {
-    card.logger.log('pipeline', 'Continuing conversation  -  skipping wake word');
+    card.logger.log('pipeline', 'Continuing conversation - skipping wake word');
     const conversationId = card.pipeline.continueConversationId;
     card.pipeline.clearContinueState();
     card.chat.streamEl = null;
@@ -138,7 +138,7 @@ export function onTTSComplete(card, playbackFailed) {
     return;
   }
 
-  // Normal completion  -  skip done chime on error (error chime already played)
+  // Normal completion - skip done chime on error (error chime already played)
   const isRemote = !!card.ttsTarget;
   if (!playbackFailed && getSwitchState(card.hass, card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
     card.tts.playChime('done');
@@ -146,7 +146,7 @@ export function onTTSComplete(card, playbackFailed) {
 
   const cleanup = () => {
     card._imageLingerTimeout = null;
-    // User is actively browsing images  -  don't auto-dismiss
+    // User is actively browsing images - don't auto-dismiss
     if (card.ui.isLightboxVisible()) return;
     card.chat.clear();
     card.ui.hideBlurOverlay(BlurReason.PIPELINE);
@@ -178,8 +178,8 @@ export function onTTSComplete(card, playbackFailed) {
     if (card._imageLingerTimeout) clearTimeout(card._imageLingerTimeout);
     card._imageLingerTimeout = setTimeout(cleanup, 30000);
   } else if (playbackFailed) {
-    // TTS failed (e.g. autoplay blocked)  -  keep response visible so the user can read it
-    card.logger.log('tts', 'Playback failed  -  lingering response text');
+    // TTS failed (e.g. autoplay blocked) - keep response visible so the user can read it
+    card.logger.log('tts', 'Playback failed - lingering response text');
     card.ui.stopReactive();
     if (card._imageLingerTimeout) clearTimeout(card._imageLingerTimeout);
     card._imageLingerTimeout = setTimeout(cleanup, Timing.TTS_FAILED_LINGER);
@@ -230,7 +230,7 @@ export function handlePipelineMessage(card, message) {
     case 'run-end': card.pipeline.handleRunEnd(); break;
     case 'error': card.pipeline.handleError(eventData); break;
     case 'displaced':
-      card.logger.error('pipeline', 'Pipeline displaced  -  another browser is using this satellite entity');
+      card.logger.error('pipeline', 'Pipeline displaced - another browser is using this satellite entity');
       card.pipeline.stop();
       card.audio.stopMicrophone();
       card.tts.stop();

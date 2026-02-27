@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card  -  MediaPlayerManager
+ * Voice Satellite Card - MediaPlayerManager
  *
  * Handles media_player commands pushed from the integration via the
  * satellite event subscription.  Plays audio in the browser, reports
@@ -110,7 +110,7 @@ export class MediaPlayerManager {
 
   /**
    * Interrupt own playback (e.g. wake word barge-in, notification).
-   * Does NOT affect external audio sources  -  they manage themselves.
+   * Does NOT affect external audio sources - they manage themselves.
    */
   interrupt() {
     if (!this._playing && !this._paused) return;
@@ -167,7 +167,7 @@ export class MediaPlayerManager {
 
     this._mediaId = media_id;
 
-    // Sign relative URLs  -  HA media endpoints require authentication
+    // Sign relative URLs - HA media endpoints require authentication
     let url;
     if (media_id.startsWith('http://') || media_id.startsWith('https://')) {
       url = media_id;
@@ -331,7 +331,7 @@ export class MediaPlayerManager {
     this._syncInitialVolume();
     const entityId = this._getEntityId();
     if (!entityId) {
-      this._log.log('media-player', 'No media_player entity found  -  skipping state report');
+      this._log.log('media-player', 'No media_player entity found - skipping state report');
       return;
     }
 
