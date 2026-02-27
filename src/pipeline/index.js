@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — PipelineManager
+ * Voice Satellite Card  -  PipelineManager
  *
  * Manages the HA Assist pipeline lifecycle via the integration's
  * voice_satellite/run_pipeline subscription.
@@ -59,7 +59,7 @@ export class PipelineManager {
     // making them unplayable.  Restarting allocates a fresh token.
     this._tokenRefreshTimer = null;
 
-    // Generation counter — incremented by stop() so that a stale start()
+    // Generation counter  -  incremented by stop() so that a stale start()
     // (e.g. from a throttled background-tab timeout) can detect it was
     // superseded and abort without clobbering the current subscription.
     this._pipelineGen = 0;
@@ -116,9 +116,9 @@ export class PipelineManager {
       this._muteCheckId = null;
     }
 
-    // Check mute state — if muted, show visual and poll for unmute
+    // Check mute state  -  if muted, show visual and poll for unmute
     if (getSwitchState(this._card.hass, config.satellite_entity, 'mute') === true) {
-      this._log.log('pipeline', 'Satellite muted — pipeline blocked');
+      this._log.log('pipeline', 'Satellite muted  -  pipeline blocked');
       this._card.ui.showErrorBar();
       this._muteCheckId = setTimeout(() => {
         this._muteCheckId = null;
@@ -130,7 +130,7 @@ export class PipelineManager {
     // Clear error bar in case we were previously muted
     this._card.ui.clearErrorBar();
 
-    // Defensive cleanup — stop any previous subscription before starting
+    // Defensive cleanup  -  stop any previous subscription before starting
     if (this._unsubscribe) {
       this._log.log('pipeline', 'Cleaning up previous subscription');
       try { await this._unsubscribe(); } catch (_) { /* cleanup */ }
@@ -154,7 +154,7 @@ export class PipelineManager {
       runConfig.extra_system_prompt = opts.extra_system_prompt;
     }
 
-    // Reset run-start tracking — used to detect stale run-end events
+    // Reset run-start tracking  -  used to detect stale run-end events
     this._runStartReceived = false;
 
     this._log.log('pipeline', `Starting pipeline: ${JSON.stringify(runConfig)}`);
@@ -171,13 +171,13 @@ export class PipelineManager {
       config.satellite_entity,
       runConfig,
       (message) => {
-        // Stale subscription — a newer stop()/start() cycle superseded us
+        // Stale subscription  -  a newer stop()/start() cycle superseded us
         if (this._pipelineGen !== gen) return;
 
         // Synthetic init event carries the WS binary handler ID
         if (message.type === 'init') {
           this._binaryHandlerId = message.handler_id;
-          this._log.log('pipeline', `Init — handler ID: ${message.handler_id}`);
+          this._log.log('pipeline', `Init  -  handler ID: ${message.handler_id}`);
           resolveInit();
           return;
         }
@@ -188,7 +188,7 @@ export class PipelineManager {
 
     // --- Gen check 1: stop() was called while we were subscribing ---
     if (this._pipelineGen !== gen) {
-      this._log.log('pipeline', 'Aborting stale start() after subscribe — pipeline was stopped');
+      this._log.log('pipeline', 'Aborting stale start() after subscribe  -  pipeline was stopped');
       try { unsub(); } catch (_) { /* cleanup */ }
       return;
     }
@@ -202,7 +202,7 @@ export class PipelineManager {
 
     // --- Gen check 2: stop() was called while we were waiting for init ---
     if (this._pipelineGen !== gen) {
-      this._log.log('pipeline', 'Aborting stale start() after init — pipeline was stopped');
+      this._log.log('pipeline', 'Aborting stale start() after init  -  pipeline was stopped');
       if (this._unsubscribe) {
         try { this._unsubscribe(); } catch (_) { /* cleanup */ }
         this._unsubscribe = null;
@@ -210,10 +210,10 @@ export class PipelineManager {
       return;
     }
 
-    this._log.log('pipeline', `Handler ID confirmed: ${this._binaryHandlerId} — starting audio`);
+    this._log.log('pipeline', `Handler ID confirmed: ${this._binaryHandlerId}  -  starting audio`);
 
     // Start sending audio now that handler ID is guaranteed to be set.
-    // Discard stale audio first — the worklet keeps buffering while the
+    // Discard stale audio first  -  the worklet keeps buffering while the
     // pipeline is down and the buffer may contain chime residue that
     // would trigger a false VAD detection on the server.
     const { audio } = this._card;
@@ -221,7 +221,7 @@ export class PipelineManager {
     audio.startSending(() => this._binaryHandlerId);
 
     this._isStreaming = true;
-    // No idle timeout — the server manages pipeline lifecycle and sends
+    // No idle timeout  -  the server manages pipeline lifecycle and sends
     // run-end/error events when the run completes.
     // The reconnect handler covers WebSocket drops.
   }
@@ -229,10 +229,10 @@ export class PipelineManager {
   async stop() {
     this._clearTokenRefreshTimer();
 
-    // Increment generation first — any in-flight start() will see the
+    // Increment generation first  -  any in-flight start() will see the
     // mismatch after its next await and abort cleanly.
     this._pipelineGen++;
-    this._log.log('pipeline', `stop() — gen=${this._pipelineGen}`);
+    this._log.log('pipeline', `stop()  -  gen=${this._pipelineGen}`);
 
     // Unblock a start() that is stuck at `await initPromise`
     if (this._cancelInit) {
@@ -257,7 +257,7 @@ export class PipelineManager {
 
   restart(delay) {
     if (this._isRestarting) {
-      this._log.log('pipeline', 'Restart already in progress — skipping');
+      this._log.log('pipeline', 'Restart already in progress  -  skipping');
       return;
     }
     this._isRestarting = true;
@@ -286,7 +286,7 @@ export class PipelineManager {
 
   restartContinue(conversationId, opts = {}) {
     if (this._isRestarting) {
-      this._log.log('pipeline', 'Restart already in progress — skipping continue');
+      this._log.log('pipeline', 'Restart already in progress  -  skipping continue');
       return;
     }
     this._isRestarting = true;
@@ -337,7 +337,7 @@ export class PipelineManager {
       return;
     }
     // Empty wake_word_output means the pipeline's audio stream was stopped
-    // (restart/stop signal). This is expected on every pipeline restart —
+    // (restart/stop signal). This is expected on every pipeline restart  - 
     // not a real error. Suppress it to avoid entering a retry loop.
     const output = data?.wake_word_output;
     if (!output || !output.wake_word_id) {
@@ -362,7 +362,7 @@ export class PipelineManager {
     // a preceding error means the server-side pipeline ended unexpectedly
     // (e.g. after HA reconnect).  Restart instead of processing full cleanup.
     if (this._wakeWordPhase && !this._errorReceived) {
-      this._log.log('pipeline', 'run-end during wake_word phase — restarting pipeline');
+      this._log.log('pipeline', 'run-end during wake_word phase  -  restarting pipeline');
       this.restart(0);
       return;
     }
@@ -414,9 +414,9 @@ export class PipelineManager {
   finishRunEnd() {
     this._pendingRunEnd = false;
 
-    // A linger timeout, video, or lightbox is active — let it handle cleanup
+    // A linger timeout, video, or lightbox is active  -  let it handle cleanup
     if (this._card._imageLingerTimeout || this._card._videoPlaying || this._card.ui.isLightboxVisible()) {
-      this._log.log('pipeline', 'Linger/video/lightbox active — deferring cleanup');
+      this._log.log('pipeline', 'Linger/video/lightbox active  -  deferring cleanup');
       if (!this._serviceUnavailable) this.restart(0);
       return;
     }
@@ -426,7 +426,7 @@ export class PipelineManager {
     this._card.setState(State.IDLE);
 
     if (this._serviceUnavailable) {
-      this._log.log('ui', 'Retry already scheduled — skipping restart');
+      this._log.log('ui', 'Retry already scheduled  -  skipping restart');
       return;
     }
     this.restart(0);
@@ -450,7 +450,7 @@ export class PipelineManager {
     this._tokenRefreshTimer = setTimeout(() => {
       this._tokenRefreshTimer = null;
       if (this._card.currentState !== State.LISTENING) return;
-      this._log.log('tts', 'Refreshing streaming token — restarting pipeline');
+      this._log.log('tts', 'Refreshing streaming token  -  restarting pipeline');
       this.restart(0);
     }, Timing.TOKEN_REFRESH_INTERVAL);
   }

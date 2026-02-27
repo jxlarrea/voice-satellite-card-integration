@@ -1,15 +1,7 @@
-/**
- * Voice Satellite Card — Entity Picker
- *
- * localStorage-based satellite entity resolution and picker overlay.
- * Used when browser_satellite_override is enabled and no satellite_entity
- * is configured in the card YAML.
- */
+/** Browser-override satellite entity persistence and picker overlay. */
 
 const STORAGE_KEY = 'vs-satellite-entity';
 export const DISABLED_VALUE = '__disabled__';
-
-// --- localStorage CRUD ---
 
 export function getStoredEntity() {
   try {
@@ -35,8 +27,6 @@ export function isDeviceDisabled() {
   return getStoredEntity() === DISABLED_VALUE;
 }
 
-// --- Entity Discovery ---
-
 export function discoverSatelliteEntities(hass) {
   if (!hass?.entities) return [];
   const results = [];
@@ -59,13 +49,13 @@ export function discoverSatelliteEntities(hass) {
 export function resolveEntity(hass) {
   const stored = getStoredEntity();
   if (stored) {
-    // Device explicitly disabled — return as-is
+    // Device explicitly disabled  -  return as-is
     if (stored === DISABLED_VALUE) return DISABLED_VALUE;
     // Validate entity still exists
     if (hass.entities?.[stored]) {
       return stored;
     }
-    // Stale — clear it
+    // Stale  -  clear it
     clearStoredEntity();
   }
 
@@ -78,8 +68,6 @@ export function resolveEntity(hass) {
 
   return null;
 }
-
-// --- HA Dialog Detection ---
 
 function isHADialogBlocking() {
   try {
@@ -111,8 +99,6 @@ function waitForDialogClose(callback) {
     return null;
   }
 }
-
-// --- Picker Overlay ---
 
 const PICKER_CSS = `
 .vs-picker-overlay {
@@ -249,24 +235,47 @@ function doShowPicker(hass, onSelect) {
   overlay.className = 'vs-picker-overlay';
 
   const entities = discoverSatelliteEntities(hass);
+  const card = document.createElement('div');
+  card.className = 'vs-picker-card';
 
-  let listHTML;
+  const title = document.createElement('div');
+  title.className = 'vs-picker-title';
+  title.textContent = 'Voice Satellite Card';
+  card.appendChild(title);
+
+  const subtitle = document.createElement('div');
+  subtitle.className = 'vs-picker-subtitle';
+  subtitle.textContent = 'Per-device satellite override is enabled. Select the satellite to use on this device.';
+  card.appendChild(subtitle);
+
+  const list = document.createElement('div');
+  list.className = 'vs-picker-list';
+
   if (entities.length === 0) {
-    listHTML = '<div class="vs-picker-empty">No voice satellites found.<br>Set up the Voice Satellite Card integration first.</div>';
+    const empty = document.createElement('div');
+    empty.className = 'vs-picker-empty';
+    empty.append('No voice satellites found.');
+    empty.appendChild(document.createElement('br'));
+    empty.append('Set up the Voice Satellite Card integration first.');
+    list.appendChild(empty);
   } else {
-    listHTML = entities
-      .map((e) => `<button class="vs-picker-item" data-entity="${e.entity_id}">${e.friendly_name}</button>`)
-      .join('');
+    for (const entity of entities) {
+      const button = document.createElement('button');
+      button.className = 'vs-picker-item';
+      button.dataset.entity = entity.entity_id;
+      button.textContent = entity.friendly_name;
+      list.appendChild(button);
+    }
   }
+  card.appendChild(list);
 
-  overlay.innerHTML = `
-    <div class="vs-picker-card">
-      <div class="vs-picker-title">Voice Satellite Card</div>
-      <div class="vs-picker-subtitle">Per-device satellite override is enabled. Select the satellite to use on this device.</div>
-      <div class="vs-picker-list">${listHTML}</div>
-      <button class="vs-picker-disable" data-entity="${DISABLED_VALUE}">Disable on this device</button>
-    </div>
-  `;
+  const disable = document.createElement('button');
+  disable.className = 'vs-picker-disable';
+  disable.dataset.entity = DISABLED_VALUE;
+  disable.textContent = 'Disable on this device';
+  card.appendChild(disable);
+
+  overlay.appendChild(card);
 
   overlay.addEventListener('click', (e) => {
     const btn = e.target.closest('.vs-picker-item') || e.target.closest('.vs-picker-disable');

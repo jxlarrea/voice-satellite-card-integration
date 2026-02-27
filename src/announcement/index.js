@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — AnnouncementManager
+ * Voice Satellite Card  -  AnnouncementManager
  *
  * Simple announcements: plays chime + media, shows message bubble,
  * ACKs the integration, then auto-clears after configured duration.
@@ -46,7 +46,7 @@ export class AnnouncementManager {
     sendAck(this._card, ann.id, LOG);
 
     // HA's base class cancels the active pipeline when triggering an
-    // announcement (async_internal_announce → _cancel_running_pipeline).
+    // announcement (async_internal_announce -> _cancel_running_pipeline).
     // Restart immediately so wake word detection resumes.
     this._card.pipeline.restart(0);
 
@@ -55,7 +55,7 @@ export class AnnouncementManager {
       clearNotificationUI(this);
       this.playing = false;
 
-      // Skip done chime when a queued notification is waiting — the next
+      // Skip done chime when a queued notification is waiting  -  the next
       // notification starts with its own announce chime and overlapping
       // audio from Web Audio + HTML Audio causes distortion in WebView.
       if (this.queued) {

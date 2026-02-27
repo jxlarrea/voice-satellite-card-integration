@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — Timer Events
+ * Voice Satellite Card  -  Timer Events
  *
  * Processes satellite entity state changes to detect timer additions,
  * removals, and finished alerts.

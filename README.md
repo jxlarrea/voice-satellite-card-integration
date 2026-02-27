@@ -6,7 +6,7 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/jxlarrea/voice-satellite-card-integration/release.yml?style=for-the-badge&label=Build)](https://github.com/jxlarrea/voice-satellite-card-integration/actions/workflows/release.yml)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jxlarrea)
 
-Transform any browser into a full-featured voice satellite for Home Assistant's Assist. This single package includes both a **Lovelace card** and a **custom integration** that work together to give your browser-based devices true satellite identity — with feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/), including wake word detection, timers, announcements, conversations, and more.
+Transform any browser into a full-featured voice satellite for Home Assistant's Assist. This single package includes both a **Lovelace card** and a **custom integration** that work together to give your browser-based devices true satellite identity  -  with feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/), including wake word detection, timers, announcements, conversations, and more.
 
 ## Screenshots
 <p align="center">
@@ -68,7 +68,7 @@ https://github.com/user-attachments/assets/77dda388-330c-4544-84ea-0ead6cdaad17
 
 For kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/details?id=de.ozerov.fully), make sure to enable microphone permissions and use the screensaver feature (not screen off) to keep the microphone active while dimming the display.
 
-For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings → Companion App → Other settings. Without this, the WebView will block TTS audio playback.
+For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings -> Companion App -> Other settings. Without this, the WebView will block TTS audio playback.
 
 ## Features
 
@@ -96,7 +96,7 @@ Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_re
    - Conversation agent ([Home Assistant](https://www.home-assistant.io/integrations/conversation/), OpenAI, Qwen, etc.)
    - Text-to-Speech ([Piper](https://www.home-assistant.io/integrations/piper/), Kokoro, etc.)
 
-> **Important:** Your wake word service must be **available to Home Assistant as a Wyoming integration** (either as an add-on or an external Wyoming instance) AND **enabled in your Assist pipeline**. The wake word option is hidden by default in the pipeline settings — go to **Settings → Voice assistants**, select your pipeline, click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown. If no wake word option appears, your wake word service is not installed or not detected by Home Assistant.
+> **Important:** Your wake word service must be **available to Home Assistant as a Wyoming integration** (either as an add-on or an external Wyoming instance) AND **enabled in your Assist pipeline**. The wake word option is hidden by default in the pipeline settings  -  go to **Settings -> Voice assistants**, select your pipeline, click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown. If no wake word option appears, your wake word service is not installed or not detected by Home Assistant.
 
 ## Installation
 
@@ -114,7 +114,7 @@ Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_re
 
 ## Setup
 
-1. Go to **Settings → Devices & Services → Add Integration**
+1. Go to **Settings -> Devices & Services -> Add Integration**
 2. Search for **Voice Satellite Card**
 3. Enter a name for the device (e.g., "Kitchen Tablet")
 4. Repeat for each browser device that will act as a satellite
@@ -183,7 +183,7 @@ auto_gain_control: true            # Enable automatic gain control
 voice_isolation: false             # AI-based voice isolation (Chrome only)
 ```
 
-> **Note:** Settings like TTS output, screensaver entity, and announcement display duration are configured per-device in the integration's device page (**Settings → Devices & Services → Voice Satellite Card → [device]**).
+> **Note:** Settings like TTS output, screensaver entity, and announcement display duration are configured per-device in the integration's device page (**Settings -> Devices & Services -> Voice Satellite Card -> [device]**).
 
 ## Integration
 
@@ -193,16 +193,16 @@ The integration creates a virtual Assist Satellite device for each browser, enab
 
 ### Device Settings
 
-Each satellite device exposes configuration entities on its device page (**Settings → Devices & Services → Voice Satellite Card → [device]**):
+Each satellite device exposes configuration entities on its device page (**Settings -> Devices & Services -> Voice Satellite Card -> [device]**):
 
 | Entity | Type | Description |
 |--------|------|-------------|
 | **Assist pipeline** | Select | Choose which Assist pipeline to use for this satellite |
-| **Finished speaking detection** | Select | VAD sensitivity — how aggressively to detect end of speech |
+| **Finished speaking detection** | Select | VAD sensitivity  -  how aggressively to detect end of speech |
 | **TTS Output** | Select | Where to play TTS audio: "Browser" (default) plays audio locally, or select any `media_player` entity to route TTS to an external speaker |
 | **Screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
-| **Announcement display duration** | Number | How long (1–60 seconds) to show the announcement text on screen after playback completes |
-| **Mute** | Switch | Mute/unmute the satellite — when muted, wake word detection is paused |
+| **Announcement display duration** | Number | How long (1-60 seconds) to show the announcement text on screen after playback completes |
+| **Mute** | Switch | Mute/unmute the satellite  -  when muted, wake word detection is paused |
 | **Wake sound** | Switch | Enable/disable chime sounds (wake, done, error) |
 
 All settings persist across restarts.
@@ -218,7 +218,7 @@ The card syncs its pipeline state back to the entity in real time. This means th
 | `processing` | Processing the user's intent |
 | `responding` | Speaking a TTS response |
 
-You can use this in automations — for example, muting a TV when the nearby satellite starts listening:
+You can use this in automations  -  for example, muting a TV when the nearby satellite starts listening:
 
 ```yaml
 trigger:
@@ -254,14 +254,14 @@ Example template to check for active timers:
 
 ### Starting the Satellite
 
-The card will automatically request microphone access and begin listening when loaded. If the browser blocks auto-start due to restrictions, a floating microphone button will appear — click it to start.
+The card will automatically request microphone access and begin listening when loaded. If the browser blocks auto-start due to restrictions, a floating microphone button will appear  -  click it to start.
 
 ### Voice Interaction
 
 Once running, the satellite continuously listens for your configured wake word. When detected:
 
 1. A **wake chime** plays (if enabled) and the activity bar appears
-2. **Speak your command** — the card streams audio to your STT engine and displays the transcription in real time
+2. **Speak your command**  -  the card streams audio to your STT engine and displays the transcription in real time
 3. The assistant **processes your intent** and the bar animates while thinking
 4. The **TTS response plays** and the response text appears on screen
 5. The bar fades and the satellite returns to **wake word listening**
@@ -364,9 +364,9 @@ The card provides audio and visual feedback: a done chime on successful match, o
 Each satellite automatically exposes a `media_player` entity in Home Assistant. This entity:
 
 - **Controls volume** for all satellite audio (chimes, TTS, announcements) via the HA volume slider
-- **Reflects playback state** — shows "Playing" whenever any sound is active on the satellite
-- **Supports `tts.speak`** — target the satellite as a TTS device in automations
-- **Supports `media_player.play_media`** — play arbitrary audio files on the satellite
+- **Reflects playback state**  -  shows "Playing" whenever any sound is active on the satellite
+- **Supports `tts.speak`**  -  target the satellite as a TTS device in automations
+- **Supports `media_player.play_media`**  -  play arbitrary audio files on the satellite
 - **Supports browsing** the HA media library
 
 ```yaml
@@ -387,7 +387,7 @@ data:
   message: "The laundry is done!"
 ```
 
-The entity supports play, pause, resume, stop, volume set, and volume mute — all controllable from the HA UI or automations.
+The entity supports play, pause, resume, stop, volume set, and volume mute  -  all controllable from the HA UI or automations.
 
 ## Mini Card
 
@@ -432,7 +432,7 @@ voice_isolation: false             # AI-based voice isolation (Chrome only)
 
 ## Skins
 
-The card includes a skin system that themes the entire UI — activity bar, text display, timers, and background overlay. Select a skin in the card editor under **Appearance**.
+The card includes a skin system that themes the entire UI  -  activity bar, text display, timers, and background overlay. Select a skin in the card editor under **Appearance**.
 
 ![skins](https://github.com/user-attachments/assets/436029a8-c199-4773-b50f-428598e66ff4)
 
@@ -444,7 +444,7 @@ The card includes a skin system that themes the entire UI — activity bar, text
 | **Alexa** | Cyan glow bar, dark overlay, centered bold text, Echo-inspired design |
 | **Google Home** | Four-color Google gradient bar, left-aligned text, light overlay, Nest-inspired design |
 | **Retro Terminal** | Green phosphor CRT aesthetic with scanlines, bezel frame, monospace font, and screen-edge glow |
-| **Siri** | Full-screen gradient border glow (purple → blue → teal → pink), dark frosted overlay, centered clean text, Apple-inspired design |
+| **Siri** | Full-screen gradient border glow (purple -> blue -> teal -> pink), dark frosted overlay, centered clean text, Apple-inspired design |
 
 ### Appearance Options
 
@@ -454,7 +454,7 @@ The card includes a skin system that themes the entire UI — activity bar, text
 | **Reactive activity bar** | Bar animates in response to mic and audio levels. Disable on slow devices to save resources |
 | **Reactive bar update interval (ms)** | Controls how often audio-reactive level updates are pushed to the bar. Default `33ms` (~30fps). Recommended for slow tablets: `50ms` (~20fps). Minimum `17ms` (~60fps cap). |
 | **Text Scale** | Scale all text (transcriptions, responses, timers) from 50% to 200% |
-| **Background Opacity** | Override the skin's default overlay opacity (0–100%) |
+| **Background Opacity** | Override the skin's default overlay opacity (0-100%) |
 | **Custom CSS** | Advanced: CSS rules applied on top of the selected skin for fine-tuning colors, fonts, sizes, etc. |
 
 ### Custom CSS
@@ -524,7 +524,7 @@ Ask your assistant about the weather:
 - *"What's the weather today?"*
 - *"What's the forecast for this week?"*
 
-The assistant responds with a spoken summary while displaying a weather card in the media panel showing the current temperature, condition, humidity, and a scrollable forecast (hourly, daily, or twice-daily depending on the range requested). The weather icon is sourced from Google Weather SVGs via Home Assistant. The weather card uses the same featured panel layout as web search and Wikipedia — it appears alongside the chat response and dismisses immediately after TTS completes (no 30-second linger).
+The assistant responds with a spoken summary while displaying a weather card in the media panel showing the current temperature, condition, humidity, and a scrollable forecast (hourly, daily, or twice-daily depending on the range requested). The weather icon is sourced from Google Weather SVGs via Home Assistant. The weather card uses the same featured panel layout as web search and Wikipedia  -  it appears alongside the chat response and dismisses immediately after TTS completes (no 30-second linger).
 
 ### Financial Data
 
@@ -540,7 +540,7 @@ Ask your assistant about stocks, crypto, or currency conversions:
 
 **Currency conversions** display the converted amount prominently with the exchange rate below.
 
-The financial card uses the same featured panel layout as weather — it appears alongside the chat response and dismisses immediately after TTS completes.
+The financial card uses the same featured panel layout as weather  -  it appears alongside the chat response and dismisses immediately after TTS completes.
 
 ## Troubleshooting
 
@@ -548,21 +548,21 @@ The financial card uses the same featured panel layout as weather — it appears
 
 1. **Check HTTPS:** Browsers require HTTPS for microphone access. If you're using HTTP, the microphone permission prompt won't appear. Use HTTPS or access via `localhost`.
 2. **Check browser permissions:** Make sure the browser has microphone permission for your HA URL. Look for a microphone icon in the address bar.
-3. **Check Fully Kiosk settings:** If using Fully Kiosk, ensure **Web Content Settings → Enable Microphone Access** and **Autoplay Audio** are enabled.
+3. **Check Fully Kiosk settings:** If using Fully Kiosk, ensure **Web Content Settings -> Enable Microphone Access** and **Autoplay Audio** are enabled.
 4. **Try the manual start:** If auto-start fails, tap the blue microphone button to start manually. Check the browser console (F12) for errors.
 
 ### Wake word not detected
 
-1. **Verify your wake word service is running:** Check that your wake word engine (e.g., openWakeWord, microWakeWord) is available to Home Assistant — either as an add-on (**Settings → Add-ons**) or as a Wyoming integration (**Settings → Devices & Services**).
-2. **Verify wake word detection is enabled in your pipeline:** Go to **Settings → Voice assistants**, select your pipeline, and check that a wake word is selected. **This setting is hidden by default** — click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown.
+1. **Verify your wake word service is running:** Check that your wake word engine (e.g., openWakeWord, microWakeWord) is available to Home Assistant  -  either as an add-on (**Settings -> Add-ons**) or as a Wyoming integration (**Settings -> Devices & Services**).
+2. **Verify wake word detection is enabled in your pipeline:** Go to **Settings -> Voice assistants**, select your pipeline, and check that a wake word is selected. **This setting is hidden by default**  -  click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown.
 3. Enable `debug: true` in the card config to see pipeline events in the browser console (F12).
 
 ### No audio response
 
 1. Check that TTS is configured in your Assist pipeline.
 2. Check browser audio permissions.
-3. If **using Fully Kiosk**, ensure that **Web Content Settings** → **Autoplay Audio** is enabled.
-4. The **Home Assistant Companion App** may block audio autoplay by default, ensure that **Settings** → **Companion App** → **Other settings** → **Autoplay videos** is enabled.
+3. If **using Fully Kiosk**, ensure that **Web Content Settings** -> **Autoplay Audio** is enabled.
+4. The **Home Assistant Companion App** may block audio autoplay by default, ensure that **Settings** -> **Companion App** -> **Other settings** -> **Autoplay videos** is enabled.
 
 Without these settings, the card will still function (wake word detection, speech-to-text, and visual feedback all work normally) but TTS audio won't play. The UI will clean up gracefully after the interaction completes.
 

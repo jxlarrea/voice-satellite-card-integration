@@ -1,9 +1,9 @@
 /**
- * Voice Satellite Card — AnalyserManager
+ * Voice Satellite Card  -  AnalyserManager
  *
  * Provides real-time audio level analysis for reactive bar animations.
- * Uses two separate AnalyserNodes — one for microphone input, one for
- * audio output (TTS / notifications) — so the mic can never be routed
+ * Uses two separate AnalyserNodes  -  one for microphone input, one for
+ * audio output (TTS / notifications)  -  so the mic can never be routed
  * to the speakers through the analyser graph.
  *
  * The mic analyser is never connected to AudioContext.destination;
@@ -18,11 +18,11 @@ export class AnalyserManager {
     this._card = card;
     this._log = card.logger;
 
-    // Mic path: sourceNode → _micAnalyser (no destination)
+    // Mic path: sourceNode -> _micAnalyser (no destination)
     this._micAnalyser = null;
     this._micSourceNode = null;
 
-    // Audio path: mediaElementSource → _audioAnalyser → destination
+    // Audio path: mediaElementSource -> _audioAnalyser -> destination
     this._audioAnalyser = null;
     this._mediaSourceNode = null;
 
@@ -47,7 +47,7 @@ export class AnalyserManager {
 
   /**
    * Connect analyser as a parallel tap on the mic source node.
-   * The mic analyser is never connected to destination — it only
+   * The mic analyser is never connected to destination  -  it only
    * provides FFT data for the reactive bar.
    */
   attachMic(sourceNode, audioContext) {
@@ -57,14 +57,14 @@ export class AnalyserManager {
     }
     try {
       sourceNode.connect(this._micAnalyser);
-      this._log.log('analyser', 'Mic → micAnalyser connected');
+      this._log.log('analyser', 'Mic -> micAnalyser connected');
     } catch (e) {
       this._log.log('analyser', `Failed to attach mic: ${e.message}`);
     }
     // Default to mic analyser when no audio is playing
     if (!this._activeAnalyser) {
       this._setActiveAnalyser(this._micAnalyser);
-      this._log.log('analyser', 'Active → micAnalyser (initial)');
+      this._log.log('analyser', 'Active -> micAnalyser (initial)');
     }
   }
 
@@ -76,13 +76,13 @@ export class AnalyserManager {
     if (!this._micAnalyser) return;
     try {
       sourceNode.disconnect(this._micAnalyser);
-      this._log.log('analyser', 'Mic → micAnalyser disconnected');
+      this._log.log('analyser', 'Mic -> micAnalyser disconnected');
     } catch {
       // Already disconnected
     }
     if (this._activeAnalyser === this._micAnalyser) {
       this._activeAnalyser = null;
-      this._log.log('analyser', 'Active → none (mic detached)');
+      this._log.log('analyser', 'Active -> none (mic detached)');
     }
   }
 
@@ -91,7 +91,7 @@ export class AnalyserManager {
    * analysis. createMediaElementSource reroutes audio through the Web
    * Audio graph, so we connect through to destination for audibility.
    *
-   * Uses a separate analyser from the mic — the mic analyser has no
+   * Uses a separate analyser from the mic  -  the mic analyser has no
    * path to destination, so feedback is structurally impossible.
    */
   attachAudio(audioEl, audioContext) {
@@ -108,7 +108,7 @@ export class AnalyserManager {
 
       // Switch reactive bar to read from audio analyser during playback
       this._setActiveAnalyser(this._audioAnalyser);
-      this._log.log('analyser', 'Audio → audioAnalyser → destination connected, active → audioAnalyser');
+      this._log.log('analyser', 'Audio -> audioAnalyser -> destination connected, active -> audioAnalyser');
     } catch (e) {
       this._log.log('analyser', `Failed to attach audio: ${e.message}`);
       this._mediaSourceNode = null;
@@ -124,22 +124,22 @@ export class AnalyserManager {
 
   /**
    * Switch the reactive bar back to reading from the mic analyser.
-   * The mic source stays connected to its analyser at all times —
+   * The mic source stays connected to its analyser at all times  - 
    * this just changes which analyser _tick() reads FFT data from.
    *
-   * No-op while audio is routed through the audio analyser — callers
+   * No-op while audio is routed through the audio analyser  -  callers
    * like updateForState fire for all bar-visible states (including TTS),
    * and switching away from the audio analyser mid-playback would make
    * the bar show mic levels instead of TTS levels.
    */
   reconnectMic() {
     if (this._mediaSourceNode) {
-      this._log.log('analyser', 'reconnectMic skipped — audio still attached');
+      this._log.log('analyser', 'reconnectMic skipped  -  audio still attached');
       return;
     }
     if (this._micAnalyser) {
       this._setActiveAnalyser(this._micAnalyser);
-      this._log.log('analyser', 'Active → micAnalyser (reconnectMic)');
+      this._log.log('analyser', 'Active -> micAnalyser (reconnectMic)');
     }
   }
 
@@ -206,19 +206,19 @@ export class AnalyserManager {
     if (this._mediaSourceNode) {
       try { this._mediaSourceNode.disconnect(); } catch {}
       this._mediaSourceNode = null;
-      this._log.log('analyser', 'Audio → audioAnalyser disconnected');
+      this._log.log('analyser', 'Audio -> audioAnalyser disconnected');
     }
     if (this._audioAnalyser) {
       try { this._audioAnalyser.disconnect(); } catch {}
-      this._log.log('analyser', 'audioAnalyser → destination disconnected');
+      this._log.log('analyser', 'audioAnalyser -> destination disconnected');
     }
     // Revert to mic analyser if available
     if (this._micAnalyser) {
       this._setActiveAnalyser(this._micAnalyser);
-      this._log.log('analyser', 'Active → micAnalyser (audio detached)');
+      this._log.log('analyser', 'Active -> micAnalyser (audio detached)');
     } else {
       this._activeAnalyser = null;
-      this._log.log('analyser', 'Active → none (audio detached, no mic)');
+      this._log.log('analyser', 'Active -> none (audio detached, no mic)');
     }
   }
 
@@ -228,7 +228,7 @@ export class AnalyserManager {
       return;
     }
 
-    // Cap at ~20 fps — CSS transitions smooth the gaps and this saves CPU
+    // Cap at ~20 fps  -  CSS transitions smooth the gaps and this saves CPU
     // significantly on low-end Android wall tablets.
     const now = performance.now();
     const targetIntervalMs = this._getUpdateIntervalMs();
@@ -245,7 +245,7 @@ export class AnalyserManager {
     // cheaper than FFT/frequency analysis and visually sufficient here.
     this._activeAnalyser.getByteTimeDomainData(this._dataArray);
 
-    // Compute mean absolute amplitude normalized to 0–1, then quantize to
+    // Compute mean absolute amplitude normalized to 0-1, then quantize to
     // skip redundant CSS updates when the level barely changes.
     let sum = 0;
     for (let i = 0; i < this._dataArray.length; i++) {

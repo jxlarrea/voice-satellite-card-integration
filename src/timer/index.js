@@ -1,15 +1,15 @@
 /**
- * Voice Satellite Card — TimerManager
+ * Voice Satellite Card  -  TimerManager
  *
  * Watches the satellite entity's active_timers attribute and renders
  * countdown pill overlays.
  *
  * Timer lifecycle:
- * 1. HA state_changed → active_timers gets new entry → pill appears
- * 2. Local 1s tick counts down → pill updates in-place
- * 3. HA state_changed → active_timers entry removed + last_timer_event
- *    - "finished" → show alert (blur + chime + 0:00 display)
- *    - "cancelled" → silently remove pill
+ * 1. HA state_changed -> active_timers gets new entry -> pill appears
+ * 2. Local 1s tick counts down -> pill updates in-place
+ * 3. HA state_changed -> active_timers entry removed + last_timer_event
+ *    - "finished" -> show alert (blur + chime + 0:00 display)
+ *    - "cancelled" -> silently remove pill
  * 4. Alert dismissed by double-tap or auto-dismiss timeout
  */
 

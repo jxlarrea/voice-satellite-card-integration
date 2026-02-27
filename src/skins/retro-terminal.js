@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — Retro Terminal Skin
+ * Voice Satellite Card  -  Retro Terminal Skin
  *
  * Green phosphor CRT aesthetic with monospace font,
  * scanline overlay, and glow effects.

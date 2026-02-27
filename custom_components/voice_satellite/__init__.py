@@ -170,7 +170,7 @@ async def ws_question_answered(
     if match_event is not None:
         try:
             await asyncio.wait_for(match_event.wait(), timeout=10.0)
-            # Read result immediately — finally block may clear it
+            # Read result immediately  -  finally block may clear it
             result = entity._question_match_result or result
         except asyncio.TimeoutError:
             pass
@@ -199,7 +199,7 @@ async def ws_run_pipeline(
     connection: websocket_api.ActiveConnection,
     msg: dict,
 ) -> None:
-    """Run a bridged pipeline — stream audio in, relay events back.
+    """Run a bridged pipeline  -  stream audio in, relay events back.
 
     Follows the same binary handler pattern as HA core's assist_pipeline/run.
     """
@@ -217,17 +217,17 @@ async def ws_run_pipeline(
         return
 
     # Stop the old pipeline's audio stream so internal HA tasks (wake word,
-    # STT) unblock naturally.  We must NOT cancel immediately — the stop
+    # STT) unblock naturally.  We must NOT cancel immediately  -  the stop
     # signal and CancelledError would race on `await audio_queue.get()`,
     # and CancelledError always wins, leaving orphaned PipelineInput tasks.
-    # Instead: send stop signal → wait for natural exit → cancel only on timeout.
+    # Instead: send stop signal -> wait for natural exit -> cancel only on timeout.
     if entity._pipeline_audio_queue is not None:
         old_conn = entity._pipeline_connection
         old_msg_id = entity._pipeline_msg_id
         if old_conn is not None and old_conn is not connection:
             _LOGGER.warning(
                 "Pipeline for '%s' displaced by a different browser connection "
-                "— the previous browser will stop receiving wake word events. "
+                " -  the previous browser will stop receiving wake word events. "
                 "Each browser must use its own satellite entity.",
                 entity._satellite_name,
             )
@@ -247,7 +247,7 @@ async def ws_run_pipeline(
             except (asyncio.CancelledError, Exception):
                 pass
 
-    # Audio queue — card sends binary audio frames, empty bytes = stop
+    # Audio queue  -  card sends binary audio frames, empty bytes = stop
     audio_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
     # Register binary handler for incoming audio.
@@ -289,7 +289,7 @@ async def ws_run_pipeline(
     )
     entity._pipeline_task = task
 
-    # Cleanup on unsubscribe — send stop signal to end the audio stream
+    # Cleanup on unsubscribe  -  send stop signal to end the audio stream
     # naturally.  Do NOT cancel here; CancelledError races with the stop
     # signal and leaves orphaned HA pipeline tasks.  The next ws_run_pipeline
     # call (or async_will_remove_from_hass) handles forced cancellation.

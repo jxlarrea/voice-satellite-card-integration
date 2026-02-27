@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — Skin Registry
+ * Voice Satellite Card  -  Skin Registry
  */
 
 import { defaultSkin } from './default.js';

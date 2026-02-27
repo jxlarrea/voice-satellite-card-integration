@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — Satellite Event Subscription
+ * Voice Satellite Card  -  Satellite Event Subscription
  *
  * Single WS subscription for satellite-pushed events (announcement,
  * start_conversation, ask_question).  Replaces per-manager entity
@@ -23,7 +23,7 @@ let _retryCount = 0;
 
 /**
  * Subscribe to satellite events via voice_satellite/subscribe_events.
- * Idempotent — no-op if already subscribed.
+ * Idempotent  -  no-op if already subscribed.
  *
  * @param {object} card - Card instance
  * @param {(event: object) => void} onEvent - Called with {type, data}
@@ -42,7 +42,7 @@ export function subscribeSatelliteEvents(card, onEvent) {
   // Re-subscribe on HA reconnect
   if (!_reconnectListener) {
     _reconnectListener = () => {
-      card.logger.log('satellite-sub', 'Connection reconnected — re-subscribing');
+      card.logger.log('satellite-sub', 'Connection reconnected  -  re-subscribing');
       _cleanup();
       const conn = card.connection;
       if (conn) {

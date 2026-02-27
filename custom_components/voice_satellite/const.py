@@ -5,7 +5,7 @@ from typing import Final
 DOMAIN: Final[str] = "voice_satellite"
 SCREENSAVER_INTERVAL: int = 5  # seconds
 
-# Version — synced from package.json by scripts/sync-version.js
+# Version  -  synced from package.json by scripts/sync-version.js
 INTEGRATION_VERSION: str = "5.7.1"
 
 # Frontend serving

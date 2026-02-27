@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — Alexa Skin
+ * Voice Satellite Card  -  Alexa Skin
  *
  * Dark theme with cyan accent glow, inspired by the Echo Show UI.
  * Uses a bottom edge glow instead of a rainbow bar.

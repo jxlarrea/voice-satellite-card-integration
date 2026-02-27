@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — Chime Utility
+ * Voice Satellite Card  -  Chime Utility
  *
  * Shared Web Audio API chime synthesis. Supports reusing the card's
  * existing AudioContext (unlocked by user gesture) with automatic

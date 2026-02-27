@@ -5,7 +5,7 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-/* Blur Overlay — darker, heavier blur for Alexa's dark aesthetic */
+/* Blur Overlay  -  darker, heavier blur for Alexa's dark aesthetic */
 #voice-satellite-ui .vs-blur-overlay {
   position: fixed;
   top: 0;
@@ -25,7 +25,7 @@
   opacity: 1;
 }
 
-/* Start Button — cyan Alexa accent */
+/* Start Button  -  cyan Alexa accent */
 #voice-satellite-ui .vs-start-btn {
   position: fixed;
   bottom: 20px;
@@ -72,7 +72,7 @@
   }
 }
 
-/* Bottom Glow — full-width bar with strong glow */
+/* Bottom Glow  -  full-width bar with strong glow */
 #voice-satellite-ui .vs-rainbow-bar {
   position: fixed;
   left: 0;
@@ -122,7 +122,7 @@
   animation: alexa-error-flash 0.15s ease-in-out 3;
 }
 
-/* Reactive Bar — audio-driven glow, speed varies by state */
+/* Reactive Bar  -  audio-driven glow, speed varies by state */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   overflow: visible;
   transform: translateZ(0);
@@ -242,7 +242,7 @@
   transform: translate(-50%, -50%);
 }
 
-/* Chat Messages — clean text on dark background, no bubbles */
+/* Chat Messages  -  clean text on dark background, no bubbles */
 #voice-satellite-ui .vs-chat-msg {
   max-width: 85%;
   opacity: 0;
@@ -299,7 +299,7 @@
   }
 }
 
-/* Timer Container — top-right */
+/* Timer Container  -  top-right */
 .vs-timer-container {
   position: fixed;
   top: 12px;
@@ -312,7 +312,7 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-/* Timer Pills — dark with cyan accent */
+/* Timer Pills  -  dark with cyan accent */
 .vs-timer-pill {
   position: relative;
   overflow: hidden;
@@ -365,7 +365,7 @@
   animation: alexa-timer-fade-out 0.4s ease forwards;
 }
 
-/* Timer Finished Alert — dark with cyan glow */
+/* Timer Finished Alert  -  dark with cyan glow */
 .vs-timer-alert {
   position: fixed;
   top: 50%;
@@ -431,7 +431,7 @@
   }
 }
 
-/* Image Panel — right-side slide-in panel for tool results */
+/* Image Panel  -  right-side slide-in panel for tool results */
 #voice-satellite-ui .vs-image-panel {
   position: fixed;
   top: 50%;
@@ -507,7 +507,7 @@
   animation: alexa-fade-in 0.35s ease forwards;
 }
 
-/* Lightbox — fullscreen image viewer */
+/* Lightbox  -  fullscreen image viewer */
 #voice-satellite-ui .vs-lightbox {
   position: fixed;
   inset: 0;
@@ -610,7 +610,7 @@
   width: 25%;
 }
 
-/* Weather — borderless floating content over blur overlay */
+/* Weather  -  borderless floating content over blur overlay */
 #voice-satellite-ui .vs-image-panel.weather {
   background: none;
   border-radius: 0;
@@ -693,7 +693,7 @@
   min-width: 56px;
 }
 
-/* Financial — borderless floating content over blur overlay */
+/* Financial  -  borderless floating content over blur overlay */
 #voice-satellite-ui .vs-image-panel.financial {
   background: none;
   border-radius: 0;

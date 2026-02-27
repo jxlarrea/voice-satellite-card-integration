@@ -1,10 +1,4 @@
-/**
- * Voice Satellite Card — Timer UI
- *
- * Timer-specific orchestration for pill sync, tick updates,
- * and alert lifecycle. All DOM ops delegate to UIManager,
- * all audio delegates to audio/chime.
- */
+/** Timer UI bridge: pills, ticking, and finished-alert lifecycle. */
 
 import { playMultiNoteChime, CHIME_ALERT } from '../audio/chime.js';
 
@@ -12,14 +6,10 @@ let _chimeInterval = null;
 let _dismissTimeout = null;
 import { BlurReason, Timing } from '../constants.js';
 
-// --- Container ---
-
 /** @param {import('./index.js').TimerManager} mgr */
 export function removeContainer(mgr) {
   mgr.card.ui.removeTimerContainer();
 }
-
-// --- Pill Management ---
 
 /**
  * @param {import('./index.js').TimerManager} mgr
@@ -40,8 +30,6 @@ export function syncDOM(mgr) {
   );
 }
 
-// --- Tick ---
-
 /** @param {import('./index.js').TimerManager} mgr */
 export function tick(mgr) {
   const now = Date.now();
@@ -54,8 +42,6 @@ export function tick(mgr) {
     mgr.card.ui.updateTimerPill(t.el, left, t.totalSeconds);
   }
 }
-
-// --- Alert ---
 
 /** @param {import('./index.js').TimerManager} mgr */
 export function showAlert(mgr) {

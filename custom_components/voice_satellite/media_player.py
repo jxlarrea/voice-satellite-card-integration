@@ -127,7 +127,7 @@ class VoiceSatelliteMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        """Return device info — same device as the satellite entity."""
+        """Return device info  -  same device as the satellite entity."""
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
         }
@@ -141,7 +141,7 @@ class VoiceSatelliteMediaPlayer(MediaPlayerEntity, RestoreEntity):
         satellite = self._get_satellite_entity()
         if satellite is None:
             _LOGGER.warning(
-                "Cannot push media_player command — satellite entity not found for '%s'",
+                "Cannot push media_player command  -  satellite entity not found for '%s'",
                 self._satellite_name,
             )
             return
@@ -217,7 +217,7 @@ class VoiceSatelliteMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.async_write_ha_state()
 
     async def async_set_volume_level(self, volume: float) -> None:
-        """Set volume level (0–1)."""
+        """Set volume level (0-1)."""
         self._push_command("volume_set", volume=volume)
         self._attr_volume_level = volume
         self.async_write_ha_state()

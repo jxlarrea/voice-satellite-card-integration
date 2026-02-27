@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — Card Comms
+ * Voice Satellite Card  -  Card Comms
  *
  * WebSocket state sync from the card.
  *

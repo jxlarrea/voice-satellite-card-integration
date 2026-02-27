@@ -1,8 +1,8 @@
 """Select entities for Voice Satellite Card integration.
 
-Pipeline select — choose which Assist pipeline to use.
-VAD sensitivity select — configure finished speaking detection.
-Screensaver select — choose which entity to keep off during interactions.
+Pipeline select  -  choose which Assist pipeline to use.
+VAD sensitivity select  -  configure finished speaking detection.
+Screensaver select  -  choose which entity to keep off during interactions.
 
 Pipeline and VAD subclass the framework's built-in select entities from
 assist_pipeline so that the device is registered in pipeline_devices
@@ -71,7 +71,7 @@ class VoiceSatellitePipelineSelect(AssistPipelineSelect):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        """Return device info — same identifiers as the satellite entity."""
+        """Return device info  -  same identifiers as the satellite entity."""
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
         }
@@ -90,7 +90,7 @@ class VoiceSatelliteVadSensitivitySelect(VadSensitivitySelect):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        """Return device info — same identifiers as the satellite entity."""
+        """Return device info  -  same identifiers as the satellite entity."""
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
         }
@@ -118,7 +118,7 @@ class VoiceSatelliteScreensaverSelect(SelectEntity, RestoreEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        """Return device info — same identifiers as the satellite entity."""
+        """Return device info  -  same identifiers as the satellite entity."""
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
         }
@@ -174,7 +174,7 @@ class VoiceSatelliteScreensaverSelect(SelectEntity, RestoreEntity):
 
     @property
     def options(self) -> list[str]:
-        """Return available options — friendly names of switch/input_boolean entities."""
+        """Return available options  -  friendly names of switch/input_boolean entities."""
         eid_to_name, _ = self._build_mapping()
         opts: list[str] = [SCREENSAVER_DISABLED]
         opts.extend(eid_to_name.values())
@@ -211,7 +211,7 @@ class VoiceSatelliteScreensaverSelect(SelectEntity, RestoreEntity):
                 self._selected_entity_id = entity_id
 
     async def async_select_option(self, option: str) -> None:
-        """Handle option selection — resolve friendly name to entity_id."""
+        """Handle option selection  -  resolve friendly name to entity_id."""
         if option == SCREENSAVER_DISABLED:
             self._selected_entity_id = None
         else:
@@ -243,7 +243,7 @@ class VoiceSatelliteTTSOutputSelect(SelectEntity, RestoreEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        """Return device info — same identifiers as the satellite entity."""
+        """Return device info  -  same identifiers as the satellite entity."""
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
         }
@@ -295,7 +295,7 @@ class VoiceSatelliteTTSOutputSelect(SelectEntity, RestoreEntity):
 
     @property
     def options(self) -> list[str]:
-        """Return available options — friendly names of media_player entities."""
+        """Return available options  -  friendly names of media_player entities."""
         eid_to_name, _ = self._build_mapping()
         opts: list[str] = [TTS_OUTPUT_BROWSER]
         opts.extend(eid_to_name.values())
@@ -330,7 +330,7 @@ class VoiceSatelliteTTSOutputSelect(SelectEntity, RestoreEntity):
                 self._selected_entity_id = entity_id
 
     async def async_select_option(self, option: str) -> None:
-        """Handle option selection — resolve friendly name to entity_id."""
+        """Handle option selection  -  resolve friendly name to entity_id."""
         if option == TTS_OUTPUT_BROWSER:
             self._selected_entity_id = None
         else:

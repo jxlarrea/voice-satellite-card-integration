@@ -1,4 +1,4 @@
-/* Default Skin — Bubble-less */
+/* Default Skin  -  Bubble-less */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&display=swap');
 
 /* Animatable custom property for syncing bar + glow gradient position */
@@ -128,7 +128,7 @@
   animation: vs-error-flash 0.15s ease-in-out 3;
 }
 
-/* Reactive Bar — enhanced glow */
+/* Reactive Bar  -  enhanced glow */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   transition: transform 0.05s linear;
   transform-origin: bottom;
@@ -208,7 +208,7 @@
   transform: translate(-50%, -50%);
 }
 
-/* Chat Messages — Bubble-less floating text */
+/* Chat Messages  -  Bubble-less floating text */
 #voice-satellite-ui .vs-chat-msg {
   max-width: 85%;
   opacity: 0;
@@ -309,7 +309,7 @@
   font-family: 'DM Sans', Roboto, Noto, sans-serif;
 }
 
-/* Timer Pills — white card with subtle shadow */
+/* Timer Pills  -  white card with subtle shadow */
 .vs-timer-pill {
   position: relative;
   overflow: hidden;
@@ -426,7 +426,7 @@
   }
 }
 
-/* Image Panel — white card */
+/* Image Panel  -  white card */
 #voice-satellite-ui .vs-image-panel {
   position: fixed;
   top: 50%;
@@ -501,7 +501,7 @@
   animation: vs-chat-fade-in 0.3s ease forwards;
 }
 
-/* Lightbox — fullscreen image viewer */
+/* Lightbox  -  fullscreen image viewer */
 #voice-satellite-ui .vs-lightbox {
   position: fixed;
   inset: 0;
@@ -604,7 +604,7 @@
   width: 25%;
 }
 
-/* Weather — borderless floating content over blur overlay */
+/* Weather  -  borderless floating content over blur overlay */
 #voice-satellite-ui .vs-image-panel.weather {
   background: none;
   border-radius: 0;
@@ -687,7 +687,7 @@
   min-width: 56px;
 }
 
-/* Financial — borderless floating content over blur overlay */
+/* Financial  -  borderless floating content over blur overlay */
 #voice-satellite-ui .vs-image-panel.financial {
   background: none;
   border-radius: 0;

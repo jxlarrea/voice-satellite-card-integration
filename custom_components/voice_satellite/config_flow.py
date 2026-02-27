@@ -17,7 +17,7 @@ class VoiceSatelliteConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, str] | None = None
     ) -> ConfigFlowResult:
-        """Handle the initial step — user enters a name for the satellite."""
+        """Handle the initial step  -  user enters a name for the satellite."""
         errors: dict[str, str] = {}
 
         if user_input is not None:

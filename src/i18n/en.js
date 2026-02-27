@@ -16,7 +16,7 @@ export default {
       question: 'Question',
       conversation: 'Conversation',
       announcement: 'Announcement',
-      arrow_suffix: ' →',
+      arrow_suffix: ' ->',
     },
     timer: {
       finished: 'Timer finished',
@@ -53,7 +53,7 @@ export default {
         title_default: 'Tap to start voice assistant',
         title_not_allowed: 'Tap to enable microphone',
         title_not_found: 'No microphone found',
-        title_not_readable: 'Microphone unavailable - tap to retry',
+        title_not_readable: 'Microphone unavailable. Tap to retry.',
       },
       weather: {
         humidity: 'Humidity: {value}',

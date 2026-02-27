@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — Preview Renderer
+ * Voice Satellite Card  -  Preview Renderer
  *
  * Renders a static preview of the card inside the HA card editor.
  * Shows the rainbow bar, sample chat bubbles, and a timer pill
@@ -34,7 +34,7 @@ export function isEditorPreview(el) {
 
 /**
  * Render a static preview inside the given shadow root.
- * All visual values are baked into the CSS — no config-driven styling needed.
+ * All visual values are baked into the CSS  -  no config-driven styling needed.
  * @param {ShadowRoot} shadowRoot
  * @param {object} config
  */

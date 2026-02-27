@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — AskQuestionManager
+ * Voice Satellite Card  -  AskQuestionManager
  *
  * Handles ask_question announcements: plays the question prompt,
  * enters STT-only mode to capture the user's spoken answer,
@@ -74,7 +74,7 @@ export class AskQuestionManager {
     this.currentAudio = null;
     this._log.log(LOG, `Question #${ann.id} playback complete`);
 
-    // ACK immediately on playback complete — signals the integration that
+    // ACK immediately on playback complete  -  signals the integration that
     // the prompt was played. The integration then waits for question_answered.
     sendAck(this._card, ann.id, LOG);
     this._enterSttMode(ann);
@@ -98,7 +98,7 @@ export class AskQuestionManager {
 
     // Play wake chime to signal the user should speak.
     // Delay STT pipeline start so the mic doesn't pick up the chime
-    // as speech (causes false VAD trigger → stt-no-text-recognized).
+    // as speech (causes false VAD trigger -> stt-no-text-recognized).
     // Reconnect mic to the analyser for reactive bar during STT.
     // attachAudio disconnected it during announcement playback, and
     // updateForState won't run while playing is true.
@@ -129,7 +129,7 @@ export class AskQuestionManager {
       // and clean up after a generous window.
       this._sttSafetyTimeout = setTimeout(() => {
         if (!this._answerSent) {
-          this._log.log(LOG, `No STT result for #${announceId} — sending empty answer to release server`);
+          this._log.log(LOG, `No STT result for #${announceId}  -  sending empty answer to release server`);
           this._answerSent = true;
           this._processAnswer(announceId, '', isRemote);
         }
@@ -144,7 +144,7 @@ export class AskQuestionManager {
    * triggers cleanup; the other is a no-op via the `cleaned` guard.
    */
   _processAnswer(announceId, text, isRemote) {
-    // Clear pending timers — we have a result (or explicit empty)
+    // Clear pending timers  -  we have a result (or explicit empty)
     if (this._chimeSettleTimeout) {
       clearTimeout(this._chimeSettleTimeout);
       this._chimeSettleTimeout = null;
@@ -176,7 +176,7 @@ export class AskQuestionManager {
       }
     };
 
-    // Safety timeout — if sendAnswer takes too long, clean up anyway
+    // Safety timeout  -  if sendAnswer takes too long, clean up anyway
     this._cleanupTimeout = setTimeout(cleanup, Timing.ASK_QUESTION_CLEANUP);
 
     sendAnswer(this._card, announceId, text, LOG).then((result) => {

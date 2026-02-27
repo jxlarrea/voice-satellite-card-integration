@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — StartConversationManager
+ * Voice Satellite Card  -  StartConversationManager
  *
  * Handles start_conversation announcements: plays the prompt,
  * then clears the UI and enters full STT listening mode

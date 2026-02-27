@@ -14,7 +14,7 @@
   font-family: "Google Sans", Roboto, Noto, sans-serif;
 }
 
-/* Blur Overlay — light, frosted glass */
+/* Blur Overlay  -  light, frosted glass */
 #voice-satellite-ui .vs-blur-overlay {
   position: fixed;
   top: 0;
@@ -34,7 +34,7 @@
   opacity: 1;
 }
 
-/* Start Button — Google Blue with material shadow */
+/* Start Button  -  Google Blue with material shadow */
 #voice-satellite-ui .vs-start-btn {
   position: fixed;
   bottom: 20px;
@@ -81,7 +81,7 @@
   }
 }
 
-/* Google Bar — 4-color gradient, 60% width, floating above bottom */
+/* Google Bar  -  4-color gradient, 60% width, floating above bottom */
 #voice-satellite-ui .vs-rainbow-bar {
   position: fixed;
   left: 20%;
@@ -130,9 +130,9 @@
   animation: google-error-flash 0.15s ease-in-out 3;
 }
 
-/* Reactive Bar — audio-driven pulsation, speed varies by state.
+/* Reactive Bar  -  audio-driven pulsation, speed varies by state.
    Uses @property --vs-gp so the bar and its ::after glow share a single
-   animated gradient position — guaranteeing perfect color sync. */
+   animated gradient position  -  guaranteeing perfect color sync. */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   transition: transform 0.05s linear;
   transform-origin: bottom;
@@ -199,7 +199,7 @@
   50% { opacity: 0.3; }
 }
 
-/* Chat Container — left-aligned, Nest Hub style */
+/* Chat Container  -  left-aligned, Nest Hub style */
 #voice-satellite-ui .vs-chat-container {
   position: fixed;
   left: 7.5%;
@@ -235,7 +235,7 @@
   transform: translate(-50%, -50%);
 }
 
-/* Chat Messages — left-aligned text, no bubbles (Nest Hub style) */
+/* Chat Messages  -  left-aligned text, no bubbles (Nest Hub style) */
 #voice-satellite-ui .vs-chat-msg {
   max-width: 85%;
   opacity: 0;
@@ -304,7 +304,7 @@
   font-family: "Google Sans", Roboto, Noto, sans-serif;
 }
 
-/* Timer Pills — white material cards with Google Blue progress */
+/* Timer Pills  -  white material cards with Google Blue progress */
 .vs-timer-pill {
   position: relative;
   overflow: hidden;
@@ -357,7 +357,7 @@
   animation: google-timer-fade-out 0.4s ease forwards;
 }
 
-/* Timer Finished Alert — white card with Google Blue accent */
+/* Timer Finished Alert  -  white card with Google Blue accent */
 .vs-timer-alert {
   position: fixed;
   top: 50%;
@@ -422,7 +422,7 @@
   }
 }
 
-/* Image Panel — right-side slide-in panel for tool results */
+/* Image Panel  -  right-side slide-in panel for tool results */
 #voice-satellite-ui .vs-image-panel {
   position: fixed;
   top: 50%;
@@ -497,7 +497,7 @@
   animation: google-fade-in 0.3s ease forwards;
 }
 
-/* Lightbox — fullscreen image viewer */
+/* Lightbox  -  fullscreen image viewer */
 #voice-satellite-ui .vs-lightbox {
   position: fixed;
   inset: 0;
@@ -600,7 +600,7 @@
   width: 25%;
 }
 
-/* Weather — borderless floating content over blur overlay */
+/* Weather  -  borderless floating content over blur overlay */
 #voice-satellite-ui .vs-image-panel.weather {
   background: none;
   border-radius: 0;
@@ -683,7 +683,7 @@
   min-width: 56px;
 }
 
-/* Financial — borderless floating content over blur overlay */
+/* Financial  -  borderless floating content over blur overlay */
 #voice-satellite-ui .vs-image-panel.financial {
   background: none;
   border-radius: 0;

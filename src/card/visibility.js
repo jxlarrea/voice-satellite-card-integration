@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card — VisibilityManager
+ * Voice Satellite Card  -  VisibilityManager
  *
  * Handles tab visibility changes: pauses mic and blocks events on hide,
  * resumes and restarts pipeline on show.
@@ -48,7 +48,7 @@ export class VisibilityManager {
       clearTimeout(this._debounceTimer);
     }
 
-    // Only the singleton owner should manage visibility — non-owner instances
+    // Only the singleton owner should manage visibility  -  non-owner instances
     // have no mic or pipeline and must not interfere with the active owner.
     if (!this._card.isOwner) return;
 
@@ -64,7 +64,7 @@ export class VisibilityManager {
 
       this._isPaused = true;
 
-      // Cancel any in-progress ask_question flow — its cleanup timer
+      // Cancel any in-progress ask_question flow  -  its cleanup timer
       // would otherwise fire after resume and double-restart the pipeline.
       this._card.askQuestion.cancel();
 
@@ -72,7 +72,7 @@ export class VisibilityManager {
       const isLingering = this._card._imageLingerTimeout || this._card.ui.hasVisibleImages() || this._card.ui.isLightboxVisible();
 
       if (isInteracting || isLingering) {
-        this._log.log('visibility', `Tab hidden — cleaning up UI (interacting=${isInteracting}, lingering=${!!isLingering})`);
+        this._log.log('visibility', `Tab hidden  -  cleaning up UI (interacting=${isInteracting}, lingering=${!!isLingering})`);
         if (this._card._imageLingerTimeout) {
           clearTimeout(this._card._imageLingerTimeout);
           this._card._imageLingerTimeout = null;
@@ -86,11 +86,11 @@ export class VisibilityManager {
       }
 
       this._debounceTimer = setTimeout(() => {
-        this._log.log('visibility', 'Tab hidden — pausing mic');
+        this._log.log('visibility', 'Tab hidden  -  pausing mic');
         this._pause();
       }, Timing.VISIBILITY_DEBOUNCE);
     } else {
-      this._log.log('visibility', 'Tab visible — resuming');
+      this._log.log('visibility', 'Tab visible  -  resuming');
       this._resume();
     }
   }
@@ -99,11 +99,11 @@ export class VisibilityManager {
     this._isPaused = true;
     this._card.setState(State.PAUSED);
     this._card.audio.pause();
-    // Do NOT call pipeline.stop() here — the unawaited stop() creates a
+    // Do NOT call pipeline.stop() here  -  the unawaited stop() creates a
     // race where the server is still cancelling the old pipeline task when
-    // _resume() → restart(0) → start() creates a new subscription, causing
+    // _resume() -> restart(0) -> start() creates a new subscription, causing
     // async_accept_pipeline_from_satellite() to silently fail.
-    // restart(0) in _resume() handles the properly sequenced stop→start.
+    // restart(0) in _resume() handles the properly sequenced stop->start.
   }
 
   async _resume() {
@@ -115,17 +115,17 @@ export class VisibilityManager {
     // Browsers throttle setTimeout in background tabs (≥1s in Chrome).
     // When the tab becomes visible, the throttled timeout can fire during
     // our await below, starting a concurrent pipeline.start() that races
-    // with our own restart(0) — two subscriptions clobber each other's
+    // with our own restart(0)  -  two subscriptions clobber each other's
     // binaryHandlerId, sending audio to a dead handler.
     pipeline.resetForResume();
 
-    // Resume AudioContext — browser suspends it in background tabs,
+    // Resume AudioContext  -  browser suspends it in background tabs,
     // and the worklet/processor can't produce audio until it's running.
     // Keep _isPaused = true during this await so stale pipeline events
     // from the still-active subscription are blocked by handlePipelineMessage.
     await this._card.audio.resume();
 
-    // Now unpause and immediately enter restart — the synchronous path from
+    // Now unpause and immediately enter restart  -  the synchronous path from
     // here to restart(0) / hasPendingSatelliteEvent has no awaits, so no
     // stale events can slip through the gap.
     this._isPaused = false;
@@ -135,15 +135,15 @@ export class VisibilityManager {
     // The replayed event's flow will manage the pipeline (e.g. ask_question
     // calls restartContinue after playback).
     if (hasPendingSatelliteEvent()) {
-      this._log.log('visibility', 'Resuming — satellite event pending, deferring pipeline restart');
+      this._log.log('visibility', 'Resuming  -  satellite event pending, deferring pipeline restart');
       return;
     }
 
-    // Re-establish satellite subscription — the WebSocket may have silently
+    // Re-establish satellite subscription  -  the WebSocket may have silently
     // reconnected while the tab was hidden, invalidating the old subscription.
     refreshSatelliteSubscription();
 
-    this._log.log('visibility', 'Resuming — restarting pipeline');
+    this._log.log('visibility', 'Resuming  -  restarting pipeline');
     pipeline.restart(0);
   }
 }

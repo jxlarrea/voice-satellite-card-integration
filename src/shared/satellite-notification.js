@@ -1,14 +1,4 @@
-/**
- * Voice Satellite Card — Satellite Notification Base
- *
- * Shared lifecycle for satellite-pushed notification features:
- * event dispatch, pipeline-busy queuing, playback orchestration.
- *
- * DOM operations delegate to UIManager.
- * Audio operations delegate to audio/chime and audio/media-playback.
- *
- * Each manager provides its own onComplete handler.
- */
+/** Shared notification dispatch, queueing, and playback flow. */
 
 import { CHIME_ANNOUNCE_URI } from '../audio/chime.js';
 import { buildMediaUrl, playMediaUrl } from '../audio/media-playback.js';
@@ -16,7 +6,6 @@ import { BlurReason, Timing } from '../constants.js';
 
 let _lastAnnounceId = 0;
 
-// ─── Hidden-tab event queue ──────────────────────────────────────
 
 let _pendingEvent = null;
 let _pendingCard = null;
@@ -24,7 +13,7 @@ let _visibilityListenerAdded = false;
 
 /**
  * Whether a satellite event is queued for replay when the tab becomes visible.
- * Used by VisibilityManager to skip its own pipeline restart — the replayed
+ * Used by VisibilityManager to skip its own pipeline restart  -  the replayed
  * event's flow will manage the pipeline instead.
  */
 export function hasPendingSatelliteEvent() {
@@ -40,11 +29,10 @@ function _onVisibilityChange() {
   _pendingEvent = null;
   _pendingCard = null;
 
-  card.logger.log('satellite-notify', `Tab visible — replaying queued event #${event.data.id}`);
+  card.logger.log('satellite-notify', `Tab visible  -  replaying queued event #${event.data.id}`);
   dispatchSatelliteEvent(card, event);
 }
 
-// ─── Satellite Event Dispatch ─────────────────────────────────────
 
 /**
  * Dispatch a satellite event to the appropriate notification manager.
@@ -56,7 +44,7 @@ function _onVisibilityChange() {
 export function dispatchSatelliteEvent(card, event) {
   const { type, data } = event;
 
-  // media_player events don't have an id field — route early
+  // media_player events don't have an id field  -  route early
   if (type === 'media_player') {
     card.mediaPlayer.handleCommand(data);
     return;
@@ -64,11 +52,11 @@ export function dispatchSatelliteEvent(card, event) {
 
   if (!data || !data.id) return;
 
-  // Queue events while the tab is hidden — audio can't play and UI state
+  // Queue events while the tab is hidden  -  audio can't play and UI state
   // gets corrupted.  Only keep the latest event (newer replaces older).
   // When the tab becomes visible, the queued event is replayed.
   if (document.visibilityState === 'hidden') {
-    card.logger.log('satellite-notify', `Event #${data.id} queued — tab hidden`);
+    card.logger.log('satellite-notify', `Event #${data.id} queued  -  tab hidden`);
     _pendingEvent = event;
     _pendingCard = card;
     if (!_visibilityListenerAdded) {
@@ -91,13 +79,13 @@ export function dispatchSatelliteEvent(card, event) {
 }
 
 function _deliverToManager(mgr, ann, logPrefix) {
-  // Dedup check (monotonic IDs — safety net for duplicate events)
+  // Dedup check (monotonic IDs  -  safety net for duplicate events)
   if (ann.id <= _lastAnnounceId) return;
 
   if (mgr.playing) {
     if (!mgr.queued || mgr.queued.id !== ann.id) {
       mgr.queued = ann;
-      mgr.log.log(logPrefix, `Notification #${ann.id} queued — still displaying`);
+      mgr.log.log(logPrefix, `Notification #${ann.id} queued  -  still displaying`);
     }
     return;
   }
@@ -108,7 +96,7 @@ function _deliverToManager(mgr, ann, logPrefix) {
   if (pipelineBusy || mgr.card.tts.isPlaying) {
     if (!mgr.queued || mgr.queued.id !== ann.id) {
       mgr.queued = ann;
-      mgr.log.log(logPrefix, `Notification #${ann.id} queued — pipeline busy (${cardState})`);
+      mgr.log.log(logPrefix, `Notification #${ann.id} queued  -  pipeline busy (${cardState})`);
     }
     return;
   }
@@ -120,7 +108,6 @@ function _deliverToManager(mgr, ann, logPrefix) {
   playNotification(mgr, ann, (a) => mgr._onComplete(a), logPrefix);
 }
 
-// ─── Dedup & Queuing ─────────────────────────────────────────────
 
 /**
  * Try to play a queued notification.
@@ -139,10 +126,9 @@ export function dequeueNotification(mgr) {
   return ann;
 }
 
-// ─── Playback Orchestration ──────────────────────────────────────
 
 /**
- * Full playback: blur → bar → preannounce → main media → onComplete.
+ * Full playback: blur -> bar -> preannounce -> main media -> onComplete.
  * DOM delegated to UIManager, audio to chime/media-playback.
  *
  * @param {object} mgr
@@ -174,7 +160,7 @@ export function playNotification(mgr, ann, onComplete, logPrefix) {
 
   // Pre-announcement
   if (ann.preannounce === false) {
-    mgr.log.log(logPrefix, 'Preannounce disabled — skipping chime');
+    mgr.log.log(logPrefix, 'Preannounce disabled  -  skipping chime');
     _playMain(mgr, ann, onComplete, logPrefix);
   } else {
     const hasPreAnnounce = ann.preannounce_media_id && ann.preannounce_media_id !== '';
@@ -219,12 +205,11 @@ function _playMain(mgr, ann, onComplete, logPrefix) {
     mgr.log.log(logPrefix, `Playing media: ${mediaUrl}`);
     playMediaFor(mgr, mediaUrl, logPrefix, () => onComplete(ann));
   } else {
-    mgr.log.log(logPrefix, 'No media — completing after message display');
+    mgr.log.log(logPrefix, 'No media  -  completing after message display');
     setTimeout(() => onComplete(ann), Timing.NO_MEDIA_DISPLAY);
   }
 }
 
-// ─── Cleanup ─────────────────────────────────────────────────────
 
 /**
  * Clear notification UI: bubbles, blur, bar restore.
@@ -242,7 +227,6 @@ export function clearNotificationUI(mgr) {
   mgr.card.ui.restoreBar(mgr.barWasVisible);
 }
 
-// ─── Audio Helper ────────────────────────────────────────────────
 
 /**
  * Play a media URL with volume from config.
@@ -276,7 +260,6 @@ export function playMediaFor(mgr, urlPath, logPrefix, onDone) {
   });
 }
 
-// ─── Common State Init ───────────────────────────────────────────
 
 /**
  * Initialize shared notification state on a manager instance.

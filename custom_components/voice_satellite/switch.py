@@ -1,7 +1,7 @@
 """Switch entities for Voice Satellite Card integration.
 
-Wake sound switch — enable/disable the wake word chime.
-Mute switch — mute/unmute the satellite microphone.
+Wake sound switch  -  enable/disable the wake word chime.
+Mute switch  -  mute/unmute the satellite microphone.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class VoiceSatelliteWakeSoundSwitch(SwitchEntity, RestoreEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        """Return device info — same identifiers as the satellite entity."""
+        """Return device info  -  same identifiers as the satellite entity."""
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
         }
@@ -88,7 +88,7 @@ class VoiceSatelliteMuteSwitch(SwitchEntity, RestoreEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        """Return device info — same identifiers as the satellite entity."""
+        """Return device info  -  same identifiers as the satellite entity."""
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
         }

@@ -544,7 +544,7 @@ export class MiniUIManager {
       if (this._lineEl?.childNodes?.length) {
         const sep = document.createElement('span');
         sep.className = 'vs-mini-sep';
-        sep.textContent = '→';
+        sep.textContent = '->';
         this._lineEl.appendChild(sep);
       }
       const el = document.createElement('span');
@@ -570,13 +570,7 @@ export class MiniUIManager {
     else this._scrollTranscriptToEnd();
   }
 
-  updateChatHtml(el, html) {
-    if (!el) return;
-    el.innerHTML = html;
-    if (this._card.config.mini_mode === 'compact') this._refreshCompactMarquee();
-    else this._scrollTranscriptToEnd();
-  }
-
+  // Compatibility surface with the full UIManager. Mini mode has no media panel/lightbox.
   showImagePanel() {}
   showVideoPanel() {}
   showWeatherPanel() {}
@@ -588,8 +582,8 @@ export class MiniUIManager {
   isLightboxVisible() { return false; }
 
   clearChat() {
-    if (this._lineEl) this._lineEl.innerHTML = '';
-    if (this._transcriptEl) this._transcriptEl.innerHTML = '';
+    if (this._lineEl) this._lineEl.textContent = '';
+    if (this._transcriptEl) this._transcriptEl.textContent = '';
     this._stopMarquee();
   }
 
@@ -714,7 +708,7 @@ export class MiniUIManager {
   }
 
   _getNotificationStatus() {
-    const arrow = this._t('mini.notification.arrow_suffix', ' →');
+    const arrow = this._t('mini.notification.arrow_suffix', ' ->');
     if (this._card.askQuestion?.playing) {
       return { label: `${this._t('mini.notification.question', 'Question')}${arrow}`, dot: 'responding', showCompactStatus: true, kind: 'question' };
     }
