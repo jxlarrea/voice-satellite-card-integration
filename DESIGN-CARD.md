@@ -366,6 +366,7 @@ When saving/canceling in the HA editor, HA can replace the visible mini-card ele
 - non-owner visible mini instances mirror the singleton owner's local UI state
 - mirrored content includes status, transcript (compact line / tall transcript), and timer badges
 - mirroring uses DOM cloning (`cloneNode`) rather than `innerHTML`
+- compact marquee position is mirrored by copying the owner track's `style.transform` (CSS transforms are DOM attributes visible to `MutationObserver`, unlike `scrollLeft` which is a JS property)
 - a `MutationObserver` watches the owner mini UI and schedules mirror refreshes via `requestAnimationFrame`
 
 This is mini-card specific complexity caused by HA editor instance churn + singleton side effects.
@@ -384,15 +385,17 @@ This is mini-card specific complexity caused by HA editor instance churn + singl
 **Compact mode behavior:**
 
 - Layout: `[status dot/mic button] [status label (selective)] [conversation line]`
-- Idle state uses a tappable circular mic icon and label `Tap to start`
+- Idle state uses a tappable circular mic icon and label `Tap to start` (both icon and label are clickable)
 - Status label is only shown in compact mode for idle / wake-word waiting (and notification overrides)
 - Conversation text uses a one-way marquee that scrolls to the end and stays there (no bounce)
-- TTS cleanup linger hook keeps text visible briefly if marquee is actively scrolling
+- User and assistant messages are separated by a ` · ` (middle dot) separator
+- Marquee uses CSS `transform: translateX()` on an inner `<span class="vs-mini-line-inner">` track element (not `scrollLeft`) for GPU-composited animation that is visible to `MutationObserver` for mirror sync
+- Marquee scroll speed is synced to TTS playback duration via smooth interpolation: starts at a default speed, then each frame steers toward `pixelsLeft / remainingTTSTime` (12% blend per frame, clamped 20–120 px/sec). TTS duration is estimated from word count + number token penalty until the real `audio.duration` becomes available (streaming audio reports `Infinity` until fully buffered).
 
 **Tall mode behavior:**
 
 - Status row + timer badges + scrollable transcript region
-- Transcript auto-scrolls to latest content
+- Transcript vertical scroll is TTS-synced: a RAF loop animates `scrollTop` at a speed derived from `pixelsLeft / remainingTTSTime` (same estimation and blend as compact marquee, clamped 10–200 px/sec). Falls back to instant jump when TTS is not active.
 - Uses internal scrolling (not card growth) in row-sized layouts
 - Masonry-specific CSS provides a default tall min-height because Masonry has no row sizing
 
