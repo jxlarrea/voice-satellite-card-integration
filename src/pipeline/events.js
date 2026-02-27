@@ -201,13 +201,10 @@ export function handleIntentProgress(mgr, eventData) {
 
 /** @param {import('./index.js').PipelineManager} mgr */
 export function handleIntentEnd(mgr, eventData) {
-  let responseType = null;
-  try {
-    responseType = eventData.intent_output.response.response_type;
-  } catch (_) { /* ignore */ }
+  const responseType = eventData?.intent_output?.response?.response_type;
 
   if (responseType === 'error') {
-    const errorText = extractResponseText(mgr, eventData) || 'An error occurred';
+    const errorText = extractResponseText(eventData) || 'An error occurred';
     mgr.log.error('error', `Intent error: ${errorText}`);
 
     mgr.card.ui.showErrorBar();
@@ -228,20 +225,23 @@ export function handleIntentEnd(mgr, eventData) {
     return;
   }
 
-  const responseText = extractResponseText(mgr, eventData);
+  const responseText = extractResponseText(eventData);
   if (responseText) {
     mgr.card.chat.showResponse(responseText);
+  } else if (mgr.card.chat.streamedResponse) {
+    // Streaming text exists but intent_output had no extractable string.
+    // Use the accumulated text so the UI finalises (fade spans → plain text,
+    // compact marquee starts, etc.).
+    mgr.card.chat.showResponse(mgr.card.chat.streamedResponse);
   }
 
   mgr.shouldContinue = false;
   mgr.continueConversationId = null;
-  try {
-    if (eventData.intent_output.continue_conversation === true) {
-      mgr.shouldContinue = true;
-      mgr.continueConversationId = eventData.intent_output.conversation_id || null;
-      mgr.log.log('pipeline', `Continue conversation requested - id: ${mgr.continueConversationId}`);
-    }
-  } catch (_) { /* ignore */ }
+  if (eventData?.intent_output?.continue_conversation === true) {
+    mgr.shouldContinue = true;
+    mgr.continueConversationId = eventData.intent_output.conversation_id || null;
+    mgr.log.log('pipeline', `Continue conversation requested - id: ${mgr.continueConversationId}`);
+  }
 
   mgr.card.chat.streamedResponse = '';
   mgr.card.chat.streamEl = null;
@@ -368,20 +368,16 @@ export function handleError(mgr, errorData) {
 
 /**
  * Extract response text from intent_output, trying multiple HA response formats.
- * @param {import('./index.js').PipelineManager} mgr
  * @param {object} eventData
  * @returns {string|null}
  */
-function extractResponseText(mgr, eventData) {
-  try {
-    const text = eventData.intent_output.response.speech.plain.speech;
-    if (text) return text;
-  } catch (_) { /* ignore */ }
+function extractResponseText(eventData) {
+  const response = eventData?.intent_output?.response;
+  if (!response) return null;
 
-  try { if (eventData.intent_output.response.speech.speech) return eventData.intent_output.response.speech.speech; } catch (_) { /* ignore */ }
-  try { if (eventData.intent_output.response.plain) return eventData.intent_output.response.plain; } catch (_) { /* ignore */ }
-  try { if (typeof eventData.intent_output.response === 'string') return eventData.intent_output.response; } catch (_) { /* ignore */ }
-
-  mgr.log.log('error', 'Could not extract response text');
-  return null;
+  const result = response?.speech?.plain?.speech
+    || response?.speech?.speech
+    || (typeof response?.plain === 'string' ? response.plain : null)
+    || (typeof response === 'string' ? response : null);
+  return result;
 }

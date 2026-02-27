@@ -162,6 +162,9 @@ ha-card.vs-mini-card-shell.compact {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.vs-mini-status.clickable {
+  cursor: pointer;
+}
 .vs-mini-status.hidden {
   display: none;
 }
@@ -267,6 +270,9 @@ ha-card.vs-mini-card-shell.compact {
 .vs-mini-line::-webkit-scrollbar {
   display: none;
 }
+.vs-mini-line-inner {
+  display: inline-block;
+}
 .vs-mini-line .vs-mini-msg {
   display: inline;
 }
@@ -360,9 +366,18 @@ export class MiniUIManager {
     this._blurReasons = {};
     this._pendingStartButtonReason = undefined;
     this._notificationStatus = null;
+    this._lineTrackEl = null;
     this._marqueeRaf = null;
+    this._marqueePos = 0;
     this._marqueePauseUntil = 0;
     this._marqueeLastTs = 0;
+    this._marqueeSpeed = 0;
+    this._ttsEstimatedDuration = 0;
+    // Vertical scroll (tall mode)
+    this._vScrollRaf = null;
+    this._vScrollPos = 0;
+    this._vScrollSpeed = 0;
+    this._vScrollLastTs = 0;
   }
 
   get element() {
@@ -392,7 +407,7 @@ export class MiniUIManager {
             </div>
             <div class="vs-mini-body">
               <div class="vs-mini-timers"></div>
-              <div class="vs-mini-line"></div>
+              <div class="vs-mini-line"><span class="vs-mini-line-inner"></span></div>
               <button class="vs-mini-start">${this._t('mini.start_button', 'Start')}</button>
               <div class="vs-mini-bar"></div>
               <div class="vs-mini-transcript"></div>
@@ -408,6 +423,7 @@ export class MiniUIManager {
     this._statusEl = shadow.querySelector('.vs-mini-status');
     this._dotEl = shadow.querySelector('.vs-mini-dot');
     this._lineEl = shadow.querySelector('.vs-mini-line');
+    this._lineTrackEl = shadow.querySelector('.vs-mini-line-inner');
     this._transcriptEl = shadow.querySelector('.vs-mini-transcript');
     this._timersEl = shadow.querySelector('.vs-mini-timers');
     this._startBtn = shadow.querySelector('.vs-mini-start');
@@ -415,6 +431,9 @@ export class MiniUIManager {
 
     this._startBtn?.addEventListener('click', () => this._card.onStartClick());
     this._dotEl?.addEventListener('click', () => {
+      if (this._dotEl?.classList.contains('clickable')) this._card.onStartClick();
+    });
+    this._statusEl?.addEventListener('click', () => {
       if (this._dotEl?.classList.contains('clickable')) this._card.onStartClick();
     });
 
@@ -470,11 +489,21 @@ export class MiniUIManager {
     if (this._dotEl) {
       this._dotEl.className = `vs-mini-dot ${status.dot || ''}`;
       this._dotEl.classList.toggle('clickable', !!status.micAction);
+      this._statusEl?.classList.toggle('clickable', !!status.micAction);
       this._dotEl.title = status.micAction ? this._t('mini.state.tap_to_start', 'Tap to start') : '';
       this._dotEl.innerHTML = status.micAction
         ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>'
         : '';
     }
+  }
+
+  onStreamingUpdate() {
+    if (this._card.config.mini_mode !== 'compact' || !this._lineEl) return;
+    // If the marquee is already running, let it continue without resetting the
+    // 250ms pause — otherwise rapid streaming updates keep pushing the pause
+    // deadline forward and the marquee never actually scrolls.
+    if (this._marqueeRaf) return;
+    this._refreshCompactMarquee();
   }
 
   stopReactive() {}
@@ -516,10 +545,7 @@ export class MiniUIManager {
   hideBar() {}
 
   getTtsLingerTimeoutMs() {
-    // Compact mode only: if the marquee is actively scrolling, keep the text
-    // visible a bit longer after TTS completes so the user can read it.
-    if (this._card.config.mini_mode !== 'compact') return 0;
-    return this._marqueeRaf ? 6000 : 0;
+    return 0;
   }
 
   showBarSpeaking() {
@@ -541,16 +567,17 @@ export class MiniUIManager {
   addChatMessage(text, type) {
     if (!this._root) return null;
     if (this._card.config.mini_mode === 'compact') {
-      if (this._lineEl?.childNodes?.length) {
+      const track = this._lineTrackEl || this._lineEl;
+      if (track?.childNodes?.length) {
         const sep = document.createElement('span');
         sep.className = 'vs-mini-sep';
-        sep.textContent = '->';
-        this._lineEl.appendChild(sep);
+        sep.textContent = ' · ';
+        track.appendChild(sep);
       }
       const el = document.createElement('span');
       el.className = `vs-mini-msg ${type}`;
       el.textContent = text;
-      this._lineEl?.appendChild(el);
+      track?.appendChild(el);
       this._scrollLineToEnd();
       return el;
     }
@@ -566,6 +593,12 @@ export class MiniUIManager {
   updateChatText(el, text) {
     if (!el) return;
     el.textContent = text;
+    // Estimate TTS duration: word count + extra time for numbers (expanded pronunciation)
+    if (text) {
+      const words = text.trim().split(/\s+/).length;
+      const nums = (text.match(/\d[\d,.]*%?/g) || []).length;
+      this._ttsEstimatedDuration = Math.max(3, (words / 2.8) + (nums * 0.7));
+    }
     if (this._card.config.mini_mode === 'compact') this._refreshCompactMarquee();
     else this._scrollTranscriptToEnd();
   }
@@ -582,9 +615,21 @@ export class MiniUIManager {
   isLightboxVisible() { return false; }
 
   clearChat() {
-    if (this._lineEl) this._lineEl.textContent = '';
+    if (this._lineTrackEl) {
+      this._lineTrackEl.textContent = '';
+      this._lineTrackEl.style.transform = '';
+    } else if (this._lineEl) {
+      this._lineEl.textContent = '';
+    }
+    this._marqueePos = 0;
+    this._marqueeSpeed = 0;
+    this._ttsEstimatedDuration = 0;
+    this._marqueeRealDurLogged = false;
     if (this._transcriptEl) this._transcriptEl.textContent = '';
     this._stopMarquee();
+    this._stopVScroll();
+    this._vScrollPos = 0;
+    this._vScrollSpeed = 0;
   }
 
   setAnnouncementMode(on) {
@@ -727,14 +772,84 @@ export class MiniUIManager {
 
   _scrollTranscriptToEnd() {
     if (!this._transcriptEl) return;
-    requestAnimationFrame(() => {
-      this._transcriptEl.scrollTop = this._transcriptEl.scrollHeight;
-    });
+    const el = this._transcriptEl;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 0) return;
+
+    // If TTS is playing or expected, use synced vertical scroll
+    if (this._card.tts?.isPlaying || this._ttsEstimatedDuration > 0) {
+      this._startVScroll();
+      return;
+    }
+
+    // Otherwise jump immediately
+    el.scrollTop = max;
+  }
+
+  _startVScroll() {
+    if (this._vScrollRaf) return;
+    this._vScrollLastTs = 0;
+    this._vScrollRaf = requestAnimationFrame((ts) => this._vScrollTick(ts));
+  }
+
+  _stopVScroll() {
+    if (this._vScrollRaf) {
+      cancelAnimationFrame(this._vScrollRaf);
+      this._vScrollRaf = null;
+    }
+    this._vScrollLastTs = 0;
+  }
+
+  _vScrollTick(ts) {
+    const el = this._transcriptEl;
+    if (!el || this._card.config.mini_mode === 'compact') {
+      this._stopVScroll();
+      return;
+    }
+
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 0) {
+      this._stopVScroll();
+      return;
+    }
+
+    if (!this._vScrollLastTs) this._vScrollLastTs = ts;
+    const dt = ts - this._vScrollLastTs;
+    this._vScrollLastTs = ts;
+
+    if (!this._vScrollSpeed) this._vScrollSpeed = 30;
+
+    const ttsAudio = this._card.tts?.currentAudio;
+    const realDuration = ttsAudio && isFinite(ttsAudio.duration) && ttsAudio.duration > 0
+      ? ttsAudio.duration : 0;
+    const effectiveDuration = realDuration || this._ttsEstimatedDuration;
+
+    if (effectiveDuration > 0 && ttsAudio && ttsAudio.currentTime >= 0) {
+      const remaining = effectiveDuration - ttsAudio.currentTime;
+      const pxLeft = max - this._vScrollPos;
+      if (remaining > 0.1 && pxLeft > 0) {
+        const target = Math.max(10, Math.min(200, pxLeft / remaining));
+        this._vScrollSpeed += (target - this._vScrollSpeed) * 0.12;
+      }
+    }
+
+    this._vScrollPos += this._vScrollSpeed * dt / 1000;
+
+    if (this._vScrollPos >= max) {
+      this._vScrollPos = max;
+      el.scrollTop = max;
+      this._stopVScroll();
+      return;
+    }
+
+    el.scrollTop = this._vScrollPos;
+    this._vScrollRaf = requestAnimationFrame((nextTs) => this._vScrollTick(nextTs));
   }
 
   _normalizeCompactSeparators() {
-    if (!this._lineEl) return;
-    const nodes = Array.from(this._lineEl.childNodes);
+    const track = this._lineTrackEl || this._lineEl;
+    if (!track) return;
+    const nodes = Array.from(track.childNodes);
     let sawMsg = false;
     for (const node of nodes) {
       if (!(node instanceof HTMLElement) || !node.classList.contains('vs-mini-sep')) {
@@ -745,24 +860,30 @@ export class MiniUIManager {
       const next = node.nextElementSibling;
       if (!prev || !next) node.remove();
     }
-    if (!sawMsg) this._lineEl.innerHTML = '';
+    if (!sawMsg) track.innerHTML = '';
     this._refreshCompactMarquee();
   }
 
   _refreshCompactMarquee() {
     if (!this._lineEl || this._card.config.mini_mode !== 'compact') return;
+    const track = this._lineTrackEl;
+    if (!track) return;
     requestAnimationFrame(() => {
-      if (!this._lineEl) return;
-      const max = Math.max(0, this._lineEl.scrollWidth - this._lineEl.clientWidth);
+      if (!this._lineEl || !track) return;
+      const max = Math.max(0, track.offsetWidth - this._lineEl.clientWidth);
       if (max <= 0) {
-        this._lineEl.scrollLeft = 0;
+        this._marqueePos = 0;
+        track.style.transform = '';
         this._stopMarquee();
         return;
       }
       // Do not reset to the beginning on each new turn. Continue from the
       // current position and only scroll forward to the new end.
-      if (this._lineEl.scrollLeft > max) this._lineEl.scrollLeft = max;
-      if (this._lineEl.scrollLeft >= max) {
+      if (this._marqueePos > max) {
+        this._marqueePos = max;
+        track.style.transform = `translateX(-${max}px)`;
+      }
+      if (this._marqueePos >= max) {
         this._stopMarquee();
         return;
       }
@@ -786,14 +907,16 @@ export class MiniUIManager {
   }
 
   _marqueeTick(ts) {
-    if (!this._lineEl || this._card.config.mini_mode !== 'compact') {
+    const track = this._lineTrackEl;
+    if (!track || !this._lineEl || this._card.config.mini_mode !== 'compact') {
       this._stopMarquee();
       return;
     }
 
-    const max = Math.max(0, this._lineEl.scrollWidth - this._lineEl.clientWidth);
+    const max = Math.max(0, track.offsetWidth - this._lineEl.clientWidth);
     if (max <= 0) {
-      this._lineEl.scrollLeft = 0;
+      this._marqueePos = 0;
+      track.style.transform = '';
       this._stopMarquee();
       return;
     }
@@ -803,17 +926,55 @@ export class MiniUIManager {
     this._marqueeLastTs = ts;
 
     if (ts >= this._marqueePauseUntil) {
-      const speedPxPerSec = 42;
-      let next = this._lineEl.scrollLeft + (speedPxPerSec * dt / 1000);
+      // Start at default speed, smoothly steer toward TTS-synced target
+      if (!this._marqueeSpeed) this._marqueeSpeed = 42;
 
-      if (next >= max) {
-        next = max;
-        this._lineEl.scrollLeft = next;
+      const ttsAudio = this._card.tts?.currentAudio;
+      const realDuration = ttsAudio && isFinite(ttsAudio.duration) && ttsAudio.duration > 0
+        ? ttsAudio.duration : 0;
+      // Log once when real duration first becomes known
+      if (realDuration && !this._marqueeRealDurLogged) {
+        this._marqueeRealDurLogged = true;
+        this._card.logger?.log?.('marquee',
+          `Real duration known: ${realDuration.toFixed(2)}s (estimate was ${this._ttsEstimatedDuration.toFixed(2)}s)`
+        );
+      }
+      // Use real duration if available, otherwise fall back to text-based estimate
+      const effectiveDuration = realDuration || this._ttsEstimatedDuration;
+
+      // Log every ~1s to avoid flooding
+      if (!this._marqueeLogTs || ts - this._marqueeLogTs > 1000) {
+        this._marqueeLogTs = ts;
+        const dur = ttsAudio ? ttsAudio.duration : 'no-audio';
+        const cur = ttsAudio ? ttsAudio.currentTime?.toFixed(1) : '-';
+        const playing = this._card.tts?.isPlaying;
+        this._card.logger?.log?.('marquee',
+          `speed=${this._marqueeSpeed.toFixed(1)} pos=${this._marqueePos.toFixed(0)}/${max.toFixed(0)} ` +
+          `effDur=${effectiveDuration.toFixed(1)} dur=${typeof dur === 'number' ? dur.toFixed(1) : dur} ` +
+          `cur=${cur} est=${this._ttsEstimatedDuration.toFixed(1)} playing=${playing}`
+        );
+      }
+
+      if (effectiveDuration > 0 && ttsAudio && ttsAudio.currentTime >= 0) {
+        const remaining = effectiveDuration - ttsAudio.currentTime;
+        const pixelsLeft = max - this._marqueePos;
+        if (remaining > 0.1 && pixelsLeft > 0) {
+          const target = Math.max(20, Math.min(120, pixelsLeft / remaining));
+          // Steer toward the target each frame (12% blend ≈ 95% converged in 250ms)
+          this._marqueeSpeed += (target - this._marqueeSpeed) * 0.12;
+        }
+      }
+
+      this._marqueePos += this._marqueeSpeed * dt / 1000;
+
+      if (this._marqueePos >= max) {
+        this._marqueePos = max;
+        track.style.transform = `translateX(-${max}px)`;
         this._stopMarquee();
         return;
       }
 
-      this._lineEl.scrollLeft = next;
+      track.style.transform = `translateX(-${this._marqueePos}px)`;
     }
 
     this._marqueeRaf = requestAnimationFrame((nextTs) => this._marqueeTick(nextTs));

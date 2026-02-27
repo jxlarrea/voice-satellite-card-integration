@@ -29,6 +29,7 @@ export class TtsManager {
     this._endTimer = null;
     this._streamingUrl = null;
     this._playbackWatchdog = null;
+    this._lastWatchdogTime = 0;
 
     // Retry fallback - tts-end URL stored for retry on playback failure
     this._pendingTtsEndUrl = null;
@@ -39,6 +40,7 @@ export class TtsManager {
   }
 
   get isPlaying() { return this._playing; }
+  get currentAudio() { return this._currentAudio; }
 
   get streamingUrl() { return this._streamingUrl; }
   set streamingUrl(url) { this._streamingUrl = url; }
@@ -99,6 +101,11 @@ export class TtsManager {
         if (!isRetry && this._pendingTtsEndUrl) {
           const retryUrl = this._pendingTtsEndUrl;
           this._pendingTtsEndUrl = null;
+          // Clear listeners on the failed audio element before losing reference
+          if (this._currentAudio) {
+            this._currentAudio.onended = null;
+            this._currentAudio.onerror = null;
+          }
           this._currentAudio = null;
           this._log.log('tts', `Retrying with tts-end URL: ${retryUrl}`);
           this.play(retryUrl, true);

@@ -17,6 +17,17 @@ export function formatTime(seconds) {
   return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}:${sec < 10 ? '0' : ''}${sec}`;
 }
 
+const _formatCache = {};
+function _getFormatter(currency, decimals) {
+  const key = `${currency}-${decimals}`;
+  return _formatCache[key] || (_formatCache[key] = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: decimals,
+  }));
+}
+
 /**
  * Format a price value with currency symbol.
  * Prices < $1 get up to 6 decimals; >= $1 get 2.
@@ -27,12 +38,7 @@ export function formatTime(seconds) {
 export function formatPrice(value, currency = 'USD') {
   if (value == null) return '';
   const decimals = Math.abs(value) < 1 ? 6 : 2;
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: decimals,
-  }).format(value);
+  return _getFormatter(currency, decimals).format(value);
 }
 
 /**

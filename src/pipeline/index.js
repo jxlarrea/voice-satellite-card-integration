@@ -271,6 +271,9 @@ export class PipelineManager {
           this.restart(this.calculateRetryDelay());
         });
       }, delay || 0);
+    }).catch((e) => {
+      this._isRestarting = false;
+      this._log.error('pipeline', `stop() failed during restart: ${e?.message || e}`);
     });
   }
 
@@ -302,6 +305,9 @@ export class PipelineManager {
         this._card.ui.hideBlurOverlay(BlurReason.PIPELINE);
         this.restart(0);
       });
+    }).catch((e) => {
+      this._isRestarting = false;
+      this._log.error('pipeline', `stop() failed during restartContinue: ${e?.message || e}`);
     });
   }
   handleRunStart(data) {
@@ -426,7 +432,7 @@ export class PipelineManager {
    */
   _startTokenRefreshTimer() {
     this._clearTokenRefreshTimer();
-    if (!this._card.tts._streamingUrl) return;
+    if (!this._card.tts.streamingUrl) return;
 
     this._tokenRefreshTimer = setTimeout(() => {
       this._tokenRefreshTimer = null;

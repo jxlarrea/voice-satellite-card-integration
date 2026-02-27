@@ -78,7 +78,7 @@ function getOrCreateContext(card) {
  */
 export function playChime(card, pattern, log) {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const { ctx, owned } = getOrCreateContext(card);
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
@@ -99,7 +99,7 @@ export function playChime(card, pattern, log) {
     osc.start();
     osc.stop(ctx.currentTime + pattern.duration);
 
-    setTimeout(() => ctx.close(), 500);
+    if (owned) setTimeout(() => ctx.close(), 500);
   } catch (e) {
     log?.error('chime', `Chime error: ${e}`);
   }

@@ -86,13 +86,23 @@ function waitForDialogClose(callback) {
     const main = ha?.shadowRoot?.querySelector('home-assistant-main');
     if (!main) { callback(); return null; }
 
+    let fired = false;
+    const fire = () => {
+      if (fired) return;
+      fired = true;
+      observer.disconnect();
+      clearTimeout(safetyTimeout);
+      callback();
+    };
+
     const observer = new MutationObserver(() => {
-      if (!main.hasAttribute('inert')) {
-        observer.disconnect();
-        callback();
-      }
+      if (!main.hasAttribute('inert')) fire();
     });
     observer.observe(main, { attributes: true, attributeFilter: ['inert'] });
+
+    // Safety timeout - don't wait forever if the dialog gets stuck
+    const safetyTimeout = setTimeout(fire, 10000);
+
     return observer;
   } catch (_) {
     callback();

@@ -739,6 +739,10 @@ export class UIManager {
     if (panel) {
       const scroll = panel.querySelector('.vs-panel-scroll');
       if (scroll) {
+        if (scroll._vsScrollHandler) {
+          scroll.removeEventListener('scroll', scroll._vsScrollHandler);
+          scroll._vsScrollHandler = null;
+        }
         while (scroll.firstChild) scroll.removeChild(scroll.firstChild);
       }
       panel.classList.remove('visible', 'featured', 'weather', 'financial');

@@ -18,9 +18,13 @@ export class DoubleTapHandler {
     this._lastTapTime = 0;
     this._lastTouchTime = 0;
     this._handler = null;
+    this._keyHandler = null;
   }
 
   setup() {
+    // Idempotency guard - prevent duplicate listeners on repeated calls
+    if (this._handler) return;
+
     this._handler = (e) => {
       const state = this._getInteractionState();
       if (!state) return;
@@ -43,7 +47,7 @@ export class DoubleTapHandler {
     document.addEventListener('click', this._handler);
 
     // Escape key cancels the same way as double-tap
-    document.addEventListener('keydown', (e) => {
+    this._keyHandler = (e) => {
       if (e.key !== 'Escape') return;
 
       const state = this._getInteractionState();
@@ -51,7 +55,8 @@ export class DoubleTapHandler {
 
       e.preventDefault();
       this._cancel(state.isTimerAlert, state.isNotification);
-    });
+    };
+    document.addEventListener('keydown', this._keyHandler);
   }
 
   _getInteractionState() {

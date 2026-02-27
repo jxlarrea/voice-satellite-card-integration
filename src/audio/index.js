@@ -7,6 +7,8 @@
 
 import { setupAudioWorklet, sendAudioBuffer } from './processing.js';
 
+const TARGET_SAMPLE_RATE = 16000;
+
 export class AudioManager {
   constructor(card) {
     this._card = card;
@@ -18,11 +20,12 @@ export class AudioManager {
     this._workletNode = null;
     this._audioBuffer = [];
     this._sendInterval = null;
-    this._actualSampleRate = 16000;
+    this._actualSampleRate = TARGET_SAMPLE_RATE;
   }
   get card() { return this._card; }
   get log() { return this._log; }
   get audioContext() { return this._audioContext; }
+  get sourceNode() { return this._sourceNode; }
   get workletNode() { return this._workletNode; }
   set workletNode(val) { this._workletNode = val; }
   get audioBuffer() { return this._audioBuffer; }
@@ -35,7 +38,7 @@ export class AudioManager {
     this._log.log('mic', `AudioContext state=${this._audioContext.state} sampleRate=${this._audioContext.sampleRate}`);
 
     const audioConstraints = {
-      sampleRate: 16000,
+      sampleRate: TARGET_SAMPLE_RATE,
       channelCount: 1,
       echoCancellation: config.echo_cancellation,
       noiseSuppression: config.noise_suppression,
@@ -140,7 +143,7 @@ export class AudioManager {
     try {
       if (!this._audioContext) {
         this._audioContext = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate: 16000,
+          sampleRate: TARGET_SAMPLE_RATE,
         });
       }
       if (this._audioContext.state === 'suspended') {
@@ -153,7 +156,7 @@ export class AudioManager {
   async _ensureAudioContextRunning() {
     if (!this._audioContext) {
       this._audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000,
+        sampleRate: TARGET_SAMPLE_RATE,
       });
     }
     if (this._audioContext.state === 'suspended') {

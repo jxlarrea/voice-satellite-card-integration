@@ -45,6 +45,10 @@ export class VoiceSatelliteCard extends HTMLElement {
     this._disconnectTimeout = null;
     this._pickerTeardown = null;
     this._isLocalStorageEntity = false;
+    this._imageLingerTimeout = null;
+    this._videoPlaying = false;
+    this._activeSkin = null;
+    this._deviceDisabled = false;
 
     // Logger (shared by all managers)
     this._logger = new Logger();
@@ -187,10 +191,10 @@ export class VoiceSatelliteCard extends HTMLElement {
 
       // If reactive bar was just enabled and mic is already running, attach analyser
       const reactive = this.isReactiveBarEnabled;
-      if (reactive && this._audio._sourceNode && this._audio._audioContext) {
-        this._analyser.attachMic(this._audio._sourceNode, this._audio._audioContext);
+      if (reactive && this._audio.sourceNode && this._audio.audioContext) {
+        this._analyser.attachMic(this._audio.sourceNode, this._audio.audioContext);
       } else if (!reactive) {
-        if (this._audio._sourceNode) this._analyser.detachMic(this._audio._sourceNode);
+        if (this._audio.sourceNode) this._analyser.detachMic(this._audio.sourceNode);
         this._analyser.stop();
       }
 

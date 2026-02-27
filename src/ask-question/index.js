@@ -22,6 +22,10 @@ export class AskQuestionManager {
   constructor(card) {
     this._card = card;
     this._log = card.logger;
+    this._chimeSettleTimeout = null;
+    this._sttSafetyTimeout = null;
+    this._cleanupTimeout = null;
+    this._answerSent = false;
     initNotificationState(this);
   }
 

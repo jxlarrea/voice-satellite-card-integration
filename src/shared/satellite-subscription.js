@@ -10,6 +10,7 @@
  */
 
 import { isOwner } from './singleton.js';
+import { teardownVisibilityListener } from './satellite-notification.js';
 
 let _unsubscribe = null;
 let _subscribed = false;
@@ -123,5 +124,6 @@ export function teardownSatelliteSubscription() {
   }
   _card = null;
   _onEvent = null;
+  teardownVisibilityListener();
 }
 

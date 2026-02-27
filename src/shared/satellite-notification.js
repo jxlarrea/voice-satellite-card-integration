@@ -12,6 +12,19 @@ let _pendingCard = null;
 let _visibilityListenerAdded = false;
 
 /**
+ * Remove the visibilitychange listener and clear pending state.
+ * Called from teardownSatelliteSubscription to prevent stale closures.
+ */
+export function teardownVisibilityListener() {
+  if (_visibilityListenerAdded) {
+    document.removeEventListener('visibilitychange', _onVisibilityChange);
+    _visibilityListenerAdded = false;
+  }
+  _pendingEvent = null;
+  _pendingCard = null;
+}
+
+/**
  * Whether a satellite event is queued for replay when the tab becomes visible.
  * Used by VisibilityManager to skip its own pipeline restart - the replayed
  * event's flow will manage the pipeline instead.

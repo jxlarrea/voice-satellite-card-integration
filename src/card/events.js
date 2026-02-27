@@ -176,7 +176,7 @@ export function onTTSComplete(card, playbackFailed) {
   if (card.ui.hasVisibleImages()) {
     card.ui.stopReactive();
     if (card._imageLingerTimeout) clearTimeout(card._imageLingerTimeout);
-    card._imageLingerTimeout = setTimeout(cleanup, 30000);
+    card._imageLingerTimeout = setTimeout(cleanup, Timing.IMAGE_LINGER);
   } else if (playbackFailed) {
     // TTS failed (e.g. autoplay blocked) - keep response visible so the user can read it
     card.logger.log('tts', 'Playback failed - lingering response text');

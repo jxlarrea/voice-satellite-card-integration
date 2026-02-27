@@ -64,12 +64,23 @@ class JSModuleRegistration:
 
     async def _async_wait_for_lovelace_resources(self) -> None:
         """Wait for Lovelace resources to be loaded, then register."""
-        async def _check_loaded(_now) -> None:
+        max_retries = 12  # ~60 seconds total
+
+        async def _check_loaded(_now, attempt: int = 0) -> None:
             if self.lovelace.resources.loaded:
                 await self._async_register_module()
+            elif attempt >= max_retries:
+                _LOGGER.warning(
+                    "Lovelace resources did not load after %d attempts - "
+                    "card resource not auto-registered",
+                    max_retries,
+                )
             else:
-                _LOGGER.debug("Lovelace resources not yet loaded, retrying in 5s")
-                async_call_later(self.hass, 5, _check_loaded)
+                _LOGGER.debug("Lovelace resources not yet loaded, retrying in 5s (attempt %d/%d)", attempt + 1, max_retries)
+                async_call_later(
+                    self.hass, 5,
+                    lambda now: self.hass.async_create_task(_check_loaded(now, attempt + 1)),
+                )
 
         await _check_loaded(0)
 

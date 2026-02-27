@@ -110,17 +110,19 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
         # Extra system prompt (captured from async_internal_start_conversation)
         self._pending_extra_system_prompt: str | None = None
+        self._extra_system_prompt: str | None = None
 
         # Bridged pipeline state
-        self._pipeline_connection = None  # ActiveConnection for event relay
+        self._pipeline_connection: Any = None  # ActiveConnection for event relay
         self._pipeline_msg_id: int | None = None  # WS message ID for send_event
         self._pipeline_task: asyncio.Task | None = None  # Current pipeline task
         self._pipeline_audio_queue: asyncio.Queue | None = None
         self._pipeline_gen: int = 0  # Generation counter - filters orphaned events
         self._pipeline_run_started: bool = False  # Gate: block events until run-start
+        self._conversation_id: str | None = None
 
         # Satellite event subscription (Phase 2 - direct push to card)
-        self._satellite_subscribers: list[tuple] = []
+        self._satellite_subscribers: list[tuple[Any, int]] = []
 
         # Screensaver keep-alive
         self._screensaver_unsub = None
@@ -215,11 +217,56 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
         return attrs
 
+    # --- Public accessors for __init__.py WebSocket handlers ---
+
+    @property
+    def satellite_name(self) -> str:
+        """Return the satellite display name."""
+        return self._satellite_name
+
+    @property
+    def question_match_event(self) -> asyncio.Event | None:
+        """Return the ask_question match event (set when matching completes)."""
+        return self._question_match_event
+
+    @property
+    def question_match_result(self) -> dict | None:
+        """Return the ask_question match result."""
+        return self._question_match_result
+
+    @property
+    def pipeline_audio_queue(self) -> asyncio.Queue | None:
+        """Return the current pipeline audio queue."""
+        return self._pipeline_audio_queue
+
+    @property
+    def pipeline_connection(self):
+        """Return the current pipeline WebSocket connection."""
+        return self._pipeline_connection
+
+    @property
+    def pipeline_msg_id(self) -> int | None:
+        """Return the current pipeline WS message ID."""
+        return self._pipeline_msg_id
+
+    @property
+    def pipeline_task(self) -> asyncio.Task | None:
+        """Return the current pipeline background task."""
+        return self._pipeline_task
+
+    @pipeline_task.setter
+    def pipeline_task(self, task: asyncio.Task | None) -> None:
+        """Set the current pipeline background task."""
+        self._pipeline_task = task
+
     async def async_added_to_hass(self) -> None:
         """Register timer handler when entity is added."""
         await super().async_added_to_hass()
 
-        assert self.device_entry is not None
+        if self.device_entry is None:
+            raise RuntimeError(
+                f"device_entry must be set before async_added_to_hass ({self.entity_id})"
+            )
 
         # Register this device as a timer handler
         self.async_on_remove(
@@ -501,11 +548,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 announce_id,
                 self._satellite_name,
             )
-            self.hass.states.async_set(
-                self.entity_id,
-                "listening",
-                self.extra_state_attributes,
-            )
+            self._set_satellite_state("listening")
         except asyncio.TimeoutError:
             _LOGGER.warning(
                 "Start conversation #%d on '%s' timed out after %ds",
@@ -591,11 +634,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._start_screensaver_keepalive()
 
         # Set state to listening (card is now in STT mode)
-        self.hass.states.async_set(
-            self.entity_id,
-            "listening",
-            self.extra_state_attributes,
-        )
+        self._set_satellite_state("listening")
 
         try:
             # Phase 2: Wait for the card to send back transcribed text
@@ -743,6 +782,27 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 self._satellite_name,
             )
 
+    def _set_satellite_state(self, state_value: str) -> None:
+        """Set the satellite entity state via the base class internal attribute.
+
+        Uses the name-mangled attribute with a safety check, then writes
+        state through the entity framework instead of hass.states.async_set().
+        """
+        if self.state == state_value:
+            return
+        # pylint: disable=protected-access
+        attr = "_AssistSatelliteEntity__assist_satellite_state"
+        if not hasattr(self, attr):
+            _LOGGER.warning(
+                "Cannot set satellite state for '%s': base class attribute "
+                "'%s' not found (HA version may have changed the internal name)",
+                self._satellite_name,
+                attr,
+            )
+            return
+        setattr(self, attr, state_value)
+        self.async_write_ha_state()
+
     # Map card state strings to HA satellite state values
     _STATE_MAP: dict[str, str] = {
         "IDLE": "idle",
@@ -769,15 +829,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         else:
             self._stop_screensaver_keepalive()
 
-        if self.state == mapped:
-            return
-
-        # Update the base class's internal state directly so that future
-        # async_write_ha_state() calls (e.g. from switch changes) publish
-        # the correct state instead of a stale value.
-        # pylint: disable=protected-access
-        self._AssistSatelliteEntity__assist_satellite_state = mapped
-        self.async_write_ha_state()
+        self._set_satellite_state(mapped)
         _LOGGER.debug(
             "Pipeline state for '%s': %s -> %s",
             self._satellite_name,
@@ -810,11 +862,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
         # Turn off immediately
         self.hass.async_create_task(
-            self.hass.services.async_call(
-                "homeassistant",
-                "turn_off",
-                {"entity_id": entity_id},
-            )
+            self._screensaver_turn_off(entity_id)
         )
 
         @callback
@@ -824,11 +872,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 self._stop_screensaver_keepalive()
                 return
             self.hass.async_create_task(
-                self.hass.services.async_call(
-                    "homeassistant",
-                    "turn_off",
-                    {"entity_id": eid},
-                )
+                self._screensaver_turn_off(eid)
             )
 
         self._screensaver_unsub = async_track_time_interval(
@@ -850,6 +894,16 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 "Screensaver keep-alive stopped for '%s'",
                 self._satellite_name,
             )
+
+    async def _screensaver_turn_off(self, entity_id: str) -> None:
+        """Turn off the screensaver entity, swallowing errors during shutdown."""
+        try:
+            await self.hass.services.async_call(
+                "homeassistant", "turn_off", {"entity_id": entity_id},
+            )
+        except Exception:
+            if not self.hass.is_stopping:
+                _LOGGER.debug("Failed to turn off screensaver %s", entity_id)
 
     async def async_run_pipeline(
         self,
@@ -1023,8 +1077,11 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             )
             return
 
+        if self.hass.is_stopping:
+            return
+
         dead: list[tuple] = []
-        for connection, msg_id in self._satellite_subscribers:
+        for connection, msg_id in list(self._satellite_subscribers):
             try:
                 connection.send_event(
                     msg_id, {"type": event_type, "data": data}

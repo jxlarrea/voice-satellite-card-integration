@@ -47,8 +47,11 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     # Register frontend JS module
     async def _register_frontend(_event=None) -> None:
-        registration = JSModuleRegistration(hass)
-        await registration.async_register()
+        try:
+            registration = JSModuleRegistration(hass)
+            await registration.async_register()
+        except Exception as err:
+            _LOGGER.warning("Failed to register frontend resources: %s", err)
 
     if hass.state is CoreState.running:
         await _register_frontend()
@@ -161,7 +164,7 @@ async def ws_question_answered(
         return
 
     # Grab the match event before triggering the answer
-    match_event = entity._question_match_event
+    match_event = entity.question_match_event
 
     entity.question_answered(announce_id, sentence)
 
@@ -171,7 +174,7 @@ async def ws_question_answered(
         try:
             await asyncio.wait_for(match_event.wait(), timeout=10.0)
             # Read result immediately - finally block may clear it
-            result = entity._question_match_result or result
+            result = entity.question_match_result or result
         except asyncio.TimeoutError:
             pass
 
@@ -221,23 +224,23 @@ async def ws_run_pipeline(
     # signal and CancelledError would race on `await audio_queue.get()`,
     # and CancelledError always wins, leaving orphaned PipelineInput tasks.
     # Instead: send stop signal -> wait for natural exit -> cancel only on timeout.
-    if entity._pipeline_audio_queue is not None:
-        old_conn = entity._pipeline_connection
-        old_msg_id = entity._pipeline_msg_id
+    if entity.pipeline_audio_queue is not None:
+        old_conn = entity.pipeline_connection
+        old_msg_id = entity.pipeline_msg_id
         if old_conn is not None and old_conn is not connection:
             _LOGGER.warning(
                 "Pipeline for '%s' displaced by a different browser connection "
                 " -  the previous browser will stop receiving wake word events. "
                 "Each browser must use its own satellite entity.",
-                entity._satellite_name,
+                entity.satellite_name,
             )
             try:
                 old_conn.send_event(old_msg_id, {"type": "displaced"})
             except Exception:
                 pass  # old connection may already be dead
-        entity._pipeline_audio_queue.put_nowait(b"")
+        entity.pipeline_audio_queue.put_nowait(b"")
 
-    old_task = entity._pipeline_task
+    old_task = entity.pipeline_task
     if old_task and not old_task.done():
         done, _ = await asyncio.wait({old_task}, timeout=3.0)
         if not done:
@@ -263,41 +266,45 @@ async def ws_run_pipeline(
         _on_binary
     )
 
-    # Send subscription result (resolves the JS promise)
-    connection.send_result(msg["id"])
+    try:
+        # Send subscription result (resolves the JS promise)
+        connection.send_result(msg["id"])
 
-    # Send synthetic init event with the handler_id the card needs
-    connection.send_event(
-        msg["id"],
-        {"type": "init", "handler_id": handler_id},
-    )
-
-    # Run the pipeline as a background task so it doesn't block HA bootstrap.
-    # Pipeline tasks are long-running (wake word detection) and must not
-    # prevent HA from completing startup.
-    task = hass.async_create_background_task(
-        entity.async_run_pipeline(
-            audio_queue,
-            connection,
+        # Send synthetic init event with the handler_id the card needs
+        connection.send_event(
             msg["id"],
-            start_stage,
-            end_stage,
-            conversation_id=conversation_id,
-            extra_system_prompt=extra_system_prompt,
-        ),
-        name=f"voice_satellite.{entity._satellite_name}_pipeline",
-    )
-    entity._pipeline_task = task
+            {"type": "init", "handler_id": handler_id},
+        )
 
-    # Cleanup on unsubscribe - send stop signal to end the audio stream
-    # naturally.  Do NOT cancel here; CancelledError races with the stop
-    # signal and leaves orphaned HA pipeline tasks.  The next ws_run_pipeline
-    # call (or async_will_remove_from_hass) handles forced cancellation.
-    def unsub() -> None:
-        audio_queue.put_nowait(b"")
+        # Run the pipeline as a background task so it doesn't block HA bootstrap.
+        # Pipeline tasks are long-running (wake word detection) and must not
+        # prevent HA from completing startup.
+        task = hass.async_create_background_task(
+            entity.async_run_pipeline(
+                audio_queue,
+                connection,
+                msg["id"],
+                start_stage,
+                end_stage,
+                conversation_id=conversation_id,
+                extra_system_prompt=extra_system_prompt,
+            ),
+            name=f"voice_satellite.{entity.satellite_name}_pipeline",
+        )
+        entity.pipeline_task = task
+
+        # Cleanup on unsubscribe - send stop signal to end the audio stream
+        # naturally.  Do NOT cancel here; CancelledError races with the stop
+        # signal and leaves orphaned HA pipeline tasks.  The next ws_run_pipeline
+        # call (or async_will_remove_from_hass) handles forced cancellation.
+        def unsub() -> None:
+            audio_queue.put_nowait(b"")
+            unregister()
+
+        connection.subscriptions[msg["id"]] = unsub
+    except Exception:
         unregister()
-
-    connection.subscriptions[msg["id"]] = unsub
+        raise
 
 
 @websocket_api.websocket_command(

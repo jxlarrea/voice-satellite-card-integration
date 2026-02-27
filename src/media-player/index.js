@@ -11,6 +11,7 @@
  */
 
 import { buildMediaUrl, playMediaUrl } from '../audio/media-playback.js';
+import { Timing } from '../constants.js';
 
 export class MediaPlayerManager {
   constructor(card) {
@@ -67,7 +68,7 @@ export class MediaPlayerManager {
         if (this._activeSources.size === 0 && !this._playing && !this._paused) {
           this._reportState('idle');
         }
-      }, 200);
+      }, Timing.IDLE_DEBOUNCE);
     }
   }
   /**
@@ -169,7 +170,7 @@ export class MediaPlayerManager {
           const result = await conn.sendMessagePromise({
             type: 'auth/sign_path',
             path: media_id,
-            expires: 3600,
+            expires: Timing.AUTH_SIGN_EXPIRES,
           });
           url = buildMediaUrl(result.path);
         } catch (e) {
@@ -268,7 +269,7 @@ export class MediaPlayerManager {
 
   /** Apply volume to any active TTS or notification Audio elements. */
   _applyVolumeToExternalAudio(vol) {
-    const ttsAudio = this._card.tts?._currentAudio;
+    const ttsAudio = this._card.tts?.currentAudio;
     if (ttsAudio) ttsAudio.volume = vol;
 
     // Notification managers share the same currentAudio pattern

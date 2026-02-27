@@ -8,6 +8,18 @@ import baseCSS from './preview.css';
 import { getMiniGridRows, getMiniModeKey } from '../mini/constants.js';
 import { t } from '../i18n/index.js';
 
+/**
+ * Disconnect the ResizeObserver if one was set up for preview sizing.
+ * Call from the host element's disconnectedCallback.
+ */
+export function teardownMiniPreview(shadowRoot) {
+  const host = shadowRoot?.host;
+  if (host?.__vsMiniPreviewRO) {
+    host.__vsMiniPreviewRO.disconnect();
+    host.__vsMiniPreviewRO = null;
+  }
+}
+
 export function renderMiniPreview(shadowRoot, config = {}) {
   _ensureMiniPreviewResizeObserver(shadowRoot);
 

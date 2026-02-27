@@ -20,7 +20,7 @@ import { AskQuestionManager } from '../ask-question';
 import { StartConversationManager } from '../start-conversation';
 import { MediaPlayerManager } from '../media-player';
 import { isEditorPreview } from '../editor/preview.js';
-import { renderMiniPreview } from '../mini-editor/preview.js';
+import { renderMiniPreview, teardownMiniPreview } from '../mini-editor/preview.js';
 import { getMiniConfigForm } from '../mini-editor/index.js';
 import { getMiniGridRows } from './constants.js';
 import * as singleton from '../shared/singleton.js';
@@ -200,6 +200,7 @@ export class VoiceSatelliteMiniCard extends HTMLElement {
       this._pickerTeardown = null;
     }
     this._clearOwnerMirrorObserver();
+    if (this.shadowRoot) teardownMiniPreview(this.shadowRoot);
     this._disconnectTimeout = setTimeout(() => {
       // Mirror full-card behavior: editing/reconfiguring dashboards can detach
       // and reattach the same card instance (or a replacement) transiently.
@@ -414,9 +415,17 @@ export class VoiceSatelliteMiniCard extends HTMLElement {
 
     const ownerLine = ownerRoot.querySelector('.vs-mini-line');
     const localLine = localRoot.querySelector('.vs-mini-line');
-    if (ownerLine && localLine && !this._sameMiniContent(ownerLine, localLine)) {
-      this._replaceChildrenFrom(ownerLine, localLine);
-      localLine.scrollLeft = ownerLine.scrollLeft;
+    if (ownerLine && localLine) {
+      if (!this._sameMiniContent(ownerLine, localLine)) {
+        this._replaceChildrenFrom(ownerLine, localLine);
+      }
+      // Sync marquee transform — the style attribute isn't checked by
+      // _sameMiniContent, so copy it explicitly on every mirror tick.
+      const ownerTrack = ownerLine.querySelector('.vs-mini-line-inner');
+      const localTrack = localLine.querySelector('.vs-mini-line-inner');
+      if (ownerTrack && localTrack) {
+        localTrack.style.transform = ownerTrack.style.transform;
+      }
     }
 
     const ownerTranscript = ownerRoot.querySelector('.vs-mini-transcript');

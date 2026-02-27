@@ -126,12 +126,14 @@ export class ChatManager {
     this._autoScroll();
   }
 
-  /** Scroll the stream element to the bottom if it overflows. */
+  /** Scroll the stream element and its transcript container to the bottom. */
   _autoScroll() {
     const el = this._streamEl;
     if (el && el.scrollHeight > el.clientHeight) {
       el.scrollTop = el.scrollHeight;
     }
+    // Also scroll the transcript container (tall mini mode)
+    this._card.ui._scrollTranscriptToEnd?.();
   }
 
   /** Build the fade DOM structure once: a text node for solid text + 24 reusable spans. */
