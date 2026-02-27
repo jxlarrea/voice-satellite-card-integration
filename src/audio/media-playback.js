@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Media Playback Utility
+ * Media Playback Utility
  *
  * Shared helpers for browser audio playback and URL normalization.
  * Used by TtsManager and AnnouncementManager.

@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - AudioManager
+ * AudioManager
  *
  * Handles microphone acquisition, AudioContext management,
  * and audio stream send control.
@@ -20,9 +20,6 @@ export class AudioManager {
     this._sendInterval = null;
     this._actualSampleRate = 16000;
   }
-
-  // --- Public accessors ---
-
   get card() { return this._card; }
   get log() { return this._log; }
   get audioContext() { return this._audioContext; }
@@ -31,9 +28,6 @@ export class AudioManager {
   get audioBuffer() { return this._audioBuffer; }
   set audioBuffer(val) { this._audioBuffer = val; }
   get actualSampleRate() { return this._actualSampleRate; }
-
-  // --- Public API ---
-
   async startMicrophone() {
     await this._ensureAudioContextRunning();
 
@@ -156,9 +150,6 @@ export class AudioManager {
       this._log.error('mic', `Failed to resume AudioContext on click: ${e}`);
     }
   }
-
-  // --- Private ---
-
   async _ensureAudioContextRunning() {
     if (!this._audioContext) {
       this._audioContext = new (window.AudioContext || window.webkitAudioContext)({

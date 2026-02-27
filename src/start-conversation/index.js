@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - StartConversationManager
+ * StartConversationManager
  *
  * Handles start_conversation announcements: plays the prompt,
  * then clears the UI and enters full STT listening mode
@@ -32,9 +32,6 @@ export class StartConversationManager {
     this._log.log(LOG, `Playing queued start_conversation #${ann.id}`);
     this._play(ann);
   }
-
-  // --- Private ---
-
   _play(ann) {
     playNotification(this, ann, (a) => this._onComplete(a), LOG);
   }

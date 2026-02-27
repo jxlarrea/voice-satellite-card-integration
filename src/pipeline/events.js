@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Pipeline Events
+ * Pipeline Events
  *
  * Handlers for all pipeline event types (run-start through error).
  */

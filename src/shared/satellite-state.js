@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Satellite State Helpers
+ * Satellite State Helpers
  *
  * Read satellite entity attributes and sibling switch states
  * from the HA frontend cache. These are pure lookups with no

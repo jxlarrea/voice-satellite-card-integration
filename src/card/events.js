@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Card Events
+ * Card Events
  *
  * State transitions, user interactions, pipeline message dispatch,
  * and TTS completion handling.

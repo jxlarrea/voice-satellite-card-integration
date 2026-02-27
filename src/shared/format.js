@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Formatting Utilities
+ * Formatting Utilities
  *
  * Pure formatting functions used across modules.
  */

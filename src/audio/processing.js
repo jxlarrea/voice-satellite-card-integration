@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Audio Processing
+ * Audio Processing
  *
  * AudioWorklet/ScriptProcessor setup, resampling, and buffer management.
  */

@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Default Skin
+ * Default Skin
  */
 
 import css from './default.css';

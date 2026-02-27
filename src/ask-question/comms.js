@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Ask Question Comms
+ * Ask Question Comms
  *
  * WebSocket service call for submitting question answers.
  */

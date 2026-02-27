@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Timer Comms
+ * Timer Comms
  *
  * Cancel timers via the integration's WS command.
  *

@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - AskQuestionManager
+ * AskQuestionManager
  *
  * Handles ask_question announcements: plays the question prompt,
  * enters STT-only mode to capture the user's spoken answer,
@@ -63,9 +63,6 @@ export class AskQuestionManager {
     this._log.log(LOG, `Playing queued ask_question #${ann.id}`);
     this._play(ann);
   }
-
-  // --- Private ---
-
   _play(ann) {
     playNotification(this, ann, (a) => this._onComplete(a), LOG);
   }

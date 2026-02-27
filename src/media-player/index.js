@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - MediaPlayerManager
+ * MediaPlayerManager
  *
  * Handles media_player commands pushed from the integration via the
  * satellite event subscription.  Plays audio in the browser, reports
@@ -40,9 +40,6 @@ export class MediaPlayerManager {
     this._syncInitialVolume();
     return this._muted ? 0 : this._volume * this._volume;
   }
-
-  // --- External audio tracking (TTS, chimes, notifications) ---
-
   /**
    * Notify that an audio source has started playing.
    * @param {string} source - e.g. 'tts', 'chime', 'notification'
@@ -73,9 +70,6 @@ export class MediaPlayerManager {
       }, 200);
     }
   }
-
-  // --- Media player commands (from integration) ---
-
   /**
    * Handle a command from the integration (via satellite subscription).
    * @param {object} data - {command, ...fields}
@@ -120,9 +114,6 @@ export class MediaPlayerManager {
       this._reportState('idle');
     }
   }
-
-  // --- Private ---
-
   /** Apply perceptual curve to raw volume (0-1). */
   _curved(raw) {
     return raw * raw;

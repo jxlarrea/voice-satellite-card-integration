@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - TtsManager
+ * TtsManager
  *
  * Handles TTS playback (browser + remote media player), chimes via Web Audio API,
  * and streaming TTS early-start support.
@@ -42,9 +42,6 @@ export class TtsManager {
 
   get streamingUrl() { return this._streamingUrl; }
   set streamingUrl(url) { this._streamingUrl = url; }
-
-  // --- TTS Playback ---
-
   /**
    * @param {string} urlPath - URL or path to TTS audio
    * @param {boolean} [isRetry] - Whether this is a retry attempt
@@ -165,9 +162,6 @@ export class TtsManager {
   storeTtsEndUrl(url) {
     this._pendingTtsEndUrl = url ? buildMediaUrl(url) : null;
   }
-
-  // --- Chimes ---
-
   /**
    * @param {'wake' | 'error' | 'done'} type
    */
@@ -205,9 +199,6 @@ export class TtsManager {
       this._onComplete();
     }
   }
-
-  // --- Private ---
-
   _clearWatchdog() {
     if (this._playbackWatchdog) {
       clearInterval(this._playbackWatchdog);

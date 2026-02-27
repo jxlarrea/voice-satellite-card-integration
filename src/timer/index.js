@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - TimerManager
+ * TimerManager
  *
  * Watches the satellite entity's active_timers attribute and renders
  * countdown pill overlays.
@@ -41,9 +41,6 @@ export class TimerManager {
     this._alertActive = false;
     this._alertEl = null;
   }
-
-  // --- Public API ---
-
   update() {
     if (this._subscribed) return;
 
@@ -80,15 +77,9 @@ export class TimerManager {
     resetTimerDedup();
     unsubscribeEntity(this);
   }
-
-  // --- State Processing (delegated) ---
-
   processStateChange(attrs) {
     processStateChange(this, attrs);
   }
-
-  // --- Timer Sync ---
-
   /**
    * @param {Array<object>} rawTimers - active_timers array from entity attributes
    */
@@ -140,9 +131,6 @@ export class TimerManager {
     this.startTick();
     syncDOM(this);
   }
-
-  // --- Tick Control ---
-
   startTick() {
     if (this._tickInterval) return;
     this._tickInterval = setInterval(() => tick(this), 1000);
@@ -154,15 +142,9 @@ export class TimerManager {
       this._tickInterval = null;
     }
   }
-
-  // --- UI Delegation ---
-
   showAlert() { showAlert(this); }
   clearAlert() { clearAlert(this); }
   removePill(timerId) { removePill(this, timerId); }
-
-  // --- Cancel Timer ---
-
   cancelTimer(timerId) {
     this._log.log('timer', `Cancelling timer: ${timerId}`);
 

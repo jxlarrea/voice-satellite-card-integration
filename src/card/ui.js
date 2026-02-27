@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - UIManager
+ * UIManager
  *
  * Single owner of ALL DOM manipulation in the card.
  * Manages: global overlay, rainbow bar, blur overlay, start button,
@@ -445,8 +445,6 @@ export class UIManager {
 
     const card = document.createElement('div');
     card.className = 'vs-weather-card';
-
-    // --- Current conditions header ---
     const header = document.createElement('div');
     header.className = 'vs-weather-header';
 
@@ -487,8 +485,6 @@ export class UIManager {
 
     header.appendChild(info);
     card.appendChild(header);
-
-    // --- Forecast rows ---
     if (Array.isArray(data.forecast) && data.forecast.length > 0) {
       const divider = document.createElement('div');
       divider.className = 'vs-weather-divider';
@@ -559,7 +555,6 @@ export class UIManager {
     const cur = data.currency || 'USD';
 
     if (data.query_type === 'currency') {
-      // --- Currency conversion layout ---
       const conversion = document.createElement('div');
       conversion.className = 'vs-financial-conversion';
       const amt = data.amount != null ? data.amount : '';
@@ -574,8 +569,6 @@ export class UIManager {
         card.appendChild(rate);
       }
     } else {
-      // --- Stock / Crypto layout ---
-
       // Header: logo + name + badge
       const header = document.createElement('div');
       header.className = 'vs-financial-header';

@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - AnnouncementManager
+ * AnnouncementManager
  *
  * Simple announcements: plays chime + media, shows message bubble,
  * ACKs the integration, then auto-clears after configured duration.
@@ -32,9 +32,6 @@ export class AnnouncementManager {
     this._log.log(LOG, `Playing queued announcement #${ann.id}`);
     this._play(ann);
   }
-
-  // --- Private ---
-
   _play(ann) {
     playNotification(this, ann, (a) => this._onComplete(a), LOG);
   }

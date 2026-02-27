@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Preview Renderer
+ * Preview Renderer
  *
  * Renders a static preview of the card inside the HA card editor.
  * Shows the rainbow bar, sample chat bubbles, and a timer pill

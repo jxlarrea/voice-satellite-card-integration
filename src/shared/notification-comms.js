@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Notification Comms
+ * Notification Comms
  *
  * Shared WebSocket calls for satellite notification features
  * (announcement, ask-question, start-conversation).

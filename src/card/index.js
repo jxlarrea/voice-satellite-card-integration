@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Main Card Class
+ * Main Card Class
  *
  * Thin orchestrator that owns the managers and wires them together.
  * All real work is delegated to composition-based managers.
@@ -64,9 +64,6 @@ export class VoiceSatelliteCard extends HTMLElement {
     this._startConversation = new StartConversationManager(this);
     this._mediaPlayer = new MediaPlayerManager(this);
   }
-
-  // --- Public accessors ---
-
   get logger() { return this._logger; }
   get audio() { return this._audio; }
   get analyser() { return this._analyser; }
@@ -103,9 +100,6 @@ export class VoiceSatelliteCard extends HTMLElement {
   get isReactiveBarEnabled() {
     return !!this._activeSkin?.reactiveBar && this._config.reactive_bar !== false;
   }
-
-  // --- HTMLElement Lifecycle ---
-
   connectedCallback() {
     if (this._disconnectTimeout) {
       clearTimeout(this._disconnectTimeout);
@@ -274,16 +268,10 @@ export class VoiceSatelliteCard extends HTMLElement {
 
   static getConfigForm() { return getConfigForm(); }
   static getStubConfig() { return { skin: 'default', text_scale: 100 }; }
-
-  // --- Delegated methods (public API for managers) ---
-
   setState(newState) { setState(this, newState); }
   onStartClick() { handleStartClick(this); }
   onPipelineMessage(message) { handlePipelineMessage(this, message); }
   onTTSComplete(playbackFailed) { onTTSComplete(this, playbackFailed); }
-
-  // --- Private ---
-
   _showEntityPicker(hass) {
     this._pickerTeardown = showPicker(hass, (entityId) => {
       this._pickerTeardown = null;

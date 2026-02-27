@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Siri Skin
+ * Siri Skin
  *
  * Apple-inspired design with a full-screen gradient border glow
  * (purple -> blue -> teal -> pink), dark frosted overlay, and clean

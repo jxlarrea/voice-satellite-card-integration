@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Satellite Event Subscription
+ * Satellite Event Subscription
  *
  * Single WS subscription for satellite-pushed events (announcement,
  * start_conversation, ask_question).  Replaces per-manager entity

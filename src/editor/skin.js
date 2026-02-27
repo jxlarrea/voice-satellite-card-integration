@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Editor: Skin
+ * Editor: Skin
  */
 
 import { getSkinOptions } from '../skins/index.js';

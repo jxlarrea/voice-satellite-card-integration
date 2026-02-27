@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - VisibilityManager
+ * VisibilityManager
  *
  * Handles tab visibility changes: pauses mic and blocks events on hide,
  * resumes and restarts pipeline on show.
@@ -40,9 +40,6 @@ export class VisibilityManager {
     }
     this._isPaused = false;
   }
-
-  // --- Private ---
-
   _handleChange() {
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);

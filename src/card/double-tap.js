@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - DoubleTapHandler
+ * DoubleTapHandler
  *
  * Detects double-taps on the document to cancel active interactions.
  * Also supports Escape key and includes touch/click deduplication.

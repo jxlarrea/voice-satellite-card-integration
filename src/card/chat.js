@@ -46,9 +46,6 @@ export class ChatManager {
       this._scheduleStreaming(text);
     }
   }
-
-  // --- Core Methods ---
-
   addUser(text) {
     this._card.ui.addChatMessage(text, 'user');
   }
@@ -89,9 +86,6 @@ export class ChatManager {
       this._pendingText = null;
     }
   }
-
-  // --- Private ---
-
   /** Coalesce rapid stream chunks into one DOM write per frame. */
   _scheduleStreaming(text) {
     this._pendingText = text;

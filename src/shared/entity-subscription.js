@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Entity Subscription Utility
+ * Entity Subscription Utility
  *
  * Shared subscription pattern for watching HA entity state changes.
  * Used by TimerManager and AnnouncementManager.

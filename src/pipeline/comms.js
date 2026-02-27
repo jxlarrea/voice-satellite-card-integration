@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Pipeline Comms
+ * Pipeline Comms
  *
  * WebSocket operations for the pipeline: run subscription
  * and reconnect handling.

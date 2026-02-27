@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - AnalyserManager
+ * AnalyserManager
  *
  * Provides real-time audio level analysis for reactive bar animations.
  * Uses two separate AnalyserNodes - one for microphone input, one for
@@ -190,9 +190,6 @@ export class AnalyserManager {
     this._perfGapMsMax = 0;
     this._perfLateGaps = 0;
   }
-
-  // --- Private ---
-
   _createAnalyser(audioContext) {
     const analyser = audioContext.createAnalyser();
     // Reactive bar only needs coarse loudness, not detailed frequency bins.

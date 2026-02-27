@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - Singleton State
+ * Singleton State
  *
  * Manages the single-instance guarantee. Only one card instance
  * can be active at a time (owns the mic + pipeline).

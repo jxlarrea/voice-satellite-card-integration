@@ -1,5 +1,5 @@
 /**
- * Voice Satellite Card - PipelineManager
+ * PipelineManager
  *
  * Manages the HA Assist pipeline lifecycle via the integration's
  * voice_satellite/run_pipeline subscription.
@@ -65,9 +65,6 @@ export class PipelineManager {
     this._pipelineGen = 0;
     this._cancelInit = null;
   }
-
-  // --- Public accessors ---
-
   get card() { return this._card; }
   get log() { return this._log; }
   get binaryHandlerId() { return this._binaryHandlerId; }
@@ -95,9 +92,6 @@ export class PipelineManager {
   set askQuestionCallback(val) { this._askQuestionCallback = val; }
   get askQuestionHandled() { return this._askQuestionHandled; }
   set askQuestionHandled(val) { this._askQuestionHandled = val; }
-
-  // --- Start / Stop / Restart ---
-
   async start(options) {
     const opts = options || {};
     const { connection, config } = this._card;
@@ -185,8 +179,6 @@ export class PipelineManager {
         this._card.onPipelineMessage(message);
       },
     );
-
-    // --- Gen check 1: stop() was called while we were subscribing ---
     if (this._pipelineGen !== gen) {
       this._log.log('pipeline', 'Aborting stale start() after subscribe - pipeline was stopped');
       try { unsub(); } catch (_) { /* cleanup */ }
@@ -199,8 +191,6 @@ export class PipelineManager {
     // Block until the init event arrives with the binary handler ID
     await initPromise;
     this._cancelInit = null;
-
-    // --- Gen check 2: stop() was called while we were waiting for init ---
     if (this._pipelineGen !== gen) {
       this._log.log('pipeline', 'Aborting stale start() after init - pipeline was stopped');
       if (this._unsubscribe) {
@@ -314,9 +304,6 @@ export class PipelineManager {
       });
     });
   }
-
-  // --- Event Handlers (with stale event filtering) ---
-
   handleRunStart(data) {
     this._runStartReceived = true;
     this._wakeWordPhase = false;
@@ -377,9 +364,6 @@ export class PipelineManager {
     this._errorReceived = true;
     handleError(this, data);
   }
-
-  // --- Public Helpers ---
-
   clearContinueState() {
     this._shouldContinue = false;
     this._continueConversationId = null;
@@ -408,9 +392,6 @@ export class PipelineManager {
     }
     this._serviceUnavailable = false;
   }
-
-  // --- Private ---
-
   finishRunEnd() {
     this._pendingRunEnd = false;
 
