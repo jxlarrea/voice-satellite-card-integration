@@ -93,10 +93,19 @@ export class DoubleTapHandler {
         }
         mgr.playing = false;
         mgr.currentAnnounceId = null;
+        mgr.queued = null;
         clearNotificationUI(mgr);
       }
       // Release server-side _question_event if ask_question was playing
       this._card.askQuestion.cancel();
+      this._card.chat.clear();
+      this._card.ui.clearNotificationStatusOverride();
+
+      const isRemote = !!this._card.ttsTarget;
+      if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+        this._card.tts.playChime('done');
+      }
+
       this._card.pipeline.restart(0);
       return;
     }

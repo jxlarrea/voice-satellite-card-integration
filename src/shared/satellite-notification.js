@@ -161,9 +161,9 @@ export function playNotification(mgr, ann, onComplete, logPrefix) {
   mgr.playing = true;
   mgr.currentAnnounceId = ann.id;
 
-  // UI: blur overlay + wake screen + bar
+  // UI: blur overlay + wake screen + notification state
   mgr.card.ui.showBlurOverlay(BlurReason.ANNOUNCEMENT);
-  mgr.barWasVisible = mgr.card.ui.showBarSpeaking();
+  mgr.barWasVisible = mgr.card.ui.onNotificationStart();
 
   // Only center on screen for passive announcements (not ask_question or start_conversation)
   const isPassive = !ann.ask_question && !ann.start_conversation;
@@ -237,7 +237,7 @@ export function clearNotificationUI(mgr) {
   mgr.card.ui.setAnnouncementMode(false);
   mgr.card.ui.clearAnnouncementBubbles();
   mgr.card.ui.hideBlurOverlay(BlurReason.ANNOUNCEMENT);
-  mgr.card.ui.restoreBar(mgr.barWasVisible);
+  mgr.card.ui.onNotificationDismiss(mgr.barWasVisible);
 }
 
 

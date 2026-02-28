@@ -9,7 +9,6 @@
  * reconnect via the connection 'ready' event.
  */
 
-import { isOwner } from './singleton.js';
 import { teardownVisibilityListener } from './satellite-notification.js';
 
 let _unsubscribe = null;
@@ -32,7 +31,6 @@ let _retryCount = 0;
 export function subscribeSatelliteEvents(card, onEvent) {
   const { config, connection } = card;
   if (!config.satellite_entity || !connection) return;
-  if (!isOwner(card)) return;
   if (_subscribed) return;
 
   _card = card;

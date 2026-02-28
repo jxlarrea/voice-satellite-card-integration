@@ -37,7 +37,7 @@ export function setupReconnectListener(card, pipeline, connection, listenerRef) 
   listenerRef.listener = () => {
     card.logger.log('pipeline', 'Connection reconnected - resetting retry state');
     pipeline.resetRetryState();
-    card.ui.clearErrorBar();
+    card.ui.clearServiceError();
     if (card.visibility.isPaused) {
       card.logger.log('pipeline', 'Tab is paused - deferring restart to resume');
       return;

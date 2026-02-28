@@ -12,6 +12,8 @@
 /* Font */
 #voice-satellite-ui {
   font-family: "Google Sans", Roboto, Noto, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Blur Overlay - light, frosted glass */
@@ -32,6 +34,7 @@
 
 #voice-satellite-ui .vs-blur-overlay.visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* Start Button - Google Blue with material shadow */

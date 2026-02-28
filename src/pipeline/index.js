@@ -113,7 +113,7 @@ export class PipelineManager {
     // Check mute state - if muted, show visual and poll for unmute
     if (getSwitchState(this._card.hass, config.satellite_entity, 'mute') === true) {
       this._log.log('pipeline', 'Satellite muted - pipeline blocked');
-      this._card.ui.showErrorBar();
+      this._card.ui.showServiceError();
       this._muteCheckId = setTimeout(() => {
         this._muteCheckId = null;
         this.start(opts).catch(() => {});
@@ -121,8 +121,8 @@ export class PipelineManager {
       return;
     }
 
-    // Clear error bar in case we were previously muted
-    this._card.ui.clearErrorBar();
+    // Clear service error in case we were previously muted
+    this._card.ui.clearServiceError();
 
     // Defensive cleanup - stop any previous subscription before starting
     if (this._unsubscribe) {
@@ -265,7 +265,7 @@ export class PipelineManager {
           const msg = e?.message || JSON.stringify(e);
           this._log.error('pipeline', `Restart failed: ${msg}`);
           if (!this._serviceUnavailable) {
-            this._card.ui.showErrorBar();
+            this._card.ui.showServiceError();
             this._serviceUnavailable = true;
           }
           this.restart(this.calculateRetryDelay());

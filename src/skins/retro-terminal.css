@@ -5,6 +5,8 @@
 /* Font */
 #voice-satellite-ui {
   font-family: 'VT323', 'Courier New', monospace;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Blur Overlay - near-black with CRT bezel frame */
@@ -31,6 +33,7 @@
 
 #voice-satellite-ui .vs-blur-overlay.visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* Scanline overlay */

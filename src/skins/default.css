@@ -11,6 +11,8 @@
 /* Font */
 #voice-satellite-ui {
   font-family: 'DM Sans', Roboto, Noto, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Blur Overlay */
@@ -31,6 +33,7 @@
 
 #voice-satellite-ui .vs-blur-overlay.visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* Start Button */

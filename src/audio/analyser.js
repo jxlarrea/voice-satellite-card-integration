@@ -109,6 +109,14 @@ export class AnalyserManager {
       // Switch reactive bar to read from audio analyser during playback
       this._setActiveAnalyser(this._audioAnalyser);
       this._log.log('analyser', 'Audio -> audioAnalyser -> destination connected, active -> audioAnalyser');
+
+      // Auto-start tick loop if a bar element is waiting (deferred start
+      // from onNotificationStart — bar was prepared but loop deferred
+      // until audio was attached).
+      if (this._barEl && !this._rafId) {
+        this._log.log('analyser', 'Auto-starting tick loop (deferred bar ready)');
+        this._tick();
+      }
     } catch (e) {
       this._log.log('analyser', `Failed to attach audio: ${e.message}`);
       this._mediaSourceNode = null;
@@ -145,8 +153,15 @@ export class AnalyserManager {
 
   /**
    * Start the animation frame loop that updates --vs-audio-level.
+   * @param {HTMLElement} barEl - The bar element to update
+   * @param {object} [opts]
+   * @param {boolean} [opts.deferred] - Store bar element but don't start
+   *   the tick loop yet.  Used by notification playback: the bar enters
+   *   reactive/speaking mode immediately, but the tick loop should only
+   *   run once attachAudio() switches to the audio analyser — otherwise
+   *   the bar would react to mic input during the pre-announce chime.
    */
-  start(barEl) {
+  start(barEl, { deferred } = {}) {
     this._barEl = barEl;
     if (!this._visibilityHandler) {
       this._visibilityHandler = () => {
@@ -162,7 +177,7 @@ export class AnalyserManager {
       document.addEventListener('visibilitychange', this._visibilityHandler);
     }
     if (this._rafId) return; // Already running
-    this._tick();
+    if (!deferred) this._tick();
   }
 
   /**
@@ -209,14 +224,17 @@ export class AnalyserManager {
       try { this._audioAnalyser.disconnect(); } catch {}
       this._log.log('analyser', 'audioAnalyser -> destination disconnected');
     }
-    // Revert to mic analyser if available
-    if (this._micAnalyser) {
-      this._setActiveAnalyser(this._micAnalyser);
-      this._log.log('analyser', 'Active -> micAnalyser (audio detached)');
-    } else {
-      this._activeAnalyser = null;
-      this._log.log('analyser', 'Active -> none (audio detached, no mic)');
+    // Clear active analyser — the tick loop will stop on the next frame.
+    // Don't revert to mic: callers like playMediaFor detach audio when
+    // notification media ends, and the bar would react to mic input
+    // during the cleanup/linger period.  reconnectMic() restores mic
+    // explicitly when the pipeline needs it (e.g. updateForState).
+    this._setActiveAnalyser(null);
+    if (this._barEl) {
+      this._lastLevel = 0;
+      this._barEl.style.setProperty('--vs-audio-level', '0');
     }
+    this._log.log('analyser', 'Active -> none (audio detached)');
   }
 
   _tick() {

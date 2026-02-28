@@ -131,7 +131,7 @@ export class UIManager {
     if (!config.barVisible && (this._card._imageLingerTimeout || this._card._videoPlaying || this.isLightboxVisible())) return;
 
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
-    if (bar.classList.contains('error-mode')) this.clearErrorBar();
+    if (bar.classList.contains('error-mode')) this.clearServiceError();
 
     const reactive = this._card.isReactiveBarEnabled;
 
@@ -208,14 +208,14 @@ export class UIManager {
 
   // ─── Rainbow Bar ──────────────────────────────────────────────────
 
-  showErrorBar() {
+  showServiceError() {
     if (!this._globalUI) return;
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     bar.classList.remove('connecting', 'listening', 'processing', 'speaking');
     bar.classList.add('visible', 'error-mode');
   }
 
-  clearErrorBar() {
+  clearServiceError() {
     if (!this._globalUI) return;
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     bar.classList.remove('error-mode');
@@ -227,10 +227,10 @@ export class UIManager {
 
 
   /**
-   * Show the bar in speaking mode, returning whether it was already visible.
+   * Prepare UI for notification playback (bar enters speaking mode).
    * @returns {boolean} Whether bar was previously visible
    */
-  showBarSpeaking() {
+  onNotificationStart() {
     if (!this._globalUI) return false;
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     if (!bar) return false;
@@ -240,16 +240,20 @@ export class UIManager {
     if (reactive) {
       bar.classList.add('reactive');
       this._globalUI.classList.add('reactive-mode');
-      this._card.analyser.start(bar);
+      // Deferred: store bar element but don't start the tick loop yet.
+      // The loop will auto-start when attachAudio() switches to the
+      // audio analyser, preventing the bar from reacting to mic input
+      // during the pre-announce chime.
+      this._card.analyser.start(bar, { deferred: true });
     }
     return wasVisible;
   }
 
   /**
-   * Restore bar after notification playback.
+   * Clean up bar state after a notification is dismissed.
    * @param {boolean} wasVisible - Whether bar was visible before notification
    */
-  restoreBar(wasVisible) {
+  onNotificationDismiss(wasVisible) {
     if (!this._globalUI) return;
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     if (!bar) return;
@@ -919,6 +923,12 @@ export class UIManager {
     }
     this._timerAlertEl = null;
   }
+
+  // No-ops — mini card implements these; full card doesn't need them
+  // but stubs ensure the UIBroadcastProxy can call uniformly.
+  clearNotificationStatusOverride() {}
+  getTtsLingerTimeoutMs() { return 0; }
+  _scrollTranscriptToEnd() {}
 
   // ─── Private ──────────────────────────────────────────────────────
 

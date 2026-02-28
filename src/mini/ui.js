@@ -241,7 +241,7 @@ ha-card.vs-mini-card-shell.compact {
   padding-bottom: 0;
 }
 .vs-mini-root.compact.notification-active .vs-mini-surface {
-  gap: 4px;
+  gap: 0;
 }
 .vs-mini-root.tall .vs-mini-line {
   display: none;
@@ -535,11 +535,11 @@ export class MiniUIManager {
     }
   }
 
-  showErrorBar() {
+  showServiceError() {
     this.updateForState(this._card.currentState, true, this._card.tts?.isPlaying);
   }
 
-  clearErrorBar() {
+  clearServiceError() {
   }
 
   hideBar() {}
@@ -548,7 +548,7 @@ export class MiniUIManager {
     return 0;
   }
 
-  showBarSpeaking() {
+  onNotificationStart() {
     this._notificationStatus = this._getNotificationStatus();
     this.updateForState(this._card.currentState, this._card.pipeline?.serviceUnavailable, this._card.tts?.isPlaying);
     return false;
@@ -559,7 +559,7 @@ export class MiniUIManager {
     this.updateForState(this._card.currentState, this._card.pipeline?.serviceUnavailable, this._card.tts?.isPlaying);
   }
 
-  restoreBar(_wasVisible) {
+  onNotificationDismiss(_wasVisible) {
     this._notificationStatus = null;
     this.updateForState(this._card.currentState, this._card.pipeline?.serviceUnavailable, this._card.tts?.isPlaying);
   }
@@ -573,6 +573,13 @@ export class MiniUIManager {
         sep.className = 'vs-mini-sep';
         sep.textContent = ' · ';
         track.appendChild(sep);
+      } else if (this._root.classList.contains('notification-active')) {
+        // First message during a notification — add separator between
+        // the status label ("Announcement") and the message text.
+        const sep = document.createElement('span');
+        sep.className = 'vs-mini-sep';
+        sep.textContent = ' · ';
+        track?.appendChild(sep);
       }
       const el = document.createElement('span');
       el.className = `vs-mini-msg ${type}`;
@@ -753,15 +760,14 @@ export class MiniUIManager {
   }
 
   _getNotificationStatus() {
-    const arrow = this._t('mini.notification.arrow_suffix', ' ->');
     if (this._card.askQuestion?.playing) {
-      return { label: `${this._t('mini.notification.question', 'Question')}${arrow}`, dot: 'responding', showCompactStatus: true, kind: 'question' };
+      return { label: this._t('mini.notification.question', 'Question'), dot: 'responding', showCompactStatus: true, kind: 'question' };
     }
     if (this._card.startConversation?.playing) {
-      return { label: `${this._t('mini.notification.conversation', 'Conversation')}${arrow}`, dot: 'responding', showCompactStatus: true, kind: 'conversation' };
+      return { label: this._t('mini.notification.conversation', 'Conversation'), dot: 'responding', showCompactStatus: true, kind: 'conversation' };
     }
     if (this._card.announcement?.playing) {
-      return { label: `${this._t('mini.notification.announcement', 'Announcement')}${arrow}`, dot: 'responding', showCompactStatus: true, kind: 'announcement' };
+      return { label: this._t('mini.notification.announcement', 'Announcement'), dot: 'responding', showCompactStatus: true, kind: 'announcement' };
     }
     return { label: this._t('mini.state.responding', 'Responding'), dot: 'responding', showCompactStatus: true };
   }

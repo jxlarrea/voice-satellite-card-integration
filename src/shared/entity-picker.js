@@ -27,6 +27,30 @@ export function isDeviceDisabled() {
   return getStoredEntity() === DISABLED_VALUE;
 }
 
+/**
+ * Apply browser_satellite_override logic to a config object.
+ * Mutates config.satellite_entity based on localStorage state.
+ * @param {object} config
+ * @returns {{ isLocalStorageEntity: boolean, deviceDisabled: boolean }}
+ */
+export function applyBrowserOverride(config) {
+  if (!config.browser_satellite_override) {
+    clearStoredEntity();
+    return { isLocalStorageEntity: false, deviceDisabled: false };
+  }
+  const stored = getStoredEntity();
+  if (stored === DISABLED_VALUE) {
+    config.satellite_entity = '';
+    return { isLocalStorageEntity: false, deviceDisabled: true };
+  }
+  if (stored) {
+    config.satellite_entity = stored;
+    return { isLocalStorageEntity: true, deviceDisabled: false };
+  }
+  config.satellite_entity = '';
+  return { isLocalStorageEntity: false, deviceDisabled: false };
+}
+
 export function discoverSatelliteEntities(hass) {
   if (!hass?.entities) return [];
   const results = [];

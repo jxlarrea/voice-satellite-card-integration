@@ -64,6 +64,12 @@ export class AnnouncementManager {
       if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
         this._card.tts.playChime('done');
       }
+
+      // Re-sync bar state — updateForState calls during the linger were
+      // blocked by the notifPlaying guard.  If a pipeline interaction
+      // started while the linger was active, the bar needs to catch up.
+      const s = this._card;
+      s.ui.updateForState(s.currentState, s.pipeline.serviceUnavailable, s.tts.isPlaying);
     }, clearDelay);
   }
 }

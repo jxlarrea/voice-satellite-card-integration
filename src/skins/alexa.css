@@ -3,6 +3,8 @@
 /* Font */
 #voice-satellite-ui {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Blur Overlay - darker, heavier blur for Alexa's dark aesthetic */
@@ -23,6 +25,7 @@
 
 #voice-satellite-ui .vs-blur-overlay.visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* Start Button - cyan Alexa accent */

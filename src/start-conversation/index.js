@@ -53,9 +53,9 @@ export class StartConversationManager {
     this._card.ui.setAnnouncementMode(false);
     this._card.ui.clearAnnouncementBubbles();
     this._card.ui.hideBlurOverlay(BlurReason.ANNOUNCEMENT);
-    // MiniUIManager uses restoreBar() to clear its notification status
-    // override, but calling restoreBar() here causes a fullscreen-card bar
-    // flicker. Clear the override explicitly when supported.
+    // onNotificationDismiss() resets bar state on the full card, causing
+    // flicker since start_conversation transitions into a conversation.
+    // Clear the mini card's notification status override explicitly instead.
     this._card.ui.clearNotificationStatusOverride?.();
 
     this.playing = false;

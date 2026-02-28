@@ -12,6 +12,8 @@
 /* Font - Inter (closest open-source match to SF Pro) */
 #voice-satellite-ui {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Blur Overlay - dark frosted glass */
@@ -32,6 +34,7 @@
 
 #voice-satellite-ui .vs-blur-overlay.visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* Start Button - Siri gradient accent */

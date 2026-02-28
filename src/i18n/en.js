@@ -16,7 +16,6 @@ export default {
       question: 'Question',
       conversation: 'Conversation',
       announcement: 'Announcement',
-      arrow_suffix: ' ->',
     },
     timer: {
       finished: 'Timer finished',
@@ -33,6 +32,8 @@ export default {
     custom_css_override: 'Custom CSS Override',
     helper_mode: 'Compact is a single scrolling line; Tall shows status and a scrolling transcript.',
     helper_text_scale: 'Scales text sizes in the mini card while keeping Home Assistant theme typography as the base.',
+    suppress_full_card: 'Suppress Full Card',
+    helper_suppress_full_card: 'Hides the full-screen voice satellite overlay when this mini card is active.',
     helper_custom_css: 'Advanced: CSS overrides applied inside the mini card shadow DOM',
     preview: {
       label: 'Preview',

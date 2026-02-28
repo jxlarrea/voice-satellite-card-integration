@@ -243,6 +243,8 @@ The satellite entity exposes the following attributes for use in templates and a
 | `last_timer_event` | string | Last timer event type: `started`, `updated`, `cancelled`, or `finished` |
 | `muted` | boolean | Current mute switch state |
 | `wake_sound` | boolean | Current wake sound switch state |
+| `tts_target` | string | Entity ID of the selected TTS output media player (empty string when set to "Browser") |
+| `announcement_display_duration` | integer | Configured announcement display duration in seconds |
 
 Example template to check for active timers:
 
@@ -398,7 +400,7 @@ The entity supports play, pause, resume, stop, volume set, and volume mute - all
 ### Modes
 
 - **Compact** - Single-line status + conversation text with marquee scrolling when content overflows
-- **Tall** - Status row + scrolling transcript + timer badges inside the card
+- **Tall** - Status row + scrolling transcript + timer badges inside the card. Occupies 3 grid rows by default in Sections dashboards (min 2, max 12)
 
 ### Mini Card Features
 
@@ -421,6 +423,7 @@ debug: false                       # Show debug info in browser console
 # Mini Layout
 mini_mode: compact                 # 'compact' or 'tall'
 text_scale: 100                    # Scale text 50-200%
+suppress_full_card: true           # Hide the fullscreen overlay when this mini card is active
 custom_css: ''                     # CSS overrides inside the mini card shadow DOM
 
 # Microphone Processing

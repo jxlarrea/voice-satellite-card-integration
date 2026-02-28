@@ -7,7 +7,7 @@
 import { State, INTERACTING_STATES, EXPECTED_ERRORS, BlurReason, Timing } from '../constants.js';
 import { getSwitchState } from '../shared/satellite-state.js';
 import { CHIME_WAKE } from '../audio/chime.js';
-import { onTTSComplete } from '../card/events.js';
+import { onTTSComplete } from '../session/events.js';
 
 /**
  * Run-start: binaryHandlerId is already set from the init event.
@@ -41,7 +41,7 @@ export function handleWakeWordStart(mgr) {
         mgr.log.log('recovery', 'Wake word service recovered');
         mgr.serviceUnavailable = false;
         mgr.retryCount = 0;
-        mgr.card.ui.clearErrorBar();
+        mgr.card.ui.clearServiceError();
         mgr.card.ui.hideBar();
       }
     }, Timing.RECONNECT_DELAY);
@@ -63,7 +63,7 @@ export function handleWakeWordEnd(mgr, eventData) {
     }
 
     mgr.binaryHandlerId = null;
-    mgr.card.ui.showErrorBar();
+    mgr.card.ui.showServiceError();
     mgr.serviceUnavailable = true;
     mgr.restart(mgr.calculateRetryDelay());
     return;
@@ -76,7 +76,7 @@ export function handleWakeWordEnd(mgr, eventData) {
   }
   mgr.serviceUnavailable = false;
   mgr.retryCount = 0;
-  mgr.card.ui.clearErrorBar();
+  mgr.card.ui.clearServiceError();
 
   mgr.card.mediaPlayer.interrupt();
 
@@ -207,7 +207,7 @@ export function handleIntentEnd(mgr, eventData) {
     const errorText = extractResponseText(eventData) || 'An error occurred';
     mgr.log.error('error', `Intent error: ${errorText}`);
 
-    mgr.card.ui.showErrorBar();
+    mgr.card.ui.showServiceError();
     if (getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false) {
       mgr.card.tts.playChime('error');
     }
@@ -217,7 +217,7 @@ export function handleIntentEnd(mgr, eventData) {
     if (mgr.intentErrorBarTimeout) clearTimeout(mgr.intentErrorBarTimeout);
     mgr.intentErrorBarTimeout = setTimeout(() => {
       mgr.intentErrorBarTimeout = null;
-      mgr.card.ui.clearErrorBar();
+      mgr.card.ui.clearServiceError();
       mgr.card.ui.hideBar();
     }, Timing.INTENT_ERROR_DISPLAY);
 
@@ -358,7 +358,7 @@ export function handleError(mgr, errorData) {
   if (wasInteracting && getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false) {
     mgr.card.tts.playChime('error');
   }
-  mgr.card.ui.showErrorBar();
+  mgr.card.ui.showServiceError();
   mgr.serviceUnavailable = true;
   mgr.card.chat.clear();
   mgr.card.ui.hideBlurOverlay(BlurReason.PIPELINE);

@@ -1,107 +1,289 @@
 # Voice Satellite Card Integration — Design Document
 
+> Comprehensive design reference for the Python integration component.
+> Companion document to DESIGN-CARD.md which covers the JavaScript card.
+> A future implementer should be able to recreate the entire integration
+> from this document alone.
+
+---
+
+## Table of Contents
+
+1. [Overview](#1-overview)
+2. [Architecture](#2-architecture)
+3. [Card Interface](#3-card-interface)
+4. [File Map](#4-file-map)
+5. [Integration Lifecycle](#5-integration-lifecycle)
+6. [Config Flow](#6-config-flow)
+7. [Frontend Registration](#7-frontend-registration)
+8. [Device & Entity Architecture](#8-device--entity-architecture)
+9. [Satellite Entity](#9-satellite-entity)
+10. [Pipeline State Synchronization](#10-pipeline-state-synchronization)
+11. [Bridged Pipeline](#11-bridged-pipeline)
+12. [Satellite Event Subscription](#12-satellite-event-subscription)
+13. [Announcement System](#13-announcement-system)
+14. [Start Conversation](#14-start-conversation)
+15. [Ask Question](#15-ask-question)
+16. [Timer System](#16-timer-system)
+17. [Screensaver Keep-Alive](#17-screensaver-keep-alive)
+18. [Media Player Entity](#18-media-player-entity)
+19. [Select Entities](#19-select-entities)
+20. [Switch Entities](#20-switch-entities)
+21. [Number Entity](#21-number-entity)
+22. [WebSocket API](#22-websocket-api)
+23. [Error Handling & Concurrency](#23-error-handling--concurrency)
+24. [HA API Dependencies](#24-ha-api-dependencies)
+25. [Strings & Localization](#25-strings--localization)
+26. [Implementation Checklist](#26-implementation-checklist)
+
+---
+
 ## 1. Overview
 
-This integration creates virtual Assist Satellite entities in Home Assistant for browsers running the Voice Satellite Card. Each config entry produces one `assist_satellite.*` entity backed by a device in the device registry, along with supporting select, switch, number, and media player entities.
+Voice Satellite Card is a custom Home Assistant integration that registers browser
+tablets as virtual Assist Satellite devices. This gives the JavaScript card
+(documented in DESIGN-CARD.md) a proper device identity in HA, unlocking:
 
-### What the integration provides
+- **Timers** — LLM-triggered `HassStartTimer` routed to the correct device
+- **Announcements** — `assist_satellite.announce` service targets the browser
+- **Start conversation** — `assist_satellite.start_conversation` prompts the user
+- **Ask question** — `assist_satellite.ask_question` with hassil answer matching
+- **Media playback** — `media_player.play_media` / `tts.speak` to browser audio
+- **Per-device configuration** — Pipeline, VAD, wake sound, mute, screensaver, TTS output
+- **Per-device automations** — Automations can target specific browser satellites
 
-| Capability | Mechanism |
-|---|---|
-| Timer support | `intent.async_register_timer_handler` → LLM sees `HassStartTimer` |
-| Announcements | `assist_satellite.announce` action → pushed to card via WS subscription |
-| Start conversation | `assist_satellite.start_conversation` action → prompt + listen |
-| Ask question | `assist_satellite.ask_question` action → prompt + STT + hassil matching |
-| Media player | `media_player` entity → volume control, `tts.speak` / `play_media` targeting, media browsing |
-| Entity availability | Entity is `unavailable` when no card is connected; becomes available on `subscribe_events` |
-| Pipeline state sync | Card → integration state updates → entity reflects `idle`/`listening`/`processing`/`responding` |
-| Bridged pipeline | Card audio → integration → HA pipeline → events back to card |
-| Per-device automations | Entity state changes trigger automations |
+### 1.1 Relationship to HA Core
 
-### Card–Integration Relationship
+The integration extends `AssistSatelliteEntity` from `homeassistant.components.assist_satellite`.
+Unlike physical satellites (e.g. ESP32-S3 running ESPHome), this satellite has no persistent
+TCP connection — the card opens a WebSocket subscription to stream audio and receive events.
+The integration bridges between HA's internal pipeline system and the card's WebSocket
+connection.
 
-The card and integration are tightly coupled and ship as a single package. The card reads entity attributes (`active_timers`, `muted`, `wake_sound`, `tts_target`, `announcement_display_duration`) and sends WebSocket commands. The integration pushes notification events (announcements, start_conversation, ask_question) directly to the card via a persistent WS subscription. Changes to event formats, WebSocket command schemas, or async flow timing affect both sides.
+### 1.2 Design Principles
 
-See [DESIGN-CARD.md](DESIGN-CARD.md) for the card-side design.
+1. **Single device per entry** — One config entry creates exactly one device with all 9 entities
+2. **Push, not poll** — Events flow to the card via `connection.send_event()` subscriptions
+3. **Optimistic + reactive** — Commands update state immediately; card reports back for reconciliation
+4. **Blocking with timeout** — Announcement/question flows use `asyncio.Event` with 120s timeout
+5. **Sequence counters** — `_announce_id` prevents stale ACKs from old interactions
+6. **Generation counters** — `_pipeline_gen` filters orphaned events from old pipeline runs
+7. **Immutable lists** — Timer list is replaced (not mutated) so HA detects attribute changes
+8. **Availability = subscription** — Entity is `available` only when a card has an active `subscribe_events` connection
 
-## 2. Project Structure
+---
+
+## 2. Architecture
+
+### 2.1 High-Level Diagram
 
 ```
-voice-satellite-card-integration/
-├── src/                              ← Card source (see DESIGN-CARD.md)
-├── custom_components/
-│   └── voice_satellite/
-│       ├── __init__.py          # async_setup (WS commands + frontend), async_setup_entry (platforms)
-│       ├── assist_satellite.py  # VoiceSatelliteEntity (core entity)
-│       ├── config_flow.py       # Single-step config flow
-│       ├── const.py             # DOMAIN, SCREENSAVER_INTERVAL, INTEGRATION_VERSION, URL_BASE, JS_FILENAME
-│       ├── frontend.py          # JSModuleRegistration — auto-serve JS + register Lovelace resource
-│       ├── media_player.py      # VoiceSatelliteMediaPlayer (media player entity)
-│       ├── number.py            # Announcement display duration number entity
-│       ├── select.py            # Pipeline, VAD sensitivity, screensaver, TTS output selects
-│       ├── switch.py            # Wake sound, mute switches
-│       ├── manifest.json        # Integration manifest
-│       ├── strings.json         # UI strings for config flow + entity names
-│       ├── translations/
-│       │   └── en.json          # English translations (mirrors strings.json)
-│       ├── frontend/
-│       │   └── voice-satellite-card.js  # Webpack build output (committed for HACS)
-│       ├── icon.png             # Integration branding (256×256)
-│       └── icon@2x.png         # Integration branding (high-res)
-├── scripts/
-│   └── sync-version.js          # Syncs package.json version → manifest.json + const.py
-├── .github/
-│   ├── workflows/
-│   │   ├── hacs.yml             # HACS validation + hassfest
-│   │   └── release.yml          # Build JS + zip + upload release asset
-│   └── FUNDING.yml              # GitHub Sponsors + Buy Me a Coffee
-├── webpack.config.js             # Webpack config (outputs to custom_components/.../frontend/)
-├── babel.config.js
-├── package.json                  # Version source of truth
-├── package-lock.json
-├── hacs.json                     # HACS metadata
-├── DESIGN-CARD.md                # Card design document
-├── DESIGN-INTEGRATION.md         # This file
-├── README.md
-└── LICENSE                       # MIT
+┌─────────────────────────────────────────────────────┐
+│                  Home Assistant Core                  │
+│                                                       │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐ │
+│  │   Assist     │  │   Intent /   │  │  Lovelace   │ │
+│  │  Pipeline    │  │   Timer Mgr  │  │  Resources  │ │
+│  └──────┬──────┘  └──────┬───────┘  └──────┬──────┘ │
+│         │                │                  │        │
+│  ┌──────┴────────────────┴──────────────────┴──────┐ │
+│  │        voice_satellite integration               │ │
+│  │                                                   │ │
+│  │  ┌─────────────┐  ┌────────────┐  ┌───────────┐ │ │
+│  │  │ Satellite   │  │  Media     │  │  Selects  │ │ │
+│  │  │ Entity      │  │  Player    │  │  Switches │ │ │
+│  │  │ (assist_    │  │  Entity    │  │  Number   │ │ │
+│  │  │  satellite) │  │            │  │           │ │ │
+│  │  └──────┬──────┘  └─────┬──────┘  └─────┬─────┘ │ │
+│  │         │               │               │        │ │
+│  │  ┌──────┴───────────────┴───────────────┴──────┐ │ │
+│  │  │         7 WebSocket API Handlers            │ │ │
+│  │  │  run_pipeline | subscribe_events | ...      │ │ │
+│  │  └─────────────────────┬───────────────────────┘ │ │
+│  └────────────────────────┼─────────────────────────┘ │
+│                           │                            │
+└───────────────────────────┼────────────────────────────┘
+                            │  WebSocket
+                            │
+┌───────────────────────────┼────────────────────────────┐
+│  Browser                  │                             │
+│                           │                             │
+│  ┌────────────────────────┴──────────────────────────┐ │
+│  │            Voice Satellite Card (JS)               │ │
+│  │  Pipeline ↔ Audio ↔ TTS ↔ Chat ↔ UI               │ │
+│  └────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## 3. Integration Lifecycle
+### 2.2 Data Flow Summary
 
-### 3.1 Config Flow (`config_flow.py`)
+| Direction | Channel | Content |
+|---|---|---|
+| Card → Integration | `voice_satellite/run_pipeline` | Pipeline subscription + binary audio frames |
+| Card → Integration | `voice_satellite/update_state` | Pipeline state changes (STT, INTENT, etc.) |
+| Card → Integration | `voice_satellite/announce_finished` | Announcement playback ACK |
+| Card → Integration | `voice_satellite/question_answered` | STT transcription for ask_question |
+| Card → Integration | `voice_satellite/cancel_timer` | Timer cancellation request |
+| Card → Integration | `voice_satellite/media_player_event` | Playback state report (playing/paused/idle) |
+| Integration → Card | `subscribe_events` push | Announcements, start_conversation, ask_question, timers, media commands |
+| Integration → Card | `run_pipeline` events | Pipeline events (run-start, wake_word-end, stt-end, intent-progress, tts-end, etc.) |
+| Integration → Card | Entity attributes | Timers, mute state, wake sound, TTS target, announcement duration |
 
-Single-step flow. The user provides a name (e.g., "Kitchen Tablet"). The flow:
+---
 
-1. Strips whitespace from the name
-2. Generates a unique ID by lowercasing and replacing spaces with underscores (`kitchen_tablet`)
-3. Calls `self._abort_if_unique_id_configured()` to prevent duplicates
-4. Creates a config entry with `data={"name": name}`
+## 3. Card Interface
 
-The resulting entity ID will be `assist_satellite.<slugified_name>`.
+This section documents the bidirectional protocol between the integration and the
+card. See DESIGN-CARD.md §3 for the card's perspective.
 
-### 3.2 Entry Setup (`__init__.py`)
+### 3.1 Pipeline Subscription Protocol
 
-**`async_setup`** handles integration-wide setup (called once, not per-entry):
+The card initiates a pipeline by calling `voice_satellite/run_pipeline`. The integration:
 
-1. **Register WebSocket commands** — Registers all 7 WS commands. Since this runs once (not per-entry), no try/except wrapper is needed.
-2. **Register frontend JS** — Registers the card's JavaScript module via `JSModuleRegistration`. Deferred to `EVENT_HOMEASSISTANT_STARTED` if HA is still starting, ensuring the HTTP server and Lovelace are ready.
+1. Sends `send_result(msg_id)` — resolves the JS `subscribeMessage()` promise
+2. Sends `send_event(msg_id, {type: "init", handler_id})` — card stores `binaryHandlerId`
+3. Card starts sending binary audio frames to the `handler_id`
+4. Integration feeds audio to `async_accept_pipeline_from_satellite()`
+5. Pipeline events flow back via `send_event(msg_id, {type, data})`
+6. On unsubscribe: card sends empty bytes `b""` as stop signal
 
-**`async_setup_entry`** handles per-device setup:
+### 3.2 Satellite Event Protocol
 
-1. **Forward platform setup** — Calls `async_forward_entry_setups(entry, PLATFORMS)` where `PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SELECT, Platform.SWITCH]`.
+The card subscribes via `voice_satellite/subscribe_events`. The integration pushes events:
 
-The 7 WebSocket commands:
-- `voice_satellite/announce_finished`
-- `voice_satellite/update_state`
-- `voice_satellite/question_answered`
-- `voice_satellite/run_pipeline`
-- `voice_satellite/subscribe_events`
-- `voice_satellite/cancel_timer`
-- `voice_satellite/media_player_event`
+```
+{type: "announcement",        data: {id, message, media_id, preannounce_media_id, ...}}
+{type: "start_conversation",  data: {id, message, media_id, start_conversation: true, ...}}
+{type: "media_player",        data: {command: "play"|"pause"|"resume"|"stop"|"volume_set"|"volume_mute", ...}}
+{type: "timer",               data: {timers: [...], last_timer_event: "started"|"cancelled"|"finished"|"updated"}}
+```
 
-### 3.3 Entry Unload
+### 3.3 Entity Attributes Read by the Card
 
-Unloads platforms, removes entity references from `hass.data[DOMAIN]`, and cleans up the Lovelace resource when the last entry is unloaded:
+The card reads the satellite entity's `extra_state_attributes`:
+
+| Attribute | Type | Source |
+|---|---|---|
+| `active_timers` | `list[dict]` | Timer handler events |
+| `last_timer_event` | `string` | Most recent timer event type |
+| `muted` | `bool` | Mute switch state |
+| `wake_sound` | `bool` | Wake sound switch state |
+| `tts_target` | `string` | Selected TTS output entity_id (empty = browser) |
+| `announcement_display_duration` | `int` | Seconds to display announcement bubbles |
+
+### 3.4 Sibling Entity State Propagation
+
+The satellite entity tracks state changes from sibling entities (mute switch, wake sound
+switch, TTS output select, announcement duration number) via `async_track_state_change_event`.
+When any tracked entity changes, `_on_switch_state_change` calls `async_write_ha_state()`,
+which re-evaluates `extra_state_attributes` and pushes the update to the card.
+
+---
+
+## 4. File Map
+
+| File | Lines | Purpose |
+|---|---|---|
+| `__init__.py` | 418 | Integration setup, 7 WebSocket handlers, `_find_entity()` helper |
+| `assist_satellite.py` | 1181 | `VoiceSatelliteEntity` — main satellite entity, pipeline bridging, announcements, ask_question, timers, screensaver |
+| `media_player.py` | 263 | `VoiceSatelliteMediaPlayer` — media player entity with command push |
+| `select.py` | 340 | 4 select entities: Pipeline, VAD, Screensaver, TTS Output |
+| `switch.py` | 112 | 2 switch entities: Wake Sound, Mute |
+| `number.py` | 76 | 1 number entity: Announcement Display Duration |
+| `frontend.py` | 135 | `JSModuleRegistration` — auto-registers card JS in Lovelace |
+| `config_flow.py` | 41 | Name-based config flow with duplicate detection |
+| `const.py` | 14 | Constants: `DOMAIN`, `SCREENSAVER_INTERVAL`, `INTEGRATION_VERSION`, `URL_BASE`, `JS_FILENAME` |
+| `manifest.json` | 20 | Integration metadata, dependencies, version |
+| `strings.json` | 62 | Entity translations and config flow strings |
+
+**Total: ~2662 lines** across 11 files (10 Python + 1 JSON manifest + 1 JSON strings).
+
+### 4.2 Directory Structure
+
+```
+custom_components/voice_satellite/
+├── __init__.py
+├── assist_satellite.py
+├── config_flow.py
+├── const.py
+├── frontend.py
+├── manifest.json
+├── media_player.py
+├── number.py
+├── select.py
+├── strings.json
+├── switch.py
+└── frontend/
+    └── voice-satellite-card.js   ← Built JS (gitignored, CI builds for releases)
+```
+
+The `frontend/` subdirectory is resolved at runtime via `Path(__file__).parent / "frontend"`.
+
+### 4.3 Module-Level Constants
+
+| Constant | File | Value | Purpose |
+|---|---|---|---|
+| `DOMAIN` | `const.py` | `"voice_satellite"` | Integration domain identifier |
+| `SCREENSAVER_INTERVAL` | `const.py` | `5` (seconds) | Keep-alive periodic timer interval |
+| `INTEGRATION_VERSION` | `const.py` | `"5.7.3"` | Synced from `package.json` by `scripts/sync-version.js` |
+| `URL_BASE` | `const.py` | `"/voice_satellite"` | HTTP static path prefix |
+| `JS_FILENAME` | `const.py` | `"voice-satellite-card.js"` | Built JS filename |
+| `ANNOUNCE_TIMEOUT` | `assist_satellite.py` | `120` (seconds) | Timeout for announcement/question ACK wait |
+| `SCREENSAVER_DISABLED` | `select.py` | `"Disabled"` | Default option for screensaver select |
+| `TTS_OUTPUT_BROWSER` | `select.py` | `"Browser"` | Default option for TTS output select |
+| `_CACHE_TTL` | `select.py` (class attr) | `30` (seconds) | Entity mapping cache lifetime |
+| `FRONTEND_DIR` | `frontend.py` | `Path(__file__).parent / "frontend"` | Static path to JS directory |
+
+---
+
+## 5. Integration Lifecycle
+
+### 5.1 `async_setup()` — Integration-Wide Setup
+
+Called once when HA loads the integration (not per entry). Two responsibilities:
+
+1. **Register 7 WebSocket commands** — All WS handlers are registered here (once, not per-entry)
+2. **Register frontend JS** — Creates `JSModuleRegistration` and calls `async_register()`
+
+```python
+async def async_setup(hass, config):
+    # 1. WebSocket commands
+    websocket_api.async_register_command(hass, ws_announce_finished)
+    websocket_api.async_register_command(hass, ws_update_state)
+    websocket_api.async_register_command(hass, ws_question_answered)
+    websocket_api.async_register_command(hass, ws_run_pipeline)
+    websocket_api.async_register_command(hass, ws_subscribe_satellite_events)
+    websocket_api.async_register_command(hass, ws_cancel_timer)
+    websocket_api.async_register_command(hass, ws_media_player_event)
+
+    # 2. Frontend JS (deferred if HA not fully started)
+    if hass.state is CoreState.running:
+        await _register_frontend()
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_frontend)
+```
+
+The frontend registration is deferred to `EVENT_HOMEASSISTANT_STARTED` because the
+Lovelace resources collection may not be loaded yet during early startup.
+
+### 5.2 `async_setup_entry()` — Per-Entry Setup
+
+Called for each config entry. Minimal — just initializes the data store and forwards
+to all 5 platforms:
+
+```python
+PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER,
+             Platform.NUMBER, Platform.SELECT, Platform.SWITCH]
+
+async def async_setup_entry(hass, entry):
+    hass.data.setdefault(DOMAIN, {})
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+```
+
+### 5.3 `async_unload_entry()` — Entry Teardown
+
+Unloads all platforms, cleans up data store entries, and removes the Lovelace
+resource when the last entry is unloaded:
 
 ```python
 async def async_unload_entry(hass, entry):
@@ -109,70 +291,198 @@ async def async_unload_entry(hass, entry):
     if result:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         hass.data[DOMAIN].pop(f"{entry.entry_id}_media_player", None)
-        # Remove Lovelace resource when last entry is unloaded
-        if not hass.data[DOMAIN]:
+        if not hass.data[DOMAIN]:  # Last entry removed
             registration = JSModuleRegistration(hass)
             await registration.async_unregister()
-    return result
 ```
 
-### 3.4 Entity Storage
+### 5.4 Entity Registration in `hass.data`
 
-Satellite entities are stored in `hass.data[DOMAIN][entry.entry_id]`. Media player entities are stored in `hass.data[DOMAIN][f"{entry.entry_id}_media_player"]`. All WebSocket handlers iterate this dict to find entities by `entity_id`. This lookup is necessary because WS commands are global (not per-entity), so the handler must locate the correct entity instance.
+Each platform's `async_setup_entry` stores its entity in `hass.data[DOMAIN]` for
+WebSocket handler lookup:
+
+| Key | Entity | Stored by |
+|---|---|---|
+| `{entry.entry_id}` | `VoiceSatelliteEntity` | `assist_satellite.py` |
+| `{entry.entry_id}_media_player` | `VoiceSatelliteMediaPlayer` | `media_player.py` |
+
+The `_find_entity()` helper in `__init__.py` scans `hass.data[DOMAIN]` to find
+entities by `entity_id`:
 
 ```python
-entity = None
-for entry_id, ent in hass.data.get(DOMAIN, {}).items():
-    if ent.entity_id == entity_id:
-        entity = ent
-        break
+def _find_entity(hass, entity_id, predicate=None):
+    for _, ent in hass.data.get(DOMAIN, {}).items():
+        if ent.entity_id == entity_id and (predicate is None or predicate(ent)):
+            return ent
+    return None
 ```
 
-### 3.5 Frontend JS Serving (`frontend.py`)
+---
 
-The integration auto-serves the card's JavaScript and registers it as a Lovelace resource. This is handled by `JSModuleRegistration` in `frontend.py`:
+## 6. Config Flow
 
-1. **Static path registration** — Registers `/voice_satellite` as an HTTP static path serving the `frontend/` directory via `hass.http.async_register_static_paths([StaticPathConfig(...)])`.
+### 6.1 Flow Structure
 
-2. **Lovelace resource registration** — In storage mode, registers `/voice_satellite/voice-satellite-card.js?v={version}` as a `module` resource via the Lovelace resources collection API. On version updates, the `?v=` cache-busting parameter is updated automatically.
-
-3. **YAML mode fallback** — If Lovelace is in YAML mode, logs a message with the manual resource URL.
-
-4. **Resource cleanup** — `async_unregister()` removes the Lovelace resource entry when the last config entry is unloaded, preventing dangling 404 URLs.
-
-5. **HA 2026.2 compatibility** — Uses `getattr(lovelace, "resource_mode", getattr(lovelace, "mode", "yaml"))` to handle the `mode` → `resource_mode` rename in HA 2026.2.
-
-6. **Resource load retry** — Uses `async_call_later` with 5-second retry if Lovelace resources aren't loaded yet.
-
-The registration is triggered from `async_setup()` via an `EVENT_HOMEASSISTANT_STARTED` listener (or called directly if HA is already running).
-
-## 4. Entity (`assist_satellite.py`)
-
-### 4.1 Class Hierarchy
-
-`VoiceSatelliteEntity` extends `AssistSatelliteEntity` from `homeassistant.components.assist_satellite`. The base class provides:
-
-- Registration as an Assist Satellite device
-- The `assist_satellite.announce` action (resolves TTS, calls `async_announce`)
-- The `assist_satellite.start_conversation` action (resolves TTS, calls `async_start_conversation`)
-- Pipeline event routing (calls `on_pipeline_event`)
-- Pipeline acceptance (`async_accept_pipeline_from_satellite`)
-- Wake word configuration (calls `async_get_configuration`)
-
-The entity declares supported features:
+The config flow is a single-step user flow. The user enters a name for the satellite:
 
 ```python
-_attr_supported_features = (
-    AssistSatelliteEntityFeature.ANNOUNCE
-    | AssistSatelliteEntityFeature.START_CONVERSATION
+class VoiceSatelliteConfigFlow(ConfigFlow, domain=DOMAIN):
+    VERSION = 1
+
+    async def async_step_user(self, user_input=None):
+        if user_input is not None:
+            name = user_input["name"].strip()
+            await self.async_set_unique_id(name.lower().replace(" ", "_"))
+            self._abort_if_unique_id_configured()
+            return self.async_create_entry(title=name, data={"name": name})
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema({vol.Required("name"): str}),
+        )
+```
+
+### 6.2 Unique ID Generation
+
+The unique ID is derived from the satellite name: `name.lower().replace(" ", "_")`.
+
+- `"Kitchen Tablet"` → unique_id `"kitchen_tablet"`
+- Duplicate detection via `self._abort_if_unique_id_configured()`
+
+### 6.3 Config Entry Data
+
+```python
+entry.data = {"name": "Kitchen Tablet"}
+entry.entry_id = "auto_generated_uuid"  # HA generates this
+```
+
+The `entry.entry_id` (a UUID) is used as the base for all entity unique IDs and
+device identifiers. The `name` from `entry.data` becomes the device name and
+satellite display name.
+
+---
+
+## 7. Frontend Registration
+
+### 7.1 `JSModuleRegistration` Class
+
+Handles auto-registering the card's built JavaScript file as a Lovelace resource
+so users don't need to manually add it.
+
+```python
+class JSModuleRegistration:
+    def __init__(self, hass):
+        self.hass = hass
+        self.lovelace = hass.data.get("lovelace")
+        # HA 2026.2 renamed lovelace.mode -> lovelace.resource_mode
+        self.resource_mode = getattr(
+            self.lovelace, "resource_mode",
+            getattr(self.lovelace, "mode", "yaml"),
+        )
+```
+
+### 7.2 Registration Flow
+
+```
+async_register()
+  ├── _async_register_path()          # Static HTTP path
+  │     └── hass.http.async_register_static_paths(
+  │           [StaticPathConfig("/voice_satellite", FRONTEND_DIR, False)]
+  │         )
+  └── if MODE_STORAGE:
+        └── _async_wait_for_lovelace_resources()
+              └── poll until lovelace.resources.loaded (12 retries × 5s = 60s)
+                    └── _async_register_module()
+                          ├── Check if URL already registered
+                          ├── Update version if URL changed
+                          └── Create new resource if not found
+```
+
+### 7.3 Static Path
+
+The integration serves its `frontend/` directory at `/voice_satellite`.
+The directory path is computed at module level:
+
+```python
+FRONTEND_DIR = str(Path(__file__).parent / "frontend")
+```
+
+This means the built JS file must exist at:
+```
+custom_components/voice_satellite/frontend/voice-satellite-card.js
+```
+
+### 7.4 Versioned URL
+
+The Lovelace resource URL includes a version query parameter for cache busting:
+
+```
+/voice_satellite/voice-satellite-card.js?v=5.7.3
+```
+
+When the integration updates, `_async_register_module()` detects the version
+mismatch and updates the resource URL. URL comparison strips the query parameter
+to match base paths: `resource["url"].split("?")[0] == url`. This ensures the
+version-stamped URL (`?v=5.7.3`) still matches the base URL for update detection.
+
+### 7.5 YAML Mode Fallback
+
+If Lovelace is in YAML mode (`resource_mode != MODE_STORAGE`), auto-registration
+is not possible. The integration logs a message instructing the user:
+
+```
+Lovelace is in YAML mode - add this resource manually:
+url: /voice_satellite/voice-satellite-card.js, type: module
+```
+
+### 7.6 Unregistration
+
+When the last config entry is removed, `async_unregister()` removes the Lovelace
+resource entry:
+
+```python
+async def async_unregister(self):
+    if self.lovelace is None or self.resource_mode != MODE_STORAGE:
+        return
+    if not self.lovelace.resources.loaded:
+        await self.lovelace.resources.async_load()
+    url = f"{URL_BASE}/{JS_FILENAME}"
+    for resource in self.lovelace.resources.async_items():
+        if resource["url"].split("?")[0] == url:
+            await self.lovelace.resources.async_delete_item(resource["id"])
+            break
+```
+
+### 7.7 HA 2026.2 Compatibility
+
+HA 2026.2 renamed `lovelace.mode` to `lovelace.resource_mode`. The constructor
+uses `getattr` with fallback to handle both versions:
+
+```python
+self.resource_mode = getattr(
+    self.lovelace, "resource_mode",
+    getattr(self.lovelace, "mode", "yaml"),
 )
 ```
 
-Note: `ask_question` does not have a separate feature flag — the entity implements it via `async_internal_ask_question`.
+---
 
-### 4.2 Device Info
+## 8. Device & Entity Architecture
 
-Each entity creates a device registry entry:
+### 8.1 Single Device Per Entry
+
+Each config entry creates exactly one device in the device registry. All 9 entities
+share this device via identical `device_info`:
+
+```python
+@property
+def device_info(self):
+    return {
+        "identifiers": {(DOMAIN, self._entry.entry_id)},
+    }
+```
+
+The satellite entity additionally provides full device metadata:
 
 ```python
 @property
@@ -182,21 +492,223 @@ def device_info(self):
         "name": self._satellite_name,
         "manufacturer": "Voice Satellite Card Integration",
         "model": "Browser Satellite",
-        "sw_version": "<version>",
+        "sw_version": INTEGRATION_VERSION,
     }
 ```
 
-The `identifiers` tuple uses the config entry ID as the unique key. Each config entry = one device = 9 entities (1 assist_satellite, 1 media_player, 4 selects, 2 switches, 1 number), all sharing the same device identifiers.
+### 8.2 Entity Summary Table
 
-### 4.3 Entity Naming
+| # | Platform | Class | Translation Key | Unique ID Pattern | Entity Category | Restore |
+|---|---|---|---|---|---|---|
+| 1 | `assist_satellite` | `VoiceSatelliteEntity` | *(uses device name)* | `{entry_id}` | — | No |
+| 2 | `media_player` | `VoiceSatelliteMediaPlayer` | `media_player` | `{entry_id}_media_player` | — | Yes (volume) |
+| 3 | `select` | `VoiceSatellitePipelineSelect` | *(from framework)* | `{entry_id}-pipeline` | — | Yes (framework) |
+| 4 | `select` | `VoiceSatelliteVadSensitivitySelect` | *(from framework)* | `{entry_id}-vad_sensitivity` | — | Yes (framework) |
+| 5 | `select` | `VoiceSatelliteScreensaverSelect` | `screensaver` | `{entry_id}_screensaver` | CONFIG | Yes |
+| 6 | `select` | `VoiceSatelliteTTSOutputSelect` | `tts_output` | `{entry_id}_tts_output` | CONFIG | Yes |
+| 7 | `switch` | `VoiceSatelliteWakeSoundSwitch` | `wake_sound` | `{entry_id}_wake_sound` | CONFIG | Yes |
+| 8 | `switch` | `VoiceSatelliteMuteSwitch` | `mute` | `{entry_id}_mute` | CONFIG | Yes |
+| 9 | `number` | `VoiceSatelliteAnnouncementDurationNumber` | `announcement_display_duration` | `{entry_id}_announcement_display_duration` | CONFIG | Yes |
 
-- `_attr_has_entity_name = True` — entity uses the device name
-- `_attr_name = None` — no additional suffix; the entity name IS the device name
-- `_attr_unique_id = entry.entry_id` — uses the config entry UUID
+### 8.3 Unique ID Patterns
 
-### 4.4 Extra State Attributes
+Two patterns are used for unique IDs:
 
-The entity exposes attributes for the card to read:
+- **Framework entities** (Pipeline, VAD): `{entry_id}-{suffix}` (hyphen separator, set by base class)
+- **Custom entities**: `{entry_id}_{suffix}` (underscore separator)
+
+This is because `AssistPipelineSelect` and `VadSensitivitySelect` construct their
+own unique IDs internally using `{entry_id}-pipeline` and `{entry_id}-vad_sensitivity`.
+
+### 8.4 Entity Registry Lookup Pattern
+
+The satellite entity frequently looks up sibling entity IDs via the entity registry:
+
+```python
+registry = er.async_get(self.hass)
+eid = registry.async_get_entity_id("switch", DOMAIN, f"{self._entry.entry_id}_mute")
+if eid:
+    state = self.hass.states.get(eid)
+    # Use state...
+```
+
+This is used in `extra_state_attributes`, `pipeline_entity_id`, `vad_sensitivity_entity_id`,
+and `_get_screensaver_entity_id()`.
+
+### 8.5 Availability Model
+
+The satellite entity's availability is subscription-based:
+
+```python
+@property
+def available(self):
+    if self.hass.is_stopping:
+        return True  # Allow RestoreEntity to save full attributes
+    return len(self._satellite_subscribers) > 0
+```
+
+**Why `True` during shutdown?** If the entity reports `unavailable`, HA's RestoreEntity
+will only save the state string ("unavailable"), not the full attributes (timers,
+volume, etc.). Reporting `available = True` during shutdown ensures `extra_state_attributes`
+and `ExtraStoredData` are preserved for the next startup.
+
+The media player delegates to the satellite:
+
+```python
+@property
+def available(self):
+    satellite = self._get_satellite_entity()
+    if satellite is None:
+        return False
+    return satellite.available
+```
+
+All other entities (selects, switches, number) have no custom availability — they're
+always available since they're local configuration entities.
+
+---
+
+## 9. Satellite Entity
+
+### 9.1 Class Hierarchy
+
+```python
+class VoiceSatelliteEntity(AssistSatelliteEntity):
+    _attr_has_entity_name = True
+    _attr_name = None  # Use device name
+    _attr_supported_features = (
+        AssistSatelliteEntityFeature.ANNOUNCE
+        | AssistSatelliteEntityFeature.START_CONVERSATION
+    )
+```
+
+The entity extends HA's `AssistSatelliteEntity`, inheriting:
+- Pipeline integration via `async_accept_pipeline_from_satellite()`
+- Event callback via `on_pipeline_event()`
+- Announcement dispatch via `async_internal_announce()` → `async_announce()`
+- Start conversation via `async_internal_start_conversation()` → `async_start_conversation()`
+- Ask question via `async_internal_ask_question()` (HA 2025.7+)
+- Configuration via `async_get_configuration()` / `async_set_configuration()`
+
+### 9.2 Instance State
+
+```python
+def __init__(self, entry):
+    # Identity
+    self._entry = entry
+    self._satellite_name = entry.data["name"]
+    self._attr_unique_id = entry.entry_id
+
+    # Active timers (extra_state_attributes)
+    self._active_timers: list[dict] = []
+    self._last_timer_event: str | None = None
+
+    # Announcement blocking state
+    self._announce_event: asyncio.Event | None = None
+    self._announce_id: int = 0   # Sequence counter
+
+    # Ask question state
+    self._question_event: asyncio.Event | None = None
+    self._question_answer_text: str | None = None
+    self._ask_question_pending: bool = False
+    self._question_match_event: asyncio.Event | None = None
+    self._question_match_result: dict | None = None
+
+    # Preannounce flag (captured before base class consumes it)
+    self._preannounce_pending: bool = True
+
+    # Extra system prompt (captured from start_conversation)
+    self._pending_extra_system_prompt: str | None = None
+    self._extra_system_prompt: str | None = None
+
+    # Bridged pipeline state
+    self._pipeline_connection = None      # ActiveConnection for relay
+    self._pipeline_msg_id: int | None = None
+    self._pipeline_task: asyncio.Task | None = None
+    self._pipeline_audio_queue: asyncio.Queue | None = None
+    self._pipeline_gen: int = 0           # Generation counter
+    self._pipeline_run_started: bool = False
+    self._conversation_id: str | None = None
+
+    # Satellite event subscribers
+    self._satellite_subscribers: list[tuple] = []
+
+    # Screensaver keep-alive
+    self._screensaver_unsub = None
+```
+
+### 9.3 `async_added_to_hass()`
+
+Called when the entity is registered. Performs three setup tasks:
+
+1. **Timer handler registration** — Registers this device with HA's intent timer system.
+   Wrapped in `self.async_on_remove()` so the handler is automatically unregistered
+   when the entity is removed (prevents memory leaks and orphaned callbacks).
+2. **Sibling entity tracking** — Subscribes to state changes on mute, wake_sound,
+   tts_output, and announcement_duration entities. Also wrapped in `async_on_remove()`.
+   The tracking list is only registered if non-empty (all entity lookups may fail during
+   first setup before sibling entities exist).
+3. **Logging** — Reports successful registration with device_id
+
+```python
+async def async_added_to_hass(self):
+    await super().async_added_to_hass()
+
+    # 1. Timer handler
+    self.async_on_remove(
+        intent.async_register_timer_handler(
+            self.hass, self.device_entry.id, self._handle_timer_event,
+        )
+    )
+
+    # 2. Track sibling entities for attribute propagation
+    registry = er.async_get(self.hass)
+    tracked_eids = []
+    for suffix in ("_mute", "_wake_sound"):
+        eid = registry.async_get_entity_id("switch", DOMAIN, f"{self._entry.entry_id}{suffix}")
+        if eid: tracked_eids.append(eid)
+    tts_eid = registry.async_get_entity_id("select", DOMAIN, f"{self._entry.entry_id}_tts_output")
+    if tts_eid: tracked_eids.append(tts_eid)
+    ann_dur_eid = registry.async_get_entity_id("number", DOMAIN, f"{self._entry.entry_id}_announcement_display_duration")
+    if ann_dur_eid: tracked_eids.append(ann_dur_eid)
+    if tracked_eids:
+        self.async_on_remove(
+            async_track_state_change_event(self.hass, tracked_eids, self._on_switch_state_change)
+        )
+```
+
+### 9.4 `async_will_remove_from_hass()`
+
+Cleanup on entity removal:
+
+1. Send stop signal to audio queue (`b""`)
+2. Wait up to 5s for pipeline task to complete naturally
+3. Force-cancel if still running
+4. Release any pending announcement/question blocking events
+5. Clear all satellite subscribers
+6. Stop screensaver keep-alive
+
+### 9.5 `async_get_configuration()` / `async_set_configuration()`
+
+Returns an empty configuration (browser satellites don't have configurable wake words).
+`async_set_configuration()` is intentionally a no-op (`pass`) — browser satellites
+cannot configure wake words through the HA UI:
+
+```python
+def async_get_configuration(self):
+    return AssistSatelliteConfiguration(
+        available_wake_words=[],
+        active_wake_words=[],
+        max_active_wake_words=0,
+    )
+
+async def async_set_configuration(self, config):
+    pass  # No-op for browser satellites
+```
+
+### 9.6 `extra_state_attributes`
+
+Exposes configuration and timer state to the card:
 
 ```python
 @property
@@ -205,19 +717,22 @@ def extra_state_attributes(self):
         "active_timers": self._active_timers,
         "last_timer_event": self._last_timer_event,
     }
-    # Expose mute and wake sound switch states
     registry = er.async_get(self.hass)
-    mute_eid = registry.async_get_entity_id("switch", DOMAIN, f"{self._entry.entry_id}_mute")
+
+    # Mute switch → attrs["muted"]  (default: False if switch not found)
+    mute_eid = registry.async_get_entity_id("switch", DOMAIN, f"{entry_id}_mute")
     if mute_eid:
         s = self.hass.states.get(mute_eid)
         attrs["muted"] = s.state == "on" if s else False
-    wake_eid = registry.async_get_entity_id("switch", DOMAIN, f"{self._entry.entry_id}_wake_sound")
+
+    # Wake sound switch → attrs["wake_sound"]  (default: True if switch not found)
+    wake_eid = registry.async_get_entity_id("switch", DOMAIN, f"{entry_id}_wake_sound")
     if wake_eid:
         s = self.hass.states.get(wake_eid)
         attrs["wake_sound"] = s.state == "on" if s else True
 
-    # Expose TTS output select entity_id for the card
-    tts_select_eid = registry.async_get_entity_id("select", DOMAIN, f"{self._entry.entry_id}_tts_output")
+    # TTS output select → attrs["tts_target"]  (empty string = Browser)
+    tts_select_eid = registry.async_get_entity_id("select", DOMAIN, f"{entry_id}_tts_output")
     if tts_select_eid:
         s = self.hass.states.get(tts_select_eid)
         if s and s.state not in ("Browser", "unknown", "unavailable"):
@@ -225,9 +740,9 @@ def extra_state_attributes(self):
         else:
             attrs["tts_target"] = ""
 
-    # Expose announcement display duration for the card
-    ann_dur_eid = registry.async_get_entity_id("number", DOMAIN,
-        f"{self._entry.entry_id}_announcement_display_duration")
+    # Announcement duration number → attrs["announcement_display_duration"]
+    # (omitted entirely if entity not found or state is unknown/unavailable)
+    ann_dur_eid = registry.async_get_entity_id("number", DOMAIN, f"{entry_id}_announcement_display_duration")
     if ann_dur_eid:
         s = self.hass.states.get(ann_dur_eid)
         if s and s.state not in ("unknown", "unavailable"):
@@ -239,473 +754,37 @@ def extra_state_attributes(self):
     return attrs
 ```
 
-| Attribute | Type | Description |
+Each sibling is looked up via `registry.async_get_entity_id()`, then its current
+state is read from `hass.states.get()`.
+
+**Default values are critical:**
+- `muted` defaults to `False` (not muted) if switch entity not found
+- `wake_sound` defaults to `True` (enabled) if switch entity not found — **not False!**
+- `tts_target` defaults to `""` (empty string means Browser)
+- `announcement_display_duration` is **omitted entirely** if entity unavailable
+
+---
+
+## 10. Pipeline State Synchronization
+
+### 10.1 State Mapping
+
+The card reports pipeline state changes via `voice_satellite/update_state`.
+The integration maps card states to HA satellite states:
+
+| Card State | HA Satellite State | Meaning |
 |---|---|---|
-| `active_timers` | `list[dict]` | Active timers with countdown data (always present, empty list when none) |
-| `last_timer_event` | `string \| null` | Last timer event type: `started`, `updated`, `cancelled`, `finished` |
-| `muted` | `bool` | Whether the mute switch is on (default `False`) |
-| `wake_sound` | `bool` | Whether the wake sound switch is on (default `True`) |
-| `tts_target` | `string` | Entity ID of the media player for remote TTS, or `""` if set to "Browser" (default) |
-| `announcement_display_duration` | `int` | Seconds to display announcement bubbles (default `5`, range 1–60) |
-
-**Important:** Announcements are NOT in entity attributes. They are pushed directly to the card via the satellite event subscription (§10).
-
-### 4.5 Entity Availability
-
-The entity overrides the `available` property to reflect whether a card is actually connected:
-
-```python
-@property
-def available(self) -> bool:
-    if self.hass.is_stopping:
-        return True  # Save full attributes during shutdown
-    return len(self._satellite_subscribers) > 0
-```
-
-**Shutdown guard:** During HA shutdown, the entity reports as available so `RestoreEntity` saves state with full attributes (volume, timers, etc.) instead of an empty "unavailable" state.
-
-When no browser has an active `subscribe_events` subscription, the entity shows as **unavailable** in HA. This means:
-
-- The entity state becomes `unavailable` in the UI and state machine
-- Automations targeting the entity (announce, start_conversation, etc.) fail immediately instead of hanging until timeout
-- The media_player entity on the same device also becomes unavailable (it delegates to the satellite's `available` property)
-
-Availability updates are triggered in `register_satellite_subscription` (first subscriber → available) and `unregister_satellite_subscription` (last subscriber removed → unavailable). Both also call `_update_media_player_availability()` to propagate the change to the child media_player entity.
-
-### 4.6 Pipeline/VAD Entity ID Properties
-
-The entity provides lookup properties for the related select entities:
-
-```python
-@property
-def pipeline_entity_id(self):
-    registry = er.async_get(self.hass)
-    return registry.async_get_entity_id("select", DOMAIN, f"{self._entry.entry_id}-pipeline")
-
-@property
-def vad_sensitivity_entity_id(self):
-    registry = er.async_get(self.hass)
-    return registry.async_get_entity_id("select", DOMAIN, f"{self._entry.entry_id}-vad_sensitivity")
-```
-
-These are used by the `AssistSatelliteEntity` base class to resolve the pipeline and VAD settings when running a pipeline via `async_accept_pipeline_from_satellite`.
-
-### 4.6 Entity Lifecycle
-
-#### `async_added_to_hass`
-
-1. Registers the device as a timer handler via `intent.async_register_timer_handler`
-2. Subscribes to sibling entity state changes (mute/wake_sound switches, TTS output select, announcement duration number) so `extra_state_attributes` are re-evaluated when any change
-3. Wraps all unregister callbacks with `async_on_remove()` for cleanup
-
-```python
-async def async_added_to_hass(self):
-    await super().async_added_to_hass()
-    assert self.device_entry is not None
-
-    # Timer handler
-    self.async_on_remove(
-        intent.async_register_timer_handler(
-            self.hass, self.device_entry.id, self._handle_timer_event,
-        )
-    )
-
-    # Track sibling entity state changes
-    registry = er.async_get(self.hass)
-    tracked_eids = []
-    for suffix in ("_mute", "_wake_sound"):
-        eid = registry.async_get_entity_id("switch", DOMAIN, f"{self._entry.entry_id}{suffix}")
-        if eid:
-            tracked_eids.append(eid)
-    tts_eid = registry.async_get_entity_id("select", DOMAIN, f"{self._entry.entry_id}_tts_output")
-    if tts_eid:
-        tracked_eids.append(tts_eid)
-    ann_dur_eid = registry.async_get_entity_id("number", DOMAIN,
-        f"{self._entry.entry_id}_announcement_display_duration")
-    if ann_dur_eid:
-        tracked_eids.append(ann_dur_eid)
-    if tracked_eids:
-        self.async_on_remove(
-            async_track_state_change_event(self.hass, tracked_eids, self._on_switch_state_change)
-        )
-```
-
-**Gotcha:** `self.device_entry` is only available after `async_added_to_hass()`. Timer handler registration must happen here, not in `__init__`.
-
-#### `async_will_remove_from_hass`
-
-Cleanup on entity removal (HA restart, config entry unload):
-
-1. **Pipeline stop**: Send empty bytes to audio queue → wait up to 5s for natural exit → force cancel on timeout
-2. **Release blocking events**: Set `_announce_event` and `_question_event` so `async_announce`/`async_internal_ask_question` don't hang forever
-3. **Clear subscribers**: Empty the satellite subscriber list
-4. **Stop screensaver**: Cancel the keep-alive timer
-
-### 4.7 Wake Word Configuration
-
-```python
-@callback
-def async_get_configuration(self):
-    return AssistSatelliteConfiguration(
-        available_wake_words=[], active_wake_words=[], max_active_wake_words=0,
-    )
-
-async def async_set_configuration(self, config):
-    pass  # No-op for browser satellites
-```
-
-Wake word detection happens on the HA pipeline server side, not on the card. The card sends audio starting from the wake word stage.
-
-## 5. Timer System
-
-### 5.1 Timer Handler Registration
-
-On `async_added_to_hass`, the entity registers itself as a timer handler using `intent.async_register_timer_handler(hass, device_id, callback)`. This tells HA's intent system that this device supports timers, causing the LLM to receive timer intents (`HassStartTimer`, `HassUpdateTimer`, `HassCancelTimer`).
-
-### 5.2 Timer Event Handler
-
-The `_handle_timer_event` callback receives `(event_type: intent.TimerEventType, timer_info: intent.TimerInfo)`.
-
-| Event | Behavior |
-|---|---|
-| `STARTED` | Append new timer dict to `_active_timers` |
-| `UPDATED` | Find timer by ID, overwrite duration + `started_at` |
-| `CANCELLED` / `FINISHED` | Remove timer by ID |
-
-All events set `_last_timer_event = event_type.value` and call `async_write_ha_state()`.
-
-### 5.3 Immutable List Pattern (Critical Gotcha)
-
-Timer list mutations **must create a new list**, not modify in-place:
-
-```python
-# CORRECT — new list, HA detects the change
-self._active_timers = [*self._active_timers, new_timer]
-
-# WRONG — in-place mutation, HA suppresses state_changed event
-self._active_timers.append(new_timer)
-```
-
-**Why:** HA's state machine compares old and new attribute values by reference. If the list is mutated in-place, the previously-written state's attribute reference points to the same list object, making `old == new` → HA suppresses the `state_changed` event → the card never sees the update.
-
-The same pattern applies to UPDATED (create new list with modified timer) and CANCELLED/FINISHED (create new filtered list).
-
-### 5.4 Timer Attribute Contract
-
-Each timer in `active_timers` is a dict:
-
-```json
-{
-    "id": "timer_id_string",
-    "name": "pizza timer",
-    "total_seconds": 600,
-    "started_at": 1708000000.0,
-    "start_hours": 0,
-    "start_minutes": 10,
-    "start_seconds": 0
-}
-```
-
-- `id` — Opaque string from HA's timer system
-- `name` — User-specified name, may be empty string
-- `total_seconds` — Total duration in seconds (computed from h/m/s components)
-- `started_at` — Unix timestamp (`time.time()`) when the timer started or was last updated
-- `start_hours/minutes/seconds` — Original duration components from the intent
-
-The card computes remaining time client-side: `started_at + total_seconds - Date.now()/1000`.
-
-### 5.5 Timer Cancellation
-
-The `voice_satellite/cancel_timer` WS command allows the card to cancel timers by ID. The handler imports `TimerManager` and `TIMER_DATA` from `homeassistant.components.intent` at call time (lazy import) and calls `timer_manager.cancel_timer(timer_id)`.
-
-### 5.6 `TimerInfo` API Notes
-
-- `timer_info.start_hours`, `start_minutes`, `start_seconds` — Optional integers, can be `None` (default to 0)
-- There is no `total_seconds` field on `TimerInfo` — must be computed: `h * 3600 + m * 60 + s`
-- `timer_info.name` can be `None` (default to empty string)
-
-## 6. Announcement System
-
-### 6.1 Event Push Model (Phase 2 Architecture)
-
-Announcements are **pushed directly** to the card via the satellite event WS subscription (§10), not via entity attributes. The flow:
-
-1. An automation calls `assist_satellite.announce` targeting this entity
-2. HA base class resolves TTS and calls `async_announce(announcement)` on the entity
-3. The entity builds an announcement data dict and pushes it to all satellite subscribers via `_push_satellite_event("announcement", data)`
-4. The entity blocks on an `asyncio.Event` until the card ACKs
-5. The card plays the announcement (chime + TTS audio)
-6. The card sends `voice_satellite/announce_finished` via WebSocket
-7. The WS handler calls `entity.announce_finished(announce_id)` → sets the event
-8. `async_announce` unblocks and returns
-
-### 6.2 `async_internal_announce` Override
-
-The base class's `async_internal_announce` consumes the `preannounce` boolean internally (deciding whether to resolve a default preannounce URL) but does NOT pass it through to the `AssistSatelliteAnnouncement` object. We override it to capture the flag before delegating:
-
-```python
-async def async_internal_announce(self, message=None, media_id=None,
-                                   preannounce=True, preannounce_media_id=None):
-    self._preannounce_pending = preannounce
-    await super().async_internal_announce(...)
-```
-
-### 6.3 `async_announce` Implementation
-
-```python
-async def async_announce(self, announcement):
-    self._start_screensaver_keepalive()
-    self._announce_id += 1
-    announce_id = self._announce_id
-
-    announcement_data = {
-        "id": announce_id,
-        "message": announcement.message or "",
-        "media_id": announcement.media_id or "",
-        "preannounce_media_id": getattr(announcement, "preannounce_media_id", None) or "",
-    }
-
-    if not self._preannounce_pending:
-        announcement_data["preannounce"] = False
-
-    if self._ask_question_pending:
-        announcement_data["ask_question"] = True
-
-    self._announce_event = asyncio.Event()
-    self._push_satellite_event("announcement", announcement_data)
-
-    try:
-        await asyncio.wait_for(self._announce_event.wait(), timeout=ANNOUNCE_TIMEOUT)
-    except asyncio.TimeoutError:
-        _LOGGER.warning(...)
-    finally:
-        self._announce_event = None
-        self._preannounce_pending = True
-        # Stop keep-alive unless satellite is still active
-        current = self.hass.states.get(self.entity_id)
-        if not current or current.state == "idle":
-            self._stop_screensaver_keepalive()
-```
-
-Key design decisions:
-- `_announce_id` is monotonically increasing — prevents stale ACKs from previous announcements
-- `ANNOUNCE_TIMEOUT = 120` seconds — if the card never ACKs, the method unblocks after 2 minutes
-- `finally` block resets `_preannounce_pending` and conditionally stops screensaver keepalive
-- `media_id` is the resolved TTS URL (e.g., `/api/tts_proxy/xxxxx.mp3`), not a `media-source://` reference
-- `"preannounce": false` is only included when the chime should be suppressed (absent means `true`)
-- `"ask_question": true` is injected when `async_internal_ask_question` is driving the announce flow
-
-### 6.4 Announcement Data Contract
-
-When pushed via satellite subscription, the announcement data contains:
-
-```json
-{
-    "id": 1,
-    "message": "Dinner is ready!",
-    "media_id": "/api/tts_proxy/xxxxx.mp3",
-    "preannounce_media_id": ""
-}
-```
-
-Optional fields (only present when applicable):
-- `"preannounce": false` — suppress the chime
-- `"ask_question": true` — enter STT-only mode after playback
-- `"start_conversation": true` — enter full pipeline after playback (see §7)
-- `"extra_system_prompt": "..."` — custom LLM system prompt (see §7)
-
-### 6.5 `announce_finished` Callback
-
-Validates the `announce_id` matches the current pending announcement before setting the event:
-
-```python
-@callback
-def announce_finished(self, announce_id):
-    if self._announce_event is not None and self._announce_id == announce_id:
-        self._announce_event.set()
-```
-
-Stale ACKs (wrong `announce_id`) are silently ignored with a debug log.
-
-## 7. Start Conversation
-
-### 7.1 Flow
-
-1. An automation calls `assist_satellite.start_conversation` targeting this entity
-2. HA calls `async_internal_start_conversation(preannounce=..., extra_system_prompt=..., ...)` — our override captures both values then delegates to the base class
-3. The base class resolves TTS and calls `async_start_conversation(announcement)`
-4. The entity pushes a `start_conversation` event with the announcement data (including `"start_conversation": true` and optionally `"extra_system_prompt"`)
-5. The card plays the announcement, sends ACK
-6. After ACK: entity sets state to `listening`, card enters STT mode (skipping wake word)
-7. Pipeline state sync takes over from here
-
-### 7.2 `async_internal_start_conversation` Override
-
-Captures two values before delegating to the base class:
-
-```python
-async def async_internal_start_conversation(self, start_message=None, start_media_id=None,
-                                              preannounce=True, preannounce_media_id=None,
-                                              extra_system_prompt=None):
-    self._preannounce_pending = preannounce
-    self._pending_extra_system_prompt = extra_system_prompt
-    await super().async_internal_start_conversation(...)
-```
-
-### 7.3 `async_start_conversation` Implementation
-
-```python
-async def async_start_conversation(self, announcement):
-    self._start_screensaver_keepalive()
-    self._announce_id += 1
-    announce_id = self._announce_id
-
-    announcement_data = {
-        "id": announce_id,
-        "message": announcement.message or "",
-        "media_id": announcement.media_id or "",
-        "preannounce_media_id": getattr(announcement, "preannounce_media_id", None) or "",
-        "start_conversation": True,
-    }
-
-    if not self._preannounce_pending:
-        announcement_data["preannounce"] = False
-    if self._pending_extra_system_prompt:
-        announcement_data["extra_system_prompt"] = self._pending_extra_system_prompt
-
-    self._announce_event = asyncio.Event()
-    self._push_satellite_event("start_conversation", announcement_data)
-
-    try:
-        await asyncio.wait_for(self._announce_event.wait(), timeout=ANNOUNCE_TIMEOUT)
-        # ACK succeeded — set entity state to listening
-        self.hass.states.async_set(self.entity_id, "listening", self.extra_state_attributes)
-    except asyncio.TimeoutError:
-        ...
-    finally:
-        self._announce_event = None
-        self._preannounce_pending = True
-        self._pending_extra_system_prompt = None
-        current = self.hass.states.get(self.entity_id)
-        if not current or current.state == "idle":
-            self._stop_screensaver_keepalive()
-```
-
-Key differences from `async_announce`:
-- Includes `"start_conversation": True` in the data
-- Includes `"extra_system_prompt"` when provided
-- After ACK, explicitly sets entity state to `listening` via `hass.states.async_set()` so the entity reflects the correct state before the card's pipeline state sync kicks in
-- Clears `_pending_extra_system_prompt` in the `finally` block
-
-### 7.4 Card-Side Behavior
-
-When the card receives a `start_conversation` event:
-1. Plays the chime and TTS normally (unless `preannounce === false`)
-2. On completion: sends ACK, clears UI immediately (no display delay)
-3. Shows pipeline overlay, calls `pipeline.restartContinue(null)` to enter STT mode with a fresh conversation (or with `extra_system_prompt` if provided)
-
-## 8. Ask Question
-
-### 8.1 Overview
-
-`assist_satellite.ask_question` (HA 2025.7+) speaks a question, captures the user's voice response via STT, and matches it against predefined answer templates using [hassil](https://github.com/home-assistant/hassil) sentence matching.
-
-### 8.2 Flow
-
-1. Automation calls `ask_question` with `question`, optional `question_media_id`, and `answers` list
-2. `async_internal_ask_question` sets `_ask_question_pending = True` and creates coordination events
-3. **Phase 1:** Delegates TTS to `self.async_internal_announce(message=question, ...)` which resolves media and calls our `async_announce`. Because `_ask_question_pending` is set, `async_announce` adds `"ask_question": True` to the event data
-4. Card plays announcement, sends ACK → `async_announce` returns
-5. **Phase 2:** Re-starts screensaver keepalive, sets state to `listening`, waits for `_question_event`
-6. Card enters STT-only mode, transcribes user speech, sends `voice_satellite/question_answered`
-7. WS handler calls `entity.question_answered(announce_id, sentence)` → sets `_question_event`
-8. `async_internal_ask_question` wakes up, runs hassil matching, stores result, signals `_question_match_event`
-9. WS handler reads result, returns `{success, matched, id}` to card
-10. Entity returns `AssistSatelliteAnswer(id, sentence, slots)` to the calling automation
-
-### 8.3 TTS Resolution via Base Class Delegation
-
-The key architectural decision: `async_internal_ask_question` does NOT do its own TTS resolution. It delegates to `self.async_internal_announce()`, which the base class already handles. The `_ask_question_pending` flag tells our `async_announce` override to include the `ask_question: true` flag.
-
-### 8.4 State Coordination
-
-Six state variables coordinate the async flow:
-
-| Variable | Type | Purpose |
-|---|---|---|
-| `_ask_question_pending` | `bool` | Tells `async_announce` to add `ask_question: true` flag |
-| `_question_event` | `asyncio.Event` | Signaled when card sends transcribed text |
-| `_question_answer_text` | `str` | The transcribed text from the card |
-| `_question_match_event` | `asyncio.Event` | Signaled when hassil matching completes |
-| `_question_match_result` | `dict` | `{matched: bool, id: str|null}` for the WS handler |
-| `_preannounce_pending` | `bool` | Shared — captured from `async_internal_announce` override |
-
-### 8.5 Hassil Matching (`_match_answer`)
-
-Builds a hassil `Intents` structure from the answer list and calls `recognize(sentence, intents)`:
-
-- Each answer's `id` becomes an intent name
-- Each answer's `sentences` become the intent data sentences
-- On match: returns `AssistSatelliteAnswer(id=matched_id, sentence=sentence, slots={name: value})`
-- On no match or error: returns `AssistSatelliteAnswer(id=None, sentence=sentence, slots={})`
-
-### 8.6 WS Handler Coordination
-
-The `ws_question_answered` handler has a specific ordering requirement:
-
-```python
-# 1. Grab match event BEFORE triggering the answer (avoids race)
-match_event = entity._question_match_event
-
-# 2. Trigger the answer
-entity.question_answered(announce_id, sentence)
-
-# 3. Wait for hassil matching to complete
-await asyncio.wait_for(match_event.wait(), timeout=10.0)
-
-# 4. Read result immediately (before finally block clears it)
-result = entity._question_match_result or result
-```
-
-See §16.1–16.3 for the race conditions this ordering prevents.
-
-### 8.7 Hassil Import Pattern
-
-```python
-try:
-    from hassil.intents import Intents
-    from hassil.recognize import recognize
-    HAS_HASSIL = True
-except ImportError:
-    HAS_HASSIL = False
-
-try:
-    from homeassistant.components.assist_satellite import AssistSatelliteAnswer
-except ImportError:
-    AssistSatelliteAnswer = None
-```
-
-Both are conditionally imported. `AssistSatelliteAnswer` requires HA 2025.7+. Without hassil, raw sentences are returned. Without `AssistSatelliteAnswer`, the method raises `NotImplementedError`.
-
-## 9. Pipeline State Synchronization
-
-### 9.1 State Mapping
-
-The card sends its internal pipeline state to the integration via `voice_satellite/update_state`. The entity maps card states to HA satellite states:
-
-| Card State | HA Satellite State |
-|---|---|
-| `IDLE` | `idle` |
-| `CONNECTING` | `idle` |
-| `LISTENING` | `idle` |
-| `PAUSED` | `idle` |
-| `WAKE_WORD_DETECTED` | `listening` |
-| `STT` | `listening` |
-| `INTENT` | `processing` |
-| `TTS` | `responding` |
-| `ERROR` | `idle` |
-
-### 9.2 State Update Mechanism
+| `IDLE` | `idle` | No active interaction |
+| `CONNECTING` | `idle` | Card connecting to pipeline (not user-facing) |
+| `LISTENING` | `idle` | Listening for wake word (passive) |
+| `PAUSED` | `idle` | Tab paused (not interacting) |
+| `WAKE_WORD_DETECTED` | `listening` | Wake word detected, entering STT |
+| `STT` | `listening` | Speech-to-text in progress |
+| `INTENT` | `processing` | Intent processing / LLM reasoning |
+| `TTS` | `responding` | Text-to-speech playback |
+| `ERROR` | `idle` | Error state (maps to idle) |
+
+### 10.2 `set_pipeline_state()`
 
 ```python
 @callback
@@ -714,175 +793,127 @@ def set_pipeline_state(self, state):
     if mapped is None:
         return
 
-    # Screensaver keep-alive: active when satellite is non-idle
+    # Screensaver lifecycle: active during non-idle states
     if mapped != "idle":
         self._start_screensaver_keepalive()
     else:
         self._stop_screensaver_keepalive()
 
-    if self.state == mapped:
-        return  # Dedup: don't write same state
+    self._set_satellite_state(mapped)
+```
 
-    # Update base class internal state via name mangling
-    self._AssistSatelliteEntity__assist_satellite_state = mapped
+### 10.3 Name-Mangled State Setting
+
+HA's `AssistSatelliteEntity` stores its state in a private attribute
+`__assist_satellite_state` (Python name-mangled to `_AssistSatelliteEntity__assist_satellite_state`).
+Direct state setting through `hass.states.async_set()` would bypass the entity
+framework. Instead, the integration sets the mangled attribute directly:
+
+```python
+def _set_satellite_state(self, state_value):
+    if self.state == state_value:
+        return
+    attr = "_AssistSatelliteEntity__assist_satellite_state"
+    if not hasattr(self, attr):
+        _LOGGER.warning("Cannot set satellite state: base class attribute not found")
+        return
+    setattr(self, attr, state_value)
     self.async_write_ha_state()
 ```
 
-**Why name mangling?** `AssistSatelliteEntity` stores state in a private attribute `__assist_satellite_state` but provides no public setter. Since our entity is a virtual proxy (the actual pipeline runs in the browser), we need to force the state externally. Python's name mangling transforms `__assist_satellite_state` to `_AssistSatelliteEntity__assist_satellite_state`, giving us access to update it. This approach is preferred over `hass.states.async_set()` because it keeps the base class's internal state consistent with what's published — subsequent `async_write_ha_state()` calls (e.g., from switch changes) will publish the correct state instead of reverting to a stale value.
+The `hasattr` check provides forward-compatibility — if HA renames the internal
+attribute in a future version, the integration logs a warning instead of crashing.
 
-### 9.3 Deduplication
-
-The method checks `self.state == mapped` before writing. The card may send rapid state updates during pipeline transitions, and this prevents unnecessary state change events.
-
-### 9.4 Screensaver Integration
-
-`set_pipeline_state` also drives the screensaver keep-alive system. Any non-idle state starts the keepalive; transition back to idle stops it.
-
-## 10. Satellite Event Subscription
-
-### 10.1 Overview
-
-The card maintains a persistent WS subscription via `voice_satellite/subscribe_events`. The integration pushes notification events (announcements, start_conversation, ask_question) and media player commands directly to the card through this subscription, rather than writing to entity attributes.
-
-### 10.2 Subscriber Management
-
-```python
-# Registration
-@callback
-def register_satellite_subscription(self, connection, msg_id):
-    was_empty = not self._satellite_subscribers
-    self._satellite_subscribers.append((connection, msg_id))
-    if was_empty:
-        self.async_write_ha_state()          # satellite → available
-        self._update_media_player_availability()  # media_player → available
-
-# Unregistration
-@callback
-def unregister_satellite_subscription(self, connection, msg_id):
-    self._satellite_subscribers = [
-        (c, m) for c, m in self._satellite_subscribers
-        if not (c is connection and m == msg_id)
-    ]
-    if not self._satellite_subscribers:
-        self.async_write_ha_state()          # satellite → unavailable
-        self._update_media_player_availability()  # media_player → unavailable
-```
-
-Subscribers are stored as `list[tuple[ActiveConnection, int]]`. The first subscriber arriving makes the entity available; the last one leaving makes it unavailable (see §4.5).
-
-### 10.3 Event Push
-
-```python
-@callback
-def _push_satellite_event(self, event_type, data):
-    if not self._satellite_subscribers:
-        _LOGGER.warning("No satellite subscribers — cannot push event")
-        return
-
-    dead = []
-    for connection, msg_id in self._satellite_subscribers:
-        try:
-            connection.send_event(msg_id, {"type": event_type, "data": data})
-        except Exception:
-            dead.append((connection, msg_id))
-
-    # Clean up dead subscribers
-    if dead:
-        self._satellite_subscribers = [s for s in self._satellite_subscribers if s not in dead]
-```
-
-Dead subscriber detection: if `send_event` raises (e.g., connection closed), the subscriber is removed from the list.
-
-### 10.4 Unsubscribe Releases Blocking Events
-
-When all subscribers disconnect (e.g., tab closed, page navigated away), the entity releases any pending blocking events so `async_announce` and `async_internal_ask_question` don't hang forever:
-
-```python
-def unregister_satellite_subscription(self, connection, msg_id):
-    # ... remove subscriber ...
-
-    if not self._satellite_subscribers:
-        if self._announce_event is not None:
-            self._announce_event.set()  # Release pending announce
-        if self._question_event is not None:
-            self._question_event.set()  # Release pending question
-```
+---
 
 ## 11. Bridged Pipeline
 
-### 11.1 Architecture
+### 11.1 Overview
 
-All voice pipeline traffic routes through the integration. The card subscribes to `voice_satellite/run_pipeline`, sends binary audio, and receives pipeline events back through the same WS subscription.
+The integration bridges between the card's WebSocket audio stream and HA's internal
+pipeline system. Unlike physical satellites that have a persistent connection, the
+card's pipeline is initiated per-run via the `voice_satellite/run_pipeline` WS command.
+
+### 11.2 Pipeline Setup (in `__init__.py`)
+
+The `ws_run_pipeline` handler orchestrates the full setup:
 
 ```
-Card                          Integration                      HA Pipeline
- │                               │                                │
- │─ ws: run_pipeline ───────────>│                                │
- │<──── result (subscription) ───│                                │
- │<──── event: init (handler_id)─│                                │
- │                               │── async_accept_pipeline ──────>│
- │─ binary audio (handler_id) ──>│── audio_queue ────────────────>│
- │                               │<── on_pipeline_event ──────────│
- │<──── event: run-start ────────│                                │
- │<──── event: wake-word-end ────│                                │
- │<──── event: stt-end ──────────│                                │
- │<──── event: intent-end ───────│                                │
- │<──── event: tts-end ──────────│                                │
- │<──── event: run-end ──────────│                                │
+ws_run_pipeline() called
+  │
+  ├── 1. Find satellite entity via _find_entity()
+  │
+  ├── 2. Stop old pipeline (if running)
+  │     ├── Send stop signal: audio_queue.put_nowait(b"")
+  │     ├── If different connection: send "displaced" event to old connection
+  │     ├── Wait up to 3s for old task to complete
+  │     └── Force-cancel if still running
+  │
+  ├── 3. Create new audio queue
+  │     └── audio_queue = asyncio.Queue[bytes]()
+  │
+  ├── 4. Register binary handler
+  │     ├── handler_id, unregister = connection.async_register_binary_handler(_on_binary)
+  │     ├── _on_binary signature: (_hass, _connection, data: bytes) → None
+  │     │     (hass and connection args are required by the API but unused)
+  │     └── _on_binary puts raw bytes into audio_queue
+  │
+  ├── 5. Send subscription result + init event
+  │     ├── connection.send_result(msg_id)     # Resolves JS promise
+  │     └── connection.send_event(msg_id, {type: "init", handler_id: N})
+  │           (card stores handler_id and sends binary audio to it)
+  │
+  ├── 6. Create background task
+  │     └── hass.async_create_background_task(
+  │           entity.async_run_pipeline(audio_queue, connection, msg_id, ...),
+  │           name=f"voice_satellite.{entity.satellite_name}_pipeline",
+  │         )
+  │         (named for debugging — shows in asyncio task dumps)
+  │
+  └── 7. Register unsubscribe handler
+        └── connection.subscriptions[msg_id] = unsub
+              └── unsub() does TWO things:
+                    1. audio_queue.put_nowait(b"")  — stop signal
+                    2. unregister()                  — remove binary handler
 ```
 
-### 11.2 `ws_run_pipeline` Handler
-
-The WS handler orchestrates the pipeline lifecycle:
-
-1. **Stop old pipeline**: If an existing pipeline is running, send empty bytes to its audio queue (stop signal), wait up to 3s for natural exit, force-cancel on timeout
-2. **Create audio queue**: `asyncio.Queue[bytes]` for incoming audio frames
-3. **Register binary handler**: `connection.async_register_binary_handler(_on_binary)` → receives `handler_id`
-4. **Send subscription result**: `connection.send_result(msg["id"])` resolves the card's JS promise
-5. **Send init event**: `connection.send_event(msg["id"], {"type": "init", "handler_id": handler_id})` tells the card which handler ID to prefix on binary audio frames
-6. **Create background task**: `hass.async_create_background_task(entity.async_run_pipeline(...))` — must be a background task so wake word detection doesn't block HA startup
-7. **Register unsubscribe callback**: Sends stop signal and unregisters the binary handler
-
-### 11.3 Pipeline Stop Protocol (Critical)
-
-Stopping a running pipeline is a two-phase process:
-
-```python
-# Phase 1: Send stop signal (empty bytes)
-entity._pipeline_audio_queue.put_nowait(b"")
-
-# Phase 2: Wait for natural exit, force-cancel on timeout
-old_task = entity._pipeline_task
-if old_task and not old_task.done():
-    done, _ = await asyncio.wait({old_task}, timeout=3.0)
-    if not done:
-        old_task.cancel()
-```
-
-**Why not just cancel?** HA's internal pipeline tasks (wake word, STT) `await audio_queue.get()` in a loop. If we cancel the task, `CancelledError` and the stop signal race on `await audio_queue.get()`. `CancelledError` always wins (asyncio cancellation is immediate), leaving the internal HA tasks as orphans that never clean up. Sending the stop signal first lets the audio stream generator (`async def audio_stream()`) yield nothing and exit, causing the HA pipeline to finish naturally.
-
-### 11.4 `async_run_pipeline` Method
+### 11.3 `async_run_pipeline()` (in `assist_satellite.py`)
 
 ```python
 async def async_run_pipeline(self, audio_queue, connection, msg_id,
-                              start_stage, end_stage,
-                              conversation_id=None, extra_system_prompt=None):
+                              start_stage, end_stage, conversation_id=None,
+                              extra_system_prompt=None):
     self._pipeline_gen += 1
     my_gen = self._pipeline_gen
     self._pipeline_connection = connection
     self._pipeline_msg_id = msg_id
     self._pipeline_audio_queue = audio_queue
-    self._pipeline_run_started = False
+    self._pipeline_run_started = False  # CRITICAL: reset gate for each new run
 
+    # Store conversation_id for continue-conversation support.
+    # The base class uses self._conversation_id when constructing
+    # the pipeline context, allowing multi-turn conversations to
+    # share the same conversation thread.
     if conversation_id:
         self._conversation_id = conversation_id
+
+    # Set extra_system_prompt RIGHT BEFORE the pipeline call.
+    # Setting it too early would cause a race condition: an intermediate
+    # pipeline restart could consume it before the intended run.
     if extra_system_prompt:
         self._extra_system_prompt = extra_system_prompt
+
+    stage_map = {
+        "wake_word": PipelineStage.WAKE_WORD,
+        "stt": PipelineStage.STT,
+        "intent": PipelineStage.INTENT,
+        "tts": PipelineStage.TTS,
+    }
 
     async def audio_stream():
         while True:
             chunk = await audio_queue.get()
-            if not chunk:  # empty bytes = stop
+            if not chunk:  # empty bytes = stop signal
                 break
             yield chunk
 
@@ -899,271 +930,785 @@ async def async_run_pipeline(self, audio_queue, connection, msg_id,
             self._pipeline_audio_queue = None
 ```
 
-### 11.5 Generation Counter
+### 11.4 Generation Counter
 
-`_pipeline_gen` is incremented at the start of each pipeline run. The `finally` block only clears pipeline state if `self._pipeline_gen == my_gen` — a newer run may have already claimed these fields. Without this guard, a new pipeline's connection/queue references would be cleared by the old pipeline's `finally` block.
+The `_pipeline_gen` counter prevents orphaned events from old pipeline runs
+from being relayed to the card:
 
-### 11.6 Base Class Integration
+```
+Run 1 starts: _pipeline_gen = 1, my_gen = 1
+Run 2 starts: _pipeline_gen = 2, my_gen = 2
+Run 1 finally block:
+  if self._pipeline_gen == my_gen:  # 2 == 1 → False
+    # Skip cleanup — Run 2 owns the fields now
+```
 
-- `self._conversation_id` — Set on the base class to enable continue conversation support
-- `self._extra_system_prompt` — Set right before the pipeline call so `async_accept_pipeline_from_satellite` picks it up (avoids race conditions with intermediate restarts)
-- `self.pipeline_entity_id` / `self.vad_sensitivity_entity_id` — Properties that resolve the select entities via the entity registry (§4.5)
+Without this, the `finally` block of an old run could clear the connection/queue
+that the new run is actively using.
 
-### 11.7 Stale Event Filtering (`on_pipeline_event`)
+### 11.5 Audio Queue Protocol
+
+| Bytes | Meaning |
+|---|---|
+| Non-empty `bytes` | Raw 16-bit PCM audio frame from the card's mic |
+| Empty `b""` | Stop signal — ends the `audio_stream()` generator |
+
+The audio generator yields chunks until it receives empty bytes, at which point
+it breaks and the pipeline's audio input closes naturally.
+
+### 11.6 Event Relay — `on_pipeline_event()`
 
 ```python
 @callback
 def on_pipeline_event(self, event):
     event_type_str = str(getattr(event, "type", str(event)))
 
+    # Gate: block all events until run-start
     if event_type_str == "run-start":
         self._pipeline_run_started = True
     elif not self._pipeline_run_started:
         return  # Filter stale pre-run-start events
 
     if self._pipeline_connection and self._pipeline_msg_id:
-        self._pipeline_connection.send_event(self._pipeline_msg_id, {
-            "type": event_type_str,
-            "data": getattr(event, "data", None) or {},
-        })
+        self._pipeline_connection.send_event(
+            self._pipeline_msg_id,
+            {"type": event_type_str, "data": getattr(event, "data", None) or {}},
+        )
 ```
 
-**Why filter stale events?** When a pipeline is restarted (old task cancelled, new one started), HA's internal pipeline tasks from the old run may still fire events through the shared `on_pipeline_event` callback. `_pipeline_run_started` is reset to `False` at the start of each new run, so events from the old run (which arrive before the new `run-start`) are silently dropped.
+### 11.7 Stale Event Filtering
 
-### 11.8 Audio Stream Protocol
+Two mechanisms filter stale events:
 
-Binary audio frames are prefixed with a 1-byte handler ID by the card:
+1. **Generation counter** (`_pipeline_gen`) — Prevents the `finally` block of an
+   old run from clearing fields owned by a newer run
 
-```
-[handler_id: 1 byte][PCM audio data: Int16Array]
-```
+2. **Run-start gate** (`_pipeline_run_started`) — Blocks all events until `run-start`
+   is received. **Critically**, this flag is reset to `False` at the start of each
+   new pipeline run in `async_run_pipeline()`. This reset is essential: without it,
+   a leftover `True` from the previous run would allow stale events through.
 
-HA's binary handler system routes the frame to the correct handler based on the first byte, then passes the remaining data to the `_on_binary` callback which enqueues it.
+   The gate prevents leftover events from an old pipeline's internal tasks
+   (e.g. a trailing `wake_word-end` from a cancelled wake word detector) from
+   leaking into a new run. Since `on_pipeline_event()` is a shared callback on
+   the entity instance, events from old HA internal tasks can arrive after a new
+   run has started.
 
-## 12. Select Entities (`select.py`)
+### 11.8 Displaced Pipeline
 
-### 12.1 Platform Setup
+When a new browser connects while an old browser is still running:
 
-Four select entities are created per config entry:
+1. The old connection receives a `displaced` event
+2. The old audio queue gets a stop signal
+3. The old pipeline task is waited on (3s timeout) then cancelled
+4. A warning is logged: each browser must use its own satellite entity
 
 ```python
-entities = [
-    VoiceSatellitePipelineSelect(hass, entry),
-    VoiceSatelliteVadSensitivitySelect(hass, entry),
-    VoiceSatelliteScreensaverSelect(hass, entry),
-    VoiceSatelliteTTSOutputSelect(hass, entry),
+if old_conn is not None and old_conn is not connection:
+    _LOGGER.warning(
+        "Pipeline for '%s' displaced by a different browser connection",
+        entity.satellite_name,
+    )
+    try:
+        old_conn.send_event(old_msg_id, {"type": "displaced"})
+    except Exception:
+        pass  # old connection may already be dead
+```
+
+### 11.9 Pipeline Teardown Strategy
+
+The teardown follows a "graceful first, force second" pattern:
+
+```
+1. Send stop signal: audio_queue.put_nowait(b"")
+   ↓ The audio_stream() generator breaks, pipeline input closes
+   ↓ HA internal tasks (wake word, STT) unblock naturally
+2. Wait: asyncio.wait({old_task}, timeout=3.0)  [or 5.0 for entity removal]
+3. If still running: old_task.cancel()
+```
+
+**Why not cancel immediately?** Cancellation and the stop signal race on
+`await audio_queue.get()`. `CancelledError` always wins, leaving orphaned
+HA pipeline input tasks. The stop signal ensures a clean exit.
+
+---
+
+## 12. Satellite Event Subscription
+
+### 12.1 Subscription Lifecycle
+
+```
+Card sends: voice_satellite/subscribe_events {entity_id}
+  │
+  ├── entity.register_satellite_subscription(connection, msg_id)
+  │     ├── Append (connection, msg_id) to _satellite_subscribers
+  │     ├── If first subscriber: async_write_ha_state() → entity becomes available
+  │     └── _update_media_player_availability()
+  │
+  └── connection.subscriptions[msg_id] = unsub
+        └── unsub: entity.unregister_satellite_subscription(connection, msg_id)
+```
+
+### 12.2 Push Mechanism
+
+```python
+@callback
+def _push_satellite_event(self, event_type, data):
+    if not self._satellite_subscribers:
+        _LOGGER.warning("No satellite subscribers - cannot push %s event", event_type)
+        return
+    if self.hass.is_stopping:
+        return
+
+    dead = []
+    for connection, msg_id in list(self._satellite_subscribers):
+        try:
+            connection.send_event(msg_id, {"type": event_type, "data": data})
+        except Exception:
+            dead.append((connection, msg_id))
+
+    if dead:
+        self._satellite_subscribers = [
+            s for s in self._satellite_subscribers if s not in dead
+        ]
+```
+
+### 12.3 Dead Connection Cleanup
+
+When `send_event()` raises an exception (connection closed/broken), the subscriber
+is added to a `dead` list and removed after iteration. This prevents memory leaks
+from abandoned browser tabs.
+
+### 12.4 Availability Cascade
+
+When subscriber count changes:
+1. Satellite entity calls `async_write_ha_state()` → `available` property re-evaluates
+2. `_update_media_player_availability()` finds the media player entity and calls
+   `mp.async_write_ha_state()` → media player re-evaluates its own `available`
+
+### 12.5 Disconnection Release
+
+When all subscribers disconnect, pending blocking events are released:
+
+```python
+if not self._satellite_subscribers:
+    if self._announce_event is not None:
+        self._announce_event.set()  # Unblock async_announce()
+    if self._question_event is not None:
+        self._question_event.set()  # Unblock ask_question()
+```
+
+This prevents the entity from being stuck in an `asyncio.Event.wait()` forever
+when the card disconnects mid-announcement.
+
+---
+
+## 13. Announcement System
+
+### 13.1 Service Call Flow
+
+```
+HA service: assist_satellite.announce(entity_id, message)
+  │
+  └── AssistSatelliteEntity base class
+        ├── Resolve text → TTS media_id (if message provided)
+        └── async_internal_announce(message, media_id, preannounce, ...)
+              │
+              └── VoiceSatelliteEntity override
+                    ├── Store preannounce flag: self._preannounce_pending = preannounce
+                    └── super().async_internal_announce(...)
+                          │
+                          └── async_announce(announcement: AssistSatelliteAnnouncement)
+```
+
+### 13.2 `async_announce()` Implementation
+
+```python
+async def async_announce(self, announcement):
+    self._start_screensaver_keepalive()
+
+    # Increment sequence counter
+    self._announce_id += 1
+    announce_id = self._announce_id
+
+    # Build announcement payload
+    announcement_data = {
+        "id": announce_id,
+        "message": announcement.message or "",
+        "media_id": announcement.media_id or "",
+        "preannounce_media_id": getattr(announcement, "preannounce_media_id", None) or "",
+    }
+
+    if not self._preannounce_pending:
+        announcement_data["preannounce"] = False
+
+    if self._ask_question_pending:
+        announcement_data["ask_question"] = True
+
+    # Create blocking event
+    self._announce_event = asyncio.Event()
+
+    # Push to card
+    self._push_satellite_event("announcement", announcement_data)
+
+    # Block until card ACKs or timeout
+    try:
+        await asyncio.wait_for(self._announce_event.wait(), timeout=120)
+    except asyncio.TimeoutError:
+        _LOGGER.warning("Announcement #%d timed out after 120s", announce_id)
+    finally:
+        self._announce_event = None
+        self._preannounce_pending = True
+        current = self.hass.states.get(self.entity_id)
+        if not current or current.state == "idle":
+            self._stop_screensaver_keepalive()
+```
+
+### 13.3 Sequence Counter
+
+The `_announce_id` counter prevents stale ACKs:
+
+```python
+def announce_finished(self, announce_id):
+    if self._announce_event is not None and self._announce_id == announce_id:
+        self._announce_event.set()
+    else:
+        _LOGGER.debug("Ignoring stale announce ACK #%d (current: #%d)", ...)
+```
+
+Scenario: Announcement #5 times out. Card sends ACK for #5 after timeout.
+The entity is now on announcement #6. The ACK is ignored because `5 != 6`.
+
+### 13.4 Preannounce Flag Capture
+
+The base class's `async_internal_announce()` consumes the `preannounce` boolean
+internally (it plays its own preannounce sound) and doesn't pass it to the
+`AssistSatelliteAnnouncement` object. The integration overrides
+`async_internal_announce()` to capture the flag before delegation:
+
+```python
+async def async_internal_announce(self, message=None, media_id=None,
+                                   preannounce=True, ...):
+    self._preannounce_pending = preannounce
+    await super().async_internal_announce(message=message, media_id=media_id,
+                                          preannounce=preannounce, ...)
+```
+
+### 13.5 Announcement Payload
+
+```json
+{
+  "id": 5,
+  "message": "The timer is done",
+  "media_id": "/api/tts_proxy/abc123.mp3",
+  "preannounce_media_id": "/api/tts_proxy/chime.mp3",
+  "preannounce": false,
+  "ask_question": true
+}
+```
+
+- `preannounce` is only included when `false` (default is `true`)
+- `ask_question` is only included when `true` (for the ask_question flow)
+
+---
+
+## 14. Start Conversation
+
+### 14.1 Service Call Flow
+
+```
+HA service: assist_satellite.start_conversation(entity_id, start_message, extra_system_prompt)
+  │
+  └── AssistSatelliteEntity base class
+        └── async_internal_start_conversation(start_message, ..., extra_system_prompt)
+              │
+              └── VoiceSatelliteEntity override
+                    ├── self._preannounce_pending = preannounce
+                    ├── self._pending_extra_system_prompt = extra_system_prompt
+                    └── super().async_internal_start_conversation(...)
+                          │
+                          └── async_start_conversation(announcement)
+```
+
+### 14.2 `async_start_conversation()` Implementation
+
+Nearly identical to `async_announce()` with key differences:
+
+1. **Event type** is `"start_conversation"` instead of `"announcement"`
+2. **Payload includes** `"start_conversation": True`
+3. **Payload may include** `"extra_system_prompt"` for LLM context
+4. **After ACK**: Sets satellite state to `"listening"` — the card enters STT mode
+
+```python
+async def async_start_conversation(self, announcement):
+    self._start_screensaver_keepalive()
+    self._announce_id += 1
+    announce_id = self._announce_id
+
+    announcement_data = {
+        "id": announce_id,
+        "message": announcement.message or "",
+        "media_id": announcement.media_id or "",
+        "preannounce_media_id": ...,
+        "start_conversation": True,
+    }
+
+    if self._pending_extra_system_prompt:
+        announcement_data["extra_system_prompt"] = self._pending_extra_system_prompt
+
+    self._announce_event = asyncio.Event()
+    self._push_satellite_event("start_conversation", announcement_data)
+
+    try:
+        await asyncio.wait_for(self._announce_event.wait(), timeout=120)
+        self._set_satellite_state("listening")
+    except asyncio.TimeoutError:
+        ...
+    finally:
+        self._announce_event = None
+        self._preannounce_pending = True
+        self._pending_extra_system_prompt = None
+        current = self.hass.states.get(self.entity_id)
+        if not current or current.state == "idle":
+            self._stop_screensaver_keepalive()
+```
+
+### 14.3 Extra System Prompt
+
+The `extra_system_prompt` allows automations to inject contextual instructions
+for the LLM. It flows through:
+
+1. Service call → `async_internal_start_conversation()` → stored in `_pending_extra_system_prompt`
+2. Pushed to card in announcement payload
+3. Card reads it and includes it in the next pipeline's `run_pipeline` WS call
+4. `async_run_pipeline()` stores it in `_extra_system_prompt`
+5. `async_accept_pipeline_from_satellite()` (base class) reads it during pipeline setup
+
+---
+
+## 15. Ask Question
+
+### 15.1 Overview
+
+Ask question is a three-phase flow that combines TTS playback, STT capture, and
+optional answer matching. Requires HA 2025.7+ (`AssistSatelliteAnswer`).
+
+### 15.2 Conditional Import & Version Guard
+
+```python
+try:
+    from homeassistant.components.assist_satellite import AssistSatelliteAnswer
+except ImportError:
+    AssistSatelliteAnswer = None
+
+try:
+    from hassil.recognize import recognize
+    from hassil.intents import Intents
+    HAS_HASSIL = True
+except ImportError:
+    HAS_HASSIL = False
+```
+
+If `AssistSatelliteAnswer is None` (HA < 2025.7), `async_internal_ask_question()`
+raises `NotImplementedError` immediately. The base class handles this gracefully —
+the service call returns an error to the caller:
+
+```python
+if AssistSatelliteAnswer is None:
+    raise NotImplementedError("ask_question requires Home Assistant 2025.7 or later")
+```
+
+### 15.3 Three-Phase Flow
+
+```
+assist_satellite.ask_question(entity_id, question, answers)
+  │
+  └── async_internal_ask_question(question, answers, ...)
+        │
+        ├── Phase 1: TTS Playback
+        │     ├── Set _ask_question_pending = True
+        │     ├── Set _question_event = asyncio.Event()
+        │     ├── Set _question_match_event = asyncio.Event()
+        │     └── async_internal_announce(message=question, ...)
+        │           └── async_announce() includes ask_question=True in payload
+        │           └── Card plays TTS, sends ACK, enters STT-only mode
+        │
+        ├── Phase 2: STT Capture
+        │     ├── Re-start screensaver keep-alive
+        │     ├── Set satellite state to "listening"
+        │     └── await _question_event.wait() (timeout=120s)
+        │           └── Card captures speech, calls question_answered WS
+        │           └── question_answered() sets _question_answer_text and _question_event
+        │
+        └── Phase 3: Answer Matching (hassil)
+              ├── If sentence is empty → return None
+              ├── If answers provided and HAS_HASSIL:
+              │     └── _match_answer(sentence, answers)
+              │           └── Build hassil Intents from answer list
+              │           └── recognize(sentence, intents)
+              │           └── Return AssistSatelliteAnswer(id, sentence, slots)
+              └── Else: return AssistSatelliteAnswer(id=None, sentence, slots={})
+```
+
+### 15.4 `_match_answer()` Algorithm
+
+Converts the answer list into a hassil `Intents` structure and uses the
+`recognize()` function to match the transcribed sentence:
+
+```python
+def _match_answer(self, sentence, answers):
+    intents_dict = {"language": "en", "intents": {}}
+    for answer in answers:
+        answer_id = answer["id"]
+        sentences = answer.get("sentences", [])
+        intents_dict["intents"][answer_id] = {
+            "data": [{"sentences": sentences}]
+        }
+
+    try:
+        intents = Intents.from_dict(intents_dict)
+        result = recognize(sentence, intents)
+    except Exception:
+        return AssistSatelliteAnswer(id=None, sentence=sentence, slots={})
+
+    if result is None:
+        return AssistSatelliteAnswer(id=None, sentence=sentence, slots={})
+
+    matched_id = result.intent.name
+    slots = {name: slot.value for name, slot in result.entities.items()}
+    return AssistSatelliteAnswer(id=matched_id, sentence=sentence, slots=slots)
+```
+
+### 15.5 WebSocket Handler Coordination
+
+The `ws_question_answered` handler in `__init__.py` coordinates between the card's
+answer and the hassil matching:
+
+```python
+async def ws_question_answered(hass, connection, msg):
+    entity = _find_entity(hass, msg["entity_id"])
+    match_event = entity.question_match_event
+
+    entity.question_answered(msg["announce_id"], msg["sentence"])
+
+    result = {"matched": False, "id": None}
+    if match_event is not None:
+        try:
+            await asyncio.wait_for(match_event.wait(), timeout=10.0)
+            result = entity.question_match_result or result
+        except asyncio.TimeoutError:
+            pass
+
+    connection.send_result(msg["id"], {
+        "success": True,
+        "matched": result.get("matched", False),
+        "id": result.get("id"),
+    })
+```
+
+The handler:
+1. Grabs a reference to `question_match_event` **before** triggering the answer
+2. Calls `entity.question_answered()` which unblocks Phase 2
+3. Waits for `question_match_event` (set after Phase 3 matching completes)
+4. Returns the match result to the card
+
+### 15.6 Race Condition Handling
+
+The `_question_match_result` is intentionally **not** cleared in the `finally` block
+of `async_internal_ask_question()`. The WS handler may still need to read it after
+`_question_match_event` fires but before the `finally` block runs. It's overwritten
+on the next `ask_question` call.
+
+**Detailed sequence:**
+
+```
+t=0: WS handler grabs reference: match_event = entity.question_match_event
+t=1: WS handler calls entity.question_answered() → _question_event.set()
+     → Phase 2 unblocks
+t=2: Phase 3 runs _match_answer() → sets _question_match_result
+     → _question_match_event.set()
+t=3: WS handler's match_event.wait() returns
+     → reads _question_match_result ← MUST NOT be cleared yet
+t=4: async_internal_ask_question() finally block runs
+     → clears _question_event, _question_answer_text, _question_match_event
+     → does NOT clear _question_match_result (would race with t=3)
+```
+
+The `finally` block also:
+- Sets `_ask_question_pending = False`
+- Calls `async_write_ha_state()` to push attribute updates
+- Stops screensaver keep-alive if entity is idle
+
+---
+
+## 16. Timer System
+
+### 16.1 Timer Handler Registration
+
+Registered in `async_added_to_hass()` via the intent system:
+
+```python
+self.async_on_remove(
+    intent.async_register_timer_handler(
+        self.hass, self.device_entry.id, self._handle_timer_event,
+    )
+)
+```
+
+This makes the device eligible for `HassStartTimer` LLM tool calls, which HA routes
+to the correct device based on `device_id`. The `async_on_remove()` wrapper ensures
+the timer handler is automatically deregistered when the entity is removed, preventing
+orphaned callbacks and memory leaks.
+
+### 16.2 Timer Event Types
+
+Events use `intent.TimerEventType` enum values:
+
+| Event | Enum | Action |
+|---|---|---|
+| Started | `intent.TimerEventType.STARTED` | Add new timer to `_active_timers`, compute total_seconds |
+| Updated | `intent.TimerEventType.UPDATED` | Replace timer entry with updated duration, reset `started_at` |
+| Cancelled | `intent.TimerEventType.CANCELLED` | Remove timer from `_active_timers` |
+| Finished | `intent.TimerEventType.FINISHED` | Remove timer from `_active_timers` |
+
+The `_last_timer_event` stores `event_type.value` (the string form).
+
+### 16.3 Immutable List Pattern
+
+Timer updates create a **new list** rather than mutating in place:
+
+Duration values are extracted with `or 0` defaults since `TimerInfo` attributes
+may be `None`:
+
+```python
+h = timer_info.start_hours or 0
+m = timer_info.start_minutes or 0
+s = timer_info.start_seconds or 0
+total = h * 3600 + m * 60 + s
+
+# STARTED - spread + append (new list, not mutation)
+self._active_timers = [*self._active_timers, {
+    "id": timer_id,
+    "name": timer_info.name or "",
+    "total_seconds": total,
+    "started_at": time.time(),
+    "start_hours": h, "start_minutes": m, "start_seconds": s,
+}]
+
+# CANCELLED / FINISHED - filter
+self._active_timers = [
+    t for t in self._active_timers if t["id"] != timer_id
 ]
 ```
 
-After creation, stale select entities from older integration versions are cleaned up by comparing expected unique IDs against the entity registry.
+**Why?** HA compares `old_state.attributes == new_state.attributes` to detect changes.
+If the list is mutated in-place, the old state's reference points to the same object,
+making `old == new` always `True`. Creating a new list ensures the change is detected
+and a `state_changed` event fires.
 
-### 12.2 Pipeline Select
-
-`VoiceSatellitePipelineSelect` extends `AssistPipelineSelect` from `homeassistant.components.assist_pipeline`. This framework entity:
-
-- Lists all configured Assist pipelines as options
-- Stores the selected pipeline for the device
-- Registers the device in `pipeline_devices` so it appears in Voice Assistants settings
-
-Constructor: `super().__init__(hass, DOMAIN, entry.entry_id)` — **3 arguments** (hass, domain, config_entry_id).
-
-The entity uses `_attr_has_entity_name = True` and inherits its name from the translation key in `strings.json` ("Assistant").
-
-### 12.3 VAD Sensitivity Select
-
-`VoiceSatelliteVadSensitivitySelect` extends `VadSensitivitySelect` from `homeassistant.components.assist_pipeline`. This framework entity:
-
-- Lists VAD sensitivity options (Default, Relaxed, Aggressive)
-- Controls the finished speaking detection threshold for STT
-
-Constructor: `super().__init__(hass, entry.entry_id)` — **2 arguments** (hass, config_entry_id). **No domain parameter** — unlike `AssistPipelineSelect`, this base class doesn't take a domain.
-
-**Gotcha — Constructor signature mismatch:** Getting the argument count wrong causes a crash. `AssistPipelineSelect` takes 3 args (hass, DOMAIN, entry_id), `VadSensitivitySelect` takes 2 args (hass, entry_id). This difference comes from the HA framework, not our code.
-
-### 12.4 Screensaver Select
-
-`VoiceSatelliteScreensaverSelect` extends `SelectEntity` + `RestoreEntity`. This custom select lets the user choose a switch or input_boolean entity to keep turned off during voice interactions (preventing screensavers from activating while the satellite is in use).
-
-**Implementation details:**
-
-- Scans all `switch.*` and `input_boolean.*` entities (excluding the integration's own entities)
-- Displays friendly names in the dropdown but stores `entity_id` internally
-- Exposes `entity_id` via `extra_state_attributes` for service call lookups
-- Uses a 30-second mapping cache (`_build_mapping`) to avoid rebuilding on every options request
-- Cache is disabled during HA startup (entities still loading)
-- "Disabled" is always the first option
-- Restores previous selection on startup via `RestoreEntity`
-- `EntityCategory.CONFIG` — appears in the device's configuration section
-
-**Name collision handling:** If two entities share the same friendly name, the duplicate gets `(entity_id)` appended.
-
-### 12.5 TTS Output Select
-
-`VoiceSatelliteTTSOutputSelect` extends `SelectEntity` + `RestoreEntity`. This custom select lets the user route TTS audio to an external media player instead of the browser's Web Audio API.
-
-**Implementation details:**
-
-- Scans all `media_player.*` entities (excluding the integration's own media player entity)
-- Displays friendly names in the dropdown but stores `entity_id` internally
-- Exposes `entity_id` via `extra_state_attributes` for the card to read
-- Uses a 30-second mapping cache (`_build_mapping`) identical to the screensaver select pattern
-- Cache is disabled during HA startup (entities still loading)
-- "Browser" is always the first option (default — card plays audio locally via Web Audio)
-- Restores previous selection on startup via `RestoreEntity`
-- `EntityCategory.CONFIG` — appears in the device's configuration section
-- `translation_key = "tts_output"`
-
-The satellite entity reads this select's state in `extra_state_attributes` (§4.4) and exposes it as `tts_target`. When set to "Browser" or not configured, `tts_target` is `""`. Otherwise it contains the selected media_player's `entity_id`.
-
-**Name collision handling:** Same as screensaver — duplicate friendly names get `(entity_id)` appended.
-
-### 12.6 Unique ID Format (Critical Gotcha)
-
-The entities use **inconsistent separators** in their unique IDs. This is NOT a bug — the framework-inherited selects generate their own unique IDs internally using dashes, while our custom entities use underscores:
-
-| Entity | Unique ID Format | Separator | Source |
-|--------|-----------------|-----------|--------|
-| Pipeline select | `{entry_id}-pipeline` | **dash** | Generated by `AssistPipelineSelect` base class |
-| VAD sensitivity select | `{entry_id}-vad_sensitivity` | **dash** | Generated by `VadSensitivitySelect` base class |
-| Screensaver select | `{entry_id}_screensaver` | **underscore** | Set explicitly in our code |
-| TTS output select | `{entry_id}_tts_output` | **underscore** | Set explicitly in our code |
-| Wake sound switch | `{entry_id}_wake_sound` | **underscore** | Set explicitly in our code |
-| Mute switch | `{entry_id}_mute` | **underscore** | Set explicitly in our code |
-| Announcement duration | `{entry_id}_announcement_display_duration` | **underscore** | Set explicitly in our code |
-
-The satellite entity's `pipeline_entity_id` and `vad_sensitivity_entity_id` properties (§4.5) use **dashes** to match the framework format. All custom entities (`_get_screensaver_entity_id`, TTS output, announcement duration) use **underscores**. Getting the separator wrong breaks entity registry lookups silently (returns `None`).
-
-### 12.7 Stale Entity Cleanup
-
-After creating entities, `async_setup_entry` cleans up stale select entities from older integration versions:
+### 16.4 Timer Dict Structure
 
 ```python
-expected_uids = {e.unique_id for e in entities}
-registry = er.async_get(hass)
-for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
-    if reg_entry.domain == "select" and reg_entry.unique_id not in expected_uids:
-        registry.async_remove(reg_entry.entity_id)
+{
+    "id": "timer_abc123",
+    "name": "Pizza timer",
+    "total_seconds": 600,
+    "started_at": 1709145600.0,  # time.time() epoch
+    "start_hours": 0,
+    "start_minutes": 10,
+    "start_seconds": 0,
+}
 ```
 
-This is needed because older versions may have used different unique_id patterns or had different entity sets. Without cleanup, updating the integration would leave orphaned entities in the registry.
+The card uses `started_at` + `total_seconds` to calculate remaining time client-side,
+avoiding clock drift from polling.
 
-## 13. Switch Entities (`switch.py`)
+---
 
-### 13.1 Wake Sound Switch
+## 17. Screensaver Keep-Alive
 
-`VoiceSatelliteWakeSoundSwitch` — controls whether the card plays a chime when the wake word is detected.
+### 17.1 Purpose
 
-- Default: **on** (chime enabled)
-- `EntityCategory.CONFIG`
-- `RestoreEntity` — restores previous state on HA restart
-- The card reads this value from `extra_state_attributes.wake_sound` on the satellite entity
+Prevents a configured screensaver entity (switch/input_boolean) from activating
+during voice interactions. The integration periodically calls `homeassistant.turn_off`
+on the entity to keep it off.
 
-### 13.2 Mute Switch
-
-`VoiceSatelliteMuteSwitch` — mutes/unmutes the satellite microphone.
-
-- Default: **off** (not muted)
-- `EntityCategory.CONFIG`
-- `RestoreEntity`
-- The card reads this value from `extra_state_attributes.muted` on the satellite entity
-- When muted, the card's pipeline manager polls this attribute and blocks pipeline starts
-
-### 13.3 Switch → Satellite Attribute Propagation
-
-When a switch changes state, the satellite entity must re-evaluate `extra_state_attributes` so the card sees the updated `muted`/`wake_sound` values. This is handled by `async_track_state_change_event` registered in `async_added_to_hass`:
+### 17.2 Entity Resolution
 
 ```python
-# When mute or wake_sound switch changes → re-write satellite state
-self.async_on_remove(
-    async_track_state_change_event(self.hass, switch_eids, self._on_switch_state_change)
-)
+def _get_screensaver_entity_id(self):
+    registry = er.async_get(self.hass)
+    select_eid = registry.async_get_entity_id(
+        "select", DOMAIN, f"{self._entry.entry_id}_screensaver"
+    )
+    if not select_eid:
+        return None
+    state = self.hass.states.get(select_eid)
+    if not state or state.state in ("Disabled", "unknown", "unavailable"):
+        return None
+    return state.attributes.get("entity_id")
+```
 
-@callback
-def _on_switch_state_change(self, _event):
+The screensaver select entity stores friendly names as options but exposes the
+actual `entity_id` in its `extra_state_attributes`. The satellite entity reads
+this attribute to get the target entity to keep off.
+
+### 17.3 Keep-Alive Lifecycle
+
+```
+_start_screensaver_keepalive()
+  ├── Get screensaver entity_id
+  ├── If none configured or already running: return
+  ├── Turn off IMMEDIATELY (don't wait for first tick)
+  │     └── hass.async_create_task(_screensaver_turn_off(entity_id))
+  └── Start periodic timer: async_track_time_interval(SCREENSAVER_INTERVAL=5s)
+        └── _tick: re-resolve entity_id (may change), turn off
+              └── If entity_id resolves to None: stop keep-alive
+
+_stop_screensaver_keepalive()
+  └── Cancel the periodic timer
+```
+
+### 17.4 Triggers
+
+| Action | Effect |
+|---|---|
+| `set_pipeline_state(non-idle)` | Start keep-alive |
+| `set_pipeline_state(idle)` | Stop keep-alive |
+| `async_announce()` | Start at beginning, stop in `finally` if idle |
+| `async_start_conversation()` | Start at beginning, stop in `finally` if idle |
+| `async_internal_ask_question()` | Start at Phase 1, re-start at Phase 2, stop in `finally` if idle |
+| `async_will_remove_from_hass()` | Stop keep-alive |
+
+### 17.5 Turn-Off Service Call
+
+```python
+async def _screensaver_turn_off(self, entity_id):
+    try:
+        await self.hass.services.async_call(
+            "homeassistant", "turn_off", {"entity_id": entity_id},
+        )
+    except Exception:
+        if not self.hass.is_stopping:
+            _LOGGER.debug("Failed to turn off screensaver %s", entity_id)
+```
+
+Errors are swallowed during HA shutdown to prevent log spam.
+
+---
+
+## 18. Media Player Entity
+
+### 18.1 Class Hierarchy
+
+```python
+class VoiceSatelliteMediaPlayer(MediaPlayerEntity, RestoreEntity):
+    _attr_has_entity_name = True
+    _attr_translation_key = "media_player"
+    _attr_supported_features = (
+        PLAY_MEDIA | MEDIA_ANNOUNCE | BROWSE_MEDIA |
+        PLAY | PAUSE | STOP | VOLUME_SET | VOLUME_MUTE
+    )
+```
+
+### 18.2 Supported Features
+
+| Feature | Service | Card Command |
+|---|---|---|
+| `PLAY_MEDIA` | `media_player.play_media` | `play` with media_id, media_type, announce, volume |
+| `MEDIA_ANNOUNCE` | `media_player.media_announce` | Same as play_media with `announce=True` |
+| `BROWSE_MEDIA` | Media browser | Delegates to `media_source`, filtered to audio |
+| `PLAY` | `media_player.media_play` | `resume` |
+| `PAUSE` | `media_player.media_pause` | `pause` |
+| `STOP` | `media_player.media_stop` | `stop` |
+| `VOLUME_SET` | `media_player.volume_set` | `volume_set` with volume |
+| `VOLUME_MUTE` | `media_player.volume_mute` | `volume_mute` with mute |
+
+### 18.3 Command Push Pattern
+
+All commands are pushed to the card via the satellite entity's subscription:
+
+```python
+def _push_command(self, command, **kwargs):
+    satellite = self._get_satellite_entity()
+    payload = {"command": command, **kwargs}
+    satellite._push_satellite_event("media_player", payload)
+```
+
+The satellite entity is looked up lazily from `hass.data[DOMAIN][entry_id]`.
+
+### 18.4 Optimistic State Updates
+
+Every command immediately updates the entity's state without waiting for
+confirmation:
+
+```python
+async def async_play_media(self, media_type, media_id, **kwargs):
+    # Resolve media-source:// URIs
+    if media_id.startswith("media-source://"):
+        result = await async_resolve_media(self.hass, media_id, self.entity_id)
+        media_id = result.url
+        media_type = result.mime_type
+
+    self._push_command("play", media_id=media_id, media_type=str(media_type),
+                       announce=kwargs.get("announce"), volume=self._attr_volume_level)
+
+    # Optimistic
+    self._attr_state = MediaPlayerState.PLAYING
+    self._attr_media_content_id = media_id
+    self._attr_media_content_type = str(media_type)
     self.async_write_ha_state()
 ```
 
-## 13A. Number Entity (`number.py`)
+### 18.5 State Reconciliation
 
-### 13A.1 Announcement Display Duration
-
-`VoiceSatelliteAnnouncementDurationNumber` extends `NumberEntity` + `RestoreEntity`. This config entity controls how long announcement bubbles remain visible on the card.
-
-**Attributes:**
-
-| Attribute | Value |
-|-----------|-------|
-| `_attr_entity_category` | `EntityCategory.CONFIG` |
-| `_attr_translation_key` | `"announcement_display_duration"` |
-| `_attr_icon` | `"mdi:message-text-clock"` |
-| `_attr_native_min_value` | `1` |
-| `_attr_native_max_value` | `60` |
-| `_attr_native_step` | `1` |
-| `_attr_native_unit_of_measurement` | `UnitOfTime.SECONDS` |
-| `_attr_mode` | `NumberMode.SLIDER` |
-| Default value | `5` seconds |
-
-**Unique ID:** `f"{entry.entry_id}_announcement_display_duration"`
-
-**State persistence:** Extends `RestoreEntity` and restores the previous value on startup via `async_get_last_state()`. Invalid states (`unknown`, `unavailable`) are ignored.
-
-**How the card reads it:** The satellite entity's `extra_state_attributes` (§4.4) looks up this number entity via the entity registry and exposes its value as `announcement_display_duration`. The card reads this attribute and uses it for announcement bubble display timing.
-
-## 13B. Media Player Entity (`media_player.py`)
-
-### 13B.1 Overview
-
-`VoiceSatelliteMediaPlayer` extends `MediaPlayerEntity` and provides a media player entity for each satellite device. This enables volume control, `tts.speak` targeting, `media_player.play_media` from automations, and media library browsing — matching the Voice PE's media player capabilities.
-
-### 13B.2 Features & State
+The card reports back actual playback state via `voice_satellite/media_player_event`:
 
 ```python
-_attr_supported_features = (
-    MediaPlayerEntityFeature.PLAY_MEDIA
-    | MediaPlayerEntityFeature.PLAY
-    | MediaPlayerEntityFeature.PAUSE
-    | MediaPlayerEntityFeature.STOP
-    | MediaPlayerEntityFeature.VOLUME_SET
-    | MediaPlayerEntityFeature.VOLUME_MUTE
-    | MediaPlayerEntityFeature.BROWSE_MEDIA
-    | MediaPlayerEntityFeature.MEDIA_ANNOUNCE
-)
+@callback
+def update_playback_state(self, state, volume=None, media_id=None):
+    state_map = {
+        "playing": MediaPlayerState.PLAYING,
+        "paused": MediaPlayerState.PAUSED,
+        "idle": MediaPlayerState.IDLE,
+    }
+    mapped = state_map.get(state)
+    if mapped is not None:
+        self._attr_state = mapped
+    if volume is not None:
+        self._attr_volume_level = volume
+    if media_id is not None:
+        self._attr_media_content_id = media_id
+    elif mapped == MediaPlayerState.IDLE:
+        # Clear media IDs when returning to idle — prevents stale
+        # "now playing" info from lingering in the HA UI
+        self._attr_media_content_id = None
+        self._attr_media_content_type = None
+    self.async_write_ha_state()
 ```
 
-States: `MediaPlayerState.IDLE`, `PLAYING`, `PAUSED`.
+### 18.6 Volume Persistence
 
-Volume: `_attr_volume_level` (0–1 float, default 1.0), `_attr_is_volume_muted` (bool, default False).
-
-### 13B.2.1 Volume Persistence via `ExtraStoredData`
-
-The entity extends `RestoreEntity` and uses `ExtraStoredData` to persist volume and mute state across HA reboots.
-
-**Why not `async_get_last_state().attributes`?** During HA shutdown, the WebSocket connection drops before `RestoreEntity` saves state. This makes the entity go unavailable, and HA saves the state as `"unavailable"` with empty attributes — losing the volume level. `ExtraStoredData` is stored independently of entity state, using a separate storage mechanism that reads from the Python object's properties rather than the HA state machine.
-
-**Implementation:**
+Volume and mute state persist across reboots via `ExtraStoredData`:
 
 ```python
 class MediaPlayerExtraData(ExtraStoredData):
-    def __init__(self, volume_level: float, is_volume_muted: bool):
+    def __init__(self, volume_level, is_volume_muted):
         self.volume_level = volume_level
         self.is_volume_muted = is_volume_muted
 
-    def as_dict(self) -> dict:
+    def as_dict(self):
         return {"volume_level": self.volume_level, "is_volume_muted": self.is_volume_muted}
 
     @classmethod
-    def from_dict(cls, data: dict) -> MediaPlayerExtraData:
+    def from_dict(cls, data):
         return cls(volume_level=data.get("volume_level", 1.0),
                    is_volume_muted=data.get("is_volume_muted", False))
 ```
 
-The entity provides `extra_restore_state_data` (read at save time from the entity's Python attributes) and restores via `async_get_last_extra_data()` in `async_added_to_hass`:
+Restored in `async_added_to_hass()`:
 
 ```python
-@property
-def extra_restore_state_data(self) -> MediaPlayerExtraData:
-    return MediaPlayerExtraData(self._attr_volume_level, self._attr_is_volume_muted)
-
 async def async_added_to_hass(self):
     await super().async_added_to_hass()
     extra_data = await self.async_get_last_extra_data()
@@ -1173,626 +1718,783 @@ async def async_added_to_hass(self):
         self._attr_is_volume_muted = data.is_volume_muted
 ```
 
-### 13B.3 Service Methods
+### 18.7 Media Source Resolution
 
-All methods push commands to the card via the satellite entity's `_push_satellite_event("media_player", payload)`:
-
-| Method | Command pushed | Extra fields |
-|--------|---------------|-------------|
-| `async_play_media(media_type, media_id, **kwargs)` | `play` | `media_id`, `media_type`, `announce`, `volume` |
-| `async_media_pause()` | `pause` | — |
-| `async_media_play()` | `resume` | — |
-| `async_media_stop()` | `stop` | — |
-| `async_set_volume_level(volume)` | `volume_set` | `volume` |
-| `async_mute_volume(mute)` | `volume_mute` | `mute` |
-
-**Media source resolution:** `async_play_media` resolves `media-source://` URIs to playable paths using `async_resolve_media()` from `homeassistant.components.media_source`. This handles local media, TTS proxy URLs, and other HA media sources.
-
-**Announce flag:** When `kwargs[ATTR_MEDIA_ANNOUNCE]` is true, the command includes `announce: true`.
-
-### 13B.4 Media Library Browsing
-
-`async_browse_media()` delegates to `async_browse_media()` from `homeassistant.components.media_source` to provide the HA media library browser. This allows users to browse local media, TTS samples, etc. from the media player's UI.
-
-### 13B.5 State Callback
-
-`update_playback_state(state, volume=None, media_id=None)` is called by the `ws_media_player_event` WS handler when the card reports state changes:
+`media-source://` URIs are resolved before pushing to the card:
 
 ```python
-@callback
-def update_playback_state(self, state, volume=None, media_id=None):
-    self._state = STATE_MAP.get(state, MediaPlayerState.IDLE)
-    if volume is not None:
-        self._volume_level = volume
-    if media_id:
-        self._media_id = media_id
-    self.async_write_ha_state()
+if media_id.startswith("media-source://"):
+    result = await async_resolve_media(self.hass, media_id, self.entity_id)
+    media_id = result.url
+    media_type = result.mime_type
 ```
 
-### 13B.6 Satellite Entity Lookup
+### 18.8 Browse Media
 
-The media player uses a lazy-lookup pattern to find the satellite entity for pushing commands:
-
-```python
-def _get_satellite(self):
-    return self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
-```
-
-If no satellite entity is found (not yet loaded, or disconnected), the method logs a warning and returns without pushing the command.
-
-This same lookup is used for the `available` property — the media player delegates availability to the satellite entity:
+Delegates to HA's media source, filtered to audio content:
 
 ```python
-@property
-def available(self) -> bool:
-    satellite = self._get_satellite_entity()
-    return satellite.available if satellite else False
-```
-
-### 13B.7 Entity Registration
-
-- **Unique ID:** `f"{entry.entry_id}_media_player"`
-- **Translation key:** `_attr_translation_key = "media_player"`
-- **Device:** Same `device_info` identifiers as other entities (`(DOMAIN, entry.entry_id)`)
-- **Storage:** `hass.data[DOMAIN][f"{entry.entry_id}_media_player"]` for WS handler lookup
-
-## 14. Screensaver Keep-Alive System
-
-### 14.1 Purpose
-
-Prevents screensaver entities (e.g., a switch controlling display dimming) from activating while the satellite is in use. The system periodically calls `homeassistant.turn_off` on the configured screensaver entity.
-
-### 14.2 Start/Stop
-
-- **Start:** Called by `set_pipeline_state` (non-idle), `async_announce`, `async_start_conversation`, `async_internal_ask_question`
-- **Stop:** Called by `set_pipeline_state` (idle), and conditionally in `finally` blocks of announcement methods (only if entity is idle)
-
-```python
-@callback
-def _start_screensaver_keepalive(self):
-    entity_id = self._get_screensaver_entity_id()
-    if not entity_id or self._screensaver_unsub is not None:
-        return  # No screensaver configured or already running
-
-    # Turn off immediately
-    self.hass.async_create_task(
-        self.hass.services.async_call("homeassistant", "turn_off", {"entity_id": entity_id})
+async def async_browse_media(self, media_content_type=None, media_content_id=None):
+    return await ms_browse(
+        self.hass, media_content_id,
+        content_filter=lambda item: item.media_content_type.startswith("audio/"),
     )
-
-    # Set up periodic keep-alive
-    self._screensaver_unsub = async_track_time_interval(
-        self.hass, _tick, timedelta(seconds=SCREENSAVER_INTERVAL),
-    )
-```
-
-`SCREENSAVER_INTERVAL = 5` seconds.
-
-### 14.3 Screensaver Entity Resolution
-
-`_get_screensaver_entity_id()` looks up the screensaver select entity via the entity registry, reads its state, and extracts the `entity_id` attribute. Returns `None` if the select is set to "Disabled".
-
-## 15. WebSocket Commands
-
-All 7 WebSocket commands follow the same patterns:
-- Decorated with `@websocket_api.websocket_command(schema)` and `@websocket_api.async_response`
-- Entity lookup iterates `hass.data[DOMAIN]` by `entity_id`
-- Returns error if entity not found
-- Registered once in `async_setup` (not per-entry)
-
-### 15.1 `voice_satellite/announce_finished`
-
-**Direction:** Card → Integration
-
-| Field | Type | Description |
-|---|---|---|
-| `entity_id` | `str` | Satellite entity ID |
-| `announce_id` | `int` | Must match the ID from the announcement event |
-
-**Response:** `{"success": true}`
-
-### 15.2 `voice_satellite/update_state`
-
-**Direction:** Card → Integration
-
-| Field | Type | Description |
-|---|---|---|
-| `entity_id` | `str` | Satellite entity ID |
-| `state` | `str` | Card state string: `IDLE`, `LISTENING`, `STT`, etc. |
-
-**Response:** `{"success": true}`
-
-### 15.3 `voice_satellite/question_answered`
-
-**Direction:** Card → Integration
-
-| Field | Type | Description |
-|---|---|---|
-| `entity_id` | `str` | Satellite entity ID |
-| `announce_id` | `int` | Must match the current announcement ID |
-| `sentence` | `str` | Transcribed text from STT |
-
-**Response:** `{"success": true, "matched": bool, "id": string|null}`
-
-The handler coordinates with the entity's hassil matching via `_question_match_event` (see §8.6).
-
-### 15.4 `voice_satellite/run_pipeline`
-
-**Direction:** Card → Integration (subscription)
-
-| Field | Type | Description |
-|---|---|---|
-| `entity_id` | `str` | Satellite entity ID |
-| `start_stage` | `str` | Pipeline start stage: `wake_word`, `stt`, `intent`, `tts` |
-| `end_stage` | `str` | Pipeline end stage: `wake_word`, `stt`, `intent`, `tts` |
-| `sample_rate` | `int` | Audio sample rate (e.g., 16000) |
-| `conversation_id` | `str?` | Optional conversation ID for continue conversation |
-| `extra_system_prompt` | `str?` | Optional custom LLM system prompt |
-
-**Events sent back:**
-- `{"type": "init", "handler_id": int}` — synthetic init event with binary handler ID
-- `{"type": "run-start", "data": {...}}` — pipeline started
-- `{"type": "wake-word-end", "data": {...}}` — wake word detected
-- `{"type": "stt-end", "data": {...}}` — speech-to-text complete
-- `{"type": "intent-end", "data": {...}}` — intent processing complete
-- `{"type": "tts-end", "data": {...}}` — text-to-speech complete
-- `{"type": "run-end", "data": {...}}` — pipeline finished
-- `{"type": "error", "data": {...}}` — pipeline error
-
-### 15.5 `voice_satellite/subscribe_events`
-
-**Direction:** Card → Integration (subscription)
-
-| Field | Type | Description |
-|---|---|---|
-| `entity_id` | `str` | Satellite entity ID |
-
-**Events sent back:**
-- `{"type": "announcement", "data": {...}}` — play announcement
-- `{"type": "start_conversation", "data": {...}}` — play prompt, then listen
-- `{"type": "media_player", "data": {...}}` — media player command (play, pause, stop, volume, etc.)
-
-The subscription remains active until the card disconnects or explicitly unsubscribes.
-
-### 15.6 `voice_satellite/cancel_timer`
-
-**Direction:** Card → Integration
-
-| Field | Type | Description |
-|---|---|---|
-| `entity_id` | `str` | Satellite entity ID |
-| `timer_id` | `str` | Timer ID to cancel |
-
-**Response:** `{"success": true}` or error if timer manager unavailable or cancel fails.
-
-Uses `TimerManager.cancel_timer(timer_id)` from `homeassistant.components.intent`. Imports are lazy (at call time) to avoid circular imports.
-
-### 15.7 `voice_satellite/media_player_event`
-
-**Direction:** Card → Integration
-
-| Field | Type | Description |
-|---|---|---|
-| `entity_id` | `str` | Media player entity ID |
-| `state` | `str` | Playback state: `"playing"`, `"paused"`, `"idle"` |
-| `volume` | `float?` | Optional current volume level (0–1) |
-| `media_id` | `str?` | Optional current media ID |
-
-**Response:** `{"success": true}`
-
-The handler looks up the media player entity via `hass.data[DOMAIN]` (checking for `update_playback_state` attribute) and calls `entity.update_playback_state(state, volume, media_id)`.
-
-**Volume validation:** Uses `vol.Coerce(float)` instead of `float` for the volume field because JSON has no float type — JavaScript may send `1` (integer) instead of `1.0`.
-
-## 16. Known Gotchas & Non-Obvious Traps
-
-### 16.1 `_question_match_result` Must Survive the `finally` Block
-
-After `_question_match_event.set()`, both the WS handler (awaiting the event) and the `finally` block of `async_internal_ask_question` are ready to run. The asyncio scheduler may run `finally` first, clearing `_question_match_result` before the WS handler reads it. Solution: `_question_match_result` is intentionally NOT cleared in `finally`. It's overwritten on the next `ask_question` call.
-
-### 16.2 WS Handler Must Grab `_question_match_event` Before Triggering Answer
-
-The WS handler stores a local reference to `entity._question_match_event` BEFORE calling `entity.question_answered()`. This prevents a race where: `question_answered` → `_question_event.set()` → `async_internal_ask_question` resumes → `finally` clears `_question_match_event` to `None` → WS handler tries to await `None`.
-
-### 16.3 Empty Sentence Handling
-
-When the card sends an empty sentence (STT timeout, no speech), the integration must still signal `_question_match_event` with `matched: False` so the WS handler doesn't hang.
-
-### 16.4 `preannounce` Boolean Is NOT in `AssistSatelliteAnnouncement`
-
-The base class consumes `preannounce` internally to decide whether to resolve a default preannounce URL, but does NOT pass it through to the announcement object. That's why we override `async_internal_announce` and `async_internal_start_conversation` to capture it in `_preannounce_pending`.
-
-### 16.5 `ask_question` Piggybacks on `async_announce`
-
-`async_internal_ask_question` does NOT have its own TTS resolution. It calls `self.async_internal_announce()` which the base class resolves. The `_ask_question_pending` flag tells our `async_announce` override to add `"ask_question": True` to the event data.
-
-### 16.6 Base Class State Manipulation via Name Mangling
-
-`AssistSatelliteEntity` has no public state setter. We use Python name mangling (`self._AssistSatelliteEntity__assist_satellite_state = mapped`) to update the private attribute directly. This is necessary because `hass.states.async_set()` doesn't update the base class's internal state, causing subsequent `async_write_ha_state()` calls to publish a stale value.
-
-### 16.7 `announce_id` Prevents Stale ACKs
-
-All announcement types (announce, start_conversation, ask_question) share the same monotonically increasing `_announce_id`. If a previous announcement times out and the card sends a late ACK, the `announce_id` check silently ignores it.
-
-### 16.8 `device_entry` Not Available in `__init__`
-
-`self.device_entry` is only populated after `async_added_to_hass()`. Timer handler registration must happen there, not in the constructor.
-
-### 16.9 Immutable Timer Lists
-
-Timer list mutations must create new lists (see §5.3). In-place mutation makes HA suppress `state_changed` events because old and new attribute references point to the same object.
-
-### 16.10 Pipeline Stop Protocol — Cancel vs Stop Signal
-
-Never `cancel()` a pipeline task without first sending the empty-bytes stop signal and waiting for natural exit. `CancelledError` races with `await audio_queue.get()` and leaves orphaned HA internal pipeline tasks. See §11.3.
-
-### 16.11 Generation Counter Prevents Cross-Run Cleanup
-
-Without `_pipeline_gen`, a new pipeline run's connection/queue fields would be cleared by the old run's `finally` block. The generation counter ensures only the current run clears its own state. See §11.5.
-
-### 16.12 Stale Pipeline Events from Orphaned HA Tasks
-
-HA's internal pipeline tasks (wake word, STT) may continue running briefly after cancellation and fire events through the shared `on_pipeline_event` callback. `_pipeline_run_started` gates event forwarding so stale events from old runs are dropped. See §11.7.
-
-### 16.13 Screensaver Keep-Alive Conditional Stop
-
-The `finally` blocks of `async_announce` and `async_start_conversation` only stop the screensaver keepalive if the entity state is idle. This prevents premature stop when `start_conversation` sets state to `listening` after the ACK — the keepalive should continue until the voice interaction completes.
-
-### 16.14 Ask Question Re-Starts Keepalive for Phase 2
-
-`async_announce`'s `finally` block may stop the screensaver keepalive (if entity is idle between phases). `async_internal_ask_question` calls `_start_screensaver_keepalive()` again before entering Phase 2 (STT capture).
-
-### 16.15 Unsubscribe Releases Blocking Events
-
-When the last satellite subscriber disconnects, pending `async_announce` and `async_internal_ask_question` calls are unblocked by setting their events. Without this, the entity would wait the full `ANNOUNCE_TIMEOUT` (120s) for a card that's already gone.
-
-### 16.16 Version Sync
-
-Version is defined in a single place: `package.json`. The `scripts/sync-version.js` script propagates it to `manifest.json` (`version` field) and `const.py` (`INTEGRATION_VERSION` string). The prebuild/predev npm hooks run this automatically. Webpack's `DefinePlugin` injects it into the JS bundle as `__VERSION__`.
-
-### 16.17 No `homeassistant` Key in `manifest.json`
-
-HACS validation rejects it for custom integrations. Use `hacs.json` for the minimum HA version instead.
-
-### 16.18 Background Task for Pipeline
-
-Pipeline runs use `hass.async_create_background_task()`, not `hass.async_create_task()`. Pipeline tasks are long-running (wake word detection can block indefinitely). If created as a normal task, they would prevent HA from completing startup.
-
-### 16.19 `extra_system_prompt` Is NOT in `AssistSatelliteAnnouncement`
-
-Similar to `preannounce`, the `extra_system_prompt` parameter is consumed by the base class's `async_internal_start_conversation` but not passed to the announcement object. We override `async_internal_start_conversation` to capture it in `_pending_extra_system_prompt` before delegating.
-
-### 16.20 Two State-Setting Patterns Coexist
-
-The entity uses two different mechanisms to update state, each for a different scenario:
-
-1. **Name mangling** (`self._AssistSatelliteEntity__assist_satellite_state = mapped` + `async_write_ha_state()`) — Used in `set_pipeline_state()` for continuous external state sync from the card. Keeps the base class internal state consistent so that any subsequent `async_write_ha_state()` call (e.g., from a switch change) publishes the correct state.
-
-2. **Direct `hass.states.async_set()`** — Used in `async_start_conversation` (after ACK) and `async_internal_ask_question` (before Phase 2) to immediately set state to `listening`. These are one-shot state transitions during async operations where the base class state will be overwritten shortly by the card's pipeline state sync anyway.
-
-**Rule:** Use name mangling for state that must persist across multiple `async_write_ha_state()` calls. Use `async_set` for transient state transitions during async flows.
-
-### 16.21 Unique ID Separator Mismatch Between Framework and Custom Entities
-
-Framework-inherited select entities use **dashes** in their unique IDs while custom entities use **underscores** (see §12.5). Entity registry lookups in the satellite entity (`pipeline_entity_id`, `vad_sensitivity_entity_id`, `_get_screensaver_entity_id`) must use the correct separator for each. Getting this wrong returns `None` silently.
-
-### 16.22 JSON Integer/Float Ambiguity in WS Volume
-
-JSON has no distinct float type — `1` and `1.0` are identical. When JavaScript sends volume `1` (integer), Python receives `int(1)`, which fails Voluptuous `float` validation. The `media_player_event` WS schema uses `vol.Coerce(float)` instead of `float` to handle this.
-
-### 16.23 Media Player Entity Lookup in WS Handler
-
-The `ws_media_player_event` handler iterates `hass.data[DOMAIN]` and uses `hasattr(ent, 'update_playback_state')` to identify media player entities (as opposed to satellite entities). This avoids needing a separate lookup dict and works because only `VoiceSatelliteMediaPlayer` has this method.
-
-### 16.24 Media Player Volume Requires `ExtraStoredData`, Not `RestoreEntity` Attributes
-
-During HA shutdown, the WebSocket connection drops before `RestoreEntity` saves final state. The entity becomes unavailable, and HA persists `"unavailable"` state with empty attributes — losing volume/mute data. `ExtraStoredData` stores volume and mute state independently via `extra_restore_state_data` (reads from Python attributes, not the HA state machine), so the values survive regardless of availability state at shutdown time. See §13A.2.1.
-
-### 16.25 Availability Is Driven by `subscribe_events`, Not `run_pipeline`
-
-The entity's `available` property checks `_satellite_subscribers` (from `subscribe_events`), not the `run_pipeline` connection. The `subscribe_events` subscription is the persistent control channel maintained for the card's entire lifetime, while `run_pipeline` is transient and recreated on each wake word cycle. Using the pipeline connection would cause rapid available/unavailable flapping between pipeline runs.
-
-### 16.26 Media Player Availability Propagation
-
-When the satellite's subscriber list changes, `_update_media_player_availability()` directly calls `async_write_ha_state()` on the media player entity. Without this, the media player would only re-evaluate its `available` property on its next state write, leaving it stale (showing available when the satellite is actually unavailable).
-
-## 17. HA API Dependencies
-
-### 17.1 `assist_satellite` Component
-
-- `AssistSatelliteEntity` — Base class for satellite entities
-- `AssistSatelliteEntityFeature.ANNOUNCE` — Feature flag for `assist_satellite.announce`
-- `AssistSatelliteEntityFeature.START_CONVERSATION` — Feature flag for `assist_satellite.start_conversation`
-- `AssistSatelliteConfiguration` — Returned by `async_get_configuration()` (wake word config)
-- `AssistSatelliteAnnouncement` — Passed to `async_announce()`/`async_start_conversation()` with `.message`, `.media_id`, optionally `.preannounce_media_id`
-- `AssistSatelliteAnswer` (HA 2025.7+) — Returned by `async_internal_ask_question()` with `.id`, `.sentence`, `.slots`
-- `AssistPipelineSelect` — Base class for pipeline select entity
-- `VadSensitivitySelect` — Base class for VAD sensitivity select entity
-
-### 17.2 `assist_pipeline` Component
-
-- `PipelineStage` — Enum: `WAKE_WORD`, `STT`, `INTENT`, `TTS`
-
-### 17.3 `hassil` (bundled with HA)
-
-- `hassil.intents.Intents` — Sentence template collection
-- `hassil.recognize.recognize(sentence, intents)` — Sentence matching
-- Conditionally imported (`HAS_HASSIL` flag)
-
-### 17.4 `intent` Component
-
-- `intent.async_register_timer_handler(hass, device_id, callback)` — Registers timer handler. Returns unregister callback
-- `intent.TimerEventType` — Enum: `STARTED`, `UPDATED`, `CANCELLED`, `FINISHED`
-- `intent.TimerInfo` — `.id`, `.name`, `.start_hours`, `.start_minutes`, `.start_seconds`
-- `TimerManager.cancel_timer(timer_id)` — Cancel a specific timer (lazy import)
-
-### 17.5 `websocket_api`
-
-- `websocket_api.async_register_command(hass, handler)` — Register WS command
-- `connection.send_result(msg_id, data)` — Success response
-- `connection.send_error(msg_id, code, message)` — Error response
-- `connection.send_event(msg_id, data)` — Push subscription event
-- `connection.async_register_binary_handler(callback)` — Register binary audio handler, returns `(handler_id, unregister)`
-- `connection.subscriptions[msg_id] = unsub` — Register unsubscribe callback
-
-### 17.6 `media_player` / `media_source` Components
-
-- `MediaPlayerEntity` — Base class for media player entities
-- `MediaPlayerEntityFeature` — Feature flags (PLAY_MEDIA, PLAY, PAUSE, STOP, VOLUME_SET, VOLUME_MUTE, BROWSE_MEDIA, MEDIA_ANNOUNCE)
-- `MediaPlayerState` — State enum (IDLE, PLAYING, PAUSED)
-- `MediaType` — Media type constants
-- `async_resolve_media(hass, media_content_id, entity_id)` — Resolve `media-source://` URIs to playable paths
-- `async_browse_media(hass, media_content_type, media_content_id)` — Browse HA media library
-- `BrowseMedia` — Media browsing response object
-
-### 17.7 Event Helpers
-
-- `async_track_state_change_event(hass, entity_ids, callback)` — Track state changes for switch → satellite propagation
-- `async_track_time_interval(hass, callback, interval)` — Periodic screensaver keep-alive
-
-## 18. Card Interface Contract
-
-### 18.1 Card → Integration (WebSocket)
-
-| Command | Payload | Purpose |
-|---|---|---|
-| `voice_satellite/run_pipeline` | `{entity_id, start_stage, end_stage, sample_rate, conversation_id?, extra_system_prompt?}` | Start bridged pipeline |
-| `voice_satellite/subscribe_events` | `{entity_id}` | Subscribe to notification events |
-| `voice_satellite/announce_finished` | `{entity_id, announce_id}` | ACK announcement playback |
-| `voice_satellite/update_state` | `{entity_id, state}` | Sync pipeline state |
-| `voice_satellite/question_answered` | `{entity_id, announce_id, sentence}` | Send ask_question STT result |
-| `voice_satellite/cancel_timer` | `{entity_id, timer_id}` | Cancel a timer |
-| `voice_satellite/media_player_event` | `{entity_id, state, volume?, media_id?}` | Report media player playback state |
-| Binary frames | `[handler_id][PCM data]` | Audio for pipeline |
-
-### 18.2 Integration → Card (WS Events)
-
-| Event Type | Data | Channel |
-|---|---|---|
-| `init` | `{handler_id}` | `run_pipeline` subscription |
-| `run-start` | `{...}` | `run_pipeline` subscription |
-| `wake-word-end` | `{...}` | `run_pipeline` subscription |
-| `stt-end` | `{...}` | `run_pipeline` subscription |
-| `intent-end` | `{...}` | `run_pipeline` subscription |
-| `tts-end` | `{...}` | `run_pipeline` subscription |
-| `run-end` | `{...}` | `run_pipeline` subscription |
-| `error` | `{...}` | `run_pipeline` subscription |
-| `announcement` | `{id, message, media_id, preannounce_media_id, preannounce?, ask_question?}` | `subscribe_events` subscription |
-| `start_conversation` | `{id, message, media_id, preannounce_media_id, start_conversation, preannounce?, extra_system_prompt?}` | `subscribe_events` subscription |
-| `media_player` | `{command, media_id?, volume?, mute?, ...}` | `subscribe_events` subscription |
-
-### 18.3 Integration → Card (Entity Attributes)
-
-| Attribute | Type | Description |
-|---|---|---|
-| `active_timers` | `list[dict]` | Active timers with countdown data |
-| `last_timer_event` | `string \| null` | Last event type |
-| `muted` | `bool` | Whether mute switch is on |
-| `wake_sound` | `bool` | Whether wake sound switch is on |
-| `tts_target` | `string` | Media player entity ID for remote TTS, or `""` for browser |
-| `announcement_display_duration` | `int` | Seconds to display announcement bubbles |
-
-## 19. Strings and Localization (`strings.json`)
-
-HA uses this file for config flow UI and entity names:
-
-- Config flow: title, description, input labels, description text, abort messages
-- Entity names: Translation keys for select entities ("Assistant", "Finished speaking detection", "Screensaver entity", "TTS output"), switch entities ("Wake sound", "Mute"), number entities ("Announcement display duration"), and media player entity ("Media Player")
-- Select states: Translation keys for pipeline select ("Preferred") and VAD sensitivity ("Default", "Relaxed", "Aggressive")
-
-A `translations/en.json` file mirrors the contents of `strings.json` for English locale support.
-
-## 20. Configuration Files
-
-### 20.1 `manifest.json`
-
-```json
-{
-    "domain": "voice_satellite",
-    "name": "Voice Satellite Card",
-    "codeowners": ["@jxlarrea"],
-    "config_flow": true,
-    "dependencies": ["assist_pipeline", "assist_satellite", "frontend", "http", "intent", "lovelace"],
-    "documentation": "...",
-    "iot_class": "local_push",
-    "issue_tracker": "...",
-    "version": "5.0.0"
-}
-```
-
-- `dependencies` — `assist_pipeline` (pipeline selects), `assist_satellite` (entity base class), `frontend` (Lovelace resource registration), `http` (static path serving), `intent` (timer handlers), `lovelace` (resource collection API). HA loads these before our integration.
-- `iot_class: "local_push"` — card pushes state via WebSocket; no polling.
-- **No `homeassistant` key** — HACS validation rejects it for custom integrations.
-
-### 20.2 `hacs.json`
-
-```json
-{
-    "name": "Voice Satellite Card",
-    "homeassistant": "2025.2.1",
-    "render_readme": true,
-    "zip_release": true,
-    "filename": "voice-satellite-card.zip"
-}
-```
-
-### 20.3 `const.py`
-
-```python
-DOMAIN = "voice_satellite"
-SCREENSAVER_INTERVAL = 5  # seconds
-INTEGRATION_VERSION = "5.0.0"  # synced from package.json
-URL_BASE = "/voice_satellite"
-JS_FILENAME = "voice-satellite-card.js"
 ```
 
 ---
 
-## 21. Implementation Checklist
+## 19. Select Entities
 
-### Config Flow
-- [ ] Single-step flow asking for satellite name
-- [ ] Unique ID from lowercased, underscore-separated name
-- [ ] Duplicate detection via `_abort_if_unique_id_configured()`
-- [ ] `strings.json` with config flow strings and entity name translations (mirrored in `translations/en.json`)
+### 19.1 Pipeline Select
 
-### Entity
-- [ ] Extends `AssistSatelliteEntity`
-- [ ] `_attr_supported_features = ANNOUNCE | START_CONVERSATION`
-- [ ] `_attr_has_entity_name = True`, `_attr_name = None`
-- [ ] `_attr_unique_id = entry.entry_id`
-- [ ] `device_info` with identifiers, name, manufacturer, model, sw_version
-- [ ] `extra_state_attributes`: `active_timers`, `last_timer_event`, `muted`, `wake_sound`, `tts_target`, `announcement_display_duration`
-- [ ] `pipeline_entity_id` and `vad_sensitivity_entity_id` properties
-- [ ] Timer handler registered in `async_added_to_hass` via `intent.async_register_timer_handler`
-- [ ] Timer handler wrapped in `async_on_remove()`
-- [ ] Sibling entity state tracking (switches, TTS output select, announcement duration number) via `async_track_state_change_event`
-- [ ] `available` property returns `True` only when `_satellite_subscribers` is non-empty
-- [ ] `async_get_configuration` returns empty wake word config
-- [ ] `async_set_configuration` is a no-op
-- [ ] `async_will_remove_from_hass`: pipeline stop, release blocking events, clear subscribers, stop keepalive
+```python
+class VoiceSatellitePipelineSelect(AssistPipelineSelect):
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:assistant"
 
-### Timers
-- [ ] `_handle_timer_event` handles STARTED, UPDATED, CANCELLED, FINISHED
-- [ ] **Immutable list pattern** — new list on every mutation (no in-place append/remove)
-- [ ] STARTED appends timer dict with `id`, `name`, `total_seconds`, `started_at`, `start_hours/minutes/seconds`
-- [ ] UPDATED creates new list with modified timer
-- [ ] CANCELLED/FINISHED creates new filtered list
-- [ ] All events set `_last_timer_event` and call `async_write_ha_state()`
+    def __init__(self, hass, entry):
+        super().__init__(hass, DOMAIN, entry.entry_id)
+```
 
-### Announcements
-- [ ] `async_internal_announce` override captures `preannounce` in `_preannounce_pending`
-- [ ] `async_announce` pushes via `_push_satellite_event("announcement", data)` (NOT entity attributes)
-- [ ] Monotonic `_announce_id` prevents stale ACKs
-- [ ] `"preannounce": false` only when chime should be suppressed
-- [ ] `"ask_question": true` when `_ask_question_pending` is set
-- [ ] `asyncio.Event` with 120s timeout
-- [ ] `finally` resets `_preannounce_pending`, conditionally stops keepalive
+Subclasses `AssistPipelineSelect` from `homeassistant.components.assist_pipeline`.
+This framework class:
+- Auto-generates the unique ID as `{entry_id}-pipeline`
+- Registers the device in `pipeline_devices` for the Voice Assistants UI
+- Manages pipeline option list and selection persistence
+- Provides the translation key `"pipeline"` → displayed as "Assistant"
 
-### Start Conversation
-- [ ] `async_internal_start_conversation` captures `preannounce` and `extra_system_prompt`
-- [ ] Pushes via `_push_satellite_event("start_conversation", data)` with `"start_conversation": True`
-- [ ] Includes `"extra_system_prompt"` when provided
-- [ ] After ACK: sets entity state to `listening` via `hass.states.async_set()`
-- [ ] `finally` clears `_pending_extra_system_prompt`, conditionally stops keepalive
+### 19.2 VAD Sensitivity Select
 
-### Ask Question
-- [ ] `async_internal_ask_question` delegates TTS to `self.async_internal_announce()`
-- [ ] `_ask_question_pending` causes `async_announce` to add `ask_question: true`
-- [ ] Phase 1 (TTS) → Phase 2 (STT capture) → Phase 3 (hassil matching)
-- [ ] Re-starts keepalive between phases (announce's finally may have stopped it)
-- [ ] `_question_event` + `_question_answer_text` for card → entity text transfer
-- [ ] `_question_match_event` + `_question_match_result` for entity → WS handler result transfer
-- [ ] `_question_match_result` intentionally NOT cleared in `finally` (WS handler race)
-- [ ] WS handler grabs `_question_match_event` before triggering answer
-- [ ] Returns `AssistSatelliteAnswer(id, sentence, slots)` — `id=None` on no match
+```python
+class VoiceSatelliteVadSensitivitySelect(VadSensitivitySelect):
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:account-voice"
 
-### Pipeline State Sync
-- [ ] `_STATE_MAP` maps all card states to HA satellite states
-- [ ] `set_pipeline_state` deduplicates (skips if unchanged)
-- [ ] Uses name mangling (`_AssistSatelliteEntity__assist_satellite_state`) for base class state update
-- [ ] Drives screensaver keep-alive (non-idle starts, idle stops)
+    def __init__(self, hass, entry):
+        super().__init__(hass, entry.entry_id)
+```
 
-### Bridged Pipeline
-- [ ] `ws_run_pipeline`: stop old pipeline → create queue → register binary handler → send init → background task
-- [ ] Pipeline stop protocol: empty bytes → wait → force cancel
-- [ ] `async_run_pipeline`: generation counter, audio stream generator, `async_accept_pipeline_from_satellite`
-- [ ] `on_pipeline_event`: stale event filtering via `_pipeline_run_started` gate
-- [ ] Generation counter prevents cross-run `finally` cleanup
+Subclasses `VadSensitivitySelect` from `homeassistant.components.assist_pipeline`.
+Options: Default, Relaxed, Aggressive.
 
-### Satellite Event Subscription
-- [ ] `ws_subscribe_satellite_events`: register subscriber, send result, unsub callback
-- [ ] `register_satellite_subscription` / `unregister_satellite_subscription`
-- [ ] `_push_satellite_event`: push to all subscribers, remove dead ones
-- [ ] Unsubscribe releases blocking events when no subscribers remain
-- [ ] First subscriber triggers `async_write_ha_state()` + `_update_media_player_availability()` (entity → available)
-- [ ] Last subscriber removed triggers `async_write_ha_state()` + `_update_media_player_availability()` (entity → unavailable)
+### 19.3 Screensaver Select
 
-### Select Entities
-- [ ] Pipeline select (extends `AssistPipelineSelect`) — constructor takes 3 args: `(hass, DOMAIN, entry_id)`
-- [ ] VAD sensitivity select (extends `VadSensitivitySelect`) — constructor takes 2 args: `(hass, entry_id)` — **no domain**
-- [ ] Screensaver select (extends `SelectEntity` + `RestoreEntity`)
-- [ ] Screensaver: entity scanning (switch + input_boolean), friendly name mapping, 30s cache, "Disabled" default
-- [ ] TTS output select (extends `SelectEntity` + `RestoreEntity`)
-- [ ] TTS output: entity scanning (media_player, excludes own integration), friendly name mapping, 30s cache, "Browser" default
-- [ ] TTS output: exposes `entity_id` via `extra_state_attributes` for the card
-- [ ] Unique ID separators: framework selects use **dashes**, custom entities use **underscores**
-- [ ] Stale entity cleanup after setup
+Default option constant: `SCREENSAVER_DISABLED = "Disabled"` (module-level).
 
-### Number Entity
-- [ ] Announcement display duration (extends `NumberEntity` + `RestoreEntity`)
-- [ ] `EntityCategory.CONFIG`, `translation_key = "announcement_display_duration"`
-- [ ] Range 1–60 seconds, step 1, slider mode, default 5 seconds
-- [ ] `RestoreEntity` restores previous value on startup
-- [ ] Unique ID: `f"{entry.entry_id}_announcement_display_duration"`
-- [ ] Same `device_info` identifiers as other entities
+A custom `SelectEntity` + `RestoreEntity` that lists all `switch.*` and
+`input_boolean.*` entities as options.
 
-### Switch Entities
-- [ ] Wake sound switch (default on, `RestoreEntity`)
-- [ ] Mute switch (default off, `RestoreEntity`)
-- [ ] Both use `EntityCategory.CONFIG`
+**Key design decisions:**
 
-### Media Player Entity
-- [ ] `VoiceSatelliteMediaPlayer` extends `MediaPlayerEntity` + `RestoreEntity`
-- [ ] Supported features: PLAY_MEDIA, PLAY, PAUSE, STOP, VOLUME_SET, VOLUME_MUTE, BROWSE_MEDIA, MEDIA_ANNOUNCE
-- [ ] Service methods push commands to card via `_push_satellite_event("media_player", ...)`
-- [ ] `async_play_media` resolves `media-source://` URIs via `async_resolve_media()`
-- [ ] `async_browse_media` delegates to HA media source browser
-- [ ] `update_playback_state` callback for WS handler state updates
-- [ ] Unique ID: `f"{entry.entry_id}_media_player"`
-- [ ] Stored in `hass.data[DOMAIN][f"{entry.entry_id}_media_player"]`
-- [ ] `available` property delegates to satellite entity's `available`
-- [ ] Same `device_info` identifiers as other entities
-- [ ] Default volume 1.0 (100%), default mute False
-- [ ] `ExtraStoredData` (`MediaPlayerExtraData`) persists volume/mute across reboots
-- [ ] `extra_restore_state_data` property returns current volume/mute for save
-- [ ] `async_added_to_hass` restores volume/mute via `async_get_last_extra_data()`
+1. **Friendly names in dropdown** — Users see "Esphome: Screensaver" not `switch.screensaver`
+2. **Entity ID in attributes** — `extra_state_attributes["entity_id"]` exposes the actual entity_id
+3. **30-second mapping cache** — `_build_mapping()` caches the entity_id ↔ friendly_name
+   mapping for 30s to avoid rebuilding on every state read
+4. **Cache bypass during startup** — Only caches after `hass.is_running` is `True`
+5. **Own entities excluded** — Filters out entities from the `voice_satellite` platform
+6. **Duplicate name handling** — Appends `(entity_id)` when names collide
+7. **Restore from attribute** — On startup, restores `entity_id` from `extra_state_attributes`,
+   not from the state string (which is a friendly name that may change)
+8. **Integration prefix** — Friendly names are prefixed with the integration platform label
+   (e.g. `entry.platform.replace("_", " ").title()` → `"Esphome: Screensaver"`)
+9. **Sorted alphabetically** — Options are sorted by `name.casefold()` for consistent ordering
 
-### Screensaver Keep-Alive
-- [ ] `_start_screensaver_keepalive`: immediate turn_off + periodic interval
-- [ ] `_stop_screensaver_keepalive`: cancel interval
-- [ ] `_get_screensaver_entity_id`: resolve from screensaver select entity
-- [ ] Conditional stop in announcement `finally` blocks (only if idle)
-- [ ] Re-start in ask_question between phases
+```python
+def _build_mapping(self):
+    now = time.monotonic()
+    if (self._mapping_cache is not None
+        and self.hass and self.hass.is_running
+        and (now - self._cache_time) < self._CACHE_TTL):
+        return self._mapping_cache
 
-### WebSocket Commands
-- [ ] 7 commands: announce_finished, update_state, question_answered, run_pipeline, subscribe_events, cancel_timer, media_player_event
-- [ ] Entity lookup iterates `hass.data[DOMAIN]` by `entity_id`
-- [ ] Registered once in `async_setup` (not per-entry)
-- [ ] `media_player_event` uses `vol.Coerce(float)` for volume field (JSON integer/float ambiguity)
+    eid_to_name = {}
+    name_to_eid = {}
+    registry = er.async_get(self.hass)
+    for domain in ("switch", "input_boolean"):
+        for eid in self.hass.states.async_entity_ids(domain):
+            entry = registry.async_get(eid)
+            if entry and entry.platform == DOMAIN:
+                continue  # Skip our own entities
+            state = self.hass.states.get(eid)
+            friendly = state.attributes.get("friendly_name", eid) if state else eid
+            if entry:
+                label = entry.platform.replace("_", " ").title()
+                name = f"{label}: {friendly}"
+            else:
+                name = friendly
+            ...
+    self._mapping_cache = (eid_to_name, name_to_eid)
+    self._cache_time = now
+    return self._mapping_cache
+```
 
-### Integration Setup
-- [ ] `async_setup` registers all 7 WebSocket commands (once, no try/except needed)
-- [ ] `async_setup` registers frontend JS via `JSModuleRegistration` (deferred to `EVENT_HOMEASSISTANT_STARTED` if starting)
-- [ ] `async_setup_entry` forwards to ASSIST_SATELLITE + MEDIA_PLAYER + NUMBER + SELECT + SWITCH platforms
-- [ ] `async_unload_entry` unloads platforms and removes entity + media_player from `hass.data`
-- [ ] `async_unload_entry` removes Lovelace resource when last entry is unloaded
-- [ ] Satellite entity stored in `hass.data[DOMAIN][entry.entry_id]`
-- [ ] Media player entity stored in `hass.data[DOMAIN][f"{entry.entry_id}_media_player"]`
+### 19.4 TTS Output Select
 
-### Infrastructure
-- [ ] `manifest.json` with 6 dependencies: `assist_pipeline`, `assist_satellite`, `frontend`, `http`, `intent`, `lovelace`
-- [ ] No `homeassistant` key in `manifest.json`
-- [ ] `hacs.json` with minimum HA version, `zip_release: true`
-- [ ] Single version source: `package.json` → `scripts/sync-version.js` → `manifest.json` + `const.py`
-- [ ] `frontend.py` auto-serves JS and registers Lovelace resource
-- [ ] Lovelace resource cleanup on last entry unload
+Default option constant: `TTS_OUTPUT_BROWSER = "Browser"` (module-level).
+
+Nearly identical structure to Screensaver Select, but:
+- Lists `media_player.*` entities instead of switch/input_boolean
+- Default option is `"Browser"` (card plays audio locally via Web Audio)
+- Exposes `entity_id` in `extra_state_attributes` for the card to read
+- Restore logic also checks against `TTS_OUTPUT_BROWSER` as a skip state
+
+### 19.5 Stale Entity Cleanup
+
+The `select.py` setup cleans up stale select entities from older integration versions.
+It only targets entities in the `"select"` domain — other platforms (switch, number)
+are not affected:
+
+```python
+async def async_setup_entry(hass, entry, async_add_entities):
+    entities = [Pipeline, VAD, Screensaver, TTSOutput]
+    async_add_entities(entities)
+
+    # Collect the unique IDs of the 4 current select entities
+    expected_uids = {e.unique_id for e in entities}
+    registry = er.async_get(hass)
+    # Scan all entities registered under this config entry
+    for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+        # Only remove select entities with unrecognized unique IDs
+        if reg_entry.domain == "select" and reg_entry.unique_id not in expected_uids:
+            _LOGGER.info("Removing stale entity: %s", reg_entry.entity_id)
+            registry.async_remove(reg_entry.entity_id)
+```
+
+---
+
+## 20. Switch Entities
+
+### 20.1 Wake Sound Switch
+
+Controls whether the card plays a chime when wake word is detected.
+
+```python
+class VoiceSatelliteWakeSoundSwitch(SwitchEntity, RestoreEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "wake_sound"
+    _attr_icon = "mdi:bullhorn"
+
+    def __init__(self, entry):
+        self._attr_unique_id = f"{entry.entry_id}_wake_sound"
+        self._attr_is_on = True  # Default: enabled
+```
+
+### 20.2 Mute Switch
+
+Controls whether the card's microphone is active.
+
+```python
+class VoiceSatelliteMuteSwitch(SwitchEntity, RestoreEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "mute"
+    _attr_icon = "mdi:microphone-off"
+
+    def __init__(self, entry):
+        self._attr_unique_id = f"{entry.entry_id}_mute"
+        self._attr_is_on = False  # Default: not muted
+```
+
+### 20.3 State Persistence
+
+Both switches use `RestoreEntity` to persist state across reboots:
+
+```python
+async def async_added_to_hass(self):
+    await super().async_added_to_hass()
+    last_state = await self.async_get_last_state()
+    if last_state is not None:
+        self._attr_is_on = last_state.state == "on"
+```
+
+### 20.4 How the Card Reads Switch State
+
+The switches don't push directly to the card. Instead:
+
+1. Switch state changes → `_on_switch_state_change` callback on satellite entity
+2. Satellite entity calls `async_write_ha_state()`
+3. `extra_state_attributes` re-evaluates, looking up switch states:
+   ```python
+   mute_eid = registry.async_get_entity_id("switch", DOMAIN, f"{entry_id}_mute")
+   s = self.hass.states.get(mute_eid)
+   attrs["muted"] = s.state == "on" if s else False
+   ```
+4. Card receives attribute update via its entity subscription
+
+---
+
+## 21. Number Entity
+
+### 21.1 Announcement Display Duration
+
+Controls how many seconds announcement bubbles remain visible on the card.
+
+```python
+class VoiceSatelliteAnnouncementDurationNumber(NumberEntity, RestoreEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "announcement_display_duration"
+    _attr_icon = "mdi:message-text-clock"
+    _attr_native_min_value = 1
+    _attr_native_max_value = 60
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, entry):
+        self._attr_unique_id = f"{entry.entry_id}_announcement_display_duration"
+        self._attr_native_value = 5  # Default: 5 seconds
+```
+
+### 21.2 State Persistence
+
+Uses `int(float(state))` to handle both integer and float string representations
+(e.g. `"5"` and `"5.0"` both parse correctly):
+
+```python
+async def async_added_to_hass(self):
+    await super().async_added_to_hass()
+    last_state = await self.async_get_last_state()
+    if last_state is not None and last_state.state not in ("unknown", "unavailable"):
+        try:
+            self._attr_native_value = int(float(last_state.state))
+        except (ValueError, TypeError):
+            pass
+```
+
+### 21.3 How the Card Reads This Value
+
+Same pattern as switches — propagated via satellite entity's `extra_state_attributes`:
+
+```python
+ann_dur_eid = registry.async_get_entity_id(
+    "number", DOMAIN, f"{self._entry.entry_id}_announcement_display_duration"
+)
+if ann_dur_eid:
+    s = self.hass.states.get(ann_dur_eid)
+    if s and s.state not in ("unknown", "unavailable"):
+        attrs["announcement_display_duration"] = int(float(s.state))
+```
+
+---
+
+## 22. WebSocket API
+
+### 22.1 Command Summary
+
+| Command | Schema | Purpose |
+|---|---|---|
+| `voice_satellite/run_pipeline` | `entity_id`, `start_stage`, `end_stage`, `sample_rate`, `conversation_id?`, `extra_system_prompt?` | Start bridged pipeline with binary audio |
+| `voice_satellite/subscribe_events` | `entity_id` | Subscribe to satellite events (announcements, media, timers) |
+| `voice_satellite/update_state` | `entity_id`, `state` | Report pipeline state change |
+| `voice_satellite/announce_finished` | `entity_id`, `announce_id` | ACK announcement playback complete |
+| `voice_satellite/question_answered` | `entity_id`, `announce_id`, `sentence` | Send STT transcription for ask_question |
+| `voice_satellite/cancel_timer` | `entity_id`, `timer_id` | Cancel a specific timer |
+| `voice_satellite/media_player_event` | `entity_id`, `state`, `volume?`, `media_id?` | Report media playback state |
+
+### 22.2 `voice_satellite/run_pipeline`
+
+**Schema:**
+```python
+{
+    vol.Required("type"): "voice_satellite/run_pipeline",
+    vol.Required("entity_id"): str,
+    vol.Required("start_stage"): str,     # "wake_word" | "stt" | "intent" | "tts"
+    vol.Required("end_stage"): str,       # "wake_word" | "stt" | "intent" | "tts"
+    vol.Required("sample_rate"): int,     # e.g. 16000
+    vol.Optional("conversation_id"): str, # For continue-conversation
+    vol.Optional("extra_system_prompt"): str,
+}
+```
+
+**Response flow:**
+1. `send_result(msg_id)` — immediate, resolves JS promise
+2. `send_event(msg_id, {type: "init", handler_id: N})` — card stores handler ID
+3. Card sends binary audio to handler N
+4. Pipeline events flow as `send_event(msg_id, {type, data})` messages
+
+**Unsubscribe:** Sends `b""` stop signal to audio queue + unregisters binary handler.
+
+### 22.3 `voice_satellite/subscribe_events`
+
+**Schema:**
+```python
+{
+    vol.Required("type"): "voice_satellite/subscribe_events",
+    vol.Required("entity_id"): str,
+}
+```
+
+**Response:** `send_result(msg_id)` immediately.
+
+**Events pushed:** `{type: "announcement"|"start_conversation"|"media_player"|"timer", data: {...}}`
+
+**Unsubscribe:** Calls `entity.unregister_satellite_subscription()`.
+
+### 22.4 `voice_satellite/update_state`
+
+**Schema:**
+```python
+{
+    vol.Required("type"): "voice_satellite/update_state",
+    vol.Required("entity_id"): str,
+    vol.Required("state"): str,  # Card state: IDLE, STT, INTENT, TTS, etc.
+}
+```
+
+**Response:** `{"success": True}`
+
+### 22.5 `voice_satellite/announce_finished`
+
+**Schema:**
+```python
+{
+    vol.Required("type"): "voice_satellite/announce_finished",
+    vol.Required("entity_id"): str,
+    vol.Required("announce_id"): int,  # Must match _announce_id
+}
+```
+
+**Response:** `{"success": True}`
+
+### 22.6 `voice_satellite/question_answered`
+
+**Schema:**
+```python
+{
+    vol.Required("type"): "voice_satellite/question_answered",
+    vol.Required("entity_id"): str,
+    vol.Required("announce_id"): int,
+    vol.Required("sentence"): str,  # STT transcription
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "matched": true,
+  "id": "confirm_yes"
+}
+```
+
+The handler waits up to 10s for hassil matching to complete before responding.
+
+### 22.7 `voice_satellite/cancel_timer`
+
+**Schema:**
+```python
+{
+    vol.Required("type"): "voice_satellite/cancel_timer",
+    vol.Required("entity_id"): str,
+    vol.Required("timer_id"): str,
+}
+```
+
+**Response:** `{"success": True}` or error `"cancel_failed"`.
+
+Uses HA's `TimerManager` directly:
+
+```python
+from homeassistant.components.intent import TimerManager
+from homeassistant.components.intent.const import TIMER_DATA
+
+timer_manager = hass.data.get(TIMER_DATA)
+timer_manager.cancel_timer(timer_id)
+```
+
+### 22.8 `voice_satellite/media_player_event`
+
+**Schema:**
+```python
+{
+    vol.Required("type"): "voice_satellite/media_player_event",
+    vol.Required("entity_id"): str,
+    vol.Required("state"): str,          # "playing" | "paused" | "idle"
+    vol.Optional("volume"): vol.Coerce(float),
+    vol.Optional("media_id"): str,
+}
+```
+
+**Response:** `{"success": True}`
+
+**Entity lookup** uses a predicate to find the media player entity specifically,
+since both the satellite and media player entities are stored in `hass.data[DOMAIN]`
+and may share similar entity_id patterns:
+
+```python
+entity = _find_entity(hass, entity_id, lambda e: hasattr(e, "update_playback_state"))
+```
+
+Without the predicate, `_find_entity()` could return the satellite entity instead
+of the media player.
+
+### 22.9 Common Error Response
+
+All handlers return the same error format when entity is not found:
+
+```python
+connection.send_error(msg["id"], "not_found", f"Entity {entity_id} not found")
+```
+
+---
+
+## 23. Error Handling & Concurrency
+
+### 23.1 `asyncio.Event` Blocking Pattern
+
+Used by announcements, start_conversation, and ask_question:
+
+```python
+self._announce_event = asyncio.Event()
+# ... push event to card ...
+try:
+    await asyncio.wait_for(self._announce_event.wait(), timeout=ANNOUNCE_TIMEOUT)
+except asyncio.TimeoutError:
+    _LOGGER.warning("Timed out after %ds", ANNOUNCE_TIMEOUT)
+finally:
+    self._announce_event = None
+```
+
+**Timeout:** 120 seconds (`ANNOUNCE_TIMEOUT`). If the card doesn't ACK within this
+window, the flow continues and the event is discarded.
+
+### 23.2 Sequence Counter (Stale ACK Prevention)
+
+```
+Timeline:
+  t=0:  Announcement #5 pushed
+  t=121: Announcement #5 times out
+  t=122: Announcement #6 pushed
+  t=123: Card sends ACK for #5 (stale!)
+  t=124: announce_finished(5) → _announce_id is 6 → 5 != 6 → ignored
+```
+
+### 23.3 Generation Counter (Pipeline Lifecycle)
+
+```
+Timeline:
+  t=0:  Run A starts: _pipeline_gen=1, my_gen=1
+  t=5:  Run B starts: _pipeline_gen=2, my_gen=2
+  t=6:  Run A finally: _pipeline_gen(2) != my_gen(1) → skip cleanup
+  t=10: Run B finally: _pipeline_gen(2) == my_gen(2) → clean up fields
+```
+
+### 23.4 Run-Start Gate
+
+The `_pipeline_run_started` flag filters orphaned events:
+
+```
+Timeline:
+  t=0:  Old pipeline run ends, but wake_word internal task still running
+  t=1:  New pipeline run starts, on_pipeline_event registered
+  t=2:  Old wake_word task fires wake_word-end → _pipeline_run_started is False → filtered
+  t=3:  New pipeline fires run-start → _pipeline_run_started = True → event relayed
+```
+
+### 23.5 Pipeline Teardown Race Conditions
+
+**Problem:** `CancelledError` and stop signal race on `await audio_queue.get()`.
+`CancelledError` always wins, leaving orphaned HA pipeline tasks.
+
+**Solution:** Send stop signal first, wait for natural exit, cancel only on timeout:
+
+```python
+# 1. Stop signal
+entity.pipeline_audio_queue.put_nowait(b"")
+
+# 2. Wait for natural exit
+old_task = entity.pipeline_task
+done, _ = await asyncio.wait({old_task}, timeout=3.0)
+
+# 3. Force-cancel only if stuck
+if not done:
+    old_task.cancel()
+    try:
+        await old_task
+    except (asyncio.CancelledError, Exception):
+        pass
+```
+
+### 23.6 Subscriber Disconnection During Blocking
+
+If all card connections disconnect while an announcement is blocking:
+
+```python
+def unregister_satellite_subscription(self, connection, msg_id):
+    self._satellite_subscribers = [...]
+    if not self._satellite_subscribers:
+        if self._announce_event is not None:
+            self._announce_event.set()  # Unblock
+        if self._question_event is not None:
+            self._question_event.set()  # Unblock
+```
+
+### 23.7 HA Shutdown Safety
+
+- `_push_satellite_event()` returns early if `self.hass.is_stopping`
+- `available` returns `True` during shutdown so `RestoreEntity` saves full attributes
+- `_screensaver_turn_off()` swallows exceptions during shutdown
+- `async_will_remove_from_hass()` releases all blocking events
+
+---
+
+## 24. HA API Dependencies
+
+### 24.1 Framework Classes Used
+
+| Class/Function | Module | Used By |
+|---|---|---|
+| `AssistSatelliteEntity` | `homeassistant.components.assist_satellite` | Satellite entity base class |
+| `AssistSatelliteEntityFeature` | `homeassistant.components.assist_satellite` | Feature flags (ANNOUNCE, START_CONVERSATION) |
+| `AssistSatelliteConfiguration` | `homeassistant.components.assist_satellite` | Wake word config (empty for browser) |
+| `AssistSatelliteAnnouncement` | `homeassistant.components.assist_satellite` | Announcement data object |
+| `AssistSatelliteAnswer` | `homeassistant.components.assist_satellite` | Ask question answer (HA 2025.7+) |
+| `AssistPipelineSelect` | `homeassistant.components.assist_pipeline` | Pipeline select base class |
+| `VadSensitivitySelect` | `homeassistant.components.assist_pipeline` | VAD select base class |
+| `PipelineStage` | `homeassistant.components.assist_pipeline` | Enum for pipeline stages |
+| `MediaPlayerEntity` | `homeassistant.components.media_player` | Media player base class |
+| `MediaPlayerEntityFeature` | `homeassistant.components.media_player` | Feature flags |
+| `MediaPlayerState` | `homeassistant.components.media_player` | State enum |
+| `SelectEntity` | `homeassistant.components.select` | Select entity base class |
+| `SwitchEntity` | `homeassistant.components.switch` | Switch entity base class |
+| `NumberEntity` | `homeassistant.components.number` | Number entity base class |
+| `RestoreEntity` | `homeassistant.helpers.restore_state` | State persistence mixin |
+| `ExtraStoredData` | `homeassistant.helpers.restore_state` | Custom data persistence |
+| `ConfigFlow` | `homeassistant.config_entries` | Config flow base class |
+| `websocket_api` | `homeassistant.components` | WS command registration |
+| `StaticPathConfig` | `homeassistant.components.http` | HTTP static path |
+| `intent.async_register_timer_handler` | `homeassistant.components.intent` | Timer registration |
+| `intent.TimerManager` | `homeassistant.components.intent` | Timer cancellation |
+| `er.async_get` | `homeassistant.helpers.entity_registry` | Entity registry access |
+| `async_track_state_change_event` | `homeassistant.helpers.event` | State change tracking |
+| `async_track_time_interval` | `homeassistant.helpers.event` | Periodic callbacks |
+| `async_call_later` | `homeassistant.helpers.event` | Delayed callbacks |
+| `async_browse_media` | `homeassistant.components.media_source` | Media browsing |
+| `async_resolve_media` | `homeassistant.components.media_source` | Media URI resolution |
+| `MODE_STORAGE` | `homeassistant.components.lovelace` | Lovelace mode check |
+
+### 24.2 Manifest Dependencies
+
+```json
+{
+  "dependencies": [
+    "assist_pipeline",
+    "assist_satellite",
+    "frontend",
+    "http",
+    "intent",
+    "lovelace"
+  ]
+}
+```
+
+### 24.3 Optional Dependencies
+
+| Dependency | Import Pattern | Required For |
+|---|---|---|
+| `AssistSatelliteAnswer` | `try/except ImportError` | `ask_question` (HA 2025.7+) |
+| `hassil` | `try/except ImportError` | Answer sentence matching |
+
+---
+
+## 25. Strings & Localization
+
+### 25.1 Config Flow Strings
+
+```json
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Voice Satellite",
+        "description": "Create a virtual Assist satellite for a browser tablet...",
+        "data": { "name": "Satellite name" },
+        "data_description": {
+          "name": "A descriptive name for this tablet (e.g. Kitchen Tablet)."
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "A satellite with this name already exists."
+    }
+  }
+}
+```
+
+### 25.2 Entity Translations
+
+```json
+{
+  "entity": {
+    "select": {
+      "pipeline": { "name": "Assistant", "state": { "preferred": "Preferred" } },
+      "vad_sensitivity": {
+        "name": "Finished speaking detection",
+        "state": { "default": "Default", "relaxed": "Relaxed", "aggressive": "Aggressive" }
+      },
+      "screensaver": { "name": "Screensaver entity" },
+      "tts_output": { "name": "TTS output" }
+    },
+    "number": {
+      "announcement_display_duration": { "name": "Announcement display duration" }
+    },
+    "switch": {
+      "wake_sound": { "name": "Wake sound" },
+      "mute": { "name": "Mute" }
+    },
+    "media_player": {
+      "media_player": { "name": "Media Player" }
+    }
+  }
+}
+```
+
+### 25.3 Translation Key → Entity Name Mapping
+
+| Translation Key | Displayed Name | Entity ID Example |
+|---|---|---|
+| `pipeline` (select) | "Assistant" | `select.kitchen_tablet_assistant` |
+| `vad_sensitivity` (select) | "Finished speaking detection" | `select.kitchen_tablet_finished_speaking_detection` |
+| `screensaver` (select) | "Screensaver entity" | `select.kitchen_tablet_screensaver_entity` |
+| `tts_output` (select) | "TTS output" | `select.kitchen_tablet_tts_output` |
+| `wake_sound` (switch) | "Wake sound" | `switch.kitchen_tablet_wake_sound` |
+| `mute` (switch) | "Mute" | `switch.kitchen_tablet_mute` |
+| `announcement_display_duration` (number) | "Announcement display duration" | `number.kitchen_tablet_announcement_display_duration` |
+| `media_player` (media_player) | "Media Player" | `media_player.kitchen_tablet_media_player` |
+
+The satellite entity uses `_attr_name = None` to use the device name directly
+(e.g., `assist_satellite.kitchen_tablet`).
+
+---
+
+## 26. Implementation Checklist
+
+Step-by-step guide to recreate the integration from scratch.
+
+### Phase 1: Skeleton
+
+- [ ] Create `custom_components/voice_satellite/` directory
+- [ ] Create `manifest.json` with domain `voice_satellite`, dependencies on `assist_pipeline`, `assist_satellite`, `frontend`, `http`, `intent`, `lovelace`
+- [ ] Create `const.py` with `DOMAIN`, `SCREENSAVER_INTERVAL`, `INTEGRATION_VERSION`, `URL_BASE`, `JS_FILENAME`
+- [ ] Create `strings.json` with config flow and entity translation strings
+- [ ] Create `config_flow.py` — single-step name flow with unique ID from `name.lower().replace(" ", "_")`
+
+### Phase 2: Frontend Registration
+
+- [ ] Create `frontend.py` with `JSModuleRegistration` class
+- [ ] Implement `_async_register_path()` — register `/voice_satellite` static path
+- [ ] Implement `_async_wait_for_lovelace_resources()` — 12-retry poll with 5s intervals
+- [ ] Implement `_async_register_module()` — versioned URL, create or update resource
+- [ ] Implement `async_unregister()` — remove resource on last entry unload
+- [ ] Handle HA 2026.2 compat: `resource_mode` vs `mode` attribute
+
+### Phase 3: Integration Setup
+
+- [ ] Create `__init__.py` with `async_setup()`, `async_setup_entry()`, `async_unload_entry()`
+- [ ] Register 7 WebSocket commands in `async_setup()`
+- [ ] Defer frontend registration to `EVENT_HOMEASSISTANT_STARTED` if HA not running
+- [ ] Implement `_find_entity()` helper for WS handler entity lookup
+- [ ] Forward to 5 platforms: `ASSIST_SATELLITE`, `MEDIA_PLAYER`, `NUMBER`, `SELECT`, `SWITCH`
+
+### Phase 4: Satellite Entity
+
+- [ ] Create `assist_satellite.py` with `VoiceSatelliteEntity(AssistSatelliteEntity)`
+- [ ] Set supported features: `ANNOUNCE | START_CONVERSATION`
+- [ ] Implement `device_info` with identifiers, name, manufacturer, model, sw_version
+- [ ] Implement `available` — subscription-based with HA shutdown override
+- [ ] Implement `extra_state_attributes` — timers, mute, wake_sound, tts_target, announcement_duration
+- [ ] Implement `async_added_to_hass()` — timer handler registration + sibling entity tracking
+- [ ] Implement `async_will_remove_from_hass()` — graceful pipeline shutdown + event release
+- [ ] Implement `async_get_configuration()` — empty wake word config
+
+### Phase 5: Pipeline Bridge
+
+- [ ] Implement `async_run_pipeline()` with generation counter and audio stream generator
+- [ ] Implement `on_pipeline_event()` with run-start gate
+- [ ] Implement `ws_run_pipeline` handler — old pipeline teardown, audio queue, binary handler, background task
+- [ ] Handle displaced pipeline scenario (different connection warning + displaced event)
+- [ ] Implement graceful teardown: stop signal → wait → force cancel
+
+### Phase 6: State Synchronization
+
+- [ ] Implement `_STATE_MAP` dict (card states → HA satellite states)
+- [ ] Implement `set_pipeline_state()` with screensaver keep-alive triggers
+- [ ] Implement `_set_satellite_state()` with name-mangled attribute access
+- [ ] Implement `ws_update_state` handler
+
+### Phase 7: Satellite Event Subscription
+
+- [ ] Implement `register_satellite_subscription()` / `unregister_satellite_subscription()`
+- [ ] Implement `_push_satellite_event()` with dead connection cleanup
+- [ ] Implement `_update_media_player_availability()` cascade
+- [ ] Implement `ws_subscribe_satellite_events` handler
+- [ ] Release blocking events on last subscriber disconnect
+
+### Phase 8: Announcement System
+
+- [ ] Override `async_internal_announce()` to capture `preannounce` flag
+- [ ] Implement `async_announce()` — sequence counter, event push, blocking wait
+- [ ] Implement `announce_finished()` callback with stale ACK filtering
+- [ ] Implement `ws_announce_finished` handler
+
+### Phase 9: Start Conversation
+
+- [ ] Override `async_internal_start_conversation()` to capture `preannounce` + `extra_system_prompt`
+- [ ] Implement `async_start_conversation()` — same blocking pattern + `start_conversation: true`
+- [ ] Set satellite state to `"listening"` after ACK
+
+### Phase 10: Ask Question
+
+- [ ] Add conditional imports: `AssistSatelliteAnswer` (HA 2025.7+) + `hassil`
+- [ ] Override `async_internal_ask_question()` — three-phase flow
+- [ ] Phase 1: Set `_ask_question_pending`, delegate to announce
+- [ ] Phase 2: Wait for `_question_event` (STT transcription from card)
+- [ ] Phase 3: Match answer with `_match_answer()` using hassil
+- [ ] Implement `question_answered()` callback
+- [ ] Implement `ws_question_answered` handler — wait for match event, return result
+- [ ] Handle race: don't clear `_question_match_result` in finally block
+
+### Phase 11: Timer System
+
+- [ ] Implement `_handle_timer_event()` — STARTED, UPDATED, CANCELLED, FINISHED
+- [ ] Use immutable list pattern (create new list, don't mutate)
+- [ ] Store timer dict: id, name, total_seconds, started_at, start_hours/minutes/seconds
+- [ ] Implement `ws_cancel_timer` handler via HA's `TimerManager`
+
+### Phase 12: Screensaver Keep-Alive
+
+- [ ] Implement `_get_screensaver_entity_id()` — resolve via select entity attribute
+- [ ] Implement `_start_screensaver_keepalive()` — immediate turn-off + 5s periodic
+- [ ] Implement `_stop_screensaver_keepalive()` — cancel periodic timer
+- [ ] Implement `_screensaver_turn_off()` — service call with shutdown error swallowing
+
+### Phase 13: Supporting Entities
+
+- [ ] Create `media_player.py` — `VoiceSatelliteMediaPlayer(MediaPlayerEntity, RestoreEntity)`
+  - [ ] 8 supported features, command push via satellite subscription
+  - [ ] Optimistic state, `update_playback_state()` for reconciliation
+  - [ ] `MediaPlayerExtraData` for volume persistence
+  - [ ] Media source URI resolution, browse media with audio filter
+  - [ ] Availability delegates to satellite entity
+- [ ] Create `select.py` — 4 select entities
+  - [ ] `VoiceSatellitePipelineSelect(AssistPipelineSelect)` — framework subclass
+  - [ ] `VoiceSatelliteVadSensitivitySelect(VadSensitivitySelect)` — framework subclass
+  - [ ] `VoiceSatelliteScreensaverSelect` — custom with 30s mapping cache
+  - [ ] `VoiceSatelliteTTSOutputSelect` — custom with 30s mapping cache
+  - [ ] Stale entity cleanup for older versions
+- [ ] Create `switch.py` — 2 switch entities
+  - [ ] `VoiceSatelliteWakeSoundSwitch` — default on
+  - [ ] `VoiceSatelliteMuteSwitch` — default off
+  - [ ] Both use `RestoreEntity` for persistence
+- [ ] Create `number.py` — 1 number entity
+  - [ ] `VoiceSatelliteAnnouncementDurationNumber` — range 1-60, default 5, slider mode
+  - [ ] `RestoreEntity` for persistence
+
+### Phase 14: WebSocket Handlers
+
+- [ ] `ws_run_pipeline` — Full pipeline bridge setup (see Phase 5)
+- [ ] `ws_subscribe_satellite_events` — Subscription management
+- [ ] `ws_update_state` — Pipeline state mapping
+- [ ] `ws_announce_finished` — ACK with sequence validation
+- [ ] `ws_question_answered` — Answer + match event wait
+- [ ] `ws_cancel_timer` — HA TimerManager delegation
+- [ ] `ws_media_player_event` — Playback state update with predicate lookup

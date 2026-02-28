@@ -44,6 +44,11 @@ const miniLayoutSchema = [
           },
         },
       },
+      {
+        name: 'suppress_full_card',
+        default: true,
+        selector: { boolean: {} },
+      },
     ],
   },
 ];
@@ -61,6 +66,7 @@ const labels = {
   ...behaviorLabels,
   mini_mode: t(null, 'mini_editor.mode', 'Mode'),
   text_scale: t(null, 'mini_editor.text_scale', 'Text Scale'),
+  suppress_full_card: t(null, 'mini_editor.suppress_full_card', 'Suppress Full Card'),
   custom_css: t(null, 'mini_editor.custom_css_override', 'Custom CSS Override'),
 };
 
@@ -68,6 +74,7 @@ const helpers = {
   ...behaviorHelpers,
   mini_mode: t(null, 'mini_editor.helper_mode', 'Compact is a single scrolling line; Tall shows status and a scrolling transcript.'),
   text_scale: t(null, 'mini_editor.helper_text_scale', 'Scales text sizes in the mini card while keeping Home Assistant theme typography as the base.'),
+  suppress_full_card: t(null, 'mini_editor.helper_suppress_full_card', 'Hides the full-screen voice satellite overlay when this mini card is active.'),
   custom_css: t(null, 'mini_editor.helper_custom_css', 'Advanced: CSS overrides applied inside the mini card shadow DOM'),
 };
 

@@ -164,7 +164,7 @@ export class AskQuestionManager {
       cleaned = true;
       this._cleanupTimeout = null;
       if (matchedResult !== null && !matchedResult) {
-        this._card.ui.clearErrorBar();
+        this._card.ui.clearServiceError();
       }
       clearNotificationUI(this);
       this._card.chat.clear();
@@ -189,7 +189,7 @@ export class AskQuestionManager {
       }
 
       if (!matched) {
-        this._card.ui.showErrorBar();
+        this._card.ui.showServiceError();
         const bar = this._card.ui.element
           ? this._card.ui.element.querySelector('.vs-rainbow-bar')
           : null;
