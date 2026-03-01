@@ -964,6 +964,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         end_stage: str,
         conversation_id: str | None = None,
         extra_system_prompt: str | None = None,
+        wake_word_phrase: str | None = None,
     ) -> None:
         """Run a bridged pipeline - relay events back to the card via WS.
 
@@ -1016,6 +1017,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                     start_stage, PipelineStage.WAKE_WORD
                 ),
                 end_stage=stage_map.get(end_stage, PipelineStage.TTS),
+                wake_word_phrase=wake_word_phrase,
             )
         finally:
             # Only clear if we're still the active generation - a newer

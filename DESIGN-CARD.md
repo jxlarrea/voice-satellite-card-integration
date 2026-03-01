@@ -1103,8 +1103,11 @@ EXPECTED_ERRORS = [
 
 ```
 handleError(expected)
+├── hideBlurOverlay(PIPELINE)  ← always, even if not in INTERACTING state
+│     (duplicate_wake_up_detected arrives after run-start has already
+│      moved state to LISTENING, but the overlay from _onDetection is still up)
 ├── Clean up interaction UI (if in INTERACTING state):
-│   setState(IDLE), chat.clear(), hideBlurOverlay, play done chime
+│   setState(IDLE), chat.clear(), play done chime
 └── restart(0)   ← immediate, no backoff
 ```
 
@@ -2422,6 +2425,45 @@ scans the directory at startup:
 The JS model loader handles unknown models via fallback:
 `KEYWORD_FILES[modelName] || modelName` — so a custom model `my_word` loads
 from `/voice_satellite/models/my_word.onnx`.
+
+### 28.8 Cross-Satellite Duplicate Suppression
+
+When on-device wake word detection triggers, the card starts the pipeline with
+`start_stage: 'stt'`, bypassing HA core's server-side wake word stage. To
+participate in HA core's cross-satellite dedup (`DATA_LAST_WAKE_UP` dictionary),
+the card passes `wake_word_phrase` through the pipeline chain.
+
+**Phrase format:** HA core uses human-friendly phrases (`"Okay Nabu"`, not
+`"ok_nabu"`) as dedup keys — matching openWakeWord and microWakeWord conventions.
+`WAKE_WORD_PHRASES` maps model names to the correct phrases; custom models fall
+back to underscore→space + title case transformation.
+
+```
+WAKE_WORD_PHRASES = {
+  ok_nabu:     'Okay Nabu',
+  hey_jarvis:  'Hey Jarvis',
+  alexa:       'Alexa',
+  hey_mycroft: 'Hey Mycroft',
+  hey_rhasspy: 'Hey Rhasspy',
+}
+```
+
+**Flow:**
+```
+_onDetection()
+├── pipeline.start({ start_stage: 'stt', wake_word_phrase: getWakeWordPhrase() })
+│     └── runConfig includes wake_word_phrase → spread into WS message
+│           └── ws_run_pipeline extracts wake_word_phrase → async_run_pipeline
+│                 └── async_accept_pipeline_from_satellite(wake_word_phrase=...)
+│                       └── HA core checks DATA_LAST_WAKE_UP[phrase]
+│                             ├── Not within 2s cooldown → record + proceed
+│                             └── Within cooldown → DuplicateWakeUpDetectedError
+│                                   └── error event: "duplicate_wake_up_detected"
+│                                         └── handleError → hideBlurOverlay → restart(0) → ww.restart()
+```
+
+This is the same infrastructure Voice PE satellites use — fully unified. No
+custom dedup logic. Works for card↔card and card↔Voice PE suppression.
 
 ---
 

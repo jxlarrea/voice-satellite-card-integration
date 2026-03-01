@@ -28,6 +28,16 @@ const MODEL_THRESHOLDS = {
 };
 const DEFAULT_THRESHOLDS = { 'Slightly sensitive': 0.70, 'Moderately sensitive': 0.55, 'Very sensitive': 0.40 };
 
+// Wake word phrases matching openWakeWord / microWakeWord conventions.
+// DATA_LAST_WAKE_UP in HA core uses these exact strings for dedup.
+const WAKE_WORD_PHRASES = {
+  ok_nabu: 'Okay Nabu',
+  hey_jarvis: 'Hey Jarvis',
+  alexa: 'Alexa',
+  hey_mycroft: 'Hey Mycroft',
+  hey_rhasspy: 'Hey Rhasspy',
+};
+
 export class WakeWordManager {
   constructor(session) {
     this._session = session;
@@ -82,6 +92,16 @@ export class WakeWordManager {
    * Get the detection threshold based on sensitivity setting and active model.
    * @returns {number}
    */
+  /**
+   * Get the wake word phrase for pipeline dedup (matches openWakeWord/microWakeWord format).
+   * @returns {string}
+   */
+  getWakeWordPhrase() {
+    const model = this.getModelName();
+    return WAKE_WORD_PHRASES[model]
+      || model.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
   getThreshold() {
     const label = getSelectState(
       this._session.hass,
@@ -252,7 +272,7 @@ export class WakeWordManager {
 
     // Start pipeline with STT stage (skip server-side wake word)
     try {
-      await session.pipeline.start({ start_stage: 'stt' });
+      await session.pipeline.start({ start_stage: 'stt', wake_word_phrase: this.getWakeWordPhrase() });
     } catch (e) {
       this._log.error('wake-word', `Pipeline start failed after detection: ${e.message || e}`);
       session.pipeline.restart(session.pipeline.calculateRetryDelay());

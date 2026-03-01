@@ -333,11 +333,14 @@ export function handleError(mgr, errorData) {
   if (EXPECTED_ERRORS.includes(errorCode)) {
     mgr.log.log('pipeline', `Expected error: ${errorCode} - restarting`);
 
+    // Always hide blur — duplicate_wake_up_detected arrives after run-start
+    // has already moved state out of INTERACTING_STATES, but overlay is still up.
+    mgr.card.ui.hideBlurOverlay(BlurReason.PIPELINE);
+
     if (INTERACTING_STATES.includes(mgr.card.currentState)) {
       mgr.log.log('ui', 'Cleaning up interaction UI after expected error');
       mgr.card.setState(State.IDLE);
       mgr.card.chat.clear();
-      mgr.card.ui.hideBlurOverlay(BlurReason.PIPELINE);
       mgr.shouldContinue = false;
       mgr.continueConversationId = null;
       const isRemote = !!mgr.card.ttsTarget;

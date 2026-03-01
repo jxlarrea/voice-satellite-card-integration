@@ -908,7 +908,8 @@ ws_run_pipeline() called
 ```python
 async def async_run_pipeline(self, audio_queue, connection, msg_id,
                               start_stage, end_stage, conversation_id=None,
-                              extra_system_prompt=None):
+                              extra_system_prompt=None,
+                              wake_word_phrase=None):
     self._pipeline_gen += 1
     my_gen = self._pipeline_gen
     self._pipeline_connection = connection
@@ -948,6 +949,7 @@ async def async_run_pipeline(self, audio_queue, connection, msg_id,
             audio_stream(),
             start_stage=stage_map.get(start_stage, PipelineStage.WAKE_WORD),
             end_stage=stage_map.get(end_stage, PipelineStage.TTS),
+            wake_word_phrase=wake_word_phrase,
         )
     finally:
         if self._pipeline_gen == my_gen:
@@ -1056,6 +1058,35 @@ The teardown follows a "graceful first, force second" pattern:
 **Why not cancel immediately?** Cancellation and the stop signal race on
 `await audio_queue.get()`. `CancelledError` always wins, leaving orphaned
 HA pipeline input tasks. The stop signal ensures a clean exit.
+
+### 11.10 Cross-Satellite Wake Word Duplicate Suppression
+
+When the card uses on-device wake word detection, it starts the pipeline with
+`start_stage='stt'`, bypassing HA core's server-side wake word stage. To
+participate in HA core's cross-satellite dedup, the card passes
+`wake_word_phrase` through the full chain:
+
+```
+Card: pipeline.start({ start_stage: 'stt', wake_word_phrase: 'Okay Nabu' })
+  → WS: voice_satellite/run_pipeline { ..., wake_word_phrase: 'Okay Nabu' }
+    → ws_run_pipeline: extracts wake_word_phrase from msg
+      → entity.async_run_pipeline(..., wake_word_phrase='Okay Nabu')
+        → self.async_accept_pipeline_from_satellite(..., wake_word_phrase='Okay Nabu')
+          → HA core PipelineInput.execute():
+              checks DATA_LAST_WAKE_UP['Okay Nabu']
+              → within 2s cooldown: DuplicateWakeUpDetectedError
+              → else: record timestamp and proceed to STT
+```
+
+**Key detail:** HA core's `DATA_LAST_WAKE_UP` uses human-friendly phrase strings
+as dictionary keys (e.g. `"Okay Nabu"`, not `"ok_nabu"`). The card maps model
+names to these phrases via `WAKE_WORD_PHRASES` in `wake-word/index.js` to match
+the conventions used by openWakeWord and microWakeWord (Voice PE). This ensures
+card↔card and card↔Voice PE dedup works with the same unified infrastructure.
+
+The `wake_word_phrase` parameter is optional — omitted for server-side wake word
+mode (where HA core's own wake word stage handles dedup internally) and for
+pipelines that don't involve wake word detection (continue-conversation, etc.).
 
 ---
 
@@ -2096,6 +2127,7 @@ if ann_dur_eid:
     vol.Required("sample_rate"): int,     # e.g. 16000
     vol.Optional("conversation_id"): str, # For continue-conversation
     vol.Optional("extra_system_prompt"): str,
+    vol.Optional("wake_word_phrase"): str,   # On-device wake word dedup (e.g. "Okay Nabu")
 }
 ```
 

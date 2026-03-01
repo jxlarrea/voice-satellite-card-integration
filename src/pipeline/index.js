@@ -148,6 +148,10 @@ export class PipelineManager {
       runConfig.extra_system_prompt = opts.extra_system_prompt;
     }
 
+    if (opts.wake_word_phrase) {
+      runConfig.wake_word_phrase = opts.wake_word_phrase;
+    }
+
     // Reset run-start tracking - used to detect stale run-end events
     this._runStartReceived = false;
 

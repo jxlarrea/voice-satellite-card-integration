@@ -197,6 +197,7 @@ async def ws_question_answered(
         vol.Required("sample_rate"): int,
         vol.Optional("conversation_id"): str,
         vol.Optional("extra_system_prompt"): str,
+        vol.Optional("wake_word_phrase"): str,
     }
 )
 @websocket_api.async_response
@@ -214,6 +215,7 @@ async def ws_run_pipeline(
     end_stage = msg["end_stage"]
     conversation_id = msg.get("conversation_id")
     extra_system_prompt = msg.get("extra_system_prompt")
+    wake_word_phrase = msg.get("wake_word_phrase")
 
     entity = _find_entity(hass, entity_id)
     if entity is None:
@@ -291,6 +293,7 @@ async def ws_run_pipeline(
                 end_stage,
                 conversation_id=conversation_id,
                 extra_system_prompt=extra_system_prompt,
+                wake_word_phrase=wake_word_phrase,
             ),
             name=f"voice_satellite.{entity.satellite_name}_pipeline",
         )
