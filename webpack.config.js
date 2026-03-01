@@ -26,6 +26,11 @@ const baseConfig = {
       __VERSION__: JSON.stringify(pkg.version),
     }),
   ],
+  // Dynamic import() chunks (e.g. wake-word) are loaded from the same
+  // static path as the main card JS (/voice_satellite/).
+  output: {
+    publicPath: '/voice_satellite/',
+  },
 };
 
 module.exports = (env, argv) => {
@@ -34,7 +39,9 @@ module.exports = (env, argv) => {
     return {
       ...baseConfig,
       output: {
+        ...baseConfig.output,
         filename: 'voice-satellite-card.js',
+        chunkFilename: 'voice-satellite-[name].js',
         path: frontendDir,
       },
       optimization: {
@@ -47,7 +54,9 @@ module.exports = (env, argv) => {
   return {
     ...baseConfig,
     output: {
+      ...baseConfig.output,
       filename: 'voice-satellite-card.js',
+      chunkFilename: 'voice-satellite-[name].js',
       path: frontendDir,
     },
     optimization: {

@@ -6,7 +6,7 @@
  * so users can see the skin's appearance.
  */
 
-import { getSkin } from '../skins/index.js';
+import { getSkin, loadSkin } from '../skins/index.js';
 import baseCSS from './preview.css';
 import { t } from '../i18n/index.js';
 
@@ -41,7 +41,12 @@ export function isEditorPreview(el) {
 export function renderPreview(shadowRoot, config) {
   const hass = shadowRoot.host?._hass;
   const tt = (key, fallback) => t(hass, key, fallback);
-  const skin = getSkin(config.skin || 'default');
+  const skinId = config.skin || 'default';
+  const skin = getSkin(skinId);
+  // Lazy-load non-default skins; re-render once loaded
+  loadSkin(skinId).then((loaded) => {
+    if (loaded !== skin) renderPreview(shadowRoot, config);
+  });
   if (skin.fontURL && !document.querySelector(`link[href="${skin.fontURL}"]`)) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';

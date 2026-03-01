@@ -23,7 +23,7 @@ import { AnnouncementManager } from '../announcement';
 import { AskQuestionManager } from '../ask-question';
 import { StartConversationManager } from '../start-conversation';
 import { MediaPlayerManager } from '../media-player';
-import { getSelectEntityId, getNumberState } from '../shared/satellite-state.js';
+import { getSelectEntityId, getNumberState, getSelectState } from '../shared/satellite-state.js';
 import { DISABLED_VALUE } from '../shared/entity-picker.js';
 import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
@@ -82,6 +82,8 @@ export class VoiceSatelliteSession {
     this._askQuestion = new AskQuestionManager(this);
     this._startConversation = new StartConversationManager(this);
     this._mediaPlayer = new MediaPlayerManager(this);
+    this._wakeWord = null;
+    this._wakeWordLoading = false;
 
     // Broadcast proxies
     this._uiProxy = new UIBroadcastProxy(this);
@@ -111,6 +113,7 @@ export class VoiceSatelliteSession {
   get askQuestion() { return this._askQuestion; }
   get startConversation() { return this._startConversation; }
   get mediaPlayer() { return this._mediaPlayer; }
+  get wakeWord() { return this._wakeWord; }
 
   get currentState() { return this._state; }
   set currentState(val) { this._state = val; }
@@ -253,6 +256,11 @@ export class VoiceSatelliteSession {
     if (this._hasStarted) {
       this._timer.update();
       this._tts.checkRemotePlayback(hass);
+      if (this._wakeWord) {
+        this._wakeWord.checkSettingsChanged();
+      } else {
+        this._checkWakeWordActivation();
+      }
       subscribeSatelliteEvents(this, (event) => dispatchSatelliteEvent(this, event));
     }
   }
@@ -333,6 +341,7 @@ export class VoiceSatelliteSession {
    */
   teardown() {
     this._logger.log('session', 'Tearing down session');
+    try { this._wakeWord?.stop(); } catch (_) {}
     try { this._pipeline.stop(); } catch (_) {}
     try { this._audio.stopMicrophone(); } catch (_) {}
     try { this._tts.stop(); } catch (_) {}
@@ -343,6 +352,55 @@ export class VoiceSatelliteSession {
     this._starting = false;
     this._startAttempted = false;
     this._lastSyncedSatelliteState = null;
+  }
+
+  // ── Wake word lazy loading ─────────────────────────────────────
+
+  /**
+   * Check if on-device wake word detection is enabled (without loading the module).
+   * @returns {boolean}
+   */
+  _isWakeWordEnabled() {
+    return getSelectState(
+      this._hass, this._config.satellite_entity,
+      'wake_word_detection', 'On Device',
+    ) === 'On Device';
+  }
+
+  /**
+   * Dynamically load the wake word module and create the manager.
+   * Cached — only loads the chunk once.
+   * @returns {Promise<import('../wake-word').WakeWordManager>}
+   */
+  async _loadWakeWordModule() {
+    if (this._wakeWord) return this._wakeWord;
+    const { WakeWordManager } = await import(
+      /* webpackChunkName: "wake-word" */ '../wake-word'
+    );
+    this._wakeWord = new WakeWordManager(this);
+    return this._wakeWord;
+  }
+
+  /**
+   * Called from updateHass() when the wake word module isn't loaded yet.
+   * Detects if the user just enabled on-device mode and loads the module.
+   */
+  async _checkWakeWordActivation() {
+    if (this._wakeWordLoading || !this._isWakeWordEnabled()) return;
+    this._wakeWordLoading = true;
+    try {
+      await this._loadWakeWordModule();
+      // If in listening/idle state, switch from HA pipeline to on-device
+      if ([State.LISTENING, State.IDLE].includes(this._state)) {
+        this._logger.log('wake-word', 'Mode changed to On Device — loading');
+        this._pipeline.stop();
+        await this._wakeWord.start();
+      }
+    } catch (e) {
+      this._logger.error('wake-word', `Failed to activate: ${e.message || e}`);
+    } finally {
+      this._wakeWordLoading = false;
+    }
   }
 
   // ── Full card suppression ───────────────────────────────────────

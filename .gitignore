@@ -6,6 +6,7 @@ node_modules/
 
 # Build artifacts (CI builds production JS for releases)
 custom_components/voice_satellite/frontend/
+custom_components/voice_satellite/ort/
 
 # Python
 __pycache__/

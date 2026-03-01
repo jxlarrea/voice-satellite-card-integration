@@ -261,6 +261,15 @@ export class PipelineManager {
       this._restartTimeout = setTimeout(() => {
         this._restartTimeout = null;
         this._isRestarting = false;
+
+        // On-device wake word: restart local detection instead of server pipeline
+        const ww = this._card.wakeWord;
+        if (ww?.isEnabled()) {
+          ww.restart();
+          this._card.setState(State.LISTENING);
+          return;
+        }
+
         this.start().catch((e) => {
           const msg = e?.message || JSON.stringify(e);
           this._log.error('pipeline', `Restart failed: ${msg}`);

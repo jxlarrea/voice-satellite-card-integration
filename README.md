@@ -27,6 +27,7 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 - [Integration](#integration)
 - [Usage](#usage)
 - [Mini Card](#mini-card)
+- [On-Device Wake Word Detection](#on-device-wake-word-detection)
 - [Skins](#skins)
 - [Experimental: LLM Tools](#experimental-llm-tools)
 - [Troubleshooting](#troubleshooting)
@@ -42,7 +43,7 @@ Home Assistant's built-in voice features require dedicated hardware like ESPHome
 
 - **Turning your browser into a real satellite** - Registered as a proper `assist_satellite` device in Home Assistant, with the same capabilities as hardware satellites.
 - **Using your browser's microphone** - No additional hardware needed.
-- **Supporting wake words** - Say "OK Nabu" or your custom wake word to activate.
+- **Supporting wake words** - Say "OK Nabu" or your custom wake word to activate, with both on-device and server-side detection.
 - **Playing TTS responses** - Hear responses directly from your device or a remote media player.
 - **Media player entity** - Each satellite exposes a media player in HA for volume control, `tts.speak` targeting, and `media_player.play_media` from automations.
 - **Providing voice-activated timers** - Set, update, and cancel timers with on-screen countdown pills.
@@ -72,7 +73,7 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 
 ## Features
 
-- **Wake Word Detection** - Uses Home Assistant's configured wake word detection (like Wyoming openWakeWord or microWakeWord) for server-side processing.
+- **On-Device Wake Word Detection** - Runs openWakeWord inference locally in the browser using ONNX Runtime (WebAssembly). No server-side processing needed — detects the wake word instantly on the device, then streams audio to HA for STT. Supports multiple built-in wake words and custom user-trained models. Falls back to server-side detection (Wyoming openWakeWord/microWakeWord) when preferred.
 - **Works Across Views** - Pipeline stays active when switching dashboard views.
 - **Auto-Start** - Automatically begins listening on page load (with fallback button).
 - **Visual Feedback** - Themed gradient activity bar shows listening/processing/speaking states with optional reactive audio-level animation.
@@ -91,12 +92,12 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 ## Prerequisites
 
 Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/) with:
-   - Wake word detection (e.g., [openWakeWord](https://www.home-assistant.io/voice_control/install_wake_word_add_on/), [microWakeWord](https://www.home-assistant.io/integrations/micro_wake_word/))
    - Speech-to-Text ([Whisper](https://www.home-assistant.io/integrations/whisper/), OpenAI, etc.)
    - Conversation agent ([Home Assistant](https://www.home-assistant.io/integrations/conversation/), OpenAI, Qwen, etc.)
    - Text-to-Speech ([Piper](https://www.home-assistant.io/integrations/piper/), Kokoro, etc.)
+   - *(Optional)* Wake word detection (e.g., [openWakeWord](https://www.home-assistant.io/voice_control/install_wake_word_add_on/), [microWakeWord](https://www.home-assistant.io/integrations/micro_wake_word/)) — only needed if using server-side ("Home Assistant") wake word detection mode. On-device detection works without any server-side wake word service.
 
-> **Important:** Your wake word service must be **available to Home Assistant as a Wyoming integration** (either as an add-on or an external Wyoming instance) AND **enabled in your Assist pipeline**. The wake word option is hidden by default in the pipeline settings - go to **Settings -> Voice assistants**, select your pipeline, click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown. If no wake word option appears, your wake word service is not installed or not detected by Home Assistant.
+> **Note:** If using server-side wake word detection, your wake word service must be **available to Home Assistant as a Wyoming integration** (either as an add-on or an external Wyoming instance) AND **enabled in your Assist pipeline**. The wake word option is hidden by default in the pipeline settings - go to **Settings -> Voice assistants**, select your pipeline, click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown.
 
 ## Installation
 
@@ -200,6 +201,9 @@ Each satellite device exposes configuration entities on its device page (**Setti
 | **Assist pipeline** | Select | Choose which Assist pipeline to use for this satellite |
 | **Finished speaking detection** | Select | VAD sensitivity - how aggressively to detect end of speech |
 | **TTS Output** | Select | Where to play TTS audio: "Browser" (default) plays audio locally, or select any `media_player` entity to route TTS to an external speaker |
+| **Wake word detection** | Select | "On Device" (default) runs wake word inference locally in the browser. "Home Assistant" uses server-side detection via the pipeline's configured wake word engine |
+| **Wake word model** | Select | Which wake word to listen for when using on-device detection. Built-in models: ok_nabu, hey_jarvis, alexa, hey_mycroft, hey_rhasspy. Custom models are auto-discovered from the `models/` directory |
+| **Wake word sensitivity** | Select | Detection sensitivity for on-device wake word: "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive" |
 | **Screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
 | **Announcement display duration** | Number | How long (1-60 seconds) to show the announcement text on screen after playback completes |
 | **Mute** | Switch | Mute/unmute the satellite - when muted, wake word detection is paused |
@@ -245,6 +249,8 @@ The satellite entity exposes the following attributes for use in templates and a
 | `wake_sound` | boolean | Current wake sound switch state |
 | `tts_target` | string | Entity ID of the selected TTS output media player (empty string when set to "Browser") |
 | `announcement_display_duration` | integer | Configured announcement display duration in seconds |
+| `wake_word_detection` | string | Current wake word detection mode: "On Device" or "Home Assistant" |
+| `wake_word_model` | string | Selected on-device wake word model name (e.g., "ok_nabu") |
 
 Example template to check for active timers:
 
@@ -433,6 +439,49 @@ auto_gain_control: true            # Enable automatic gain control
 voice_isolation: false             # AI-based voice isolation (Chrome only)
 ```
 
+## On-Device Wake Word Detection
+
+The card includes built-in wake word detection that runs entirely in the browser — no server-side wake word service required. This is the default mode for new installations.
+
+### How It Works
+
+On-device detection uses [openWakeWord](https://github.com/dscripka/openWakeWord) ONNX models running via ONNX Runtime WebAssembly. The browser continuously processes audio through a 4-model inference chain (melspectrogram → embedding → VAD → keyword classifier) and only starts streaming audio to Home Assistant after detecting the wake word. This means:
+
+- **Lower latency** — detection happens instantly on the device, no network round-trip
+- **Reduced server load** — audio is only sent to HA for STT after the wake word is detected
+- **No wake word add-on required** — works without openWakeWord or microWakeWord installed on HA
+
+### Built-in Wake Words
+
+| Model | Wake Phrase |
+|-------|-------------|
+| **ok_nabu** (default) | "OK Nabu" |
+| **hey_jarvis** | "Hey Jarvis" |
+| **alexa** | "Alexa" |
+| **hey_mycroft** | "Hey Mycroft" |
+| **hey_rhasspy** | "Hey Rhasspy" |
+
+### Custom Wake Words
+
+You can add your own openWakeWord-trained ONNX models:
+
+1. Train a custom wake word model using [openWakeWord](https://github.com/dscripka/openWakeWord)
+2. Place the `.onnx` file in the integration's `models/` directory (`custom_components/voice_satellite/models/`)
+3. Restart Home Assistant
+4. The custom model will appear in the "Wake word model" dropdown on the satellite's device page
+
+The filename (without `.onnx`) becomes the option name in the dropdown. For example, `hey_computer.onnx` appears as "hey_computer".
+
+### Configuration
+
+All wake word settings are configured per-device on the satellite's device page (**Settings -> Devices & Services -> Voice Satellite Card -> [device]**):
+
+- **Wake word detection** — "On Device" (default) or "Home Assistant" (server-side)
+- **Wake word model** — Select which wake word to listen for
+- **Wake word sensitivity** — "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive"
+
+To use server-side detection instead, set "Wake word detection" to "Home Assistant". This requires a wake word service (openWakeWord or microWakeWord) configured in your Assist pipeline.
+
 ## Skins
 
 The card includes a skin system that themes the entire UI - activity bar, text display, timers, and background overlay. Select a skin in the card editor under **Appearance**.
@@ -555,6 +604,15 @@ The financial card uses the same featured panel layout as weather - it appears a
 4. **Try the manual start:** If auto-start fails, tap the blue microphone button to start manually. Check the browser console (F12) for errors.
 
 ### Wake word not detected
+
+**On-device mode (default):**
+
+1. **Check the device settings:** Go to the satellite's device page and verify "Wake word detection" is set to "On Device" and a wake word model is selected.
+2. **Try adjusting sensitivity:** Change "Wake word sensitivity" to "Very sensitive" to see if detection improves.
+3. **Check browser compatibility:** On-device detection uses WebAssembly (ONNX Runtime). Ensure your browser supports WASM — all modern browsers do, but very old versions may not.
+4. Enable `debug: true` in the card config to see wake word scores in the browser console (F12).
+
+**Server-side mode ("Home Assistant"):**
 
 1. **Verify your wake word service is running:** Check that your wake word engine (e.g., openWakeWord, microWakeWord) is available to Home Assistant - either as an add-on (**Settings -> Add-ons**) or as a Wyoming integration (**Settings -> Devices & Services**).
 2. **Verify wake word detection is enabled in your pipeline:** Go to **Settings -> Voice assistants**, select your pipeline, and check that a wake word is selected. **This setting is hidden by default** - click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown.

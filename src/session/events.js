@@ -76,7 +76,14 @@ export async function startListening(session) {
   try {
     setState(session, State.CONNECTING);
     await session.audio.startMicrophone();
-    await session.pipeline.start();
+
+    // On-device wake word: load module lazily, start local inference
+    if (session._isWakeWordEnabled()) {
+      const ww = await session._loadWakeWordModule();
+      await ww.start();
+    } else {
+      await session.pipeline.start();
+    }
 
     session._hasStarted = true;
     session.ui.hideStartButton();
@@ -256,6 +263,9 @@ export function handlePipelineMessage(session, message) {
       session.ui.hideBlurOverlay(BlurReason.ANNOUNCEMENT);
       session.currentState = State.IDLE;
       session.ui.showStartButton();
+      break;
+    case 'reload':
+      session.logger.log('pipeline', 'Integration reloading - pipeline will restart');
       break;
   }
 }

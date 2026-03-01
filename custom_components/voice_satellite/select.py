@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from homeassistant.components.assist_pipeline import (
@@ -46,6 +47,9 @@ async def async_setup_entry(
         VoiceSatelliteVadSensitivitySelect(hass, entry),
         VoiceSatelliteScreensaverSelect(hass, entry),
         VoiceSatelliteTTSOutputSelect(hass, entry),
+        VoiceSatelliteWakeWordDetectionSelect(hass, entry),
+        VoiceSatelliteWakeWordModelSelect(hass, entry),
+        VoiceSatelliteWakeWordSensitivitySelect(hass, entry),
     ]
     async_add_entities(entities)
 
@@ -337,3 +341,197 @@ class VoiceSatelliteTTSOutputSelect(SelectEntity, RestoreEntity):
             _, name_to_eid = self._build_mapping()
             self._selected_entity_id = name_to_eid.get(option)
         self.async_write_ha_state()
+
+
+WAKE_WORD_DETECTION_HA = "Home Assistant"
+WAKE_WORD_DETECTION_LOCAL = "On Device"
+WAKE_WORD_DETECTION_OPTIONS = [WAKE_WORD_DETECTION_HA, WAKE_WORD_DETECTION_LOCAL]
+
+# Common infrastructure models (not keyword models).
+_COMMON_MODELS = {"melspectrogram", "embedding_model", "silero_vad"}
+
+# Built-in keyword models: versioned filename → friendly select name.
+_BUILTIN_FILENAME_MAP = {
+    "ok_nabu": "ok_nabu",
+    "hey_jarvis_v0.1": "hey_jarvis",
+    "alexa_v0.1": "alexa",
+    "hey_mycroft_v0.1": "hey_mycroft",
+    "hey_rhasspy_v0.1": "hey_rhasspy",
+}
+
+_BUILTIN_DEFAULTS = list(dict.fromkeys(_BUILTIN_FILENAME_MAP.values()))
+
+
+def discover_wake_word_models() -> list[str]:
+    """Scan models/ directory for keyword ONNX files.
+
+    Built-in versioned filenames are mapped to friendly names.
+    Custom user-provided models use the filename (minus .onnx) as-is.
+    """
+    models_dir = Path(__file__).parent / "models"
+    if not models_dir.is_dir():
+        return list(_BUILTIN_DEFAULTS)
+
+    options: list[str] = []
+    for f in sorted(models_dir.glob("*.onnx")):
+        stem = f.stem
+        if stem in _COMMON_MODELS:
+            continue
+        if stem in _BUILTIN_FILENAME_MAP:
+            friendly = _BUILTIN_FILENAME_MAP[stem]
+            if friendly not in options:
+                options.append(friendly)
+        else:
+            options.append(stem)
+
+    return options or list(_BUILTIN_DEFAULTS)
+
+
+class VoiceSatelliteWakeWordDetectionSelect(SelectEntity, RestoreEntity):
+    """Select entity for choosing wake word detection mode.
+
+    "Home Assistant" uses the server-side openWakeWord add-on.
+    "On Device" runs inference locally in the browser via ONNX Runtime.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "wake_word_detection"
+    _attr_icon = "mdi:account-voice"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialize the wake word detection select entity."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_wake_word_detection"
+        self._selected_option: str = WAKE_WORD_DETECTION_LOCAL
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    @property
+    def options(self) -> list[str]:
+        """Return available options."""
+        return list(WAKE_WORD_DETECTION_OPTIONS)
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the currently selected option."""
+        return self._selected_option
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous selection on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state in WAKE_WORD_DETECTION_OPTIONS:
+            self._selected_option = last_state.state
+
+    async def async_select_option(self, option: str) -> None:
+        """Handle option selection."""
+        if option in WAKE_WORD_DETECTION_OPTIONS:
+            self._selected_option = option
+            self.async_write_ha_state()
+
+
+class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
+    """Select entity for choosing the on-device wake word model."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "wake_word_model"
+    _attr_icon = "mdi:microphone-message"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialize the wake word model select entity."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_wake_word_model"
+        self._options = discover_wake_word_models()
+        self._selected_option: str = self._options[0] if self._options else "ok_nabu"
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    @property
+    def options(self) -> list[str]:
+        """Return available options (built-in + custom models from models/)."""
+        return list(self._options)
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the currently selected option."""
+        return self._selected_option
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous selection on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state in self._options:
+            self._selected_option = last_state.state
+        elif self._selected_option not in self._options:
+            # Model was removed — fall back to first available
+            self._selected_option = self._options[0] if self._options else "ok_nabu"
+
+    async def async_select_option(self, option: str) -> None:
+        """Handle option selection."""
+        if option in self._options:
+            self._selected_option = option
+            self.async_write_ha_state()
+
+
+WAKE_WORD_SENSITIVITY_OPTIONS = [
+    "Slightly sensitive",
+    "Moderately sensitive",
+    "Very sensitive",
+]
+
+
+class VoiceSatelliteWakeWordSensitivitySelect(SelectEntity, RestoreEntity):
+    """Select entity for on-device wake word detection sensitivity."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "wake_word_sensitivity"
+    _attr_icon = "mdi:tune-variant"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialize the wake word sensitivity select entity."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_wake_word_sensitivity"
+        self._selected_option: str = WAKE_WORD_SENSITIVITY_OPTIONS[1]  # Moderately sensitive
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    @property
+    def options(self) -> list[str]:
+        """Return available options."""
+        return list(WAKE_WORD_SENSITIVITY_OPTIONS)
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the currently selected option."""
+        return self._selected_option
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous selection on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state in WAKE_WORD_SENSITIVITY_OPTIONS:
+            self._selected_option = last_state.state
+
+    async def async_select_option(self, option: str) -> None:
+        """Handle option selection."""
+        if option in WAKE_WORD_SENSITIVITY_OPTIONS:
+            self._selected_option = option
+            self.async_write_ha_state()

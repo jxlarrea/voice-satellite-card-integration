@@ -49,7 +49,7 @@ tablets as virtual Assist Satellite devices. This gives the JavaScript card
 - **Start conversation** — `assist_satellite.start_conversation` prompts the user
 - **Ask question** — `assist_satellite.ask_question` with hassil answer matching
 - **Media playback** — `media_player.play_media` / `tts.speak` to browser audio
-- **Per-device configuration** — Pipeline, VAD, wake sound, mute, screensaver, TTS output
+- **Per-device configuration** — Pipeline, VAD, wake sound, mute, screensaver, TTS output, wake word detection/model/sensitivity
 - **Per-device automations** — Automations can target specific browser satellites
 
 ### 1.1 Relationship to HA Core
@@ -62,7 +62,7 @@ connection.
 
 ### 1.2 Design Principles
 
-1. **Single device per entry** — One config entry creates exactly one device with all 9 entities
+1. **Single device per entry** — One config entry creates exactly one device with all 12 entities
 2. **Push, not poll** — Events flow to the card via `connection.send_event()` subscriptions
 3. **Optimistic + reactive** — Commands update state immediately; card reports back for reconciliation
 4. **Blocking with timeout** — Announcement/question flows use `asyncio.Event` with 120s timeout
@@ -187,7 +187,7 @@ which re-evaluates `extra_state_attributes` and pushes the update to the card.
 | `__init__.py` | 418 | Integration setup, 7 WebSocket handlers, `_find_entity()` helper |
 | `assist_satellite.py` | 1181 | `VoiceSatelliteEntity` — main satellite entity, pipeline bridging, announcements, ask_question, timers, screensaver |
 | `media_player.py` | 263 | `VoiceSatelliteMediaPlayer` — media player entity with command push |
-| `select.py` | 340 | 4 select entities: Pipeline, VAD, Screensaver, TTS Output |
+| `select.py` | 537 | 7 select entities: Pipeline, VAD, Screensaver, TTS Output, Wake Word Detection, Wake Word Model, Wake Word Sensitivity |
 | `switch.py` | 112 | 2 switch entities: Wake Sound, Mute |
 | `number.py` | 76 | 1 number entity: Announcement Display Duration |
 | `frontend.py` | 135 | `JSModuleRegistration` — auto-registers card JS in Lovelace |
@@ -213,11 +213,29 @@ custom_components/voice_satellite/
 ├── select.py
 ├── strings.json
 ├── switch.py
-└── frontend/
-    └── voice-satellite-card.js   ← Built JS (gitignored, CI builds for releases)
+├── frontend/
+│   ├── voice-satellite-card.js       ← Main bundle (gitignored, CI builds)
+│   ├── voice-satellite-wake-word.js  ← Wake word chunk (lazy-loaded)
+│   └── voice-satellite-skin-*.js     ← Skin chunks (lazy-loaded)
+├── models/
+│   ├── melspectrogram.onnx           ← Common: audio → mel features
+│   ├── embedding_model.onnx          ← Common: mel → 96-dim embeddings
+│   ├── silero_vad.onnx               ← Common: voice activity detection
+│   ├── ok_nabu.onnx                  ← Keyword model (default)
+│   ├── hey_jarvis_v0.1.onnx          ← Keyword model
+│   ├── alexa_v0.1.onnx               ← Keyword model
+│   ├── hey_mycroft_v0.1.onnx         ← Keyword model
+│   ├── hey_rhasspy_v0.1.onnx         ← Keyword model
+│   └── *.onnx                        ← User-provided custom keyword models
+└── ort/
+    ├── ort.wasm.min.mjs              ← ONNX Runtime entry point
+    └── ort-wasm-*.wasm               ← WASM binaries
 ```
 
 The `frontend/` subdirectory is resolved at runtime via `Path(__file__).parent / "frontend"`.
+The `models/` directory is scanned by `discover_wake_word_models()` in `select.py` to
+populate the wake word model select entity. The `ort/` directory contains onnxruntime-web
+files copied from `node_modules` during the build.
 
 ### 4.3 Module-Level Constants
 
@@ -225,12 +243,17 @@ The `frontend/` subdirectory is resolved at runtime via `Path(__file__).parent /
 |---|---|---|---|
 | `DOMAIN` | `const.py` | `"voice_satellite"` | Integration domain identifier |
 | `SCREENSAVER_INTERVAL` | `const.py` | `5` (seconds) | Keep-alive periodic timer interval |
-| `INTEGRATION_VERSION` | `const.py` | `"5.7.3"` | Synced from `package.json` by `scripts/sync-version.js` |
+| `INTEGRATION_VERSION` | `const.py` | `"5.8.0"` | Synced from `package.json` by `scripts/sync-version.js` |
 | `URL_BASE` | `const.py` | `"/voice_satellite"` | HTTP static path prefix |
 | `JS_FILENAME` | `const.py` | `"voice-satellite-card.js"` | Built JS filename |
 | `ANNOUNCE_TIMEOUT` | `assist_satellite.py` | `120` (seconds) | Timeout for announcement/question ACK wait |
 | `SCREENSAVER_DISABLED` | `select.py` | `"Disabled"` | Default option for screensaver select |
 | `TTS_OUTPUT_BROWSER` | `select.py` | `"Browser"` | Default option for TTS output select |
+| `WAKE_WORD_DETECTION_HA` | `select.py` | `"Home Assistant"` | Server-side wake word option |
+| `WAKE_WORD_DETECTION_LOCAL` | `select.py` | `"On Device"` | On-device wake word option (default) |
+| `WAKE_WORD_SENSITIVITY_OPTIONS` | `select.py` | `["Slightly sensitive", "Moderately sensitive", "Very sensitive"]` | Wake word sensitivity levels |
+| `_COMMON_MODELS` | `select.py` | `{"melspectrogram", "embedding_model", "silero_vad"}` | Infrastructure ONNX models (excluded from keyword list) |
+| `_BUILTIN_FILENAME_MAP` | `select.py` | versioned filename → friendly name | Maps built-in keyword filenames |
 | `_CACHE_TTL` | `select.py` (class attr) | `30` (seconds) | Entity mapping cache lifetime |
 | `FRONTEND_DIR` | `frontend.py` | `Path(__file__).parent / "frontend"` | Static path to JS directory |
 
@@ -471,7 +494,7 @@ self.resource_mode = getattr(
 
 ### 8.1 Single Device Per Entry
 
-Each config entry creates exactly one device in the device registry. All 9 entities
+Each config entry creates exactly one device in the device registry. All 12 entities
 share this device via identical `device_info`:
 
 ```python
@@ -506,9 +529,12 @@ def device_info(self):
 | 4 | `select` | `VoiceSatelliteVadSensitivitySelect` | *(from framework)* | `{entry_id}-vad_sensitivity` | — | Yes (framework) |
 | 5 | `select` | `VoiceSatelliteScreensaverSelect` | `screensaver` | `{entry_id}_screensaver` | CONFIG | Yes |
 | 6 | `select` | `VoiceSatelliteTTSOutputSelect` | `tts_output` | `{entry_id}_tts_output` | CONFIG | Yes |
-| 7 | `switch` | `VoiceSatelliteWakeSoundSwitch` | `wake_sound` | `{entry_id}_wake_sound` | CONFIG | Yes |
-| 8 | `switch` | `VoiceSatelliteMuteSwitch` | `mute` | `{entry_id}_mute` | CONFIG | Yes |
-| 9 | `number` | `VoiceSatelliteAnnouncementDurationNumber` | `announcement_display_duration` | `{entry_id}_announcement_display_duration` | CONFIG | Yes |
+| 7 | `select` | `VoiceSatelliteWakeWordDetectionSelect` | `wake_word_detection` | `{entry_id}_wake_word_detection` | CONFIG | Yes |
+| 8 | `select` | `VoiceSatelliteWakeWordModelSelect` | `wake_word_model` | `{entry_id}_wake_word_model` | CONFIG | Yes |
+| 9 | `select` | `VoiceSatelliteWakeWordSensitivitySelect` | `wake_word_sensitivity` | `{entry_id}_wake_word_sensitivity` | CONFIG | Yes |
+| 10 | `switch` | `VoiceSatelliteWakeSoundSwitch` | `wake_sound` | `{entry_id}_wake_sound` | CONFIG | Yes |
+| 11 | `switch` | `VoiceSatelliteMuteSwitch` | `mute` | `{entry_id}_mute` | CONFIG | Yes |
+| 12 | `number` | `VoiceSatelliteAnnouncementDurationNumber` | `announcement_display_duration` | `{entry_id}_announcement_display_duration` | CONFIG | Yes |
 
 ### 8.3 Unique ID Patterns
 
@@ -1838,7 +1864,74 @@ Nearly identical structure to Screensaver Select, but:
 - Exposes `entity_id` in `extra_state_attributes` for the card to read
 - Restore logic also checks against `TTS_OUTPUT_BROWSER` as a skip state
 
-### 19.5 Stale Entity Cleanup
+### 19.5 Wake Word Detection Select
+
+```python
+WAKE_WORD_DETECTION_HA = "Home Assistant"
+WAKE_WORD_DETECTION_LOCAL = "On Device"
+WAKE_WORD_DETECTION_OPTIONS = [WAKE_WORD_DETECTION_HA, WAKE_WORD_DETECTION_LOCAL]
+
+class VoiceSatelliteWakeWordDetectionSelect(SelectEntity, RestoreEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "wake_word_detection"
+```
+
+Simple two-option select:
+- **"Home Assistant"** — Server-side wake word via the Assist pipeline's openWakeWord add-on
+- **"On Device"** (default) — Browser-side ONNX inference via the card's WakeWordManager
+
+Default: `WAKE_WORD_DETECTION_LOCAL` ("On Device").
+
+The card reads this via `getSelectState(hass, entity, 'wake_word_detection')` to decide
+whether to use the WakeWordManager or start a pipeline with `start_stage: 'wake_word'`.
+
+### 19.6 Wake Word Model Select
+
+```python
+class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "wake_word_model"
+
+    def __init__(self, hass, entry):
+        self._options = discover_wake_word_models()
+        self._selected_option = self._options[0] if self._options else "ok_nabu"
+```
+
+Options are **dynamically discovered** at startup by `discover_wake_word_models()`:
+
+1. Scans `models/` directory for `.onnx` files
+2. Filters out common infrastructure models (`melspectrogram`, `embedding_model`, `silero_vad`)
+3. Maps built-in versioned filenames to friendly names via `_BUILTIN_FILENAME_MAP`
+   (e.g., `hey_jarvis_v0.1.onnx` → `hey_jarvis`)
+4. Custom user-provided models use the filename stem as-is
+   (e.g., `my_custom_word.onnx` → `my_custom_word`)
+5. Falls back to `_BUILTIN_DEFAULTS` if directory is missing or empty
+
+**Key behaviors:**
+- `async_added_to_hass`: If restored state is not in current options (model file was removed),
+  falls back to the first available option
+- `async_select_option`: Validates against `self._options` before accepting
+
+### 19.7 Wake Word Sensitivity Select
+
+```python
+WAKE_WORD_SENSITIVITY_OPTIONS = [
+    "Slightly sensitive",
+    "Moderately sensitive",
+    "Very sensitive",
+]
+
+class VoiceSatelliteWakeWordSensitivitySelect(SelectEntity, RestoreEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "wake_word_sensitivity"
+```
+
+Controls the detection threshold for on-device wake word detection. The card maps
+these labels to per-model floating-point thresholds (see DESIGN-CARD.md §28.5).
+
+Default: `WAKE_WORD_SENSITIVITY_OPTIONS[1]` ("Moderately sensitive").
+
+### 19.8 Stale Entity Cleanup
 
 The `select.py` setup cleans up stale select entities from older integration versions.
 It only targets entities in the `"select"` domain — other platforms (switch, number)
@@ -1846,10 +1939,11 @@ are not affected:
 
 ```python
 async def async_setup_entry(hass, entry, async_add_entities):
-    entities = [Pipeline, VAD, Screensaver, TTSOutput]
+    entities = [Pipeline, VAD, Screensaver, TTSOutput,
+                WakeWordDetection, WakeWordModel, WakeWordSensitivity]
     async_add_entities(entities)
 
-    # Collect the unique IDs of the 4 current select entities
+    # Collect the unique IDs of the 7 current select entities
     expected_uids = {e.unique_id for e in entities}
     registry = er.async_get(hass)
     # Scan all entities registered under this config entry

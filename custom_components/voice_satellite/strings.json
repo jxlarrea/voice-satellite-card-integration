@@ -37,6 +37,15 @@
       },
       "tts_output": {
         "name": "TTS output"
+      },
+      "wake_word_detection": {
+        "name": "Wake word detection"
+      },
+      "wake_word_model": {
+        "name": "Wake word model"
+      },
+      "wake_word_sensitivity": {
+        "name": "Wake word sensitivity"
       }
     },
     "number": {

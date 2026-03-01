@@ -70,6 +70,36 @@ export function getNumberState(hass, satelliteId, translationKey, defaultValue) 
 }
 
 /**
+ * Read a select entity's state value directly from the entity registry.
+ * Unlike getSelectEntityId (which reads the entity_id attribute), this
+ * returns the select entity's display state (e.g. "Home Assistant", "ok_nabu").
+ *
+ * @param {object} hass - HA frontend object
+ * @param {string} satelliteId - Satellite entity ID
+ * @param {string} translationKey - Select translation_key
+ * @param {string} [defaultValue] - Fallback if not found
+ * @returns {string|undefined} The select state value, or defaultValue
+ */
+export function getSelectState(hass, satelliteId, translationKey, defaultValue) {
+  if (!hass?.entities || !satelliteId) return defaultValue;
+  const satellite = hass.entities[satelliteId];
+  if (!satellite?.device_id) return defaultValue;
+  for (const [eid, entry] of Object.entries(hass.entities)) {
+    if (entry.device_id === satellite.device_id &&
+        entry.platform === 'voice_satellite' &&
+        entry.translation_key === translationKey) {
+      const val = hass.states[eid]?.state;
+      if (val && val !== 'unknown' && val !== 'unavailable') return val;
+      break;
+    }
+  }
+
+  // Fallback to satellite extra_state_attributes
+  const attrVal = getSatelliteAttr(hass, satelliteId, translationKey);
+  return attrVal !== undefined ? attrVal : defaultValue;
+}
+
+/**
  * Read a switch entity's on/off state directly from the entity registry
  * and state cache, bypassing satellite extra_state_attributes (which can
  * be stale if the state-change listener wasn't set up in time).

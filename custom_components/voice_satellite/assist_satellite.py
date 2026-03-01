@@ -215,6 +215,34 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 except (ValueError, TypeError):
                     pass
 
+        # Expose wake word detection mode and model for the card
+        ww_detect_eid = registry.async_get_entity_id(
+            "select", DOMAIN,
+            f"{self._entry.entry_id}_wake_word_detection"
+        )
+        if ww_detect_eid:
+            s = self.hass.states.get(ww_detect_eid)
+            if s and s.state not in ("unknown", "unavailable"):
+                attrs["wake_word_detection"] = s.state
+
+        ww_model_eid = registry.async_get_entity_id(
+            "select", DOMAIN,
+            f"{self._entry.entry_id}_wake_word_model"
+        )
+        if ww_model_eid:
+            s = self.hass.states.get(ww_model_eid)
+            if s and s.state not in ("unknown", "unavailable"):
+                attrs["wake_word_model"] = s.state
+
+        ww_sens_eid = registry.async_get_entity_id(
+            "select", DOMAIN,
+            f"{self._entry.entry_id}_wake_word_sensitivity"
+        )
+        if ww_sens_eid:
+            s = self.hass.states.get(ww_sens_eid)
+            if s and s.state not in ("unknown", "unavailable"):
+                attrs["wake_word_sensitivity"] = s.state
+
         return attrs
 
     # --- Public accessors for __init__.py WebSocket handlers ---
@@ -298,6 +326,12 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         )
         if ann_dur_eid:
             tracked_eids.append(ann_dur_eid)
+        for suffix in ("_wake_word_detection", "_wake_word_model", "_wake_word_sensitivity"):
+            eid = registry.async_get_entity_id(
+                "select", DOMAIN, f"{self._entry.entry_id}{suffix}"
+            )
+            if eid:
+                tracked_eids.append(eid)
         if tracked_eids:
             self.async_on_remove(
                 async_track_state_change_event(
@@ -314,7 +348,16 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         )
 
     async def async_will_remove_from_hass(self) -> None:
-        """Clean up when entity is removed (e.g. HA restart)."""
+        """Clean up when entity is removed (e.g. integration reload)."""
+        # Notify pipeline subscriber that the entity is being torn down
+        if self._pipeline_connection and self._pipeline_msg_id:
+            try:
+                self._pipeline_connection.send_event(
+                    self._pipeline_msg_id, {"type": "reload"}
+                )
+            except Exception:
+                pass
+
         # Signal the audio stream to stop so internal HA pipeline tasks
         # (wake word, STT) unblock and exit naturally.  Wait for natural
         # exit first; only force-cancel as a last resort after timeout.
@@ -338,6 +381,13 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         if self._question_event is not None:
             self._question_event.set()
 
+        # Notify satellite subscribers that the entity is being torn down
+        # so the card can re-subscribe after the integration reloads.
+        for connection, msg_id in self._satellite_subscribers:
+            try:
+                connection.send_event(msg_id, {"type": "reload"})
+            except Exception:
+                pass
         self._satellite_subscribers.clear()
         self._stop_screensaver_keepalive()
 

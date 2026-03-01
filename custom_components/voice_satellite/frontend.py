@@ -19,6 +19,10 @@ from .const import INTEGRATION_VERSION, URL_BASE, JS_FILENAME
 _LOGGER = logging.getLogger(__name__)
 
 FRONTEND_DIR = str(Path(__file__).parent / "frontend")
+MODELS_DIR = str(Path(__file__).parent / "models")
+MODELS_URL = f"{URL_BASE}/models"
+ORT_DIR = str(Path(__file__).parent / "ort")
+ORT_URL = f"{URL_BASE}/ort"
 
 
 class JSModuleRegistration:
@@ -61,6 +65,28 @@ class JSModuleRegistration:
             _LOGGER.debug("Static path registered: %s -> %s", URL_BASE, FRONTEND_DIR)
         except RuntimeError:
             _LOGGER.debug("Static path already registered: %s", URL_BASE)
+
+        # Serve ONNX wake word models from /voice_satellite/models/
+        models_path = Path(MODELS_DIR)
+        if models_path.is_dir():
+            try:
+                await self.hass.http.async_register_static_paths(
+                    [StaticPathConfig(MODELS_URL, MODELS_DIR, True)]
+                )
+                _LOGGER.debug("Models path registered: %s -> %s", MODELS_URL, MODELS_DIR)
+            except RuntimeError:
+                _LOGGER.debug("Models path already registered: %s", MODELS_URL)
+
+        # Serve ONNX Runtime WASM files from /voice_satellite/ort/
+        ort_path = Path(ORT_DIR)
+        if ort_path.is_dir():
+            try:
+                await self.hass.http.async_register_static_paths(
+                    [StaticPathConfig(ORT_URL, ORT_DIR, True)]
+                )
+                _LOGGER.debug("ORT path registered: %s -> %s", ORT_URL, ORT_DIR)
+            except RuntimeError:
+                _LOGGER.debug("ORT path already registered: %s", ORT_URL)
 
     async def _async_wait_for_lovelace_resources(self) -> None:
         """Wait for Lovelace resources to be loaded, then register."""

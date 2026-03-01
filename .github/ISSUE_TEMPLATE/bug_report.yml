@@ -21,7 +21,7 @@ body:
           required: true
         - label: I have selected the correct `assist_satellite.*` entity in the Voice Satellite Card editor.
           required: true
-        - label: I have **wake word detection enabled in my Assist pipeline**. I've confirmed this by going to Settings → Voice assistants → my pipeline → ⋮ three-dot menu, and verifying a wake word is selected.
+        - label: "I have wake word detection configured: either **On Device** (default — no server-side setup needed) or **Home Assistant** mode with wake word detection enabled in my Assist pipeline (Settings → Voice assistants → pipeline → ⋮ three-dot menu)."
           required: true
         - label: My Assist pipeline has **Speech-to-Text** (e.g., Whisper) and **Text-to-Speech** (e.g., Piper) configured.
           required: true

@@ -7,7 +7,7 @@
  */
 
 import { State, DEFAULT_CONFIG } from '../constants.js';
-import { getSkin } from '../skins/index.js';
+import { getSkin, loadSkin } from '../skins/index.js';
 import { Logger } from '../logger.js';
 import { UIManager } from './ui.js';
 import { ChatManager } from '../shared/chat.js';
@@ -151,9 +151,15 @@ export class VoiceSatelliteCard extends HTMLElement {
   setConfig(config) {
     const hadEntity = !!this._config.satellite_entity;
 
-    const skin = getSkin(config.skin || 'default');
+    const skinId = config.skin || 'default';
     this._config = Object.assign({}, DEFAULT_CONFIG, config);
-    this._activeSkin = skin;
+    this._activeSkin = getSkin(skinId);
+    loadSkin(skinId).then((skin) => {
+      if (this._activeSkin !== skin) {
+        this._activeSkin = skin;
+        if (this._ui.element) this._ui.applyStyles();
+      }
+    });
     this._logger.debug = this._config.debug;
 
     // When browser_satellite_override is on, localStorage takes full control

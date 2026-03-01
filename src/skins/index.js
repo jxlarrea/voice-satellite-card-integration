@@ -1,28 +1,54 @@
 /**
  * Skin Registry
+ *
+ * Default skin is bundled; others are lazy-loaded on demand
+ * via webpack code splitting to reduce main bundle size.
  */
 
 import { defaultSkin } from './default.js';
-import { alexaSkin } from './alexa.js';
-import { googleHomeSkin } from './google-home.js';
-import { retroTerminalSkin } from './retro-terminal.js';
-import { siriSkin } from './siri.js';
-/** All registered skins keyed by id */
-const SKINS = {
-  [defaultSkin.id]: defaultSkin,
-  [alexaSkin.id]: alexaSkin,
-  [googleHomeSkin.id]: googleHomeSkin,
-  [retroTerminalSkin.id]: retroTerminalSkin,
-  [siriSkin.id]: siriSkin,
+
+/** Metadata for the editor dropdown (no CSS imported). */
+const SKIN_META = [
+  { value: 'default', label: 'Default' },
+  { value: 'alexa', label: 'Alexa' },
+  { value: 'google-home', label: 'Google Home' },
+  { value: 'retro-terminal', label: 'Retro Terminal' },
+  { value: 'siri', label: 'Siri' },
+];
+
+/** Dynamic loaders for non-default skins. */
+const SKIN_LOADERS = {
+  alexa: () => import(/* webpackChunkName: "skin-alexa" */ './alexa.js'),
+  'google-home': () => import(/* webpackChunkName: "skin-google-home" */ './google-home.js'),
+  'retro-terminal': () => import(/* webpackChunkName: "skin-retro-terminal" */ './retro-terminal.js'),
+  siri: () => import(/* webpackChunkName: "skin-siri" */ './siri.js'),
 };
 
+/** Cache of loaded skins. */
+const _cache = { default: defaultSkin };
+
 /**
- * Look up a skin by id. Falls back to default if not found.
+ * Synchronous skin lookup. Returns the cached skin or default as fallback.
  * @param {string} id
  * @returns {object} skin definition
  */
 export function getSkin(id) {
-  return SKINS[id] || SKINS['default'];
+  return _cache[id] || defaultSkin;
+}
+
+/**
+ * Load a skin asynchronously. Returns immediately for default/cached skins.
+ * @param {string} id
+ * @returns {Promise<object>} skin definition
+ */
+export async function loadSkin(id) {
+  if (_cache[id]) return _cache[id];
+  const loader = SKIN_LOADERS[id];
+  if (!loader) return defaultSkin;
+  const mod = await loader();
+  const skin = Object.values(mod)[0];
+  _cache[id] = skin;
+  return skin;
 }
 
 /**
@@ -30,5 +56,5 @@ export function getSkin(id) {
  * @returns {{ value: string, label: string }[]}
  */
 export function getSkinOptions() {
-  return Object.values(SKINS).map((s) => ({ value: s.id, label: s.name }));
+  return SKIN_META;
 }

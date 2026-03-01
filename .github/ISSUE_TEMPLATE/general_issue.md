@@ -19,7 +19,6 @@ Please confirm:
 - [ ] I am accessing Home Assistant over **HTTPS** (required for microphone access)
 - [ ] I have granted **microphone permission** when prompted by the browser (a user gesture like tapping the mic button is required to trigger the permission prompt; in Fully Kiosk, enable **Web Content Settings → Enable Microphone Access** and **Autoplay Audio**)
 - [ ] I have confirmed my Assist pipeline works independently (e.g., via the Assist dialog in the HA sidebar)
-- [ ] I have a wake word service (e.g., openWakeWord, microWakeWord) available to Home Assistant and enabled in my pipeline
 
 
 ## Description

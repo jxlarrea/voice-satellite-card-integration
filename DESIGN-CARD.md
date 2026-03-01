@@ -35,7 +35,8 @@
 25. [Internationalization](#25-internationalization)
 26. [Constants & Configuration](#26-constants--configuration)
 27. [Build & Versioning](#27-build--versioning)
-28. [Implementation Checklist](#28-implementation-checklist)
+28. [On-Device Wake Word Detection](#28-on-device-wake-word-detection)
+29. [Implementation Checklist](#29-implementation-checklist)
 
 ---
 
@@ -131,7 +132,7 @@ that register with the session and receive broadcast UI/chat events.
 
 The card does not talk to HA's voice pipeline directly. All communication
 is brokered through the `voice_satellite` custom integration via
-WebSocket. The integration creates a device with 9 entities per config
+WebSocket. The integration creates a device with 12 entities per config
 entry. A separate document (`DESIGN-INTEGRATION.md`) covers the
 integration in detail; this section documents the interface contract
 from the card's perspective.
@@ -364,7 +365,7 @@ Response: { path: '/api/tts_proxy/...?authSig=...' }
 
 ### 3.5 Entity Architecture
 
-Each integration config entry creates one device with 9 entities:
+Each integration config entry creates one device with 12 entities:
 
 | Entity | Type | Unique ID Pattern | Card Reads |
 |--------|------|-------------------|------------|
@@ -374,6 +375,9 @@ Each integration config entry creates one device with 9 entities:
 | VAD Sensitivity | `select` | `{entry_id}-vad_sensitivity` | — (integration-side only) |
 | Screensaver | `select` | `{entry_id}_screensaver` | — (integration-side only) |
 | TTS Output | `select` | `{entry_id}_tts_output` | — (integration reads, exposes via satellite `tts_target`) |
+| Wake Word Detection | `select` | `{entry_id}_wake_word_detection` | Card reads via `getSelectState('wake_word_detection')` — "On Device" or "Home Assistant" |
+| Wake Word Model | `select` | `{entry_id}_wake_word_model` | Card reads via `getSelectState('wake_word_model')` — keyword model name |
+| Wake Word Sensitivity | `select` | `{entry_id}_wake_word_sensitivity` | Card reads via `getSelectState('wake_word_sensitivity')` — threshold label |
 | Mute | `switch` | `{entry_id}_mute` | — (integration reads, exposes via satellite `muted`) |
 | Wake Sound | `switch` | `{entry_id}_wake_sound` | — (integration reads, exposes via satellite `wake_sound`) |
 | Display Duration | `number` | `{entry_id}_announcement_display_duration` | — (integration reads, exposes via satellite attribute) |
@@ -530,6 +534,11 @@ src/
 ├── media-player/
 │   └── index.js              MediaPlayerManager (play/pause/stop/volume, state reporting)
 │
+├── wake-word/                   (lazy-loaded via webpack code splitting)
+│   ├── index.js              WakeWordManager (orchestrator, detection lifecycle)
+│   ├── models.js             ONNX Runtime + model loading/caching
+│   └── inference.js          WakeWordInference (4-model pipeline: mel → embedding → VAD → keyword)
+│
 ├── shared/
 │   ├── chat.js               ChatManager (streaming text with 24-char fade)
 │   ├── double-tap.js         DoubleTapHandler (cancel interactions)
@@ -559,12 +568,13 @@ src/
 │   └── en.js                 English translations (default)
 │
 └── skins/
-    ├── index.js              Skin registry (getSkin, getSkinOptions)
-    ├── default.js + .css     Default skin
-    ├── alexa.js + .css       Alexa skin
-    ├── google-home.js + .css Google Home skin
-    ├── siri.js + .css        Siri skin
-    └── retro-terminal.js + .css  Retro Terminal skin
+    ├── index.js              Skin registry (lazy-loaded, getSkin/loadSkin/getSkinOptions)
+    ├── default.js + .css     Default skin (bundled in main)
+    ├── default-preview.css   Default skin preview styles (bundled)
+    ├── alexa.js + .css       Alexa skin (lazy-loaded chunk)
+    ├── google-home.js + .css Google Home skin (lazy-loaded chunk)
+    ├── siri.js + .css        Siri skin (lazy-loaded chunk)
+    └── retro-terminal.js + .css  Retro Terminal skin (lazy-loaded chunk)
 ```
 
 ---
@@ -620,6 +630,7 @@ Categories used throughout the codebase:
 | `ui` | UI cleanup, bar state, linger |
 | `timer` | Timer sync, cancellation |
 | `announcement` | Notification playback |
+| `wake-word` | On-device wake word detection, model loading, inference |
 
 ---
 
@@ -633,8 +644,9 @@ on first `getInstance()` call.
 
 ### 6.1 Construction
 
-The constructor instantiates all 11 managers, passing `this` as the
-`card` argument:
+The constructor instantiates all 11 core managers, passing `this` as the
+`card` argument. The `WakeWordManager` is **lazy-loaded** — its chunk is
+only fetched when on-device wake word detection is enabled.
 
 ```
 this._audio       = new AudioManager(this)
@@ -649,9 +661,18 @@ this._askQuestion  = new AskQuestionManager(this)
 this._startConversation = new StartConversationManager(this)
 this._mediaPlayer  = new MediaPlayerManager(this)
 
+this._wakeWord    = null          // lazy-loaded on demand
+this._wakeWordLoading = false
+
 this._uiProxy     = new UIBroadcastProxy(this)
 this._chatProxy   = new ChatBroadcastProxy(this)
 ```
+
+**Lazy loading:** `_loadWakeWordModule()` uses `import(/* webpackChunkName:
+"wake-word" */ '../wake-word')` to load the entire wake-word chunk on first
+activation. The chunk includes the WakeWordManager, inference pipeline, and
+model-loading code (~786 lines). onnxruntime-web is loaded separately at
+runtime from `/voice_satellite/ort/` (not bundled in any chunk).
 
 ### 6.2 Card Interface
 
@@ -986,6 +1007,7 @@ their `card` argument. They access the pipeline/audio/TTS/UI through
 | 9 | `AskQuestionManager` | `ask-question/index.js` | Interactive: play prompt → STT → answer → feedback |
 | 10 | `StartConversationManager` | `start-conversation/index.js` | Play prompt → enter full pipeline conversation |
 | 11 | `MediaPlayerManager` | `media-player/index.js` | Browser media playback + unified audio-state reporting |
+| 12 | `WakeWordManager` | `wake-word/index.js` | On-device wake word detection via ONNX (lazy-loaded) |
 
 ---
 
@@ -1898,28 +1920,62 @@ instantiated.
 
 ## 21. Skins & Styling
 
-### 21.1 Skin Registry
+### 21.1 Skin Registry (Lazy-Loaded)
 
 **File:** `src/skins/index.js`
 
+Only the default skin is bundled in the main JS file. The remaining 4 skins
+are lazy-loaded via webpack code splitting when selected — each loads as a
+separate ~20KB chunk on demand.
+
 ```javascript
-const SKINS = {
-  default: defaultSkin,
-  alexa: alexaSkin,
-  'google-home': googleHomeSkin,
-  'retro-terminal': retroTerminalSkin,
-  siri: siriSkin,
+import { defaultSkin } from './default.js';
+
+const SKIN_META = [
+  { value: 'default', label: 'Default' },
+  { value: 'alexa', label: 'Alexa' },
+  { value: 'google-home', label: 'Google Home' },
+  { value: 'retro-terminal', label: 'Retro Terminal' },
+  { value: 'siri', label: 'Siri' },
+];
+
+const SKIN_LOADERS = {
+  alexa: () => import(/* webpackChunkName: "skin-alexa" */ './alexa.js'),
+  'google-home': () => import(/* webpackChunkName: "skin-google-home" */ './google-home.js'),
+  'retro-terminal': () => import(/* webpackChunkName: "skin-retro-terminal" */ './retro-terminal.js'),
+  siri: () => import(/* webpackChunkName: "skin-siri" */ './siri.js'),
 };
+
+const _cache = { default: defaultSkin };
+```
+
+**Two accessors:**
+
+- `getSkin(id)` — **Synchronous.** Returns cached skin or default fallback.
+  Used in hot paths (render, preview).
+- `loadSkin(id)` — **Async.** Dynamically imports the skin chunk, caches it,
+  returns the loaded skin. Callers re-render when the async load resolves.
+- `getSkinOptions()` — Returns `SKIN_META` for the editor dropdown (no skin
+  CSS imported).
+
+**Loading pattern** (used in both `card/index.js` and `editor/preview.js`):
+
+```javascript
+const skin = getSkin(skinId);       // sync — immediate fallback to default
+loadSkin(skinId).then((loaded) => {
+  if (loaded !== skin) reRender();  // re-render once async skin arrives
+});
 ```
 
 Each skin exports:
-`{ id, name, css, reactiveBar, overlayColor, defaultOpacity }`
+`{ id, name, css, reactiveBar, overlayColor, defaultOpacity, previewCSS }`
 
 - `css`: Injected into `<style id="voice-satellite-styles">` in
   `document.head`.
 - `reactiveBar`: Enables the reactive bar feature for the full card.
 - `overlayColor`: `[r, g, b]` for the blur overlay background.
 - `defaultOpacity`: Default blur overlay opacity (0-1).
+- `previewCSS`: Additional CSS injected into the editor preview renderer.
 
 ### 21.2 Style Application
 
@@ -2168,26 +2224,208 @@ ANNOUNCEMENT — notification playback
 
 ### 27.1 Build System
 
-- **Webpack** bundles all JS into a single file.
+- **Webpack** bundles JS with code splitting into a main file + on-demand chunks.
 - `npm run dev`: Development build (unminified + source map) + xcopy to
   `\\hassio\config\custom_components\voice_satellite\`.
 - `npm run build`: Production build (minified, no source map) — CI only.
 
-### 27.2 Versioning
+### 27.2 Code Splitting
+
+Webpack splits the bundle into a main file and several lazy-loaded chunks
+using dynamic `import()` with `webpackChunkName` hints:
+
+| Chunk | Trigger | Contents |
+|-------|---------|----------|
+| `voice-satellite-card.js` | Page load | Core card, session, pipeline, audio, TTS, all managers |
+| `voice-satellite-wake-word.js` | On-device wake word enabled | WakeWordManager, inference pipeline, model loader |
+| `voice-satellite-skin-alexa.js` | Alexa skin selected | Alexa CSS + skin definition |
+| `voice-satellite-skin-google-home.js` | Google Home skin selected | Google Home CSS + skin definition |
+| `voice-satellite-skin-retro-terminal.js` | Retro Terminal skin selected | Retro Terminal CSS + skin definition |
+| `voice-satellite-skin-siri.js` | Siri skin selected | Siri CSS + skin definition |
+
+Webpack config:
+```javascript
+output: {
+  publicPath: '/voice_satellite/',
+  chunkFilename: 'voice-satellite-[name].js',
+}
+```
+
+At runtime, webpack injects a `<script>` tag to load each chunk from
+`/voice_satellite/voice-satellite-<name>.js`. The integration's `frontend.py`
+serves all files in the `frontend/` directory via HA's static path.
+
+**onnxruntime-web** is NOT bundled in any chunk. It's loaded at runtime via
+`import(/* webpackIgnore: true */ '/voice_satellite/ort/ort.wasm.min.mjs')`.
+The `webpackIgnore` annotation tells webpack to leave the import as a native
+ES module import. The ORT files are copied from `node_modules` to the
+`ort/` directory by `scripts/copy-ort.js` during the build.
+
+### 27.3 Versioning
 
 - `package.json` is the single source of truth for the version.
 - `scripts/sync-version.js` propagates to `manifest.json` + `const.py`.
 - Webpack `DefinePlugin` injects `__VERSION__` into JS as a compile-time
   constant. Accessed via `constants.js` → `export const VERSION = __VERSION__`.
 
-### 27.3 Output
+### 27.4 Output
 
 Built JS: `custom_components/voice_satellite/frontend/voice-satellite-card.js`
-(gitignored — CI builds for releases).
++ chunk files (gitignored — CI builds for releases).
 
 ---
 
-## 28. Implementation Checklist
+## 28. On-Device Wake Word Detection
+
+The card supports on-device wake word detection using openWakeWord ONNX
+models running entirely in the browser via onnxruntime-web (WASM backend).
+This eliminates the need for a server-side wake word add-on.
+
+### 28.1 Architecture Overview
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  Browser                                                  │
+│                                                           │
+│  AudioWorklet ──16kHz float32──► WakeWordManager          │
+│                                  │                        │
+│                                  ├── feedAudio(chunk)     │
+│                                  │   accumulate 1280      │
+│                                  │   samples per frame    │
+│                                  │                        │
+│                                  └── WakeWordInference    │
+│                                       │                   │
+│  ┌────────────────────────────────────┘                   │
+│  │ 4-Model ONNX Pipeline:                                │
+│  │                                                        │
+│  │  1. Melspectrogram (1760 samples → 8 mel frames)      │
+│  │  2. Embedding (76 mel frames → 96-dim vector)         │
+│  │  3. Silero VAD (2×640 sub-chunks → speech prob)       │
+│  │  4. Keyword classifier (N embeddings → detection)     │
+│  │                                                        │
+│  │  Detection = score > threshold AND VAD hangover        │
+│  └────────────────────────────────────────────────────────┘
+│                                                           │
+│  On detection:                                            │
+│    → Play wake chime                                      │
+│    → Start pipeline with start_stage: "stt"               │
+│      (skips server-side wake word)                        │
+└──────────────────────────────────────────────────────────┘
+        │
+        │  ONNX models loaded from /voice_satellite/models/
+        │  onnxruntime-web loaded from /voice_satellite/ort/
+        │
+┌───────┴──────────────────────────────────────────────────┐
+│  Integration (static files)                               │
+│                                                           │
+│  models/                                                  │
+│    ├── melspectrogram.onnx     (shared)                   │
+│    ├── embedding_model.onnx   (shared)                   │
+│    ├── silero_vad.onnx        (shared)                   │
+│    ├── ok_nabu.onnx           (keyword — default)        │
+│    ├── hey_jarvis_v0.1.onnx   (keyword)                  │
+│    ├── alexa_v0.1.onnx        (keyword)                  │
+│    ├── hey_mycroft_v0.1.onnx  (keyword)                  │
+│    ├── hey_rhasspy_v0.1.onnx  (keyword)                  │
+│    └── my_custom_word.onnx    (user-provided keyword)    │
+│                                                           │
+│  ort/                                                     │
+│    ├── ort.wasm.min.mjs       (ONNX Runtime entry)       │
+│    └── ort-wasm-*.wasm        (WASM binaries)            │
+└──────────────────────────────────────────────────────────┘
+```
+
+### 28.2 File Structure
+
+| File | Lines | Responsibility |
+|------|-------|----------------|
+| `wake-word/index.js` | 370 | `WakeWordManager` — orchestrator, lifecycle, settings, detection handler |
+| `wake-word/models.js` | 134 | ONNX Runtime loading, model session management, caching |
+| `wake-word/inference.js` | 282 | `WakeWordInference` — stateful 4-model inference pipeline |
+
+### 28.3 Inference Pipeline
+
+**File:** `src/wake-word/inference.js`
+
+Implements the openWakeWord streaming pipeline in JavaScript, matching the
+Python reference implementation:
+
+1. **Mel spectrogram** — Converts 1760 audio samples (1280 new + 480 context)
+   to 8 mel frames (32 bins each). Input scaled to int16 range. Context
+   ensures continuous mel frames across chunk boundaries.
+
+2. **Embedding** — Runs on the last 76 mel frames (streaming mode), producing
+   one 96-dimensional embedding per chunk. Mel buffer pre-filled with ones
+   for immediate warmup.
+
+3. **Silero VAD** — Runs on 2×640-sample sub-chunks (averaged). Maintains
+   LSTM state (h, c tensors) across calls. Rolling score history for
+   hangover detection.
+
+4. **Keyword classifier** — Runs on the last N embeddings (window size read
+   from model metadata, default 16). Returns a detection probability.
+
+**Detection gating:**
+- Keyword score must exceed the configured threshold
+- VAD hangover check: speech must be detected in frames [-7:-4] (compensates
+  for keyword model latency)
+- 2-second cooldown after each detection prevents rapid re-triggers
+
+### 28.4 Model Loading
+
+**File:** `src/wake-word/models.js`
+
+- **onnxruntime-web**: Loaded once via `import(/* webpackIgnore: true */)`
+  from `/voice_satellite/ort/ort.wasm.min.mjs`. Cached in module scope.
+- **Common models** (melspectrogram, embedding, VAD): Loaded once, shared
+  across all keyword models. Cached permanently.
+- **Keyword model**: Loaded per-model, re-loaded when user switches models.
+  Filename mapped via `KEYWORD_FILES[modelName] || modelName` — built-in
+  models have versioned filenames, custom models use their name directly.
+
+### 28.5 Sensitivity Thresholds
+
+Browser ONNX inference produces lower raw scores than HA's Voice PE firmware.
+Thresholds are calibrated specifically for browser-side detection:
+
+| Model | Slightly | Moderately | Very |
+|-------|----------|------------|------|
+| ok_nabu | 0.65 | 0.50 | 0.35 |
+| hey_jarvis | 0.70 | 0.55 | 0.40 |
+| Others / custom | 0.70 | 0.55 | 0.40 |
+
+Default sensitivity: **Moderately sensitive**.
+
+Custom models (not in `MODEL_THRESHOLDS`) use `DEFAULT_THRESHOLDS`.
+
+### 28.6 Settings Change Handling
+
+`WakeWordManager.checkSettingsChanged()` is called from `session.updateHass()`
+on every HA state change. It tracks three cached values:
+
+| Setting | Change Effect |
+|---------|--------------|
+| Detection mode (On Device ↔ HA) | Stops/starts wake word or pipeline. Only switches during LISTENING/IDLE. |
+| Model name | Stops detection, reloads keyword model, restarts. |
+| Sensitivity threshold | Live update — sets `inference.threshold` without restart. |
+
+### 28.7 Custom Wake Word Models
+
+Users can drop custom openWakeWord-trained `.onnx` keyword models into the
+`models/` directory. The integration's `discover_wake_word_models()` function
+scans the directory at startup:
+
+1. Filters out common infrastructure models (`melspectrogram`, `embedding_model`, `silero_vad`)
+2. Maps built-in versioned filenames to friendly names (`hey_jarvis_v0.1` → `hey_jarvis`)
+3. Adds remaining `.onnx` files as custom options using the filename stem
+
+The JS model loader handles unknown models via fallback:
+`KEYWORD_FILES[modelName] || modelName` — so a custom model `my_word` loads
+from `/voice_satellite/models/my_word.onnx`.
+
+---
+
+## 29. Implementation Checklist
 
 A step-by-step guide to recreate the card from scratch:
 
@@ -2288,7 +2526,8 @@ A step-by-step guide to recreate the card from scratch:
 
 ### Phase 12: Skins & Editor
 
-- [ ] Skin registry with 5 built-in skins
+- [ ] Skin registry with lazy-loaded chunks (default bundled, 4 others on demand)
+- [ ] `getSkin()` sync accessor + `loadSkin()` async loader with cache
 - [ ] Skin CSS injection into document.head
 - [ ] Custom CSS support
 - [ ] Full card config form (HA native schema)
@@ -2296,7 +2535,25 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] Editor preview detection and static preview rendering
 - [ ] Full card suppression toggle
 
-### Phase 13: Polish
+### Phase 13: On-Device Wake Word Detection
+
+- [ ] `WakeWordManager`: Lazy-loaded via webpack code splitting
+- [ ] `models.js`: ONNX Runtime loading from `/voice_satellite/ort/`
+- [ ] `models.js`: Common model caching (melspec, embedding, VAD)
+- [ ] `models.js`: Keyword model loading with `KEYWORD_FILES` mapping + custom fallback
+- [ ] `inference.js`: `WakeWordInference` — mel → embedding → VAD → keyword pipeline
+- [ ] `inference.js`: Mel context (480 samples), int16 scaling, buffer pre-fill
+- [ ] `inference.js`: Streaming embedding (76 mel frames → 96-dim vector)
+- [ ] `inference.js`: Silero VAD with LSTM state + hangover check
+- [ ] `inference.js`: Keyword classifier with configurable window size
+- [ ] `index.js`: feedAudio → chunk accumulation → serial drain queue
+- [ ] `index.js`: Detection handler (chime, pipeline start with `start_stage: 'stt'`)
+- [ ] `index.js`: Settings change tracking (mode, model, threshold)
+- [ ] `index.js`: Live threshold updates without restart
+- [ ] Session integration: `_checkWakeWordActivation()`, `_loadWakeWordModule()`
+- [ ] Per-model sensitivity thresholds calibrated for browser inference
+
+### Phase 14: Polish
 
 - [ ] i18n system with HA locale integration
 - [ ] Version sync script (package.json → manifest.json → const.py)

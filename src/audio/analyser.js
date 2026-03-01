@@ -36,13 +36,6 @@ export class AnalyserManager {
     this._visibilityHandler = null;
     this._lastLevel = -1;
     this._lastTick = 0;
-    this._perfWindowStart = 0;
-    this._perfTicks = 0;
-    this._perfComputeMsSum = 0;
-    this._perfComputeMsMax = 0;
-    this._perfGapMsSum = 0;
-    this._perfGapMsMax = 0;
-    this._perfLateGaps = 0;
   }
 
   /**
@@ -197,13 +190,6 @@ export class AnalyserManager {
       this._barEl = null;
       this._log.log('analyser', 'Tick loop stopped');
     }
-    this._perfWindowStart = 0;
-    this._perfTicks = 0;
-    this._perfComputeMsSum = 0;
-    this._perfComputeMsMax = 0;
-    this._perfGapMsSum = 0;
-    this._perfGapMsMax = 0;
-    this._perfLateGaps = 0;
   }
   _createAnalyser(audioContext) {
     const analyser = audioContext.createAnalyser();
@@ -251,10 +237,7 @@ export class AnalyserManager {
       this._rafId = requestAnimationFrame(() => this._tick());
       return;
     }
-    const tickGapMs = this._lastTick ? (now - this._lastTick) : 0;
     this._lastTick = now;
-    if (!this._perfWindowStart) this._perfWindowStart = now;
-    const computeStart = performance.now();
 
     // Use time-domain waveform amplitude for a simple level meter. This is
     // cheaper than FFT/frequency analysis and visually sufficient here.
@@ -272,34 +255,6 @@ export class AnalyserManager {
     if (level !== this._lastLevel) {
       this._lastLevel = level;
       this._barEl.style.setProperty('--vs-audio-level', level.toFixed(2));
-    }
-
-    const computeMs = performance.now() - computeStart;
-    this._perfTicks += 1;
-    this._perfComputeMsSum += computeMs;
-    if (computeMs > this._perfComputeMsMax) this._perfComputeMsMax = computeMs;
-    if (tickGapMs > 0) {
-      this._perfGapMsSum += tickGapMs;
-      if (tickGapMs > this._perfGapMsMax) this._perfGapMsMax = tickGapMs;
-      // >75ms means we significantly missed the ~50ms target interval.
-      if (tickGapMs > (targetIntervalMs * 1.5)) this._perfLateGaps += 1;
-    }
-    if (now - this._perfWindowStart >= 1000) {
-      const avgMs = this._perfTicks ? (this._perfComputeMsSum / this._perfTicks) : 0;
-      const gapSamples = Math.max(0, this._perfTicks - 1);
-      const avgGapMs = gapSamples ? (this._perfGapMsSum / gapSamples) : 0;
-      const effFps = avgGapMs > 0 ? (1000 / avgGapMs) : 0;
-      this._log.log(
-        'analyser',
-        `perf 1s: int=${targetIntervalMs}ms effFps=${effFps.toFixed(1)} ticks=${this._perfTicks} avg=${avgMs.toFixed(2)}ms max=${this._perfComputeMsMax.toFixed(2)}ms gapAvg=${avgGapMs.toFixed(1)}ms gapMax=${this._perfGapMsMax.toFixed(1)}ms late=${this._perfLateGaps} analyser=${this._activeAnalyser === this._audioAnalyser ? 'audio' : 'mic'}`,
-      );
-      this._perfWindowStart = now;
-      this._perfTicks = 0;
-      this._perfComputeMsSum = 0;
-      this._perfComputeMsMax = 0;
-      this._perfGapMsSum = 0;
-      this._perfGapMsMax = 0;
-      this._perfLateGaps = 0;
     }
 
     this._rafId = requestAnimationFrame(() => this._tick());

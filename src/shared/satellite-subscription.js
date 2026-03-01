@@ -55,7 +55,20 @@ export function subscribeSatelliteEvents(card, onEvent) {
 
 function _doSubscribe(card, connection, onEvent) {
   connection.subscribeMessage(
-    (message) => onEvent(message),
+    (message) => {
+      // Integration reload: entity is being torn down, re-subscribe after delay
+      if (message.type === 'reload') {
+        card.logger.log('satellite-sub', 'Integration reloading - will re-subscribe');
+        _cleanup();
+        _scheduleRetry(card, connection, onEvent);
+        // Also restart the pipeline (its subscription is now dead too)
+        if (card.pipeline) {
+          card.pipeline.restart(RETRY_DELAYS[0]);
+        }
+        return;
+      }
+      onEvent(message);
+    },
     {
       type: 'voice_satellite/subscribe_events',
       entity_id: card.config.satellite_entity,
