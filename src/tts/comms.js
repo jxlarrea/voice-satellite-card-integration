@@ -7,21 +7,25 @@
 
 /**
  * Play TTS on a remote media player entity.
+ * Uses media-source:// URIs when available so HA resolves/proxies the audio
+ * (required for devices like Sonos that can't fetch self-signed HTTPS URLs).
  * @param {object} card - Card instance
- * @param {string} url - Full media URL
+ * @param {string} mediaId - media-source:// URI or full media URL
  * @returns {Promise<void>}
  */
-export function playRemote(card, url) {
+export function playRemote(card, mediaId) {
   const entityId = card.ttsTarget;
 
-  card.logger.log('tts', `Playing on remote: ${entityId} URL: ${url}`);
+  card.logger.log('tts', `Playing on remote: ${entityId} media: ${mediaId}`);
 
   return card.hass.callService('media_player', 'play_media', {
     entity_id: entityId,
-    media_content_id: url,
+    media_content_id: mediaId,
     media_content_type: 'music',
+    announce: true,
   }).catch((e) => {
-    card.logger.error('tts', `Remote play failed: ${e}`);
+    card.logger.error('tts', `Remote play failed: ${e?.message || JSON.stringify(e)}`);
+    throw e;
   });
 }
 

@@ -11,7 +11,7 @@ import { playRemote, stopRemote } from './comms.js';
 import { Timing } from '../constants.js';
 
 /** Safety ceiling so the UI never gets stuck if remote state monitoring fails */
-const REMOTE_SAFETY_TIMEOUT = 120_000;
+const REMOTE_SAFETY_TIMEOUT = 30_000;
 
 const CHIME_MAP = {
   wake: CHIME_WAKE,
@@ -47,8 +47,9 @@ export class TtsManager {
   /**
    * @param {string} urlPath - URL or path to TTS audio
    * @param {boolean} [isRetry] - Whether this is a retry attempt
+   * @param {string} [mediaId] - media-source:// URI for remote playback (HA resolves/proxies)
    */
-  play(urlPath, isRetry) {
+  play(urlPath, isRetry, mediaId) {
     const url = buildMediaUrl(urlPath);
     this._playing = true;
 
@@ -57,7 +58,10 @@ export class TtsManager {
     if (ttsTarget) {
       this._remoteTarget = ttsTarget;
       this._remoteSawPlaying = false;
-      playRemote(this._card, url);
+      playRemote(this._card, mediaId || url).catch(() => {
+        this._log.log('tts', 'Remote play service call failed - forcing completion');
+        this._onComplete();
+      });
 
       // Safety timeout - if state monitoring never fires, clean up after 2 minutes
       this._endTimer = setTimeout(() => {

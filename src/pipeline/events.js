@@ -269,10 +269,11 @@ export function handleTtsEnd(mgr, eventData) {
   }
 
   const url = eventData.tts_output?.url || eventData.tts_output?.url_path || null;
+  const mediaId = eventData.tts_output?.media_id || null;
   if (url) {
     tts.storeTtsEndUrl(url);
     if (!mgr.card._videoPlaying) {
-      tts.play(url);
+      tts.play(url, false, mediaId);
     } else {
       // Video is playing - skip TTS but still run cleanup so UI doesn't get stuck
       onTTSComplete(mgr.card, false);
