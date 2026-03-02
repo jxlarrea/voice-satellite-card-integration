@@ -31,6 +31,9 @@ const EMBEDDING_MAX_BUFFER = 120;
 const VAD_H_SIZE = 2 * 1 * 64;
 const VAD_FRAME_SIZE = 640; // Silero VAD sub-chunk size
 const COOLDOWN_MS = 2000;
+const VAD_SLEEP_THRESHOLD = 0.2;
+const VAD_WAKE_THRESHOLD = 0.3;
+const VAD_SLEEP_FRAMES = 30; // ~2.4s of silence before sleeping
 
 export class WakeWordInference {
   /**
@@ -64,6 +67,10 @@ export class WakeWordInference {
 
     // Detection state
     this._lastDetectionTime = 0;
+
+    // VAD sleep mode — skip expensive models during silence
+    this._sleeping = false;
+    this._silentFrames = 0;
   }
 
   /**
@@ -96,6 +103,23 @@ export class WakeWordInference {
     this._vadScores.push(vadScore);
     if (this._vadScores.length > this._vadMaxHistory) {
       this._vadScores.shift();
+    }
+
+    // Sleep/wake state machine — skip expensive models during silence
+    if (vadScore < VAD_SLEEP_THRESHOLD) {
+      this._silentFrames++;
+      if (!this._sleeping && this._silentFrames >= VAD_SLEEP_FRAMES) {
+        this._sleeping = true;
+      }
+    } else if (vadScore >= VAD_WAKE_THRESHOLD) {
+      this._silentFrames = 0;
+      this._sleeping = false;
+    }
+
+    if (this._sleeping) {
+      // Keep mel context fresh for seamless wake-up (no ONNX needed)
+      this._melContext = samples.slice(CHUNK_SIZE - MEL_CONTEXT_SAMPLES);
+      return { detected: false, score: 0, vadScore, model: null };
     }
 
     // 2. Melspectrogram inference (with 480-sample left context → 8 frames)
@@ -292,5 +316,7 @@ export class WakeWordInference {
     this._vadC = new this._ort.Tensor('float32', new Float32Array(VAD_H_SIZE).fill(0), [2, 1, 64]);
     this._vadScores = [];
     this._lastDetectionTime = 0;
+    this._sleeping = false;
+    this._silentFrames = 0;
   }
 }
