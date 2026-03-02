@@ -1,0 +1,86 @@
+/* Home Assistant Skin — Editor Preview Overrides */
+
+.preview-container {
+  font-family: var(--ha-font-family, Roboto, Noto, sans-serif);
+}
+
+.preview-blur {
+  background: var(--card-background-color, rgba(255, 255, 255, 0.85));
+}
+
+.preview-bar {
+  left: 20%;
+  right: 20%;
+  bottom: 24px;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg,
+    oklch(from var(--primary-color, #03a9f4) calc(l - 0.2) calc(c * 1.2) h),
+    oklch(from var(--primary-color, #03a9f4) calc(l - 0.2) calc(c * 1.2) h) 25%,
+    var(--primary-color, #03a9f4) 25%,
+    var(--primary-color, #03a9f4) 50%,
+    oklch(from var(--primary-color, #03a9f4) calc(l + 0.1) calc(c * 0.85) h) 50%,
+    oklch(from var(--primary-color, #03a9f4) calc(l + 0.1) calc(c * 0.85) h) 75%,
+    oklch(from var(--primary-color, #03a9f4) calc(l + 0.2) calc(c * 0.7) h) 75%,
+    oklch(from var(--primary-color, #03a9f4) calc(l + 0.2) calc(c * 0.7) h));
+  background-size: 200% 100%;
+  animation: ha-preview-flow 3s linear infinite;
+}
+
+.preview-bar.reactive {
+  box-shadow: 0 0 12px 4px rgba(var(--rgb-primary-color, 3, 169, 244), 0.3);
+}
+
+@keyframes ha-preview-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+.preview-chat {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.preview-msg {
+  box-shadow: none;
+}
+
+.preview-msg.user {
+  font-size: calc(30px * var(--vs-text-scale, 1));
+  color: var(--secondary-text-color, rgba(0, 0, 0, 0.54));
+  background: none;
+  border: none;
+  padding: 4px 0;
+  border-radius: 0;
+  align-self: flex-start;
+  text-align: left;
+}
+
+.preview-msg.assistant {
+  font-size: calc(32px * var(--vs-text-scale, 1));
+  color: var(--primary-text-color, #212121);
+  font-weight: 400;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  border-radius: 0;
+  align-self: flex-start;
+  text-align: left;
+}
+
+.preview-timer {
+  color: var(--primary-text-color, #212121);
+  background: var(--card-background-color, #ffffff);
+  border: none;
+  border-radius: var(--ha-card-border-radius, 12px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+.preview-timer-progress {
+  background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.12);
+  opacity: 1;
+}
+
+.preview-label {
+  color: var(--disabled-text-color, rgba(0, 0, 0, 0.35));
+}

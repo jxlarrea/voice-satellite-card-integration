@@ -574,6 +574,7 @@ src/
     ├── default-preview.css   Default skin preview styles (bundled)
     ├── alexa.js + .css       Alexa skin (lazy-loaded chunk)
     ├── google-home.js + .css Google Home skin (lazy-loaded chunk)
+    ├── home-assistant.js + .css  Home Assistant skin (lazy-loaded chunk)
     ├── siri.js + .css        Siri skin (lazy-loaded chunk)
     └── retro-terminal.js + .css  Retro Terminal skin (lazy-loaded chunk)
 ```
@@ -1481,7 +1482,7 @@ from reacting to mic input during the pre-announce chime.
 
 Each skin defines how `--vs-audio-level` (0.00–1.00) drives visual effects:
 
-**Default / Google Home / Alexa:** Height scaling + glow pseudo-element
+**Default / Google Home / Alexa / Home Assistant:** Height scaling + glow pseudo-element
 
 ```css
 .vs-rainbow-bar.reactive {
@@ -1976,7 +1977,7 @@ instantiated.
 
 **File:** `src/skins/index.js`
 
-Only the default skin is bundled in the main JS file. The remaining 4 skins
+Only the default skin is bundled in the main JS file. The remaining 5 skins
 are lazy-loaded via webpack code splitting when selected — each loads as a
 separate ~20KB chunk on demand.
 
@@ -1987,6 +1988,7 @@ const SKIN_META = [
   { value: 'default', label: 'Default' },
   { value: 'alexa', label: 'Alexa' },
   { value: 'google-home', label: 'Google Home' },
+  { value: 'home-assistant', label: 'Home Assistant' },
   { value: 'retro-terminal', label: 'Retro Terminal' },
   { value: 'siri', label: 'Siri' },
 ];
@@ -1994,6 +1996,7 @@ const SKIN_META = [
 const SKIN_LOADERS = {
   alexa: () => import(/* webpackChunkName: "skin-alexa" */ './alexa.js'),
   'google-home': () => import(/* webpackChunkName: "skin-google-home" */ './google-home.js'),
+  'home-assistant': () => import(/* webpackChunkName: "skin-home-assistant" */ './home-assistant.js'),
   'retro-terminal': () => import(/* webpackChunkName: "skin-retro-terminal" */ './retro-terminal.js'),
   siri: () => import(/* webpackChunkName: "skin-siri" */ './siri.js'),
 };
@@ -2025,7 +2028,9 @@ Each skin exports:
 - `css`: Injected into `<style id="voice-satellite-styles">` in
   `document.head`.
 - `reactiveBar`: Enables the reactive bar feature for the full card.
-- `overlayColor`: `[r, g, b]` for the blur overlay background.
+- `overlayColor`: `[r, g, b]` for the blur overlay background, or `null` to
+  let the skin's CSS handle the overlay (e.g. Home Assistant skin uses
+  `var(--card-background-color)` so it adapts to the active HA theme).
 - `defaultOpacity`: Default blur overlay opacity (0-1).
 - `previewCSS`: Additional CSS injected into the editor preview renderer.
 
@@ -2293,6 +2298,7 @@ using dynamic `import()` with `webpackChunkName` hints:
 | `voice-satellite-skin-alexa.js` | Alexa skin selected | Alexa CSS + skin definition |
 | `voice-satellite-skin-google-home.js` | Google Home skin selected | Google Home CSS + skin definition |
 | `voice-satellite-skin-retro-terminal.js` | Retro Terminal skin selected | Retro Terminal CSS + skin definition |
+| `voice-satellite-skin-home-assistant.js` | Home Assistant skin selected | Home Assistant CSS + skin definition |
 | `voice-satellite-skin-siri.js` | Siri skin selected | Siri CSS + skin definition |
 
 Webpack config:
@@ -2662,7 +2668,7 @@ A step-by-step guide to recreate the card from scratch:
 
 ### Phase 12: Skins & Editor
 
-- [ ] Skin registry with lazy-loaded chunks (default bundled, 4 others on demand)
+- [ ] Skin registry with lazy-loaded chunks (default bundled, 5 others on demand)
 - [ ] `getSkin()` sync accessor + `loadSkin()` async loader with cache
 - [ ] Skin CSS injection into document.head
 - [ ] Custom CSS support

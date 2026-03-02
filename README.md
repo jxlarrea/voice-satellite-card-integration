@@ -50,7 +50,7 @@ Home Assistant's built-in voice features require dedicated hardware like ESPHome
 - **Receiving announcements** - Push TTS messages to specific devices from automations.
 - **Supporting interactive conversations** - Automations can proactively ask questions and listen for responses.
 - **Providing visual feedback** - Themed gradient bar shows current state, with transcription and response text.
-- **Skin system** - Choose between built-in skins (Default, Alexa, Google Home, Retro Terminal) that theme the entire UI.
+- **Skin system** - Choose between built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) that theme the entire UI.
 - **Working on any device** - Tablets, phones, computers, kiosks.
 
 Perfect for wall-mounted tablets, kiosk displays, or any browser-based Home Assistant setup.
@@ -77,7 +77,7 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 - **Works Across Views** - Pipeline stays active when switching dashboard views.
 - **Visual Feedback** - Themed gradient activity bar shows listening/processing/speaking states with optional reactive audio-level animation.
 - **Mini Card (Text-First UI)** - Optional `voice-satellite-mini-card` for a normal in-dashboard card layout (compact or tall) without the fullscreen overlay.
-- **Skins** - Built-in skins (Default, Alexa, Google Home, Retro Terminal, Siri) that theme the activity bar, text display, timers, and overlay. Customizable with CSS overrides.
+- **Skins** - Built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) that theme the activity bar, text display, timers, and overlay. Customizable with CSS overrides.
 - **Transcription & Response Display** - Shows what was understood and the assistant's response with real-time streaming.
 - **Timers** - Voice-activated timers with on-screen countdown pills, alert chimes, and cancel via double-tap or voice.
 - **Announcements** - Receive `assist_satellite.announce` service calls with pre-announcement chimes and TTS playback. Queues behind active conversations. Also supports Conversations and Ask Question.
@@ -166,7 +166,7 @@ browser_satellite_override: false  # Per-device satellite selection via browser 
 debug: false                       # Show debug info in browser console
 
 # Appearance
-skin: default                      # 'default', 'alexa', 'google-home', 'retro-terminal', or 'siri'
+skin: default                      # 'default', 'alexa', 'google-home', 'home-assistant', 'retro-terminal', or 'siri'
 reactive_bar: true                 # Activity bar reacts to audio levels
 reactive_bar_update_interval_ms: 33 # Reactive bar update cadence (try 50 on slow tablets)
 text_scale: 100                    # Scale all text 50-200%
@@ -494,6 +494,7 @@ The card includes a skin system that themes the entire UI - activity bar, text d
 | **Default** | Rainbow gradient bar with enhanced glow, floating text with colored fading borders, white overlay |
 | **Alexa** | Cyan glow bar, dark overlay, centered bold text, Echo-inspired design |
 | **Google Home** | Four-color Google gradient bar, left-aligned text, light overlay, Nest-inspired design |
+| **Home Assistant** | Matches your HA theme natively in both light and dark mode. All colors derived from your theme's primary color and card background via CSS custom properties — automatically adapts to any HA theme. Monochromatic four-tone activity bar with flowing gradient animation |
 | **Retro Terminal** | Green phosphor CRT aesthetic with scanlines, bezel frame, monospace font, and screen-edge glow |
 | **Siri** | Full-screen gradient border glow (purple -> blue -> teal -> pink), dark frosted overlay, centered clean text, Apple-inspired design |
 

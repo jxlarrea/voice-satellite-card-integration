@@ -12,6 +12,7 @@ const SKIN_META = [
   { value: 'default', label: 'Default' },
   { value: 'alexa', label: 'Alexa' },
   { value: 'google-home', label: 'Google Home' },
+  { value: 'home-assistant', label: 'Home Assistant' },
   { value: 'retro-terminal', label: 'Retro Terminal' },
   { value: 'siri', label: 'Siri' },
 ];
@@ -20,6 +21,7 @@ const SKIN_META = [
 const SKIN_LOADERS = {
   alexa: () => import(/* webpackChunkName: "skin-alexa" */ './alexa.js'),
   'google-home': () => import(/* webpackChunkName: "skin-google-home" */ './google-home.js'),
+  'home-assistant': () => import(/* webpackChunkName: "skin-home-assistant" */ './home-assistant.js'),
   'retro-terminal': () => import(/* webpackChunkName: "skin-retro-terminal" */ './retro-terminal.js'),
   siri: () => import(/* webpackChunkName: "skin-siri" */ './siri.js'),
 };

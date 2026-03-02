@@ -1,0 +1,771 @@
+/* Home Assistant Skin — Theme-adaptive using HA CSS custom properties */
+
+/* Animatable custom property for syncing bar + glow gradient position */
+@property --vs-gp {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
+/* Font — use HA's system font */
+#voice-satellite-ui {
+  font-family: var(--ha-font-family, Roboto, Noto, sans-serif);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Blur Overlay — uses card-background-color for theme-adaptive backdrop */
+#voice-satellite-ui .vs-blur-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--card-background-color, #fff) 85%, transparent) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 9999;
+  pointer-events: none;
+  will-change: opacity;
+}
+
+#voice-satellite-ui .vs-blur-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Start Button — HA accent color */
+#voice-satellite-ui .vs-start-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--primary-color, #03a9f4);
+  border: none;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 4px 16px rgba(0, 0, 0, 0.1);
+  z-index: 10001;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#voice-satellite-ui .vs-start-btn.visible {
+  display: flex;
+  animation: ha-btn-pulse 2.5s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-start-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2), 0 6px 20px rgba(0, 0, 0, 0.15);
+  animation: none;
+}
+
+#voice-satellite-ui .vs-start-btn svg {
+  width: 28px;
+  height: 28px;
+  fill: white;
+}
+
+/* Activity Bar — 4-color full-width bar, monochromatic variations of primary */
+#voice-satellite-ui .vs-rainbow-bar {
+  --ha-c1: oklch(from var(--primary-color, #03a9f4) calc(l - 0.2) calc(c * 1.2) h);
+  --ha-c2: var(--primary-color, #03a9f4);
+  --ha-c3: oklch(from var(--primary-color, #03a9f4) calc(l + 0.1) calc(c * 0.85) h);
+  --ha-c4: oklch(from var(--primary-color, #03a9f4) calc(l + 0.2) calc(c * 0.7) h);
+  position: fixed;
+  left: 20%;
+  right: 20%;
+  bottom: 24px;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg,
+    var(--ha-c1), var(--ha-c1) 25%,
+    var(--ha-c2) 25%, var(--ha-c2) 50%,
+    var(--ha-c3) 50%, var(--ha-c3) 75%,
+    var(--ha-c4) 75%, var(--ha-c4));
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 10000;
+  pointer-events: none;
+  will-change: filter, opacity;
+  contain: layout style;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.visible {
+  opacity: 1;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.connecting {
+  animation: ha-breathe 1.5s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.listening {
+  animation: ha-flow 3s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.processing {
+  animation: ha-flow 0.5s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.speaking {
+  animation: ha-flow 2s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.error-mode {
+  background: linear-gradient(90deg, var(--error-color, #db4437), #d93025, var(--error-color, #db4437), #d93025);
+  background-size: 200% 100%;
+  animation: ha-flow 2s linear infinite;
+  opacity: 1;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.error-flash {
+  animation: ha-error-flash 0.15s ease-in-out 3;
+}
+
+/* Reactive Bar — audio-driven height scaling + synced glow bloom */
+#voice-satellite-ui .vs-rainbow-bar.reactive {
+  transition: transform 0.05s linear;
+  transform-origin: bottom;
+  transform: translateZ(0) scaleY(calc(1 + 3 * var(--vs-audio-level, 0)));
+  overflow: visible;
+  background-position: var(--vs-gp) 50%;
+  will-change: transform;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    var(--ha-c1), var(--ha-c1) 25%,
+    var(--ha-c2) 25%, var(--ha-c2) 50%,
+    var(--ha-c3) 50%, var(--ha-c3) 75%,
+    var(--ha-c4) 75%, var(--ha-c4));
+  background-size: 200% 100%;
+  background-position: var(--vs-gp) 50%;
+  border-radius: 50%;
+  filter: blur(calc(6px + 12px * var(--vs-audio-level, 0)));
+  opacity: calc(var(--vs-audio-level, 0) * 2.5);
+  transform: scale(1.15, 2);
+  z-index: -1;
+  pointer-events: none;
+  will-change: opacity, transform;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.listening {
+  animation: ha-flow-sync 3s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.processing {
+  animation: ha-flow-sync 0.5s linear infinite;
+}
+
+#voice-satellite-ui .vs-rainbow-bar.reactive.speaking {
+  animation: ha-flow-sync 2s linear infinite;
+}
+
+/* Chat Container */
+#voice-satellite-ui .vs-chat-container {
+  position: fixed;
+  left: 7.5%;
+  right: 7.5%;
+  bottom: 72px;
+  display: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  width: auto;
+  contain: content;
+  z-index: 10001;
+  pointer-events: none;
+  overflow: visible;
+  transition: left 0.4s ease, right 0.4s ease;
+}
+
+#voice-satellite-ui .vs-chat-container.visible {
+  display: flex;
+  pointer-events: auto;
+}
+
+#voice-satellite-ui.reactive-mode .vs-chat-container {
+  bottom: 120px;
+}
+
+#voice-satellite-ui .vs-chat-container.announcement-mode {
+  left: 50% !important;
+  right: auto !important;
+  width: 85%;
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%);
+}
+
+/* Chat Messages — clean HA-native text, left-aligned */
+#voice-satellite-ui .vs-chat-msg {
+  max-width: 85%;
+  opacity: 0;
+  animation: ha-fade-in 0.3s ease forwards;
+  word-wrap: break-word;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 4px 0;
+  border-radius: 0;
+}
+
+#voice-satellite-ui .vs-chat-msg.user {
+  font-size: calc(30px * var(--vs-text-scale, 1));
+  color: var(--secondary-text-color, rgba(0, 0, 0, 0.54));
+  font-weight: normal;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+}
+
+#voice-satellite-ui .vs-chat-msg.assistant {
+  font-size: calc(32px * var(--vs-text-scale, 1));
+  color: var(--primary-text-color, #212121);
+  font-weight: 400;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+  max-height: 70vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--divider-color, rgba(0, 0, 0, 0.12)) transparent;
+}
+
+#voice-satellite-ui .vs-chat-msg.announcement {
+  font-size: calc(32px * var(--vs-text-scale, 1));
+  color: var(--primary-text-color, #212121);
+  font-weight: 400;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+}
+
+/* Timer Container */
+.vs-timer-container {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10001;
+  pointer-events: none;
+  font-family: var(--ha-font-family, Roboto, Noto, sans-serif);
+}
+
+/* Timer Pills — HA card style */
+.vs-timer-pill {
+  position: relative;
+  overflow: hidden;
+  contain: content;
+  font-size: calc(28px * var(--vs-text-scale, 1));
+  color: var(--primary-text-color, #212121);
+  font-weight: bold;
+  font-style: normal;
+  background: var(--card-background-color, #ffffff);
+  border: none;
+  padding: 14px 18px;
+  border-radius: var(--ha-card-border-radius, 12px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 4px 16px rgba(0, 0, 0, 0.06);
+  animation: ha-timer-fade-in 0.3s ease forwards;
+  pointer-events: auto;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.vs-timer-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.12);
+  opacity: 1;
+  transition: width 1s linear;
+  pointer-events: none;
+}
+
+.vs-timer-content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vs-timer-icon {
+  flex-shrink: 0;
+}
+
+.vs-timer-time {
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.vs-timer-pill.vs-timer-expired {
+  animation: ha-timer-fade-out 0.4s ease forwards;
+}
+
+/* Timer Finished Alert — card-style with accent glow */
+.vs-timer-alert {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: calc(28px * var(--vs-text-scale, 1));
+  font-family: var(--ha-font-family, Roboto, Noto, sans-serif);
+  color: var(--primary-text-color, #212121);
+  font-weight: bold;
+  font-style: normal;
+  background: var(--card-background-color, #ffffff);
+  border: none;
+  padding: 18px 24px;
+  border-radius: var(--ha-card-border-radius, 12px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 8px 24px rgba(0, 0, 0, 0.1);
+  z-index: 10002;
+  animation: ha-alert-pulse 1.5s ease-in-out infinite;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.vs-timer-alert .vs-timer-icon {
+  font-size: 1.5em;
+}
+
+.vs-timer-alert .vs-timer-time {
+  font-size: 1.2em;
+}
+
+/* Image Panel — HA card style */
+#voice-satellite-ui .vs-image-panel {
+  position: fixed;
+  top: 50%;
+  right: 7.5%;
+  transform: translateY(-50%);
+  width: 30%;
+  max-height: 70vh;
+  overflow: hidden;
+  z-index: 10001;
+  pointer-events: none;
+  display: none;
+  background: var(--card-background-color, #ffffff);
+  border-radius: var(--ha-card-border-radius, 12px);
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+#voice-satellite-ui .vs-panel-scroll {
+  overflow-y: auto;
+  max-height: calc(70vh - 24px);
+  padding-right: 8px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--divider-color, rgba(0, 0, 0, 0.12)) transparent;
+}
+
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-thumb {
+  background: var(--divider-color, rgba(0, 0, 0, 0.12));
+  border-radius: 3px;
+}
+
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--secondary-text-color, rgba(0, 0, 0, 0.35));
+}
+
+#voice-satellite-ui .vs-image-panel.visible {
+  display: block;
+  pointer-events: auto;
+}
+
+#voice-satellite-ui .vs-image-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+}
+
+#voice-satellite-ui .vs-image-grid.single {
+  grid-template-columns: 1fr;
+}
+
+#voice-satellite-ui .vs-image-grid.single .vs-panel-img {
+  aspect-ratio: auto;
+  max-height: calc(70vh - 24px);
+  object-fit: contain;
+}
+
+#voice-satellite-ui .vs-panel-img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: calc(var(--ha-card-border-radius, 12px) - 4px);
+  opacity: 0;
+  animation: ha-fade-in 0.3s ease forwards;
+}
+
+/* Lightbox */
+#voice-satellite-ui .vs-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.92);
+}
+
+#voice-satellite-ui .vs-lightbox.visible {
+  display: flex;
+}
+
+#voice-satellite-ui .vs-lightbox-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--ha-card-border-radius, 12px);
+}
+
+#voice-satellite-ui .vs-lightbox-iframe {
+  width: 90vw;
+  max-width: 1200px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--ha-card-border-radius, 12px);
+  display: none;
+}
+
+/* Video grid */
+#voice-satellite-ui .vs-video-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  width: 100%;
+}
+
+#voice-satellite-ui .vs-video-card {
+  cursor: pointer;
+}
+
+#voice-satellite-ui .vs-video-thumb-wrap {
+  position: relative;
+  width: 100%;
+}
+
+#voice-satellite-ui .vs-video-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: calc(var(--ha-card-border-radius, 12px) - 4px);
+}
+
+#voice-satellite-ui .vs-video-duration {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+#voice-satellite-ui .vs-video-info {
+  padding: 8px 4px 0;
+}
+
+#voice-satellite-ui .vs-video-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--primary-text-color, #212121);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+#voice-satellite-ui .vs-video-channel {
+  font-size: 12px;
+  color: var(--secondary-text-color, rgba(0, 0, 0, 0.54));
+  margin-top: 2px;
+}
+
+/* Chat narrows when image panel is open */
+#voice-satellite-ui.has-images .vs-chat-container {
+  right: calc(37.5% + 40px);
+}
+#voice-satellite-ui.has-featured .vs-chat-container {
+  right: calc(32.5% + 40px);
+}
+
+#voice-satellite-ui.has-images .vs-chat-msg,
+#voice-satellite-ui.has-featured .vs-chat-msg {
+  max-width: 100%;
+}
+
+#voice-satellite-ui .vs-image-panel.featured {
+  width: 25%;
+}
+
+/* Weather — borderless floating content */
+#voice-satellite-ui .vs-image-panel.weather {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  border: none;
+}
+
+#voice-satellite-ui .vs-weather-card {
+  padding: 8px 0;
+}
+
+#voice-satellite-ui .vs-weather-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 4px;
+}
+
+#voice-satellite-ui .vs-weather-icon {
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+}
+
+#voice-satellite-ui .vs-weather-temp {
+  font-size: calc(52px * var(--vs-text-scale, 1));
+  font-weight: 500;
+  color: var(--primary-text-color, #212121);
+  line-height: 1.1;
+}
+
+#voice-satellite-ui .vs-weather-condition {
+  font-size: calc(22px * var(--vs-text-scale, 1));
+  color: var(--primary-color, #03a9f4);
+  margin-top: 4px;
+}
+
+#voice-satellite-ui .vs-weather-humidity {
+  font-size: calc(18px * var(--vs-text-scale, 1));
+  color: var(--secondary-text-color, rgba(0, 0, 0, 0.54));
+  margin-top: 4px;
+}
+
+#voice-satellite-ui .vs-weather-divider {
+  height: 1px;
+  background: var(--divider-color, rgba(0, 0, 0, 0.12));
+  margin: 12px 0;
+}
+
+#voice-satellite-ui .vs-weather-forecast {
+  display: flex;
+  flex-direction: column;
+}
+
+#voice-satellite-ui .vs-weather-row {
+  display: flex;
+  align-items: center;
+  padding: 6px 4px;
+}
+
+#voice-satellite-ui .vs-weather-row-time {
+  width: 30%;
+  font-size: calc(18px * var(--vs-text-scale, 1));
+  color: var(--secondary-text-color, rgba(0, 0, 0, 0.54));
+  flex-shrink: 0;
+}
+
+#voice-satellite-ui .vs-weather-row-cond {
+  flex: 1;
+  font-size: calc(18px * var(--vs-text-scale, 1));
+  color: var(--primary-text-color, #212121);
+}
+
+#voice-satellite-ui .vs-weather-row-temp {
+  font-size: calc(22px * var(--vs-text-scale, 1));
+  font-weight: 500;
+  color: var(--primary-text-color, #212121);
+  text-align: right;
+  min-width: 56px;
+}
+
+/* Financial — borderless floating content */
+#voice-satellite-ui .vs-image-panel.financial {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  border: none;
+}
+
+#voice-satellite-ui .vs-financial-card {
+  padding: 8px 0;
+}
+
+#voice-satellite-ui .vs-financial-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+}
+
+#voice-satellite-ui .vs-financial-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+#voice-satellite-ui .vs-financial-name {
+  font-size: calc(20px * var(--vs-text-scale, 1));
+  color: var(--primary-text-color, #212121);
+  flex: 1;
+  min-width: 0;
+}
+
+#voice-satellite-ui .vs-financial-badge {
+  font-size: calc(12px * var(--vs-text-scale, 1));
+  color: var(--secondary-text-color, rgba(0, 0, 0, 0.54));
+  background: var(--divider-color, rgba(0, 0, 0, 0.06));
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+#voice-satellite-ui .vs-financial-price {
+  font-size: calc(48px * var(--vs-text-scale, 1));
+  font-weight: 500;
+  color: var(--primary-text-color, #212121);
+  padding: 4px 4px 0;
+  line-height: 1.1;
+}
+
+#voice-satellite-ui .vs-financial-change {
+  font-size: calc(22px * var(--vs-text-scale, 1));
+  padding: 4px 4px 8px;
+}
+
+#voice-satellite-ui .vs-financial-change.up {
+  color: var(--success-color, #4caf50);
+}
+
+#voice-satellite-ui .vs-financial-change.down {
+  color: var(--error-color, #db4437);
+}
+
+#voice-satellite-ui .vs-financial-details {
+  font-size: calc(16px * var(--vs-text-scale, 1));
+  color: var(--secondary-text-color, rgba(0, 0, 0, 0.54));
+  padding: 8px 4px;
+}
+
+#voice-satellite-ui .vs-financial-conversion {
+  font-size: calc(42px * var(--vs-text-scale, 1));
+  font-weight: 500;
+  color: var(--primary-text-color, #212121);
+  padding: 16px 4px 8px;
+  line-height: 1.2;
+}
+
+#voice-satellite-ui .vs-financial-rate {
+  font-size: calc(20px * var(--vs-text-scale, 1));
+  color: var(--secondary-text-color, rgba(0, 0, 0, 0.54));
+  padding: 4px 4px;
+}
+
+/* Keyframes */
+@keyframes ha-btn-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 4px 16px rgba(0, 0, 0, 0.1);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 4px 16px rgba(var(--rgb-primary-color, 3, 169, 244), 0.3), 0 6px 24px rgba(0, 0, 0, 0.15);
+  }
+}
+
+@keyframes ha-breathe {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes ha-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+@keyframes ha-flow-sync {
+  0%   { --vs-gp: 0%; }
+  100% { --vs-gp: 200%; }
+}
+
+@keyframes ha-error-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes ha-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ha-timer-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ha-timer-fade-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes ha-alert-pulse {
+  0%, 100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.04);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 12px 32px rgba(var(--rgb-primary-color, 3, 169, 244), 0.15);
+  }
+}

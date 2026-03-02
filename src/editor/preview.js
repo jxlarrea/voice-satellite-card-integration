@@ -56,7 +56,9 @@ export function renderPreview(shadowRoot, config) {
   const scale = (config.text_scale || 100) / 100;
   const skinDefault = Math.round((skin.defaultOpacity ?? 1) * 100);
   const bgOpacity = (config.background_opacity ?? skinDefault) / 100;
-  const [r, g, b] = skin.overlayColor || [0, 0, 0];
+  const overlayStyle = skin.overlayColor
+    ? `background:rgba(${skin.overlayColor[0]},${skin.overlayColor[1]},${skin.overlayColor[2]},${bgOpacity})`
+    : '';
   shadowRoot.innerHTML = `
     <style>
       ${baseCSS}
@@ -65,8 +67,8 @@ export function renderPreview(shadowRoot, config) {
     <div class="preview-background"></div>
     <div class="preview-container" style="--vs-text-scale:${scale}">
       <div class="preview-label">${tt('editor.preview.label', 'Preview')}</div>
-      <div class="preview-blur" style="background:rgba(${r},${g},${b},${bgOpacity})"></div>
-      <div class="preview-bar"></div>
+      <div class="preview-blur" style="${overlayStyle}"></div>
+      <div class="preview-bar${config.reactive_bar !== false ? ' reactive' : ''}"></div>
       <div class="preview-chat">
         <div class="preview-msg user">${tt('editor.preview.user_question', "What's the temperature outside?")}</div>
         <div class="preview-msg assistant">${tt('editor.preview.assistant_answer', "It's currently 75°F and sunny.")}</div>
