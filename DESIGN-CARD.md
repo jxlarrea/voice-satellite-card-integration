@@ -2428,6 +2428,32 @@ Python reference implementation:
   for keyword model latency)
 - 2-second cooldown after each detection prevents rapid re-triggers
 
+**VAD-gated sleep mode:**
+
+During silence, only the lightweight Silero VAD model runs — mel, embedding,
+and keyword inference are skipped entirely. This reduces wake word CPU usage
+by ~50% on typical hardware.
+
+```
+processChunk(samples)
+├── 1. Always run VAD (cheap LSTM, maintains h/c state)
+├── 2. Sleep/wake state machine:
+│     ├── vadScore < 0.2 → increment _silentFrames
+│     │   └── _silentFrames >= 30 (~2.4s) → _sleeping = true
+│     └── vadScore >= 0.3 → _silentFrames = 0, _sleeping = false
+├── 3. If sleeping:
+│     ├── Update _melContext (last 480 samples — no ONNX, ensures
+│     │   mel context continuity on wake-up)
+│     └── Return early (skip mel/embedding/keyword)
+└── 4. Full pipeline (mel → embedding → keyword) when awake
+```
+
+On wake-up, the keyword classifier needs `windowSize` (16) new embeddings
+before it can produce valid scores — 16 × 80ms = ~1.28s. This aligns with
+the duration of the wake word itself: VAD triggers on the first voiced
+frame, and by the time the user finishes saying the keyword, the embedding
+buffer is full.
+
 ### 28.4 Model Loading
 
 **File:** `src/wake-word/models.js`
