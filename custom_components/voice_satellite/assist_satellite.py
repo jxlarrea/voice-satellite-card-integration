@@ -234,6 +234,15 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             if s and s.state not in ("unknown", "unavailable"):
                 attrs["wake_word_model"] = s.state
 
+        ww_model2_eid = registry.async_get_entity_id(
+            "select", DOMAIN,
+            f"{self._entry.entry_id}_wake_word_model_2"
+        )
+        if ww_model2_eid:
+            s = self.hass.states.get(ww_model2_eid)
+            if s and s.state not in ("unknown", "unavailable"):
+                attrs["wake_word_model_2"] = s.state
+
         ww_sens_eid = registry.async_get_entity_id(
             "select", DOMAIN,
             f"{self._entry.entry_id}_wake_word_sensitivity"
@@ -326,7 +335,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         )
         if ann_dur_eid:
             tracked_eids.append(ann_dur_eid)
-        for suffix in ("_wake_word_detection", "_wake_word_model", "_wake_word_sensitivity"):
+        for suffix in ("_wake_word_detection", "_wake_word_model", "_wake_word_model_2", "_wake_word_sensitivity"):
             eid = registry.async_get_entity_id(
                 "select", DOMAIN, f"{self._entry.entry_id}{suffix}"
             )

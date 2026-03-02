@@ -62,7 +62,7 @@ connection.
 
 ### 1.2 Design Principles
 
-1. **Single device per entry** — One config entry creates exactly one device with all 12 entities
+1. **Single device per entry** — One config entry creates exactly one device with all 13 entities
 2. **Push, not poll** — Events flow to the card via `connection.send_event()` subscriptions
 3. **Optimistic + reactive** — Commands update state immediately; card reports back for reconciliation
 4. **Blocking with timeout** — Announcement/question flows use `asyncio.Event` with 120s timeout
@@ -170,13 +170,17 @@ The card reads the satellite entity's `extra_state_attributes`:
 | `wake_sound` | `bool` | Wake sound switch state |
 | `tts_target` | `string` | Selected TTS output entity_id (empty = browser) |
 | `announcement_display_duration` | `int` | Seconds to display announcement bubbles |
+| `wake_word_detection` | `string` | "On Device" or "Home Assistant" |
+| `wake_word_model` | `string` | Primary on-device wake word model name |
+| `wake_word_model_2` | `string` | Second on-device wake word model name, or "No wake word" |
 
 ### 3.4 Sibling Entity State Propagation
 
 The satellite entity tracks state changes from sibling entities (mute switch, wake sound
-switch, TTS output select, announcement duration number) via `async_track_state_change_event`.
-When any tracked entity changes, `_on_switch_state_change` calls `async_write_ha_state()`,
-which re-evaluates `extra_state_attributes` and pushes the update to the card.
+switch, TTS output select, announcement duration number, wake word detection/model/model_2/sensitivity)
+via `async_track_state_change_event`. When any tracked entity changes, `_on_switch_state_change`
+calls `async_write_ha_state()`, which re-evaluates `extra_state_attributes` and pushes the
+update to the card.
 
 ---
 
@@ -187,7 +191,7 @@ which re-evaluates `extra_state_attributes` and pushes the update to the card.
 | `__init__.py` | 418 | Integration setup, 7 WebSocket handlers, `_find_entity()` helper |
 | `assist_satellite.py` | 1181 | `VoiceSatelliteEntity` — main satellite entity, pipeline bridging, announcements, ask_question, timers, screensaver |
 | `media_player.py` | 263 | `VoiceSatelliteMediaPlayer` — media player entity with command push |
-| `select.py` | 537 | 7 select entities: Pipeline, VAD, Screensaver, TTS Output, Wake Word Detection, Wake Word Model, Wake Word Sensitivity |
+| `select.py` | ~590 | 8 select entities: Pipeline, VAD, Screensaver, TTS Output, Wake Word Detection, Wake Word Model, Wake Word Model 2, Wake Word Sensitivity |
 | `switch.py` | 112 | 2 switch entities: Wake Sound, Mute |
 | `number.py` | 76 | 1 number entity: Announcement Display Duration |
 | `frontend.py` | 135 | `JSModuleRegistration` — auto-registers card JS in Lovelace |
@@ -531,10 +535,11 @@ def device_info(self):
 | 6 | `select` | `VoiceSatelliteTTSOutputSelect` | `tts_output` | `{entry_id}_tts_output` | CONFIG | Yes |
 | 7 | `select` | `VoiceSatelliteWakeWordDetectionSelect` | `wake_word_detection` | `{entry_id}_wake_word_detection` | CONFIG | Yes |
 | 8 | `select` | `VoiceSatelliteWakeWordModelSelect` | `wake_word_model` | `{entry_id}_wake_word_model` | CONFIG | Yes |
-| 9 | `select` | `VoiceSatelliteWakeWordSensitivitySelect` | `wake_word_sensitivity` | `{entry_id}_wake_word_sensitivity` | CONFIG | Yes |
-| 10 | `switch` | `VoiceSatelliteWakeSoundSwitch` | `wake_sound` | `{entry_id}_wake_sound` | CONFIG | Yes |
-| 11 | `switch` | `VoiceSatelliteMuteSwitch` | `mute` | `{entry_id}_mute` | CONFIG | Yes |
-| 12 | `number` | `VoiceSatelliteAnnouncementDurationNumber` | `announcement_display_duration` | `{entry_id}_announcement_display_duration` | CONFIG | Yes |
+| 9 | `select` | `VoiceSatelliteWakeWordModel2Select` | `wake_word_model_2` | `{entry_id}_wake_word_model_2` | CONFIG | Yes |
+| 10 | `select` | `VoiceSatelliteWakeWordSensitivitySelect` | `wake_word_sensitivity` | `{entry_id}_wake_word_sensitivity` | CONFIG | Yes |
+| 11 | `switch` | `VoiceSatelliteWakeSoundSwitch` | `wake_sound` | `{entry_id}_wake_sound` | CONFIG | Yes |
+| 12 | `switch` | `VoiceSatelliteMuteSwitch` | `mute` | `{entry_id}_mute` | CONFIG | Yes |
+| 13 | `number` | `VoiceSatelliteAnnouncementDurationNumber` | `announcement_display_duration` | `{entry_id}_announcement_display_duration` | CONFIG | Yes |
 
 ### 8.3 Unique ID Patterns
 
@@ -776,6 +781,20 @@ def extra_state_attributes(self):
                 attrs["announcement_display_duration"] = int(float(s.state))
             except (ValueError, TypeError):
                 pass
+
+    # Wake word selects → attrs["wake_word_detection"], attrs["wake_word_model"],
+    # attrs["wake_word_model_2"], attrs["wake_word_sensitivity"]
+    for suffix, attr_name in [
+        ("_wake_word_detection", "wake_word_detection"),
+        ("_wake_word_model", "wake_word_model"),
+        ("_wake_word_model_2", "wake_word_model_2"),
+        ("_wake_word_sensitivity", "wake_word_sensitivity"),
+    ]:
+        eid = registry.async_get_entity_id("select", DOMAIN, f"{entry_id}{suffix}")
+        if eid:
+            s = self.hass.states.get(eid)
+            if s and s.state not in ("unknown", "unavailable"):
+                attrs[attr_name] = s.state
 
     return attrs
 ```
@@ -1943,7 +1962,31 @@ Options are **dynamically discovered** at startup by `discover_wake_word_models(
   falls back to the first available option
 - `async_select_option`: Validates against `self._options` before accepting
 
-### 19.7 Wake Word Sensitivity Select
+### 19.7 Wake Word Model 2 Select
+
+```python
+NO_WAKE_WORD = "No wake word"
+
+class VoiceSatelliteWakeWordModel2Select(SelectEntity, RestoreEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "wake_word_model_2"
+
+    def __init__(self, hass, entry):
+        self._model_options = discover_wake_word_models()
+        self._selected_option = NO_WAKE_WORD
+```
+
+Mirrors `VoiceSatelliteWakeWordModelSelect` but adds a "No wake word" option at the front
+of the options list, which is also the default. This allows the user to disable the second
+wake word slot entirely.
+
+**Options:** `["No wake word"] + discover_wake_word_models()`
+
+The card reads this via `getSelectState(hass, entity, 'wake_word_model_2')`. When the value
+is "No wake word", the card's `getActiveModels()` excludes it. When both slots select the
+same model, deduplication ensures the ONNX session is only loaded once.
+
+### 19.8 Wake Word Sensitivity Select
 
 ```python
 WAKE_WORD_SENSITIVITY_OPTIONS = [
@@ -1962,7 +2005,7 @@ these labels to per-model floating-point thresholds (see DESIGN-CARD.md §28.5).
 
 Default: `WAKE_WORD_SENSITIVITY_OPTIONS[1]` ("Moderately sensitive").
 
-### 19.8 Stale Entity Cleanup
+### 19.9 Stale Entity Cleanup
 
 The `select.py` setup cleans up stale select entities from older integration versions.
 It only targets entities in the `"select"` domain — other platforms (switch, number)
@@ -1971,10 +2014,10 @@ are not affected:
 ```python
 async def async_setup_entry(hass, entry, async_add_entities):
     entities = [Pipeline, VAD, Screensaver, TTSOutput,
-                WakeWordDetection, WakeWordModel, WakeWordSensitivity]
+                WakeWordDetection, WakeWordModel, WakeWordModel2, WakeWordSensitivity]
     async_add_entities(entities)
 
-    # Collect the unique IDs of the 7 current select entities
+    # Collect the unique IDs of the 8 current select entities
     expected_uids = {e.unique_id for e in entities}
     registry = er.async_get(hass)
     # Scan all entities registered under this config entry
@@ -2482,6 +2525,10 @@ def unregister_satellite_subscription(self, connection, msg_id):
 | `vad_sensitivity` (select) | "Finished speaking detection" | `select.kitchen_tablet_finished_speaking_detection` |
 | `screensaver` (select) | "Screensaver entity" | `select.kitchen_tablet_screensaver_entity` |
 | `tts_output` (select) | "TTS output" | `select.kitchen_tablet_tts_output` |
+| `wake_word_detection` (select) | "Wake word detection" | `select.kitchen_tablet_wake_word_detection` |
+| `wake_word_model` (select) | "Wake word" | `select.kitchen_tablet_wake_word` |
+| `wake_word_model_2` (select) | "Wake word 2" | `select.kitchen_tablet_wake_word_2` |
+| `wake_word_sensitivity` (select) | "Wake word sensitivity" | `select.kitchen_tablet_wake_word_sensitivity` |
 | `wake_sound` (switch) | "Wake sound" | `switch.kitchen_tablet_wake_sound` |
 | `mute` (switch) | "Mute" | `switch.kitchen_tablet_mute` |
 | `announcement_display_duration` (number) | "Announcement display duration" | `number.kitchen_tablet_announcement_display_duration` |
@@ -2527,7 +2574,7 @@ Step-by-step guide to recreate the integration from scratch.
 - [ ] Set supported features: `ANNOUNCE | START_CONVERSATION`
 - [ ] Implement `device_info` with identifiers, name, manufacturer, model, sw_version
 - [ ] Implement `available` — subscription-based with HA shutdown override
-- [ ] Implement `extra_state_attributes` — timers, mute, wake_sound, tts_target, announcement_duration
+- [ ] Implement `extra_state_attributes` — timers, mute, wake_sound, tts_target, announcement_duration, wake_word_detection, wake_word_model, wake_word_model_2, wake_word_sensitivity
 - [ ] Implement `async_added_to_hass()` — timer handler registration + sibling entity tracking
 - [ ] Implement `async_will_remove_from_hass()` — graceful pipeline shutdown + event release
 - [ ] Implement `async_get_configuration()` — empty wake word config
@@ -2601,11 +2648,15 @@ Step-by-step guide to recreate the integration from scratch.
   - [ ] `MediaPlayerExtraData` for volume persistence
   - [ ] Media source URI resolution, browse media with audio filter
   - [ ] Availability delegates to satellite entity
-- [ ] Create `select.py` — 4 select entities
+- [ ] Create `select.py` — 8 select entities
   - [ ] `VoiceSatellitePipelineSelect(AssistPipelineSelect)` — framework subclass
   - [ ] `VoiceSatelliteVadSensitivitySelect(VadSensitivitySelect)` — framework subclass
   - [ ] `VoiceSatelliteScreensaverSelect` — custom with 30s mapping cache
   - [ ] `VoiceSatelliteTTSOutputSelect` — custom with 30s mapping cache
+  - [ ] `VoiceSatelliteWakeWordDetectionSelect` — "On Device" / "Home Assistant"
+  - [ ] `VoiceSatelliteWakeWordModelSelect` — dynamic model discovery
+  - [ ] `VoiceSatelliteWakeWordModel2Select` — same as Model, plus "No wake word" default
+  - [ ] `VoiceSatelliteWakeWordSensitivitySelect` — 3-level sensitivity
   - [ ] Stale entity cleanup for older versions
 - [ ] Create `switch.py` — 2 switch entities
   - [ ] `VoiceSatelliteWakeSoundSwitch` — default on

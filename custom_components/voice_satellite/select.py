@@ -34,6 +34,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SCREENSAVER_DISABLED = "Disabled"
 TTS_OUTPUT_BROWSER = "Browser"
+NO_WAKE_WORD = "No wake word"
 
 
 async def async_setup_entry(
@@ -49,6 +50,7 @@ async def async_setup_entry(
         VoiceSatelliteTTSOutputSelect(hass, entry),
         VoiceSatelliteWakeWordDetectionSelect(hass, entry),
         VoiceSatelliteWakeWordModelSelect(hass, entry),
+        VoiceSatelliteWakeWordModel2Select(hass, entry),
         VoiceSatelliteWakeWordSensitivitySelect(hass, entry),
     ]
     async_add_entities(entities)
@@ -481,6 +483,60 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
     async def async_select_option(self, option: str) -> None:
         """Handle option selection."""
         if option in self._options:
+            self._selected_option = option
+            self.async_write_ha_state()
+
+
+class VoiceSatelliteWakeWordModel2Select(SelectEntity, RestoreEntity):
+    """Select entity for choosing a second on-device wake word model.
+
+    Identical to the primary model select but adds a "No wake word" option
+    to disable the second slot entirely. Defaults to disabled.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "wake_word_model_2"
+    _attr_icon = "mdi:microphone-message"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialize the wake word model 2 select entity."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_wake_word_model_2"
+        self._model_options = discover_wake_word_models()
+        self._selected_option: str = NO_WAKE_WORD
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    @property
+    def options(self) -> list[str]:
+        """Return available options (No wake word + built-in/custom models)."""
+        return [NO_WAKE_WORD] + list(self._model_options)
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the currently selected option."""
+        return self._selected_option
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous selection on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state:
+            if last_state.state == NO_WAKE_WORD:
+                self._selected_option = NO_WAKE_WORD
+            elif last_state.state in self._model_options:
+                self._selected_option = last_state.state
+            # Otherwise keep default (No wake word)
+
+    async def async_select_option(self, option: str) -> None:
+        """Handle option selection."""
+        if option == NO_WAKE_WORD or option in self._model_options:
             self._selected_option = option
             self.async_write_ha_state()
 

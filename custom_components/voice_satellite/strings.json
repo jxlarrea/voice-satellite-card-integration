@@ -42,7 +42,10 @@
         "name": "Wake word detection"
       },
       "wake_word_model": {
-        "name": "Wake word model"
+        "name": "Wake word"
+      },
+      "wake_word_model_2": {
+        "name": "Wake word 2"
       },
       "wake_word_sensitivity": {
         "name": "Wake word sensitivity"

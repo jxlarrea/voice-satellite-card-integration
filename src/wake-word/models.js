@@ -3,6 +3,10 @@
  *
  * Loads ONNX Runtime and wake word ONNX models from the
  * integration's static path (/voice_satellite/models/).
+ *
+ * Supports loading multiple keyword models concurrently for
+ * dual wake word detection. Common models (mel, embedding, VAD)
+ * are shared; keyword sessions are cached by model name.
  */
 
 const ORT_URL = '/voice_satellite/ort/ort.wasm.min.mjs';
@@ -23,8 +27,8 @@ const KEYWORD_FILES = {
 
 let _ort = null;
 let _commonSessions = null; // { melspec, embedding, vad }
-let _keywordSession = null;
-let _loadedKeyword = null;
+/** @type {Record<string, object>} name → InferenceSession */
+let _keywordCache = {};
 
 /**
  * Load onnxruntime-web from the integration's static path (cached after first load).
@@ -64,39 +68,57 @@ async function loadCommonModels(ort, onProgress) {
 }
 
 /**
- * Load a keyword model by name.
+ * Load a single keyword model by name (uses per-name cache).
  * @param {object} ort - onnxruntime-web module
  * @param {string} modelName - e.g. 'ok_nabu', 'hey_jarvis'
- * @param {Function} [onProgress] - callback(modelName) for progress reporting
+ * @param {Function} [onProgress] - callback(modelName)
  * @returns {Promise<object>} ONNX InferenceSession
  */
 async function loadKeywordModel(ort, modelName, onProgress) {
-  if (_loadedKeyword === modelName && _keywordSession) return _keywordSession;
+  if (_keywordCache[modelName]) return _keywordCache[modelName];
 
   const filename = KEYWORD_FILES[modelName] || modelName;
   if (onProgress) onProgress(modelName);
 
   const url = `${MODELS_BASE}/${filename}.onnx`;
-  _keywordSession = await ort.InferenceSession.create(url, {
+  const session = await ort.InferenceSession.create(url, {
     executionProviders: ['wasm'],
   });
-  _loadedKeyword = modelName;
-  return _keywordSession;
+  _keywordCache[modelName] = session;
+  return session;
 }
 
 /**
- * Load all models required for wake word detection.
+ * Load common models + one or more keyword models.
+ * Deduplicates model names so the same ONNX file is only loaded once.
  * @param {object} ort - onnxruntime-web module
- * @param {string} modelName - keyword model name (e.g. 'ok_nabu')
+ * @param {string[]} modelNames - keyword model names (e.g. ['ok_nabu', 'hey_jarvis'])
  * @param {Function} [onProgress] - callback(modelName) for progress reporting
- * @returns {Promise<{melspec: object, embedding: object, vad: object, keyword: object}>}
+ * @returns {Promise<{common: {melspec, embedding, vad}, keywords: Record<string, object>}>}
  */
-export async function loadModels(ort, modelName, onProgress) {
-  const [common, keyword] = await Promise.all([
+export async function loadModels(ort, modelNames, onProgress) {
+  const unique = [...new Set(modelNames)];
+  const [common, ...keywordSessions] = await Promise.all([
     loadCommonModels(ort, onProgress),
-    loadKeywordModel(ort, modelName, onProgress),
+    ...unique.map((name) => loadKeywordModel(ort, name, onProgress)),
   ]);
-  return { ...common, keyword };
+  const keywords = {};
+  unique.forEach((name, i) => { keywords[name] = keywordSessions[i]; });
+  return { common, keywords };
+}
+
+/**
+ * Release keyword sessions that are no longer active.
+ * @param {string[]} activeNames - model names still in use
+ */
+export async function releaseUnusedKeywords(activeNames) {
+  const active = new Set(activeNames);
+  for (const [name, session] of Object.entries(_keywordCache)) {
+    if (!active.has(name)) {
+      try { await session.release(); } catch (_) { /* ignore */ }
+      delete _keywordCache[name];
+    }
+  }
 }
 
 /**
@@ -122,13 +144,13 @@ export function getKeywordWindowSize(keywordSession) {
  * Release all loaded sessions.
  */
 export async function releaseModels() {
-  const sessions = [_commonSessions?.melspec, _commonSessions?.embedding, _commonSessions?.vad, _keywordSession];
+  const sessions = [_commonSessions?.melspec, _commonSessions?.embedding, _commonSessions?.vad];
+  for (const s of Object.values(_keywordCache)) sessions.push(s);
   for (const s of sessions) {
     if (s) {
       try { await s.release(); } catch (_) { /* ignore */ }
     }
   }
   _commonSessions = null;
-  _keywordSession = null;
-  _loadedKeyword = null;
+  _keywordCache = {};
 }

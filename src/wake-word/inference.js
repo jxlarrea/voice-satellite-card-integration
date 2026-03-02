@@ -2,11 +2,14 @@
  * Wake Word Inference Pipeline
  *
  * Implements the openWakeWord 4-model inference chain:
- * melspectrogram → embedding → VAD → keyword classifier.
+ * melspectrogram → embedding → VAD → keyword classifier(s).
  *
  * Processes 1280-sample (80ms @ 16kHz) audio chunks and returns
  * detection results. Stateful — maintains mel buffer, embedding
  * history, and VAD LSTM state across calls.
+ *
+ * Supports multiple keyword classifiers on the same shared
+ * mel/embedding/VAD pipeline for dual wake word detection.
  *
  * Matches the openWakeWord Python streaming pipeline:
  * - Mel model fed with 480 samples of left context (1760 total) → 8 frames/chunk
@@ -25,24 +28,21 @@ const MEL_WINDOW = 76; // frames needed for one embedding
 const MEL_MAX_BUFFER = 970;
 const EMBEDDING_DIM = 96;
 const EMBEDDING_MAX_BUFFER = 120;
-const DEFAULT_KEYWORD_WINDOW = 16;
 const VAD_H_SIZE = 2 * 1 * 64;
 const VAD_FRAME_SIZE = 640; // Silero VAD sub-chunk size
-const DETECTION_THRESHOLD = 0.5;
 const COOLDOWN_MS = 2000;
 
 export class WakeWordInference {
   /**
    * @param {object} ort - onnxruntime-web module
-   * @param {{melspec: object, embedding: object, vad: object, keyword: object}} models
-   * @param {number} [keywordWindow=16] - keyword model window size
-   * @param {number} [threshold=0.5] - detection threshold (0-1, lower = more sensitive)
+   * @param {{melspec: object, embedding: object, vad: object}} commonModels
+   * @param {{session: object, windowSize: number, threshold: number, name: string}[]} keywordConfigs
    */
-  constructor(ort, models, keywordWindow = DEFAULT_KEYWORD_WINDOW, threshold = DETECTION_THRESHOLD) {
+  constructor(ort, commonModels, keywordConfigs) {
     this._ort = ort;
-    this._models = models;
-    this._keywordWindow = keywordWindow;
-    this._threshold = threshold;
+    this._models = commonModels;
+    this._keywords = keywordConfigs;
+    this._minEmbeddings = Math.max(...keywordConfigs.map((k) => k.windowSize));
 
     // Mel buffer: pre-filled with ones (matching Python reference init)
     this._melBuffer = [];
@@ -66,19 +66,27 @@ export class WakeWordInference {
     this._lastDetectionTime = 0;
   }
 
-  /** @param {number} val */
-  set threshold(val) { this._threshold = val; }
+  /**
+   * Update thresholds for all keyword models (live, no restart needed).
+   * @param {{name: string, threshold: number}[]} updates
+   */
+  updateThresholds(updates) {
+    for (const u of updates) {
+      const kw = this._keywords.find((k) => k.name === u.name);
+      if (kw) kw.threshold = u.threshold;
+    }
+  }
 
   /**
    * Process one 1280-sample audio chunk.
    * Audio must be float32 in [-1, 1] range (Web Audio API format).
    * Internally scales to int16 range for the mel model.
    * @param {Float32Array} samples - 1280 float32 samples pre-resampled to 16kHz
-   * @returns {Promise<{detected: boolean, score: number, vadScore: number}>}
+   * @returns {Promise<{detected: boolean, score: number, vadScore: number, model: string|null}>}
    */
   async processChunk(samples) {
     if (samples.length !== CHUNK_SIZE) {
-      return { detected: false, score: 0, vadScore: 0 };
+      return { detected: false, score: 0, vadScore: 0, model: null };
     }
 
     const ort = this._ort;
@@ -100,23 +108,27 @@ export class WakeWordInference {
       newEmbedding = true;
     }
 
-    // 4. Keyword inference (when enough embeddings accumulated)
-    if (newEmbedding && this._embeddingBuffer.length >= this._keywordWindow) {
-      const score = await this._runKeyword(ort);
+    // 4. Keyword inference — run all classifiers on the shared embedding stream
+    if (newEmbedding && this._embeddingBuffer.length >= this._minEmbeddings) {
       const speechActive = this._checkVadHangover();
+      const now = Date.now();
+      const cooldownOk = now - this._lastDetectionTime > COOLDOWN_MS;
 
-      if (score > this._threshold && speechActive) {
-        const now = Date.now();
-        if (now - this._lastDetectionTime > COOLDOWN_MS) {
+      for (const kw of this._keywords) {
+        if (this._embeddingBuffer.length < kw.windowSize) continue;
+        const score = await this._runKeywordModel(ort, kw);
+
+        if (score > kw.threshold && speechActive && cooldownOk) {
           this._lastDetectionTime = now;
-          return { detected: true, score, vadScore };
+          return { detected: true, score, vadScore, model: kw.name };
         }
       }
 
-      return { detected: false, score, vadScore };
+      // Return the last evaluated score for diagnostics (first keyword)
+      return { detected: false, score: 0, vadScore, model: null };
     }
 
-    return { detected: false, score: 0, vadScore };
+    return { detected: false, score: 0, vadScore: 0, model: null };
   }
 
   /**
@@ -226,11 +238,13 @@ export class WakeWordInference {
   }
 
   /**
-   * Run keyword classifier on the last N embeddings.
+   * Run a single keyword classifier on the last N embeddings.
+   * @param {object} ort
+   * @param {{session: object, windowSize: number}} kw - keyword config
    * @returns {Promise<number>} detection score
    */
-  async _runKeyword(ort) {
-    const window = this._keywordWindow;
+  async _runKeywordModel(ort, kw) {
+    const window = kw.windowSize;
     const start = this._embeddingBuffer.length - window;
     const inputData = new Float32Array(window * EMBEDDING_DIM);
 
@@ -238,10 +252,10 @@ export class WakeWordInference {
       inputData.set(this._embeddingBuffer[start + i], i * EMBEDDING_DIM);
     }
 
-    const inputName = this._models.keyword.inputNames[0];
+    const inputName = kw.session.inputNames[0];
     const inputTensor = new ort.Tensor('float32', inputData, [1, window, EMBEDDING_DIM]);
-    const result = await this._models.keyword.run({ [inputName]: inputTensor });
-    const outputName = this._models.keyword.outputNames[0];
+    const result = await kw.session.run({ [inputName]: inputTensor });
+    const outputName = kw.session.outputNames[0];
     return result[outputName].data[0];
   }
 

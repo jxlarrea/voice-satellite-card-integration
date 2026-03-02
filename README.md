@@ -73,18 +73,14 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 
 ## Features
 
-- **On-Device Wake Word Detection** - Runs openWakeWord inference locally in the browser using ONNX Runtime (WebAssembly). No server-side processing needed — detects the wake word instantly on the device, then streams audio to HA for STT. Supports multiple built-in wake words and custom user-trained models. Falls back to server-side detection (Wyoming openWakeWord/microWakeWord) when preferred.
+- **On-Device Wake Word Detection** - Runs openWakeWord locally in the browser. No server-side processing needed, detects the wake word instantly on the device then streams audio to HA for STT. Supports dual wake words,  multiple built-in wake words, and custom user-trained models. Falls back to server-side detection (Wyoming openWakeWord/microWakeWord) when preferred.
 - **Works Across Views** - Pipeline stays active when switching dashboard views.
-- **Auto-Start** - Automatically begins listening on page load (with fallback button).
 - **Visual Feedback** - Themed gradient activity bar shows listening/processing/speaking states with optional reactive audio-level animation.
 - **Mini Card (Text-First UI)** - Optional `voice-satellite-mini-card` for a normal in-dashboard card layout (compact or tall) without the fullscreen overlay.
 - **Skins** - Built-in skins (Default, Alexa, Google Home, Retro Terminal, Siri) that theme the activity bar, text display, timers, and overlay. Customizable with CSS overrides.
 - **Transcription & Response Display** - Shows what was understood and the assistant's response with real-time streaming.
-- **Continue Conversation** - When the assistant asks a follow-up question, the card automatically listens for a response without requiring the wake word again. Conversation history is displayed on screen.
 - **Timers** - Voice-activated timers with on-screen countdown pills, alert chimes, and cancel via double-tap or voice.
-- **Announcements** - Receive `assist_satellite.announce` service calls with pre-announcement chimes and TTS playback. Queues behind active conversations.
-- **Start Conversation** - Receive `assist_satellite.start_conversation` calls that speak a prompt then automatically listen for the user's response.
-- **Ask Question** - Receive `assist_satellite.ask_question` calls that speak a question, capture the user's voice response, and match it against predefined answers using hassil sentence templates. Returns structured results to the calling automation.
+- **Announcements** - Receive `assist_satellite.announce` service calls with pre-announcement chimes and TTS playback. Queues behind active conversations. Also supports Conversations and Ask Question.
 - **Screensaver Control** - Automatically dismisses a configured screensaver entity when a voice interaction begins.
 - **Media Player Entity** - Each satellite exposes a `media_player` entity. Volume is controlled via the entity's volume slider in HA and applies to all audio (chimes, TTS, announcements). Supports `tts.speak` and `media_player.play_media` targeting from automations.
 - **LLM Tools** *(Experimental)* - Enhance your voice assistant with visual tools: search for images and YouTube videos displayed in a media panel, get web search results with featured images, look up Wikipedia articles with summaries and images, view weather forecasts with current conditions and scrollable daily/hourly rows, and check stock prices, crypto prices, and currency conversions with color-coded change indicators. Requires the [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration.
@@ -202,7 +198,8 @@ Each satellite device exposes configuration entities on its device page (**Setti
 | **Finished speaking detection** | Select | VAD sensitivity - how aggressively to detect end of speech |
 | **TTS Output** | Select | Where to play TTS audio: "Browser" (default) plays audio locally, or select any `media_player` entity to route TTS to an external speaker |
 | **Wake word detection** | Select | "On Device" (default) runs wake word inference locally in the browser. "Home Assistant" uses server-side detection via the pipeline's configured wake word engine |
-| **Wake word model** | Select | Which wake word to listen for when using on-device detection. Built-in models: ok_nabu, hey_jarvis, alexa, hey_mycroft, hey_rhasspy. Custom models are auto-discovered from the `models/` directory |
+| **Wake word** | Select | Primary wake word to listen for when using on-device detection. Built-in models: ok_nabu, hey_jarvis, alexa, hey_mycroft, hey_rhasspy. Custom models are auto-discovered from the `models/` directory |
+| **Wake word 2** | Select | Optional second wake word for dual wake word detection. Set to "No wake word" (default) to disable. When both slots use the same model, the ONNX model is only loaded once |
 | **Wake word sensitivity** | Select | Detection sensitivity for on-device wake word: "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive" |
 | **Screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
 | **Announcement display duration** | Number | How long (1-60 seconds) to show the announcement text on screen after playback completes |
@@ -250,7 +247,8 @@ The satellite entity exposes the following attributes for use in templates and a
 | `tts_target` | string | Entity ID of the selected TTS output media player (empty string when set to "Browser") |
 | `announcement_display_duration` | integer | Configured announcement display duration in seconds |
 | `wake_word_detection` | string | Current wake word detection mode: "On Device" or "Home Assistant" |
-| `wake_word_model` | string | Selected on-device wake word model name (e.g., "ok_nabu") |
+| `wake_word_model` | string | Selected primary on-device wake word model name (e.g., "ok_nabu") |
+| `wake_word_model_2` | string | Selected second on-device wake word model name, or "No wake word" if disabled |
 
 Example template to check for active timers:
 
@@ -477,8 +475,9 @@ The filename (without `.onnx`) becomes the option name in the dropdown. For exam
 All wake word settings are configured per-device on the satellite's device page (**Settings -> Devices & Services -> Voice Satellite Card -> [device]**):
 
 - **Wake word detection** — "On Device" (default) or "Home Assistant" (server-side)
-- **Wake word model** — Select which wake word to listen for
-- **Wake word sensitivity** — "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive"
+- **Wake word** — Select the primary wake word to listen for
+- **Wake word 2** — Optional second wake word (set to "No wake word" to disable). Both wake words run concurrently on the same shared inference pipeline with minimal overhead. If both slots select the same model, the ONNX model is only loaded once
+- **Wake word sensitivity** — "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive". Applies to both wake word slots
 
 To use server-side detection instead, set "Wake word detection" to "Home Assistant". This requires a wake word service (openWakeWord or microWakeWord) configured in your Assist pipeline.
 

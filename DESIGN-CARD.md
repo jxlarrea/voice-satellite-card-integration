@@ -376,7 +376,8 @@ Each integration config entry creates one device with 12 entities:
 | Screensaver | `select` | `{entry_id}_screensaver` | — (integration-side only) |
 | TTS Output | `select` | `{entry_id}_tts_output` | — (integration reads, exposes via satellite `tts_target`) |
 | Wake Word Detection | `select` | `{entry_id}_wake_word_detection` | Card reads via `getSelectState('wake_word_detection')` — "On Device" or "Home Assistant" |
-| Wake Word Model | `select` | `{entry_id}_wake_word_model` | Card reads via `getSelectState('wake_word_model')` — keyword model name |
+| Wake Word Model | `select` | `{entry_id}_wake_word_model` | Card reads via `getSelectState('wake_word_model')` — primary keyword model name |
+| Wake Word Model 2 | `select` | `{entry_id}_wake_word_model_2` | Card reads via `getSelectState('wake_word_model_2')` — second keyword model, or "No wake word" |
 | Wake Word Sensitivity | `select` | `{entry_id}_wake_word_sensitivity` | Card reads via `getSelectState('wake_word_sensitivity')` — threshold label |
 | Mute | `switch` | `{entry_id}_mute` | — (integration reads, exposes via satellite `muted`) |
 | Wake Sound | `switch` | `{entry_id}_wake_sound` | — (integration reads, exposes via satellite `wake_sound`) |
@@ -537,7 +538,7 @@ src/
 ├── wake-word/                   (lazy-loaded via webpack code splitting)
 │   ├── index.js              WakeWordManager (orchestrator, detection lifecycle)
 │   ├── models.js             ONNX Runtime + model loading/caching
-│   └── inference.js          WakeWordInference (4-model pipeline: mel → embedding → VAD → keyword)
+│   └── inference.js          WakeWordInference (4-model pipeline: mel → embedding → VAD → keyword(s))
 │
 ├── shared/
 │   ├── chat.js               ChatManager (streaming text with 24-char fade)
@@ -2282,7 +2283,9 @@ Built JS: `custom_components/voice_satellite/frontend/voice-satellite-card.js`
 
 The card supports on-device wake word detection using openWakeWord ONNX
 models running entirely in the browser via onnxruntime-web (WASM backend).
-This eliminates the need for a server-side wake word add-on.
+This eliminates the need for a server-side wake word add-on. Supports
+dual wake words — two keyword classifiers can run concurrently on the
+same shared mel/embedding/VAD pipeline with minimal overhead.
 
 ### 28.1 Architecture Overview
 
@@ -2304,7 +2307,8 @@ This eliminates the need for a server-side wake word add-on.
 │  │  1. Melspectrogram (1760 samples → 8 mel frames)      │
 │  │  2. Embedding (76 mel frames → 96-dim vector)         │
 │  │  3. Silero VAD (2×640 sub-chunks → speech prob)       │
-│  │  4. Keyword classifier (N embeddings → detection)     │
+│  │  4. Keyword classifier(s) (N embeddings → detection)  │
+│  │     └── Runs 1-2 classifiers on shared pipeline       │
 │  │                                                        │
 │  │  Detection = score > threshold AND VAD hangover        │
 │  └────────────────────────────────────────────────────────┘
@@ -2342,9 +2346,9 @@ This eliminates the need for a server-side wake word add-on.
 
 | File | Lines | Responsibility |
 |------|-------|----------------|
-| `wake-word/index.js` | 370 | `WakeWordManager` — orchestrator, lifecycle, settings, detection handler |
-| `wake-word/models.js` | 134 | ONNX Runtime loading, model session management, caching |
-| `wake-word/inference.js` | 282 | `WakeWordInference` — stateful 4-model inference pipeline |
+| `wake-word/index.js` | ~490 | `WakeWordManager` — orchestrator, dual-model lifecycle, settings, detection handler |
+| `wake-word/models.js` | ~155 | ONNX Runtime loading, per-name keyword session caching, unused session cleanup |
+| `wake-word/inference.js` | ~295 | `WakeWordInference` — stateful 4-model pipeline, multi-keyword classifier support |
 
 ### 28.3 Inference Pipeline
 
@@ -2365,11 +2369,13 @@ Python reference implementation:
    LSTM state (h, c tensors) across calls. Rolling score history for
    hangover detection.
 
-4. **Keyword classifier** — Runs on the last N embeddings (window size read
-   from model metadata, default 16). Returns a detection probability.
+4. **Keyword classifier(s)** — One or two classifiers run on the shared embedding
+   stream. Each runs on the last N embeddings (window size read from model metadata,
+   default 16) and returns a detection probability. The first model to exceed its
+   threshold (with VAD confirmation) triggers detection.
 
 **Detection gating:**
-- Keyword score must exceed the configured threshold
+- Keyword score must exceed the per-model configured threshold
 - VAD hangover check: speech must be detected in frames [-7:-4] (compensates
   for keyword model latency)
 - 2-second cooldown after each detection prevents rapid re-triggers
@@ -2382,9 +2388,12 @@ Python reference implementation:
   from `/voice_satellite/ort/ort.wasm.min.mjs`. Cached in module scope.
 - **Common models** (melspectrogram, embedding, VAD): Loaded once, shared
   across all keyword models. Cached permanently.
-- **Keyword model**: Loaded per-model, re-loaded when user switches models.
-  Filename mapped via `KEYWORD_FILES[modelName] || modelName` — built-in
+- **Keyword models**: Loaded per-name into `_keywordCache` (name → session map).
+  `loadModels(ort, modelNames)` deduplicates the names array and loads each unique
+  model once. `releaseUnusedKeywords(activeNames)` disposes sessions no longer in
+  use. Filename mapped via `KEYWORD_FILES[modelName] || modelName` — built-in
   models have versioned filenames, custom models use their name directly.
+  When both wake word slots select the same model, only one ONNX session is loaded.
 
 ### 28.5 Sensitivity Thresholds
 
@@ -2404,13 +2413,24 @@ Custom models (not in `MODEL_THRESHOLDS`) use `DEFAULT_THRESHOLDS`.
 ### 28.6 Settings Change Handling
 
 `WakeWordManager.checkSettingsChanged()` is called from `session.updateHass()`
-on every HA state change. It tracks three cached values:
+on every HA state change. It tracks four cached values:
 
 | Setting | Change Effect |
 |---------|--------------|
-| Detection mode (On Device ↔ HA) | Stops/starts wake word or pipeline. Only switches during LISTENING/IDLE. |
-| Model name | Stops detection, reloads keyword model, restarts. |
-| Sensitivity threshold | Live update — sets `inference.threshold` without restart. |
+| Detection mode (On Device ↔ HA) | Stops/starts wake word or pipeline. Switches during LISTENING/IDLE/PAUSED. |
+| Model name (primary) | Stops detection, reloads keyword models, restarts. |
+| Model name (second) | Same as primary — stops, reloads, restarts. |
+| Sensitivity threshold | Live update — sets per-model thresholds without restart. |
+
+**Deferred cache update:** The enabled/model/model2 cache values are only updated
+after the change is successfully applied inside `_applyModeOrModelChange()`. If the
+change is deferred (e.g., during an active interaction), the stale cache ensures
+the change is re-detected on the next `checkSettingsChanged()` call.
+
+**PAUSED state:** When the tab is hidden (state = PAUSED), model changes are accepted
+— `stop()` is called to invalidate old state, but `start()` is deferred. On tab resume,
+`restart()` detects the stale `_loadedModelsKey` and performs a full `start()` to load
+the new models.
 
 ### 28.7 Custom Wake Word Models
 
@@ -2450,8 +2470,8 @@ WAKE_WORD_PHRASES = {
 
 **Flow:**
 ```
-_onDetection()
-├── pipeline.start({ start_stage: 'stt', wake_word_phrase: getWakeWordPhrase() })
+_onDetection(modelName)
+├── pipeline.start({ start_stage: 'stt', wake_word_phrase: getWakeWordPhrase(modelName) })
 │     └── runConfig includes wake_word_phrase → spread into WS message
 │           └── ws_run_pipeline extracts wake_word_phrase → async_run_pipeline
 │                 └── async_accept_pipeline_from_satellite(wake_word_phrase=...)
@@ -2582,16 +2602,21 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] `WakeWordManager`: Lazy-loaded via webpack code splitting
 - [ ] `models.js`: ONNX Runtime loading from `/voice_satellite/ort/`
 - [ ] `models.js`: Common model caching (melspec, embedding, VAD)
-- [ ] `models.js`: Keyword model loading with `KEYWORD_FILES` mapping + custom fallback
-- [ ] `inference.js`: `WakeWordInference` — mel → embedding → VAD → keyword pipeline
+- [ ] `models.js`: Keyword model loading with `_keywordCache`, `KEYWORD_FILES` mapping + custom fallback
+- [ ] `models.js`: `releaseUnusedKeywords()` to dispose sessions no longer active
+- [ ] `inference.js`: `WakeWordInference` — mel → embedding → VAD → keyword(s) pipeline
 - [ ] `inference.js`: Mel context (480 samples), int16 scaling, buffer pre-fill
 - [ ] `inference.js`: Streaming embedding (76 mel frames → 96-dim vector)
 - [ ] `inference.js`: Silero VAD with LSTM state + hangover check
 - [ ] `inference.js`: Keyword classifier with configurable window size
 - [ ] `index.js`: feedAudio → chunk accumulation → serial drain queue
-- [ ] `index.js`: Detection handler (chime, pipeline start with `start_stage: 'stt'`)
-- [ ] `index.js`: Settings change tracking (mode, model, threshold)
+- [ ] `inference.js`: Multi-keyword classifier support (`keywordConfigs[]` array)
+- [ ] `inference.js`: `updateThresholds()` for live per-model threshold changes
+- [ ] `index.js`: `getActiveModels()` deduplication, `getModelName2()`, `getThresholdForModel()`
+- [ ] `index.js`: Detection handler with model name (`_onDetection(modelName)`, `getWakeWordPhrase(modelName)`)
+- [ ] `index.js`: Settings change tracking (mode, model, model2, threshold) with deferred cache update
 - [ ] `index.js`: Live threshold updates without restart
+- [ ] `index.js`: PAUSED state handling — accept changes, reload models on resume via `restart()`
 - [ ] Session integration: `_checkWakeWordActivation()`, `_loadWakeWordModule()`
 - [ ] Per-model sensitivity thresholds calibrated for browser inference
 

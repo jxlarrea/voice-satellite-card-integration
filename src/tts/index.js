@@ -37,6 +37,8 @@ export class TtsManager {
     // Remote media player state monitoring
     this._remoteTarget = null;
     this._remoteSawPlaying = false;
+    this._remoteInitialState = null;
+    this._remoteInitialContentId = null;
   }
 
   get isPlaying() { return this._playing; }
@@ -58,6 +60,9 @@ export class TtsManager {
     if (ttsTarget) {
       this._remoteTarget = ttsTarget;
       this._remoteSawPlaying = false;
+      const remoteEntity = this._card.hass?.states?.[ttsTarget];
+      this._remoteInitialState = remoteEntity?.state;
+      this._remoteInitialContentId = remoteEntity?.attributes?.media_content_id || null;
       playRemote(this._card, mediaId || url).catch(() => {
         this._log.log('tts', 'Remote play service call failed - forcing completion');
         this._onComplete();
@@ -133,6 +138,8 @@ export class TtsManager {
     this._playing = false;
     this._remoteTarget = null;
     this._remoteSawPlaying = false;
+    this._remoteInitialState = null;
+    this._remoteInitialContentId = null;
     this._pendingTtsEndUrl = null;
     this._clearWatchdog();
 
@@ -197,16 +204,36 @@ export class TtsManager {
     if (!entity) return;
 
     const state = entity.state;
+    const contentId = entity.attributes?.media_content_id || null;
+    const isActive = state === 'playing' || state === 'buffering';
 
-    if (state === 'playing' || state === 'buffering') {
+    // ── Detect our content started playing ──
+    if (!this._remoteSawPlaying) {
+      if (!isActive) return;
+
+      // Player was already active when we started — only mark as saw-playing
+      // when media_content_id changes (confirms our content loaded).
+      // This avoids false-flagging pre-existing music as our TTS.
+      const wasAlreadyActive = this._remoteInitialState === 'playing'
+                            || this._remoteInitialState === 'buffering';
+      if (wasAlreadyActive && contentId === this._remoteInitialContentId) return;
+
       this._remoteSawPlaying = true;
       return;
     }
 
-    // Only complete once we've confirmed it was playing first,
-    // to avoid false triggers during the brief delay before playback starts
-    if (this._remoteSawPlaying) {
-      this._log.log('tts', `Remote player stopped (state: ${state}) - completing`);
+    // ── Detect our content finished ──
+    // Path 1: state left playing/buffering (player went idle/paused)
+    if (!isActive) {
+      this._log.log('tts', `Remote player stopped (state: ${state}) — completing`);
+      this._onComplete();
+      return;
+    }
+
+    // Path 2: player was already active and media_content_id reverted to the
+    // original (announce finished, previous media resumed)
+    if (this._remoteInitialContentId && contentId === this._remoteInitialContentId) {
+      this._log.log('tts', 'Remote player resumed original content — completing');
       this._onComplete();
     }
   }
@@ -227,6 +254,8 @@ export class TtsManager {
     this._playing = false;
     this._remoteTarget = null;
     this._remoteSawPlaying = false;
+    this._remoteInitialState = null;
+    this._remoteInitialContentId = null;
     this._pendingTtsEndUrl = null;
 
     if (this._endTimer) {

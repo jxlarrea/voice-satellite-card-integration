@@ -5,15 +5,19 @@
  * ONNX models via onnxruntime-web. Taps into the existing
  * AudioWorklet stream, runs inference, and triggers the pipeline
  * with start_stage: "stt" on detection.
+ *
+ * Supports dual wake words — two keyword models can run
+ * concurrently on the same shared mel/embedding/VAD pipeline.
  */
 
 import { State, BlurReason } from '../constants.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 import { CHIME_WAKE } from '../audio/chime.js';
-import { loadOrt, loadModels, releaseModels, getKeywordWindowSize } from './models.js';
+import { loadOrt, loadModels, releaseModels, releaseUnusedKeywords, getKeywordWindowSize } from './models.js';
 import { WakeWordInference } from './inference.js';
 
 const CHUNK_SIZE = 1280; // 80ms @ 16kHz
+const NO_WAKE_WORD = 'No wake word';
 
 // Per-model sensitivity thresholds tuned for browser-side inference.
 // Browser pipeline produces lower raw scores than HA Voice PE firmware,
@@ -47,13 +51,14 @@ export class WakeWordManager {
     this._ort = null;
     this._active = false;
     this._sampleBuffer = new Float32Array(0);
-    this._loadedModel = null;
+    this._loadedModelsKey = null; // sorted model names string for change detection
     this._processing = false;
     this._frameQueue = [];
 
     // Settings change tracking
     this._cachedEnabled = undefined;
     this._cachedModel = undefined;
+    this._cachedModel2 = undefined;
     this._cachedThreshold = undefined;
     this._switching = false;
   }
@@ -76,7 +81,7 @@ export class WakeWordManager {
   }
 
   /**
-   * Get the configured wake word model name.
+   * Get the primary wake word model name.
    * @returns {string}
    */
   getModelName() {
@@ -89,29 +94,85 @@ export class WakeWordManager {
   }
 
   /**
-   * Get the detection threshold based on sensitivity setting and active model.
-   * @returns {number}
-   */
-  /**
-   * Get the wake word phrase for pipeline dedup (matches openWakeWord/microWakeWord format).
+   * Get the second wake word model name (or NO_WAKE_WORD if disabled).
    * @returns {string}
    */
-  getWakeWordPhrase() {
-    const model = this.getModelName();
-    return WAKE_WORD_PHRASES[model]
-      || model.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  getModelName2() {
+    return getSelectState(
+      this._session.hass,
+      this._session.config.satellite_entity,
+      'wake_word_model_2',
+      NO_WAKE_WORD,
+    );
   }
 
-  getThreshold() {
-    const label = getSelectState(
+  /**
+   * Get deduplicated list of active model names.
+   * @returns {string[]}
+   */
+  getActiveModels() {
+    const models = [this.getModelName()];
+    const model2 = this.getModelName2();
+    if (model2 && model2 !== NO_WAKE_WORD && !models.includes(model2)) {
+      models.push(model2);
+    }
+    return models;
+  }
+
+  /**
+   * Get the wake word phrase for pipeline dedup (matches openWakeWord/microWakeWord format).
+   * @param {string} modelName - model name to look up
+   * @returns {string}
+   */
+  getWakeWordPhrase(modelName) {
+    return WAKE_WORD_PHRASES[modelName]
+      || modelName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  /**
+   * Get the sensitivity label from the HA select entity.
+   * @returns {string}
+   */
+  _getSensitivityLabel() {
+    return getSelectState(
       this._session.hass,
       this._session.config.satellite_entity,
       'wake_word_sensitivity',
       'Moderately sensitive',
     );
-    const model = this.getModelName();
-    const modelMap = MODEL_THRESHOLDS[model] || DEFAULT_THRESHOLDS;
+  }
+
+  /**
+   * Get the detection threshold for a specific model based on sensitivity setting.
+   * @param {string} modelName
+   * @returns {number}
+   */
+  getThresholdForModel(modelName) {
+    const label = this._getSensitivityLabel();
+    const modelMap = MODEL_THRESHOLDS[modelName] || DEFAULT_THRESHOLDS;
     return modelMap[label] ?? DEFAULT_THRESHOLDS['Moderately sensitive'];
+  }
+
+  /**
+   * Get the detection threshold for the primary model (legacy compat).
+   * @returns {number}
+   */
+  getThreshold() {
+    return this.getThresholdForModel(this.getModelName());
+  }
+
+  /**
+   * Build keywordConfigs array for the inference engine.
+   * @param {Record<string, object>} keywordSessions - name → ONNX session map
+   * @returns {{session: object, windowSize: number, threshold: number, name: string}[]}
+   */
+  _buildKeywordConfigs(keywordSessions) {
+    return Object.entries(keywordSessions).map(([name, session]) => ({
+      session,
+      windowSize: getKeywordWindowSize(session),
+      threshold: this.getThresholdForModel(name),
+      name,
+    }));
   }
 
   /**
@@ -120,8 +181,9 @@ export class WakeWordManager {
   async start() {
     if (this._active) return;
 
-    const modelName = this.getModelName();
-    this._log.log('wake-word', `Starting on-device detection (model: ${modelName})`);
+    const activeModels = this.getActiveModels();
+    const modelsKey = activeModels.slice().sort().join(',');
+    this._log.log('wake-word', `Starting on-device detection (models: ${activeModels.join(', ')})`);
 
     try {
       // Load ONNX Runtime (cached)
@@ -131,20 +193,27 @@ export class WakeWordManager {
         this._log.log('wake-word', 'ONNX Runtime loaded');
       }
 
-      // Load models (cached, unless model changed)
-      if (!this._inference || this._loadedModel !== modelName) {
+      // Load models (cached per-name, unless active set changed)
+      if (!this._inference || this._loadedModelsKey !== modelsKey) {
         this._log.log('wake-word', 'Loading wake word models...');
-        const models = await loadModels(this._ort, modelName, (name) => {
+        const { common, keywords } = await loadModels(this._ort, activeModels, (name) => {
           this._log.log('wake-word', `Loading model: ${name}`);
         });
-        const windowSize = getKeywordWindowSize(models.keyword);
-        const threshold = this.getThreshold();
-        this._inference = new WakeWordInference(this._ort, models, windowSize, threshold);
-        this._loadedModel = modelName;
-        this._log.log('wake-word', `Models loaded (keyword window: ${windowSize}, threshold: ${threshold})`);
+
+        // Release keyword sessions no longer in use
+        await releaseUnusedKeywords(activeModels);
+
+        const keywordConfigs = this._buildKeywordConfigs(keywords);
+        this._inference = new WakeWordInference(this._ort, common, keywordConfigs);
+        this._loadedModelsKey = modelsKey;
+
+        const configSummary = keywordConfigs.map((k) => `${k.name}(w=${k.windowSize},t=${k.threshold})`).join(', ');
+        this._log.log('wake-word', `Models loaded: ${configSummary}`);
       } else {
-        // Same model, just reset state and update threshold
-        this._inference.threshold = this.getThreshold();
+        // Same models, just reset state and update thresholds
+        this._inference.updateThresholds(
+          activeModels.map((name) => ({ name, threshold: this.getThresholdForModel(name) })),
+        );
         this._inference.reset();
       }
 
@@ -207,9 +276,9 @@ export class WakeWordManager {
         const frame = this._frameQueue.shift();
         const result = await this._inference.processChunk(frame);
         if (result.detected) {
-          this._log.log('wake-word', `Wake word detected! (score: ${result.score.toFixed(3)}, vad: ${result.vadScore.toFixed(3)})`);
+          this._log.log('wake-word', `Wake word detected: ${result.model} (score: ${result.score.toFixed(3)}, vad: ${result.vadScore.toFixed(3)})`);
           this._frameQueue.length = 0;
-          await this._onDetection();
+          await this._onDetection(result.model);
           return;
         }
       }
@@ -222,8 +291,9 @@ export class WakeWordManager {
 
   /**
    * Handle wake word detection — mirrors pipeline handleWakeWordEnd behavior.
+   * @param {string} modelName - the model that triggered detection
    */
-  async _onDetection() {
+  async _onDetection(modelName) {
     // Stop listening for more wake words
     this._active = false;
 
@@ -272,7 +342,7 @@ export class WakeWordManager {
 
     // Start pipeline with STT stage (skip server-side wake word)
     try {
-      await session.pipeline.start({ start_stage: 'stt', wake_word_phrase: this.getWakeWordPhrase() });
+      await session.pipeline.start({ start_stage: 'stt', wake_word_phrase: this.getWakeWordPhrase(modelName) });
     } catch (e) {
       this._log.error('wake-word', `Pipeline start failed after detection: ${e.message || e}`);
       session.pipeline.restart(session.pipeline.calculateRetryDelay());
@@ -282,16 +352,26 @@ export class WakeWordManager {
   /**
    * Restart wake word detection (e.g. after pipeline completes).
    */
-  restart() {
+  async restart() {
     if (!this.isEnabled()) return;
+
+    // If models changed while paused, do a full start to reload them
+    const activeModels = this.getActiveModels();
+    const modelsKey = activeModels.slice().sort().join(',');
+    if (!this._inference || this._loadedModelsKey !== modelsKey) {
+      this._log.log('wake-word', 'Restarting with model reload');
+      await this.start();
+      return;
+    }
+
     this._log.log('wake-word', 'Restarting detection');
     this._sampleBuffer = new Float32Array(0);
     this._frameQueue.length = 0;
     this._processing = false;
-    if (this._inference) {
-      this._inference.threshold = this.getThreshold();
-      this._inference.reset();
-    }
+    this._inference.updateThresholds(
+      activeModels.map((name) => ({ name, threshold: this.getThresholdForModel(name) })),
+    );
+    this._inference.reset();
     this._active = true;
   }
 
@@ -304,35 +384,41 @@ export class WakeWordManager {
 
     const enabled = this.isEnabled();
     const model = this.getModelName();
+    const model2 = this.getModelName2();
     const threshold = this.getThreshold();
 
     // Initialize cache on first call
     if (this._cachedEnabled === undefined) {
       this._cachedEnabled = enabled;
       this._cachedModel = model;
+      this._cachedModel2 = model2;
       this._cachedThreshold = threshold;
       return;
     }
 
     const enabledChanged = enabled !== this._cachedEnabled;
-    const modelChanged = model !== this._cachedModel;
+    const modelChanged = model !== this._cachedModel || model2 !== this._cachedModel2;
     const thresholdChanged = threshold !== this._cachedThreshold;
 
     if (!enabledChanged && !modelChanged && !thresholdChanged) return;
 
-    this._cachedEnabled = enabled;
-    this._cachedModel = model;
+    // Always update threshold cache (applies immediately)
     this._cachedThreshold = threshold;
 
     // Live threshold update (no restart needed)
-    if (thresholdChanged && this._active && this._inference) {
-      this._inference.threshold = threshold;
-      this._log.log('wake-word', `Threshold updated: ${threshold}`);
+    if (thresholdChanged && !modelChanged && this._active && this._inference) {
+      const activeModels = this.getActiveModels();
+      this._inference.updateThresholds(
+        activeModels.map((name) => ({ name, threshold: this.getThresholdForModel(name) })),
+      );
+      this._log.log('wake-word', `Thresholds updated`);
     }
 
     // Mode or model change requires switching
+    // Cache for enabled/model/model2 updated inside _applyModeOrModelChange
+    // AFTER the change is actually applied (not when deferred due to state)
     if (enabledChanged || modelChanged) {
-      this._applyModeOrModelChange(enabled, model, enabledChanged);
+      this._applyModeOrModelChange(enabled, model, model2, enabledChanged);
     }
   }
 
@@ -340,11 +426,12 @@ export class WakeWordManager {
    * Apply a detection mode or model change. Switches between
    * on-device and HA pipeline, or reloads models.
    */
-  async _applyModeOrModelChange(enabled, model, enabledChanged) {
+  async _applyModeOrModelChange(enabled, model, model2, enabledChanged) {
     const session = this._session;
 
-    // Only switch while waiting for wake word, not mid-interaction
-    if (![State.LISTENING, State.IDLE].includes(session.currentState)) {
+    // Only switch while waiting for wake word, not mid-interaction.
+    // PAUSED is allowed — change is applied and takes effect on resume.
+    if (![State.LISTENING, State.IDLE, State.PAUSED].includes(session.currentState)) {
       this._log.log('wake-word', 'Settings changed during interaction — will apply on next cycle');
       return;
     }
@@ -355,21 +442,36 @@ export class WakeWordManager {
         if (enabled) {
           this._log.log('wake-word', 'Mode → On Device');
           session.pipeline.stop();
-          await this.start();
+          if (session.currentState !== State.PAUSED) {
+            await this.start();
+          }
         } else {
           this._log.log('wake-word', 'Mode → Home Assistant');
           this.stop();
-          session.setState(State.CONNECTING);
-          await session.pipeline.start();
+          if (session.currentState !== State.PAUSED) {
+            session.setState(State.CONNECTING);
+            await session.pipeline.start();
+          }
         }
-      } else if (this._active) {
-        // Model changed while actively listening
-        this._log.log('wake-word', `Model → ${model}`);
+      } else if (this._active || session.currentState === State.PAUSED) {
+        // Model changed while actively listening (or paused)
+        this._log.log('wake-word', `Models → ${this.getActiveModels().join(', ')}`);
         this.stop();
-        await this.start();
+        if (session.currentState !== State.PAUSED) {
+          await this.start();
+        }
       }
+
+      // Update cache after successful apply
+      this._cachedEnabled = enabled;
+      this._cachedModel = model;
+      this._cachedModel2 = model2;
     } catch (e) {
       this._log.error('wake-word', `Settings change failed: ${e.message || e}`);
+      // Update cache even on error to avoid infinite retry loop
+      this._cachedEnabled = enabled;
+      this._cachedModel = model;
+      this._cachedModel2 = model2;
       session.pipeline.restart(session.pipeline.calculateRetryDelay());
     } finally {
       this._switching = false;
@@ -382,7 +484,7 @@ export class WakeWordManager {
   async teardown() {
     this.stop();
     this._inference = null;
-    this._loadedModel = null;
+    this._loadedModelsKey = null;
     try {
       await releaseModels();
     } catch (_) { /* ignore */ }
