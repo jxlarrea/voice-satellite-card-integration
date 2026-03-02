@@ -299,6 +299,13 @@ export class WakeWordManager {
 
     const session = this._session;
 
+    // If muted, silently ignore the detection and resume listening
+    if (getSwitchState(session.hass, session.config.satellite_entity, 'mute') === true) {
+      this._log.log('wake-word', 'Muted — ignoring wake word detection');
+      this._active = true;
+      return;
+    }
+
     // Interrupt media player
     session.mediaPlayer.interrupt();
 

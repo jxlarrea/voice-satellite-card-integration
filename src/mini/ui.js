@@ -7,6 +7,7 @@
  */
 
 import { formatTime } from '../shared/format.js';
+import { getSwitchState } from '../shared/satellite-state.js';
 import { t } from '../i18n/index.js';
 
 const MINI_CSS = `
@@ -745,6 +746,9 @@ export class MiniUIManager {
 
   _statusFor(state, serviceUnavailable, ttsPlaying) {
     if (serviceUnavailable) return { label: this._t('mini.state.service_unavailable', 'Service unavailable'), dot: 'error', showCompactStatus: false };
+    if (state === 'LISTENING' && getSwitchState(this._card.hass, this._card.config.satellite_entity, 'mute') === true) {
+      return { label: this._t('mini.state.muted', 'Muted'), dot: 'error pulse', showCompactStatus: true };
+    }
     if (ttsPlaying || state === 'TTS') return { label: this._t('mini.state.responding', 'Responding'), dot: 'responding', showCompactStatus: false };
     switch (state) {
       case 'CONNECTING': return { label: this._t('mini.state.connecting', 'Connecting'), dot: 'connecting', showCompactStatus: false };

@@ -10,6 +10,7 @@ export default {
       paused: 'Paused',
       error: 'Error',
       waiting_for_wake_word: 'Waiting for wake word',
+      muted: 'Muted',
       tap_to_start: 'Tap to start',
     },
     notification: {
