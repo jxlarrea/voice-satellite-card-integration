@@ -16,6 +16,9 @@
   background: linear-gradient(90deg, #4285F4, #4285F4 25%, #EA4335 25%, #EA4335 50%, #FBBC05 50%, #FBBC05 75%, #34A853 75%, #34A853);
   background-size: 200% 100%;
 }
+.preview-bar.reactive {
+  box-shadow: 0 0 12px 4px rgba(66, 133, 244, 0.35);
+}
 .preview-chat {
   align-items: flex-start;
 }

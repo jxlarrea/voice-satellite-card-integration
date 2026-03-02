@@ -53,6 +53,13 @@ export function renderPreview(shadowRoot, config) {
     link.href = skin.fontURL;
     document.head.appendChild(link);
   }
+  // @property rules must live at document level (shadow DOM ignores them)
+  if (skinId === 'siri' && !document.querySelector('#vs-siri-preview-prop')) {
+    const s = document.createElement('style');
+    s.id = 'vs-siri-preview-prop';
+    s.textContent = '@property --siri-preview-angle{syntax:"<angle>";inherits:true;initial-value:0deg}';
+    document.head.appendChild(s);
+  }
   const scale = (config.text_scale || 100) / 100;
   const skinDefault = Math.round((skin.defaultOpacity ?? 1) * 100);
   const bgOpacity = (config.background_opacity ?? skinDefault) / 100;

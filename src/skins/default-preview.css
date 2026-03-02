@@ -13,6 +13,9 @@
   background: linear-gradient(90deg, #FF7777, #FF9977, #FFCC77, #CCFF77, #77FFAA, #77DDFF, #77AAFF, #AA77FF, #FF77CC, #FF7777);
   background-size: 200% 100%;
 }
+.preview-bar.reactive {
+  box-shadow: 0 0 12px 4px rgba(119, 170, 255, 0.4);
+}
 
 .preview-chat {
   align-items: flex-start;

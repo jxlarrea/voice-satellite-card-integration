@@ -15,6 +15,8 @@
   border-radius: 3px 3px 0 0;
   background: linear-gradient(90deg, #00CAFF, #00E5FF, #00CAFF);
   background-size: 200% 100%;
+}
+.preview-bar.reactive {
   box-shadow: 0 0 20px 6px rgba(0, 202, 255, 0.5), 0 0 40px 12px rgba(0, 202, 255, 0.2);
 }
 .preview-chat {

@@ -1,4 +1,6 @@
 /* Siri Skin - Editor Preview Overrides */
+/* NOTE: @property --siri-preview-angle is registered at document level
+   via preview.js because @property rules do not work inside shadow DOM. */
 
 .preview-container {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
@@ -20,7 +22,15 @@
   background: none;
   border: 2px solid;
   border-image: conic-gradient(#8B5CF6, #3B82F6, #06B6D4, #EC4899, #8B5CF6) 1;
+}
+.preview-bar.reactive {
+  border-image: conic-gradient(from var(--siri-preview-angle), #8B5CF6, #3B82F6, #06B6D4, #EC4899, #8B5CF6) 1;
   box-shadow: 0 0 16px 4px rgba(139, 92, 246, 0.3);
+  animation: siri-preview-rotate 1.5s linear infinite;
+}
+@keyframes siri-preview-rotate {
+  0%   { --siri-preview-angle: 0deg; }
+  100% { --siri-preview-angle: 360deg; }
 }
 .preview-chat {
   align-items: center;
