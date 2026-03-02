@@ -904,7 +904,8 @@ get chat() { return this._chat; }  // ChatManager
 // Session-delegating getters
 get audio()    { return this._session?.audio; }
 get pipeline() { return this._session?.pipeline; }
-// ... all 11 managers
+get ttsTarget(){ return this._session?.ttsTarget ?? ''; }
+// ... all 11 managers + ttsTarget
 
 // State delegation
 get currentState()  { return this._session?.currentState ?? State.IDLE; }
@@ -934,7 +935,7 @@ The session's `ui` property returns this proxy. Every method iterates
 updateForState          showBlurOverlay       hideBlurOverlay
 showServiceError        clearServiceError     hideBar
 showStartButton         hideStartButton       stopReactive
-setAnnouncementMode     clearAnnouncementBubbles
+startReactive           setAnnouncementMode   clearAnnouncementBubbles
 clearNotificationStatusOverride   onNotificationStart
 onNotificationDismiss   addChatMessage        updateChatText
 clearChat               showImagePanel        showVideoPanel
@@ -1342,8 +1343,13 @@ configuration:
 | WAKE_WORD_DETECTED | yes | `listening` | yes | Detected, waiting for STT |
 | STT | yes | `listening` | yes | Actively transcribing speech |
 | INTENT | yes | `processing` | no | Waiting for HA to process intent |
-| TTS | yes | `speaking` | yes | Playing response audio |
+| TTS | yes | `speaking` | yes* | Playing response audio |
 | ERROR | no | — | — | Bar hidden (service error uses `error-mode` class separately) |
+
+*\*TTS is reactive only for browser playback. When `ttsTarget` is set
+(remote media player), there is no local audio to analyse, so the bar
+enters the `speaking` animation class but `reactive` is NOT applied and
+the analyser is stopped.*
 
 Guard logic prevents the bar from hiding when:
 - A notification is playing (notifications manage their own bar state)
@@ -1367,6 +1373,18 @@ When reactive mode is active and the bar enters a reactive-eligible state:
 2. The global UI container gets `reactive-mode` (used to push chat container upward)
 3. `analyser.reconnectMic()` ensures the active analyser points at the mic
 4. `analyser.start(barEl)` starts the tick loop
+
+When the bar is visible but NOT reactive (INTENT, or TTS with remote
+target), the `reactive` class and `reactive-mode` are removed and
+`analyser.stop()` is called to halt the tick loop. This prevents the bar
+from showing mic levels during processing or remote TTS playback.
+
+**`startReactive()`** — Bypasses `updateForState()` to force-enable
+reactive mode. Used by `AskQuestionManager` when entering STT answer
+capture: `updateForState` is blocked by the `notifPlaying` guard (the
+manager's `playing` flag is still `true`), so `startReactive()` directly
+adds the `reactive` class, reconnects the mic analyser, and starts the
+tick loop.
 
 ### 12.3 AnalyserManager — Dual-Analyser Architecture
 
@@ -1573,7 +1591,11 @@ play(url)
 ├── playRemote(card, url)  → hass.callService('media_player', 'play_media')
 ├── Safety timeout (120s)
 └── Monitor entity state via checkRemotePlayback(hass)
-    └── Wait for 'playing'→'idle' transition → _onComplete()
+    ├── Phase 1: detect 'playing' + content_id change → sawPlaying = true
+    ├── Phase 2: detect 'idle'/'paused' or content_id revert → _onComplete()
+    └── Duration-based fallback (Sonos): tts-audio-duration event replaces
+        safety timeout with (duration + 2s) timer for devices that don't
+        provide reliable state transitions
 ```
 
 **`_onComplete(playbackFailed)`:**
@@ -1630,11 +1652,20 @@ subscription. The `dispatchSatelliteEvent` function routes them:
 ```
 dispatchSatelliteEvent(card, event)
 ├── type === 'media_player' → mediaPlayer.handleCommand()
+├── type === 'tts-audio-duration' → tts.setAudioDuration() + _setNotificationAudioDuration()
 ├── Tab hidden? → queue event, replay on visibility change
 ├── ann.ask_question? → AskQuestionManager
 ├── type === 'start_conversation'? → StartConversationManager
 └── else → AnnouncementManager
 ```
+
+**`tts-audio-duration` routing:** The integration measures TTS audio
+file duration server-side (via mutagen) and pushes it as a satellite
+event. `dispatchSatelliteEvent` routes it to both:
+- `tts.setAudioDuration()` — for pipeline TTS remote playback
+- `_setNotificationAudioDuration()` — for notification remote playback
+  (finds the active notification manager with `_remotePlayback` set and
+  replaces the 30s safety timeout with a `(duration + 2s)` timer)
 
 ### 14.2 Delivery & Queueing
 
@@ -1655,13 +1686,29 @@ playNotification(mgr, ann, onComplete, logPrefix)
 ├── UI: showBlurOverlay(ANNOUNCEMENT), onNotificationStart()
 ├── Passive? → setAnnouncementMode(true)
 ├── Pre-announce:
-│   ├── Custom preannounce_media_id → playMediaFor()
-│   └── Default → CHIME_ANNOUNCE playback
+│   ├── Remote TTS target (no custom media) → skip chime, go to _playMain
+│   ├── Custom preannounce_media_id → playMediaFor() (routes to remote if configured)
+│   └── Default (browser) → CHIME_ANNOUNCE playback
 └── _playMain(mgr, ann, onComplete, logPrefix)
     ├── Show message bubble (announcement or assistant type)
     ├── Media URL? → playMediaFor() → onComplete
     └── No media → setTimeout(NO_MEDIA_DISPLAY) → onComplete
 ```
+
+**`playMediaFor()` remote routing:** When `card.ttsTarget` is set,
+`playMediaFor()` calls `playRemote(card, url)` instead of browser
+`playMediaUrl()`. This routes notification audio to the configured
+external media player (e.g. Sonos). Remote playback uses:
+- `mgr._remotePlayback` — tracking state (`target`, `sawPlaying`,
+  `initialState`, `initialContentId`, `onDone`)
+- `mgr._remoteTimeout` — 30s safety timeout (replaced by duration-based
+  timer when `tts-audio-duration` event arrives)
+- `checkRemoteNotificationPlayback(mgr, hass)` — called from
+  `session.updateHass()` to monitor entity state transitions
+
+**Pre-announce chime skipped when remote:** Consistent with pipeline
+chimes (wake/done/error already skip when `isRemote`). Custom
+pre-announce media still plays on the remote device via `playMediaFor()`.
 
 ### 14.4 AnnouncementManager
 
@@ -1687,7 +1734,8 @@ After prompt playback:
 2. Enter STT-only mode:
    - Switch from announcement mode to interactive mode
    - Play wake chime + delay (`CHIME_SETTLE` = 500ms)
-   - `reconnectMic()` for reactive bar
+   - `ui.startReactive()` for reactive bar (bypasses `notifPlaying`
+     guard since `playing` is still `true` during STT capture)
    - `pipeline.restartContinue(null, { end_stage: 'stt', onSttEnd })`
 3. STT callback receives transcribed text
 4. `sendAnswer(card, announceId, text)` → WS command

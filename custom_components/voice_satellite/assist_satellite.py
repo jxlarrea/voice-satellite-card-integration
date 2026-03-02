@@ -478,6 +478,15 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         # Push directly to card via satellite subscription
         self._push_satellite_event("announcement", announcement_data)
 
+        # Measure audio duration for remote media players (e.g. Sonos)
+        # that don't provide reliable state transitions.
+        # media_id can be a full URL or relative path — check with `in`.
+        media_url = announcement.media_id or ""
+        if media_url and "/api/tts_proxy/" in media_url:
+            self.hass.async_create_task(
+                self._send_tts_audio_duration(media_url)
+            )
+
         _LOGGER.debug(
             "Announcement #%d on '%s': %s (media: %s)",
             announce_id,
@@ -588,6 +597,13 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
         # Push directly to card via satellite subscription
         self._push_satellite_event("start_conversation", announcement_data)
+
+        # Measure audio duration for remote media players (e.g. Sonos)
+        media_url = announcement.media_id or ""
+        if media_url and "/api/tts_proxy/" in media_url:
+            self.hass.async_create_task(
+                self._send_tts_audio_duration(media_url)
+            )
 
         _LOGGER.debug(
             "Start conversation #%d on '%s': %s (media: %s)",
@@ -1062,12 +1078,94 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         )
 
         if self._pipeline_connection and self._pipeline_msg_id:
+            event_data = getattr(event, "data", None) or {}
             self._pipeline_connection.send_event(
                 self._pipeline_msg_id,
                 {
                     "type": event_type_str,
-                    "data": getattr(event, "data", None) or {},
+                    "data": event_data,
                 },
+            )
+
+            # After forwarding tts-end, measure audio duration and send
+            # to card.  Capture connection/msg_id now — the pipeline's
+            # finally block clears them almost immediately after run-end.
+            if event_type_str == "tts-end":
+                tts_url = (event_data.get("tts_output") or {}).get(
+                    "url"
+                )
+                if tts_url:
+                    self.hass.async_create_task(
+                        self._send_tts_audio_duration(tts_url)
+                    )
+
+    async def _send_tts_audio_duration(self, tts_url: str) -> None:
+        """Measure TTS audio duration via mutagen and send to card.
+
+        Fetches the audio from the TTS proxy URL (no auth needed — the
+        token in the URL is the secret) and measures duration with mutagen.
+        Sends the result via the satellite subscription (always alive),
+        not the pipeline subscription (cleaned up after run-end).
+        """
+        try:
+            import io
+
+            import mutagen
+
+            from homeassistant.helpers.aiohttp_client import (
+                async_get_clientsession,
+            )
+            from homeassistant.helpers.network import get_url
+
+            # tts_url may be a relative path (/api/tts_proxy/...)
+            # or a full URL (https://host/api/tts_proxy/...) from announcements.
+            if tts_url.startswith(("http://", "https://")):
+                full_url = tts_url
+            else:
+                try:
+                    base_url = get_url(self.hass, prefer_external=False)
+                except Exception:
+                    base_url = "http://127.0.0.1:8123"
+                full_url = f"{base_url}{tts_url}"
+            _LOGGER.debug(
+                "Measuring TTS duration for '%s': %s",
+                self._satellite_name,
+                full_url,
+            )
+
+            session = async_get_clientsession(self.hass)
+            async with session.get(full_url) as resp:
+                if resp.status != 200:
+                    _LOGGER.warning(
+                        "TTS proxy returned %d for '%s'",
+                        resp.status,
+                        self._satellite_name,
+                    )
+                    return
+                audio_data = await resp.read()
+
+            audio_file = mutagen.File(io.BytesIO(audio_data))
+            if audio_file and audio_file.info:
+                duration = round(audio_file.info.length, 2)
+                _LOGGER.debug(
+                    "TTS audio duration for '%s': %.2fs",
+                    self._satellite_name,
+                    duration,
+                )
+                self._push_satellite_event(
+                    "tts-audio-duration",
+                    {"duration": duration, "tts_url": tts_url},
+                )
+            else:
+                _LOGGER.warning(
+                    "mutagen could not parse TTS audio for '%s'",
+                    self._satellite_name,
+                )
+        except Exception:
+            _LOGGER.warning(
+                "Failed to measure TTS audio duration for '%s'",
+                self._satellite_name,
+                exc_info=True,
             )
 
     # --- Satellite event subscription ---

@@ -26,7 +26,7 @@ import { MediaPlayerManager } from '../media-player';
 import { getSelectEntityId, getNumberState, getSelectState } from '../shared/satellite-state.js';
 import { DISABLED_VALUE } from '../shared/entity-picker.js';
 import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
-import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
+import { dispatchSatelliteEvent, checkRemoteNotificationPlayback } from '../shared/satellite-notification.js';
 import { isEditorPreview } from '../editor/preview.js';
 import { UIBroadcastProxy } from './ui-proxy.js';
 import { ChatBroadcastProxy } from './chat-proxy.js';
@@ -256,6 +256,9 @@ export class VoiceSatelliteSession {
     if (this._hasStarted) {
       this._timer.update();
       this._tts.checkRemotePlayback(hass);
+      checkRemoteNotificationPlayback(this._announcement, hass);
+      checkRemoteNotificationPlayback(this._startConversation, hass);
+      checkRemoteNotificationPlayback(this._askQuestion, hass);
       if (this._wakeWord) {
         this._wakeWord.checkSettingsChanged();
       } else {

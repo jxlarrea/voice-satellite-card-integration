@@ -100,10 +100,9 @@ export class AskQuestionManager {
     // Play wake chime to signal the user should speak.
     // Delay STT pipeline start so the mic doesn't pick up the chime
     // as speech (causes false VAD trigger -> stt-no-text-recognized).
-    // Reconnect mic to the analyser for reactive bar during STT.
-    // attachAudio disconnected it during announcement playback, and
-    // updateForState won't run while playing is true.
-    this._card.analyser.reconnectMic();
+    // Start reactive bar on mic for STT phase. updateForState won't
+    // run while playing is true, so we bypass it via startReactive().
+    this._card.ui.startReactive();
 
     let chimeDelay = 0;
     if (!isRemote) {

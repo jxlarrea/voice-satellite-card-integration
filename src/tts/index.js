@@ -39,10 +39,16 @@ export class TtsManager {
     this._remoteSawPlaying = false;
     this._remoteInitialState = null;
     this._remoteInitialContentId = null;
+
+    // TTS URL from the current play() call — used to correlate tts-audio-duration events
+    this._ttsUrl = null;
   }
 
   get isPlaying() { return this._playing; }
   get currentAudio() { return this._currentAudio; }
+
+  get ttsUrl() { return this._ttsUrl; }
+  set ttsUrl(url) { this._ttsUrl = url; }
 
   get streamingUrl() { return this._streamingUrl; }
   set streamingUrl(url) { this._streamingUrl = url; }
@@ -190,6 +196,35 @@ export class TtsManager {
     setTimeout(() => {
       this._card.mediaPlayer.notifyAudioEnd('chime');
     }, (pattern.duration || 0.3) * 1000);
+  }
+
+  /**
+   * Set a duration-based completion timer for remote TTS playback.
+   * Called when the integration sends a tts-audio-duration event after
+   * measuring the audio length server-side via mutagen.
+   * @param {number} duration - Audio duration in seconds
+   * @param {string} [ttsUrl] - TTS proxy URL to correlate with current playback
+   */
+  setAudioDuration(duration, ttsUrl) {
+    if (!this._playing || !this._remoteTarget || !duration) return;
+
+    // Ignore stale duration events from a different TTS output
+    if (ttsUrl && this._ttsUrl && ttsUrl !== this._ttsUrl) {
+      this._log.log('tts', `Ignoring stale duration (url mismatch)`);
+      return;
+    }
+
+    this._log.log('tts', `Audio duration received: ${duration}s — setting completion timer`);
+
+    // Replace the 30s safety timeout with a duration-based one (+ 2s buffer)
+    if (this._endTimer) {
+      clearTimeout(this._endTimer);
+    }
+    this._endTimer = setTimeout(() => {
+      this._endTimer = null;
+      this._log.log('tts', 'Duration-based timer fired — completing');
+      this._onComplete();
+    }, (duration + 2) * 1000);
   }
 
   /**

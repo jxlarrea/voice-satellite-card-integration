@@ -68,6 +68,7 @@ export class VoiceSatelliteCard extends HTMLElement {
   get startConversation() { return this._session?.startConversation; }
   get mediaPlayer() { return this._session?.mediaPlayer; }
   get connection() { return this._session?.connection; }
+  get ttsTarget() { return this._session?.ttsTarget ?? ''; }
 
   // ── State (delegated to session) ──────────────────────────────────
 

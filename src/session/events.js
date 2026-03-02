@@ -253,6 +253,7 @@ export function handlePipelineMessage(session, message) {
     case 'intent-end': session.pipeline.handleIntentEnd(eventData); break;
     case 'tts-start': setState(session, State.TTS); break;
     case 'tts-end': session.pipeline.handleTtsEnd(eventData); break;
+    case 'tts-audio-duration': session.tts.setAudioDuration(eventData.duration); break;
     case 'run-end': session.pipeline.handleRunEnd(); break;
     case 'error': session.pipeline.handleError(eventData); break;
     case 'displaced':

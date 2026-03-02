@@ -2,7 +2,11 @@
 
 import { CHIME_ANNOUNCE_URI } from '../audio/chime.js';
 import { buildMediaUrl, playMediaUrl } from '../audio/media-playback.js';
+import { playRemote } from '../tts/comms.js';
 import { BlurReason, Timing } from '../constants.js';
+
+/** Safety timeout for remote notification playback (matches TTS manager) */
+const REMOTE_SAFETY_TIMEOUT = 30_000;
 
 let _lastAnnounceId = 0;
 
@@ -60,6 +64,13 @@ export function dispatchSatelliteEvent(card, event) {
   // media_player events don't have an id field - route early
   if (type === 'media_player') {
     card.mediaPlayer.handleCommand(data);
+    return;
+  }
+
+  // TTS audio duration - route to TTS manager and any active notification manager
+  if (type === 'tts-audio-duration') {
+    card.tts.setAudioDuration(data.duration, data.tts_url);
+    _setNotificationAudioDuration(card, data.duration);
     return;
   }
 
@@ -172,6 +183,7 @@ export function playNotification(mgr, ann, onComplete, logPrefix) {
   }
 
   // Pre-announcement
+  const isRemote = !!mgr.card.ttsTarget;
   if (ann.preannounce === false) {
     mgr.log.log(logPrefix, 'Preannounce disabled - skipping chime');
     _playMain(mgr, ann, onComplete, logPrefix);
@@ -183,6 +195,10 @@ export function playNotification(mgr, ann, onComplete, logPrefix) {
       playMediaFor(mgr, ann.preannounce_media_id, logPrefix, () => {
         _playMain(mgr, ann, onComplete, logPrefix);
       });
+    } else if (isRemote) {
+      // Skip browser chime when remote — consistent with pipeline chime behavior
+      mgr.log.log(logPrefix, 'Skipping chime - remote TTS output');
+      _playMain(mgr, ann, onComplete, logPrefix);
     } else {
       const vol = mgr.card.mediaPlayer.volume;
       playMediaUrl(CHIME_ANNOUNCE_URI, vol, {
@@ -243,8 +259,15 @@ export function clearNotificationUI(mgr) {
 
 /**
  * Play a media URL with volume from config.
+ * Routes to remote media player when TTS output is configured.
  */
 export function playMediaFor(mgr, urlPath, logPrefix, onDone) {
+  const ttsTarget = mgr.card.ttsTarget;
+  if (ttsTarget) {
+    _playMediaForRemote(mgr, urlPath, ttsTarget, logPrefix, onDone);
+    return;
+  }
+
   const url = buildMediaUrl(urlPath);
   const volume = mgr.card.mediaPlayer.volume;
 
@@ -273,6 +296,106 @@ export function playMediaFor(mgr, urlPath, logPrefix, onDone) {
   });
 }
 
+function _playMediaForRemote(mgr, urlPath, ttsTarget, logPrefix, onDone) {
+  const remoteUrl = urlPath.startsWith('media-source://') ? urlPath : buildMediaUrl(urlPath);
+  mgr.log.log(logPrefix, `Playing on remote: ${ttsTarget} media: ${remoteUrl}`);
+  mgr.card.mediaPlayer.notifyAudioStart('notification');
+
+  const entity = mgr.card.hass?.states?.[ttsTarget];
+  mgr._remotePlayback = {
+    target: ttsTarget,
+    sawPlaying: false,
+    initialState: entity?.state,
+    initialContentId: entity?.attributes?.media_content_id || null,
+    onDone: () => {
+      _clearRemotePlayback(mgr);
+      mgr.card.mediaPlayer.notifyAudioEnd('notification');
+      onDone?.();
+    },
+    logPrefix,
+  };
+
+  playRemote(mgr.card, remoteUrl).catch(() => {
+    mgr.log.log(logPrefix, 'Remote play service call failed - forcing completion');
+    mgr._remotePlayback?.onDone();
+  });
+
+  mgr._remoteTimeout = setTimeout(() => {
+    mgr.log.log(logPrefix, 'Remote safety timeout - forcing completion');
+    mgr._remotePlayback?.onDone();
+  }, REMOTE_SAFETY_TIMEOUT);
+}
+
+/**
+ * Set a duration-based completion timer on whichever notification manager
+ * has active remote playback. Replaces the 30s safety timeout.
+ */
+function _setNotificationAudioDuration(card, duration) {
+  if (!duration) return;
+  const managers = [card.announcement, card.startConversation, card.askQuestion];
+  for (const mgr of managers) {
+    if (!mgr?._remotePlayback) continue;
+    mgr.log.log(mgr._remotePlayback.logPrefix, `Audio duration received: ${duration}s — setting completion timer`);
+    // Replace safety timeout with duration-based one (+ 2s buffer)
+    if (mgr._remoteTimeout) {
+      clearTimeout(mgr._remoteTimeout);
+    }
+    mgr._remoteTimeout = setTimeout(() => {
+      mgr.log.log(mgr._remotePlayback?.logPrefix || 'notify', 'Duration-based timer fired — completing');
+      mgr._remotePlayback?.onDone();
+    }, (duration + 2) * 1000);
+    return; // Only one manager should be playing at a time
+  }
+}
+
+function _clearRemotePlayback(mgr) {
+  if (mgr._remoteTimeout) {
+    clearTimeout(mgr._remoteTimeout);
+    mgr._remoteTimeout = null;
+  }
+  mgr._remotePlayback = null;
+}
+
+/**
+ * Check remote media player state for notification playback completion.
+ * Called from session.updateHass() for each notification manager.
+ * Same pattern as TtsManager.checkRemotePlayback().
+ * @param {object} mgr - Notification manager instance
+ * @param {object} hass
+ */
+export function checkRemoteNotificationPlayback(mgr, hass) {
+  if (!mgr?._remotePlayback) return;
+
+  const { target, initialState, initialContentId, onDone, logPrefix } = mgr._remotePlayback;
+  const entity = hass.states?.[target];
+  if (!entity) return;
+
+  const state = entity.state;
+  const contentId = entity.attributes?.media_content_id || null;
+  const isActive = state === 'playing' || state === 'buffering';
+
+  // Phase 1: detect our content started playing
+  if (!mgr._remotePlayback.sawPlaying) {
+    if (!isActive) return;
+    const wasAlreadyActive = initialState === 'playing' || initialState === 'buffering';
+    if (wasAlreadyActive && contentId === initialContentId) return;
+    mgr._remotePlayback.sawPlaying = true;
+    return;
+  }
+
+  // Phase 2: detect our content finished
+  if (!isActive) {
+    mgr.log.log(logPrefix, `Remote player stopped (state: ${state}) — completing`);
+    onDone();
+    return;
+  }
+
+  if (initialContentId && contentId === initialContentId) {
+    mgr.log.log(logPrefix, 'Remote player resumed original content — completing');
+    onDone();
+  }
+}
+
 
 /**
  * Initialize shared notification state on a manager instance.
@@ -285,4 +408,6 @@ export function initNotificationState(mgr) {
   mgr.clearTimeoutId = null;
   mgr.barWasVisible = false;
   mgr.queued = null;
+  mgr._remotePlayback = null;
+  mgr._remoteTimeout = null;
 }

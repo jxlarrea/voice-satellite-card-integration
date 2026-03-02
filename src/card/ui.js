@@ -141,7 +141,10 @@ export class UIManager {
       if (config.animation) {
         bar.classList.add(config.animation);
       }
-      if (reactive && config.useReactive) {
+      // Skip reactivity for remote TTS — no local audio to visualize
+      const isRemoteTts = state === 'TTS' && !!this._card.ttsTarget;
+      const shouldReact = config.useReactive && !isRemoteTts;
+      if (reactive && shouldReact) {
         bar.classList.add('reactive');
         this._globalUI.classList.add('reactive-mode');
         this._card.analyser.reconnectMic();
@@ -149,6 +152,7 @@ export class UIManager {
       } else {
         bar.classList.remove('reactive');
         this._globalUI.classList.remove('reactive-mode');
+        if (reactive) this._card.analyser.stop();
       }
     } else {
       bar.classList.remove('visible', 'connecting', 'listening', 'processing', 'speaking', 'reactive');
@@ -165,6 +169,20 @@ export class UIManager {
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     bar.classList.remove('reactive');
     this._card.analyser.stop();
+  }
+
+  /**
+   * Start reactive bar on mic (counterpart to stopReactive).
+   * Used when updateForState is blocked (e.g. notifPlaying guard)
+   * but the bar should react to mic input (ask_question STT).
+   */
+  startReactive() {
+    if (!this._globalUI || !this._card.isReactiveBarEnabled) return;
+    const bar = this._globalUI.querySelector('.vs-rainbow-bar');
+    bar.classList.add('reactive');
+    this._globalUI.classList.add('reactive-mode');
+    this._card.analyser.reconnectMic();
+    this._card.analyser.start(bar);
   }
 
   // ─── Start Button ─────────────────────────────────────────────────

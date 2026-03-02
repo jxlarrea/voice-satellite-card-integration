@@ -15,6 +15,9 @@
   ],
   "documentation": "https://github.com/jxlarrea/voice-satellite-card-integration",
   "iot_class": "local_push",
+  "requirements": [
+    "mutagen>=1.47.0"
+  ],
   "issue_tracker": "https://github.com/jxlarrea/voice-satellite-card-integration/issues",
-  "version": "5.8.2"
+  "version": "5.8.3"
 }

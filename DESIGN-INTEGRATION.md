@@ -156,6 +156,7 @@ The card subscribes via `voice_satellite/subscribe_events`. The integration push
 {type: "start_conversation",  data: {id, message, media_id, start_conversation: true, ...}}
 {type: "media_player",        data: {command: "play"|"pause"|"resume"|"stop"|"volume_set"|"volume_mute", ...}}
 {type: "timer",               data: {timers: [...], last_timer_event: "started"|"cancelled"|"finished"|"updated"}}
+{type: "tts-audio-duration",  data: {duration: <float>, tts_url: <string>}}
 ```
 
 ### 3.3 Entity Attributes Read by the Card
@@ -1227,6 +1228,11 @@ async def async_announce(self, announcement):
     # Push to card
     self._push_satellite_event("announcement", announcement_data)
 
+    # Measure audio duration for remote media players (e.g. Sonos)
+    media_url = announcement.media_id or ""
+    if media_url and "/api/tts_proxy/" in media_url:
+        self.hass.async_create_task(self._send_tts_audio_duration(media_url))
+
     # Block until card ACKs or timeout
     try:
         await asyncio.wait_for(self._announce_event.wait(), timeout=120)
@@ -1334,6 +1340,11 @@ async def async_start_conversation(self, announcement):
 
     self._announce_event = asyncio.Event()
     self._push_satellite_event("start_conversation", announcement_data)
+
+    # Measure audio duration for remote media players (e.g. Sonos)
+    media_url = announcement.media_id or ""
+    if media_url and "/api/tts_proxy/" in media_url:
+        self.hass.async_create_task(self._send_tts_audio_duration(media_url))
 
     try:
         await asyncio.wait_for(self._announce_event.wait(), timeout=120)
@@ -1514,6 +1525,51 @@ The `finally` block also:
 - Sets `_ask_question_pending = False`
 - Calls `async_write_ha_state()` to push attribute updates
 - Stops screensaver keep-alive if entity is idle
+
+---
+
+## 15.7 TTS Audio Duration Measurement
+
+Remote media players (e.g. Sonos) often don't provide reliable entity state
+transitions for playback completion detection. The integration measures TTS
+audio file duration server-side and pushes it to the card as a fallback.
+
+### How It Works
+
+`_send_tts_audio_duration(tts_url)` runs as a background task:
+1. Fetches the TTS audio file from `tts_url` via `aiohttp`
+2. Parses the audio with `mutagen` to extract duration
+3. Pushes `{type: "tts-audio-duration", data: {duration, tts_url}}` via
+   satellite subscription
+
+The card replaces the 30s safety timeout with a precise `(duration + 2s)`
+timer, ensuring timely completion even without state-based detection.
+
+### When It Fires
+
+- **Pipeline TTS:** After `tts-end` event (URL from pipeline event data)
+- **Announcements:** After pushing the announcement satellite event
+  (`media_id` from `AssistSatelliteAnnouncement`)
+- **Start conversation:** After pushing the start_conversation satellite
+  event (same `media_id` pattern)
+- **Ask question:** Delegates to `async_announce()`, so covered by the
+  announcement path
+
+### URL Handling
+
+`media_id` can be a relative path (`/api/tts_proxy/...`) from pipeline
+events or a full URL (`https://host/api/tts_proxy/...`) from announcement
+objects. The method detects full URLs and skips prepending `base_url`:
+
+```python
+if tts_url.startswith(("http://", "https://")):
+    full_url = tts_url
+else:
+    full_url = f"{base_url}{tts_url}"
+```
+
+The check uses `"/api/tts_proxy/" in media_url` (not `startswith`) to
+handle both relative and full URL formats.
 
 ---
 

@@ -259,6 +259,11 @@ export function handleTtsEnd(mgr, eventData) {
   }
 
   const { tts } = mgr.card;
+
+  // Store canonical tts-end URL for duration event correlation
+  const ttsUrl = eventData.tts_output?.url || eventData.tts_output?.url_path || null;
+  if (ttsUrl) tts.ttsUrl = ttsUrl;
+
   if (tts.isPlaying) {
     // Store tts-end URL as retry fallback for the in-progress streaming playback
     const endUrl = eventData.tts_output?.url || eventData.tts_output?.url_path || null;
