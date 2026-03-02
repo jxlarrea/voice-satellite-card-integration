@@ -47,10 +47,19 @@ export async function loadSkin(id) {
   if (_cache[id]) return _cache[id];
   const loader = SKIN_LOADERS[id];
   if (!loader) return defaultSkin;
-  const mod = await loader();
-  const skin = Object.values(mod)[0];
-  _cache[id] = skin;
-  return skin;
+  try {
+    const mod = await loader();
+    const skin = Object.values(mod)[0];
+    if (!skin || !skin.id || !skin.css) {
+      console.warn(`[voice-satellite] Skin "${id}" has invalid structure, using default`);
+      return defaultSkin;
+    }
+    _cache[id] = skin;
+    return skin;
+  } catch (e) {
+    console.warn(`[voice-satellite] Failed to load skin "${id}": ${e.message || e}`);
+    return defaultSkin;
+  }
 }
 
 /**

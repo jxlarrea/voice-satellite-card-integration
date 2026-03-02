@@ -8,6 +8,7 @@
 
 import { formatTime } from '../shared/format.js';
 import { getSwitchState } from '../shared/satellite-state.js';
+import { attachDoubleTap } from '../shared/double-tap.js';
 import { t } from '../i18n/index.js';
 
 const MINI_CSS = `
@@ -672,7 +673,7 @@ export class MiniUIManager {
     pill.innerHTML = '<span class="vs-mini-timer-icon">⏱</span><span class="vs-mini-timer-time"></span>';
     pill._vsTimeEl = pill.querySelector('.vs-mini-timer-time');
     this.updateTimerPill(pill, timer.secondsLeft, timer.totalSeconds);
-    if (onDoubleTap) _attachMiniDoubleTap(pill, onDoubleTap);
+    if (onDoubleTap) attachDoubleTap(pill, onDoubleTap);
     return pill;
   }
 
@@ -726,7 +727,7 @@ export class MiniUIManager {
     const alert = document.createElement('div');
     alert.className = 'vs-mini-timer-alert';
     alert.innerHTML = `<div class="vs-mini-timer-alert-text">⏱ ${this._t('mini.timer.finished', 'Timer finished')}</div>`;
-    if (onDoubleTap) _attachMiniDoubleTap(alert, onDoubleTap);
+    if (onDoubleTap) attachDoubleTap(alert, onDoubleTap);
     alert.addEventListener('click', () => onDoubleTap?.());
     this._root.appendChild(alert);
     this._timerAlertEl = alert;
@@ -1012,20 +1013,3 @@ export class MiniUIManager {
   }
 }
 
-function _attachMiniDoubleTap(el, callback) {
-  let lastTap = 0;
-  let lastTouchTime = 0;
-  const handler = (e) => {
-    const now = Date.now();
-    if (e.type === 'touchstart') lastTouchTime = now;
-    if (e.type === 'click' && (now - lastTouchTime) < 400) return;
-    if (now - lastTap < 400 && now - lastTap > 0) {
-      e.preventDefault();
-      e.stopPropagation();
-      callback();
-    }
-    lastTap = now;
-  };
-  el.addEventListener('touchstart', handler, { passive: false });
-  el.addEventListener('click', handler);
-}

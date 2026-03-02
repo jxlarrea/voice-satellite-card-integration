@@ -8,6 +8,7 @@
  */
 
 import { Timing } from '../constants.js';
+import { attachDoubleTap } from '../shared/double-tap.js';
 import { formatTime, formatPrice, formatLargeNumber, formatChange } from '../shared/format.js';
 import { t } from '../i18n/index.js';
 
@@ -808,6 +809,11 @@ export class UIManager {
     const container = document.createElement('div');
     container.id = 'voice-satellite-timers';
     container.className = 'vs-timer-container';
+    // Respect suppress_full_card — if a mini card has it enabled, the full
+    // card's timer container should be hidden from creation.
+    if (this._card.cardType === 'full' && this._card._session?._fullCardSuppressed) {
+      container.style.display = 'none';
+    }
     document.body.appendChild(container);
     this._timerContainer = container;
   }
@@ -847,7 +853,7 @@ export class UIManager {
     pill._vsProgressEl = pill.querySelector('.vs-timer-progress');
 
     if (onDoubleTap) {
-      _attachDoubleTap(pill, onDoubleTap);
+      attachDoubleTap(pill, onDoubleTap);
     }
 
     return pill;
@@ -928,7 +934,7 @@ export class UIManager {
     document.body.appendChild(this._timerAlertEl);
 
     if (onDoubleTap) {
-      _attachDoubleTap(this._timerAlertEl, onDoubleTap);
+      attachDoubleTap(this._timerAlertEl, onDoubleTap);
     }
   }
 
@@ -1014,21 +1020,4 @@ export class UIManager {
 
 // ─── Module-level helpers (no DOM, pure logic) ────────────────────
 
-function _attachDoubleTap(el, callback) {
-  let lastTap = 0;
-  let lastTouchTime = 0;
-  const handler = (e) => {
-    const now = Date.now();
-    // Touch/click deduplication - skip synthetic click that follows a recent touch
-    if (e.type === 'touchstart') lastTouchTime = now;
-    if (e.type === 'click' && (now - lastTouchTime) < 400) return;
-    if (now - lastTap < Timing.DOUBLE_TAP_THRESHOLD && now - lastTap > 0) {
-      e.preventDefault();
-      e.stopPropagation();
-      callback();
-    }
-    lastTap = now;
-  };
-  el.addEventListener('touchstart', handler, { passive: false });
-  el.addEventListener('click', handler);
-}
+

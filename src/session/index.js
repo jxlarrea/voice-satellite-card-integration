@@ -204,6 +204,12 @@ export class VoiceSatelliteSession {
       if (this.isReactiveBarEnabled && this._audio.sourceNode && this._audio.audioContext) {
         this._analyser.attachMic(this._audio.sourceNode, this._audio.audioContext);
       }
+
+      // If timers are active, re-sync pills so the new card gets its own
+      // pill elements and _uiEls entries (e.g. navigating from mini to full).
+      if (this._timer.timers.length > 0) {
+        this._timer.syncDOM();
+      }
     }
     this._syncFullCardSuppression();
 
@@ -238,6 +244,10 @@ export class VoiceSatelliteSession {
       console.trace('full card unregister');
     }
     this._cards.delete(card);
+    // Clean up per-card timer pill references so tick doesn't touch stale elements
+    for (const t of this._timer.timers) {
+      t._uiEls?.delete(card);
+    }
     this._logger.log('session', `Card unregistered (${this._cards.size} remaining)`);
     this._syncFullCardSuppression();
   }
@@ -344,13 +354,13 @@ export class VoiceSatelliteSession {
    */
   teardown() {
     this._logger.log('session', 'Tearing down session');
-    try { this._wakeWord?.stop(); } catch (_) {}
-    try { this._pipeline.stop(); } catch (_) {}
-    try { this._audio.stopMicrophone(); } catch (_) {}
-    try { this._tts.stop(); } catch (_) {}
-    try { this._timer.destroy(); } catch (_) {}
-    try { teardownSatelliteSubscription(); } catch (_) {}
-    try { this._visibility.teardown(); } catch (_) {}
+    try { this._wakeWord?.stop(); } catch (e) { this._logger.log('session', `wakeWord.stop: ${e.message || e}`); }
+    try { this._pipeline.stop(); } catch (e) { this._logger.log('session', `pipeline.stop: ${e.message || e}`); }
+    try { this._audio.stopMicrophone(); } catch (e) { this._logger.log('session', `audio.stopMicrophone: ${e.message || e}`); }
+    try { this._tts.stop(); } catch (e) { this._logger.log('session', `tts.stop: ${e.message || e}`); }
+    try { this._timer.destroy(); } catch (e) { this._logger.log('session', `timer.destroy: ${e.message || e}`); }
+    try { teardownSatelliteSubscription(); } catch (e) { this._logger.log('session', `teardownSub: ${e.message || e}`); }
+    try { this._visibility.teardown(); } catch (e) { this._logger.log('session', `visibility.teardown: ${e.message || e}`); }
     this._hasStarted = false;
     this._starting = false;
     this._startAttempted = false;

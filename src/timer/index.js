@@ -37,6 +37,9 @@ export class TimerManager {
     /** @type {string[]} Track timer IDs to detect removals */
     this._knownTimerIds = [];
 
+    // Delayed container removal (cancelTimer grace period)
+    this._removeContainerTimeout = null;
+
     // Alert state
     this._alertActive = false;
     this._alertEl = null;
@@ -70,6 +73,10 @@ export class TimerManager {
 
   destroy() {
     this.stopTick();
+    if (this._removeContainerTimeout) {
+      clearTimeout(this._removeContainerTimeout);
+      this._removeContainerTimeout = null;
+    }
     removeContainer(this);
     this.clearAlert();
     this._timers = [];
@@ -142,6 +149,7 @@ export class TimerManager {
       this._tickInterval = null;
     }
   }
+  syncDOM() { syncDOM(this); }
   showAlert() { showAlert(this); }
   clearAlert() { clearAlert(this); }
   removePill(timerId) { removePill(this, timerId); }
@@ -167,7 +175,8 @@ export class TimerManager {
 
     if (this._timers.length === 0) {
       this.stopTick();
-      setTimeout(() => {
+      this._removeContainerTimeout = setTimeout(() => {
+        this._removeContainerTimeout = null;
         if (this._timers.length === 0) removeContainer(this);
       }, 500);
     }

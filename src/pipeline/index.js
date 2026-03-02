@@ -286,6 +286,10 @@ export class PipelineManager {
       }, delay || 0);
     }).catch((e) => {
       this._isRestarting = false;
+      if (this._restartTimeout) {
+        clearTimeout(this._restartTimeout);
+        this._restartTimeout = null;
+      }
       this._log.error('pipeline', `stop() failed during restart: ${e?.message || e}`);
     });
   }
@@ -296,6 +300,11 @@ export class PipelineManager {
       return;
     }
     this._isRestarting = true;
+
+    if (this._restartTimeout) {
+      clearTimeout(this._restartTimeout);
+      this._restartTimeout = null;
+    }
 
     // Store ask_question callback if provided
     this._askQuestionCallback = opts.onSttEnd || null;

@@ -166,6 +166,15 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             "select", DOMAIN, f"{self._entry.entry_id}-vad_sensitivity"
         )
 
+    def _get_child_state(
+        self, registry: er.EntityRegistry, platform: str, suffix: str
+    ):
+        """Look up a child entity state by platform and unique_id suffix."""
+        eid = registry.async_get_entity_id(
+            platform, DOMAIN, f"{self._entry.entry_id}{suffix}"
+        )
+        return self.hass.states.get(eid) if eid else None
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose timer and config state for the card to read."""
@@ -174,83 +183,44 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             "last_timer_event": self._last_timer_event,
         }
 
-        # Expose mute and wake sound switch states for the card
         registry = er.async_get(self.hass)
-        mute_eid = registry.async_get_entity_id(
-            "switch", DOMAIN, f"{self._entry.entry_id}_mute"
-        )
-        if mute_eid:
-            s = self.hass.states.get(mute_eid)
-            attrs["muted"] = s.state == "on" if s else False
-        wake_eid = registry.async_get_entity_id(
-            "switch", DOMAIN, f"{self._entry.entry_id}_wake_sound"
-        )
-        if wake_eid:
-            s = self.hass.states.get(wake_eid)
-            attrs["wake_sound"] = s.state == "on" if s else True
+
+        # Expose mute and wake sound switch states for the card
+        s = self._get_child_state(registry, "switch", "_mute")
+        if s is not None:
+            attrs["muted"] = s.state == "on"
+
+        s = self._get_child_state(registry, "switch", "_wake_sound")
+        if s is not None:
+            attrs["wake_sound"] = s.state == "on"
 
         # Expose TTS output select entity_id for the card
-        tts_select_eid = registry.async_get_entity_id(
-            "select", DOMAIN, f"{self._entry.entry_id}_tts_output"
-        )
-        if tts_select_eid:
-            s = self.hass.states.get(tts_select_eid)
-            if s and s.state not in ("Browser", "unknown", "unavailable"):
-                attrs["tts_target"] = s.attributes.get("entity_id", "")
-            else:
-                attrs["tts_target"] = ""
+        s = self._get_child_state(registry, "select", "_tts_output")
+        if s and s.state not in ("Browser", "unknown", "unavailable"):
+            attrs["tts_target"] = s.attributes.get("entity_id", "")
+        elif s:
+            attrs["tts_target"] = ""
 
         # Expose announcement display duration for the card
-        ann_dur_eid = registry.async_get_entity_id(
-            "number", DOMAIN,
-            f"{self._entry.entry_id}_announcement_display_duration"
+        s = self._get_child_state(
+            registry, "number", "_announcement_display_duration"
         )
-        if ann_dur_eid:
-            s = self.hass.states.get(ann_dur_eid)
-            if s and s.state not in ("unknown", "unavailable"):
-                try:
-                    attrs["announcement_display_duration"] = int(
-                        float(s.state)
-                    )
-                except (ValueError, TypeError):
-                    pass
+        if s and s.state not in ("unknown", "unavailable"):
+            try:
+                attrs["announcement_display_duration"] = int(float(s.state))
+            except (ValueError, TypeError):
+                pass
 
         # Expose wake word detection mode and model for the card
-        ww_detect_eid = registry.async_get_entity_id(
-            "select", DOMAIN,
-            f"{self._entry.entry_id}_wake_word_detection"
-        )
-        if ww_detect_eid:
-            s = self.hass.states.get(ww_detect_eid)
+        for suffix, attr_key in (
+            ("_wake_word_detection", "wake_word_detection"),
+            ("_wake_word_model", "wake_word_model"),
+            ("_wake_word_model_2", "wake_word_model_2"),
+            ("_wake_word_sensitivity", "wake_word_sensitivity"),
+        ):
+            s = self._get_child_state(registry, "select", suffix)
             if s and s.state not in ("unknown", "unavailable"):
-                attrs["wake_word_detection"] = s.state
-
-        ww_model_eid = registry.async_get_entity_id(
-            "select", DOMAIN,
-            f"{self._entry.entry_id}_wake_word_model"
-        )
-        if ww_model_eid:
-            s = self.hass.states.get(ww_model_eid)
-            if s and s.state not in ("unknown", "unavailable"):
-                attrs["wake_word_model"] = s.state
-
-        ww_model2_eid = registry.async_get_entity_id(
-            "select", DOMAIN,
-            f"{self._entry.entry_id}_wake_word_model_2"
-        )
-        if ww_model2_eid:
-            s = self.hass.states.get(ww_model2_eid)
-            if s and s.state not in ("unknown", "unavailable"):
-                attrs["wake_word_model_2"] = s.state
-
-        ww_sens_eid = registry.async_get_entity_id(
-            "select", DOMAIN,
-            f"{self._entry.entry_id}_wake_word_sensitivity"
-        )
-        if ww_sens_eid:
-            s = self.hass.states.get(ww_sens_eid)
-            if s and s.state not in ("unknown", "unavailable"):
-                attrs["wake_word_sensitivity"] = s.state
+                attrs[attr_key] = s.state
 
         return attrs
 

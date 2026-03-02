@@ -174,11 +174,22 @@ export class UIBroadcastProxy {
   }
 
   updateTimerPill(el, secondsLeft, totalSeconds) {
-    // Each UI's updateTimerPill operates on the passed element directly.
-    // Since we call every UI, all pills get updated regardless of which
-    // UI originally created `el`.
     for (const c of this._cards) {
       c.ui.updateTimerPill(el, secondsLeft, totalSeconds);
+    }
+  }
+
+  /**
+   * Tick all timer pills across all registered card UIs.
+   * Uses per-card element references (_uiEls) so each card's own pill is
+   * updated, not just the last one stored in t.el.
+   */
+  tickTimerPills(timers) {
+    for (const c of this._cards) {
+      for (const t of timers) {
+        const el = t._uiEls?.get(c) ?? t.el;
+        if (el) c.ui.updateTimerPill(el, t.secondsLeft, t.totalSeconds);
+      }
     }
   }
 

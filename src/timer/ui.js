@@ -38,9 +38,9 @@ export function tick(mgr) {
     const elapsed = Math.max(0, Math.floor((now - t.startedAt) / 1000));
     const left = Math.max(0, t.totalSeconds - elapsed);
     t.secondsLeft = left;
-
-    mgr.card.ui.updateTimerPill(t.el, left, t.totalSeconds);
   }
+
+  mgr.card.ui.tickTimerPills(mgr.timers);
 }
 
 /** @param {import('./index.js').TimerManager} mgr */

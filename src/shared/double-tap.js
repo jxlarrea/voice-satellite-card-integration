@@ -10,6 +10,28 @@ import { clearNotificationUI } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
 import { getSwitchState } from '../shared/satellite-state.js';
 
+/**
+ * Attach a double-tap/double-click handler to an element.
+ * Includes touch/click deduplication to avoid phantom triggers.
+ */
+export function attachDoubleTap(el, callback) {
+  let lastTap = 0;
+  let lastTouchTime = 0;
+  const handler = (e) => {
+    const now = Date.now();
+    if (e.type === 'touchstart') lastTouchTime = now;
+    if (e.type === 'click' && (now - lastTouchTime) < 400) return;
+    if (now - lastTap < Timing.DOUBLE_TAP_THRESHOLD && now - lastTap > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      callback();
+    }
+    lastTap = now;
+  };
+  el.addEventListener('touchstart', handler, { passive: false });
+  el.addEventListener('click', handler);
+}
+
 export class DoubleTapHandler {
   constructor(card) {
     this._card = card;

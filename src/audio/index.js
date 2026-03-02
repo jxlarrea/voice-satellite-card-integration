@@ -89,6 +89,10 @@ export class AudioManager {
       this._mediaStream.getTracks().forEach((track) => track.stop());
       this._mediaStream = null;
     }
+    if (this._audioContext) {
+      this._audioContext.close().catch(() => {});
+      this._audioContext = null;
+    }
     this._audioBuffer = [];
   }
 
