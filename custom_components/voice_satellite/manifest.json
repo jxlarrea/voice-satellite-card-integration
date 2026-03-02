@@ -19,5 +19,5 @@
     "mutagen>=1.47.0"
   ],
   "issue_tracker": "https://github.com/jxlarrea/voice-satellite-card-integration/issues",
-  "version": "5.8.3"
+  "version": "5.8.4"
 }
