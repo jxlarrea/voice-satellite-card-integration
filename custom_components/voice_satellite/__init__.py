@@ -17,12 +17,16 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
-from homeassistant.core import CoreState, HomeAssistant
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
-from .frontend import JSModuleRegistration
+from .frontend import (
+    async_register_resource,
+    async_register_static_paths,
+    async_unregister_resource,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,18 +104,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     websocket_api.async_register_command(hass, ws_cancel_timer)
     websocket_api.async_register_command(hass, ws_media_player_event)
 
-    # Register frontend JS module
-    async def _register_frontend(_event=None) -> None:
-        try:
-            registration = JSModuleRegistration(hass)
-            await registration.async_register()
-        except Exception as err:
-            _LOGGER.warning("Failed to register frontend resources: %s", err)
-
-    if hass.state is CoreState.running:
-        await _register_frontend()
-    else:
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_frontend)
+    # Register frontend static paths and Lovelace resource
+    try:
+        await async_register_static_paths(hass)
+        await async_register_resource(hass)
+    except Exception as err:
+        _LOGGER.warning("Failed to register frontend resources: %s", err)
 
     return True
 
@@ -119,6 +117,15 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Voice Satellite Card from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+
+    # Safety net: verify frontend resources exist (covers HACS update edge cases
+    # where async_setup registration may have failed or the resource was deleted
+    # during the unload/reload cycle)
+    try:
+        await async_register_resource(hass)
+    except Exception as err:
+        _LOGGER.warning("Failed to verify frontend resource: %s", err)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -131,8 +138,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(f"{entry.entry_id}_media_player", None)
         # Remove Lovelace resource when last entry is unloaded
         if not hass.data[DOMAIN]:
-            registration = JSModuleRegistration(hass)
-            await registration.async_unregister()
+            await async_unregister_resource(hass)
     return result
 
 

@@ -10,9 +10,11 @@ import logging
 from pathlib import Path
 
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.components.lovelace import MODE_STORAGE
+from homeassistant.components.lovelace.resources import (
+    ResourceStorageCollection,
+)
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_call_later
+from homeassistant.components.frontend import add_extra_js_url
 
 from .const import INTEGRATION_VERSION, URL_BASE, JS_FILENAME
 
@@ -25,136 +27,115 @@ TFLITE_DIR = str(Path(__file__).parent / "tflite")
 TFLITE_URL = f"{URL_BASE}/tflite"
 
 
-class JSModuleRegistration:
-    """Registers the Voice Satellite Card JS module in Home Assistant."""
+def _get_resources(hass: HomeAssistant) -> ResourceStorageCollection | None:
+    """Get the Lovelace resources collection, handling HA version differences."""
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None:
+        return None
+    # Newer HA: lovelace.resources; older HA: lovelace["resources"]
+    resources = (
+        lovelace.resources
+        if hasattr(lovelace, "resources")
+        else lovelace.get("resources") if isinstance(lovelace, dict) else None
+    )
+    if resources is None or not isinstance(resources, ResourceStorageCollection):
+        return None
+    return resources
 
-    def __init__(self, hass: HomeAssistant) -> None:
-        """Initialize the registrar."""
-        self.hass = hass
-        self.lovelace = hass.data.get("lovelace")
-        # HA 2026.2 renamed lovelace.mode -> lovelace.resource_mode
-        self.resource_mode: str = getattr(
-            self.lovelace, "resource_mode",
-            getattr(self.lovelace, "mode", "yaml"),
-        )
 
-    async def async_register(self) -> None:
-        """Register static path and Lovelace resource."""
-        await self._async_register_path()
+async def async_register_static_paths(hass: HomeAssistant) -> None:
+    """Register /voice_satellite/* as static HTTP paths."""
+    paths: list[StaticPathConfig] = [
+        StaticPathConfig(URL_BASE, FRONTEND_DIR, False),
+    ]
 
-        if self.lovelace is None:
-            _LOGGER.warning("Lovelace not available - cannot auto-register card resource")
-            return
+    if Path(MODELS_DIR).is_dir():
+        paths.append(StaticPathConfig(MODELS_URL, MODELS_DIR, True))
 
-        if self.resource_mode == MODE_STORAGE:
-            await self._async_wait_for_lovelace_resources()
-        else:
-            _LOGGER.info(
-                "Lovelace is in YAML mode - add this resource manually: "
-                "url: %s/%s, type: module",
-                URL_BASE,
-                JS_FILENAME,
-            )
+    if Path(TFLITE_DIR).is_dir():
+        paths.append(StaticPathConfig(TFLITE_URL, TFLITE_DIR, True))
 
-    async def _async_register_path(self) -> None:
-        """Register /voice_satellite as a static HTTP path serving frontend/."""
+    for cfg in paths:
         try:
-            await self.hass.http.async_register_static_paths(
-                [StaticPathConfig(URL_BASE, FRONTEND_DIR, False)]
-            )
-            _LOGGER.debug("Static path registered: %s -> %s", URL_BASE, FRONTEND_DIR)
+            await hass.http.async_register_static_paths([cfg])
+            _LOGGER.debug("Static path registered: %s", cfg.url_path)
         except RuntimeError:
-            _LOGGER.debug("Static path already registered: %s", URL_BASE)
+            _LOGGER.debug("Static path already registered: %s", cfg.url_path)
 
-        # Serve wake word models from /voice_satellite/models/
-        models_path = Path(MODELS_DIR)
-        if models_path.is_dir():
-            try:
-                await self.hass.http.async_register_static_paths(
-                    [StaticPathConfig(MODELS_URL, MODELS_DIR, True)]
-                )
-                _LOGGER.debug("Models path registered: %s -> %s", MODELS_URL, MODELS_DIR)
-            except RuntimeError:
-                _LOGGER.debug("Models path already registered: %s", MODELS_URL)
 
-        # Serve TFLite WASM files from /voice_satellite/tflite/
-        tflite_path = Path(TFLITE_DIR)
-        if tflite_path.is_dir():
-            try:
-                await self.hass.http.async_register_static_paths(
-                    [StaticPathConfig(TFLITE_URL, TFLITE_DIR, True)]
-                )
-                _LOGGER.debug("TFLite path registered: %s -> %s", TFLITE_URL, TFLITE_DIR)
-            except RuntimeError:
-                _LOGGER.debug("TFLite path already registered: %s", TFLITE_URL)
+# Legacy resource URLs from the old standalone card repo (archived).
+# If present, they conflict with the integrated version and must be removed.
+_LEGACY_RESOURCE_MARKERS = (
+    "/voice-satellite-card/voice-satellite-card.js",
+    "/Voice-Satellite-Card-for-Home-Assistant/",
+)
 
-    async def _async_wait_for_lovelace_resources(self) -> None:
-        """Wait for Lovelace resources to be loaded, then register."""
-        max_retries = 12  # ~60 seconds total
 
-        async def _check_loaded(_now, attempt: int = 0) -> None:
-            if self.lovelace.resources.loaded:
-                await self._async_register_module()
-            elif attempt >= max_retries:
-                _LOGGER.warning(
-                    "Lovelace resources did not load after %d attempts - "
-                    "card resource not auto-registered",
-                    max_retries,
-                )
-            else:
-                _LOGGER.debug("Lovelace resources not yet loaded, retrying in 5s (attempt %d/%d)", attempt + 1, max_retries)
-                async_call_later(
-                    self.hass, 5,
-                    lambda now: self.hass.async_create_task(_check_loaded(now, attempt + 1)),
-                )
+async def async_register_resource(hass: HomeAssistant) -> None:
+    """Register or update the JS module in Lovelace resources."""
+    url = f"{URL_BASE}/{JS_FILENAME}"
+    versioned_url = f"{url}?v={INTEGRATION_VERSION}"
 
-        await _check_loaded(0)
+    resources = _get_resources(hass)
+    if resources is None:
+        # Not storage mode or lovelace unavailable — use extra JS fallback
+        _LOGGER.debug(
+            "Lovelace resources collection not available, "
+            "registering via add_extra_js_url"
+        )
+        add_extra_js_url(hass, versioned_url)
+        return
 
-    async def _async_register_module(self) -> None:
-        """Register or update the JS module in Lovelace resources."""
-        url = f"{URL_BASE}/{JS_FILENAME}"
-        versioned_url = f"{url}?v={INTEGRATION_VERSION}"
+    # Force-load the resources storage (replaces the old polling mechanism)
+    await resources.async_get_info()
 
-        # Check if already registered
-        existing = [
-            r
-            for r in self.lovelace.resources.async_items()
-            if r["url"].split("?")[0] == url
-        ]
-
-        if existing:
-            resource = existing[0]
-            if resource["url"] != versioned_url:
-                _LOGGER.info(
-                    "Updating Voice Satellite Card resource to v%s",
-                    INTEGRATION_VERSION,
-                )
-                await self.lovelace.resources.async_update_item(
-                    resource["id"],
-                    {"res_type": "module", "url": versioned_url},
-                )
-            else:
-                _LOGGER.debug("Voice Satellite Card resource already up to date")
-        else:
-            _LOGGER.info(
-                "Registering Voice Satellite Card resource v%s",
-                INTEGRATION_VERSION,
+    # Remove legacy standalone card resources that conflict with this integration
+    for item in resources.async_items():
+        item_url = item.get("url", "")
+        if any(marker in item_url for marker in _LEGACY_RESOURCE_MARKERS):
+            _LOGGER.warning(
+                "Removing legacy Voice Satellite Card resource: %s", item_url
             )
-            await self.lovelace.resources.async_create_item(
-                {"res_type": "module", "url": versioned_url}
-            )
+            await resources.async_delete_item(item["id"])
 
-    async def async_unregister(self) -> None:
-        """Remove the Lovelace resource entry (called on integration unload)."""
-        if self.lovelace is None or self.resource_mode != MODE_STORAGE:
+    # Check if already registered
+    for item in resources.async_items():
+        item_url = item.get("url", "")
+        if not item_url.split("?")[0] == url:
+            continue
+        # Found existing entry
+        if item_url.endswith(INTEGRATION_VERSION):
+            _LOGGER.debug("Voice Satellite Card resource already up to date")
             return
+        # Version mismatch — update
+        _LOGGER.info(
+            "Updating Voice Satellite Card resource to v%s",
+            INTEGRATION_VERSION,
+        )
+        await resources.async_update_item(
+            item["id"], {"res_type": "module", "url": versioned_url}
+        )
+        return
 
-        if not self.lovelace.resources.loaded:
-            await self.lovelace.resources.async_load()
+    # Not found — create
+    _LOGGER.info(
+        "Registering Voice Satellite Card resource v%s", INTEGRATION_VERSION
+    )
+    await resources.async_create_item({"res_type": "module", "url": versioned_url})
 
-        url = f"{URL_BASE}/{JS_FILENAME}"
-        for resource in self.lovelace.resources.async_items():
-            if resource["url"].split("?")[0] == url:
-                await self.lovelace.resources.async_delete_item(resource["id"])
-                _LOGGER.info("Removed Voice Satellite Card Lovelace resource")
-                break
+
+async def async_unregister_resource(hass: HomeAssistant) -> None:
+    """Remove the Lovelace resource entry (called on last entry unload)."""
+    resources = _get_resources(hass)
+    if resources is None:
+        return
+
+    if not resources.loaded:
+        await resources.async_load()
+
+    url = f"{URL_BASE}/{JS_FILENAME}"
+    for item in resources.async_items():
+        if item.get("url", "").split("?")[0] == url:
+            await resources.async_delete_item(item["id"])
+            _LOGGER.info("Removed Voice Satellite Card Lovelace resource")
+            break
