@@ -537,8 +537,9 @@ src/
 │
 ├── wake-word/                   (lazy-loaded via webpack code splitting)
 │   ├── index.js              WakeWordManager (orchestrator, detection lifecycle)
-│   ├── models.js             ONNX Runtime + model loading/caching
-│   └── inference.js          WakeWordInference (4-model pipeline: mel → embedding → VAD → keyword(s))
+│   ├── micro-models.js       TFLite WASM runtime + model loading/caching
+│   ├── micro-inference.js    MicroWakeWordInference (feature extraction + keyword classifier)
+│   └── micro-frontend.js    MicroFrontend (FFT → mel filterbank → noise reduction → PCAN)
 │
 ├── shared/
 │   ├── chat.js               ChatManager (streaming text with 24-char fade)
@@ -673,8 +674,8 @@ this._chatProxy   = new ChatBroadcastProxy(this)
 **Lazy loading:** `_loadWakeWordModule()` uses `import(/* webpackChunkName:
 "wake-word" */ '../wake-word')` to load the entire wake-word chunk on first
 activation. The chunk includes the WakeWordManager, inference pipeline, and
-model-loading code (~786 lines). onnxruntime-web is loaded separately at
-runtime from `/voice_satellite/ort/` (not bundled in any chunk).
+model-loading code. The TFLite WASM runtime is loaded separately at
+runtime from `/voice_satellite/tflite/` (not bundled in any chunk).
 
 ### 6.2 Card Interface
 
@@ -1010,7 +1011,7 @@ their `card` argument. They access the pipeline/audio/TTS/UI through
 | 9 | `AskQuestionManager` | `ask-question/index.js` | Interactive: play prompt → STT → answer → feedback |
 | 10 | `StartConversationManager` | `start-conversation/index.js` | Play prompt → enter full pipeline conversation |
 | 11 | `MediaPlayerManager` | `media-player/index.js` | Browser media playback + unified audio-state reporting |
-| 12 | `WakeWordManager` | `wake-word/index.js` | On-device wake word detection via ONNX (lazy-loaded) |
+| 12 | `WakeWordManager` | `wake-word/index.js` | On-device wake word detection via TFLite (lazy-loaded) |
 
 ---
 
@@ -2313,11 +2314,10 @@ At runtime, webpack injects a `<script>` tag to load each chunk from
 `/voice_satellite/voice-satellite-<name>.js`. The integration's `frontend.py`
 serves all files in the `frontend/` directory via HA's static path.
 
-**onnxruntime-web** is NOT bundled in any chunk. It's loaded at runtime via
-`import(/* webpackIgnore: true */ '/voice_satellite/ort/ort.wasm.min.mjs')`.
-The `webpackIgnore` annotation tells webpack to leave the import as a native
-ES module import. The ORT files are copied from `node_modules` to the
-`ort/` directory by `scripts/copy-ort.js` during the build.
+**TFLite WASM** is NOT bundled in any chunk. It's loaded at runtime via
+a `<script>` tag pointing to `/voice_satellite/tflite/tflite_web_api_client.js`.
+The TFLite files are copied from `node_modules` to the `tflite/` directory
+by `scripts/copy-tflite.js` during the build.
 
 ### 27.3 Versioning
 
@@ -2335,11 +2335,11 @@ Built JS: `custom_components/voice_satellite/frontend/voice-satellite-card.js`
 
 ## 28. On-Device Wake Word Detection
 
-The card supports on-device wake word detection using openWakeWord ONNX
-models running entirely in the browser via onnxruntime-web (WASM backend).
-This eliminates the need for a server-side wake word add-on. Supports
-dual wake words — two keyword classifiers can run concurrently on the
-same shared mel/embedding/VAD pipeline with minimal overhead.
+The card supports on-device wake word detection using microWakeWord TFLite
+models running entirely in the browser via TensorFlow Lite WASM. This
+eliminates the need for a server-side wake word add-on. Supports dual
+wake words — two keyword classifiers can run concurrently on the same
+shared feature extraction pipeline with minimal overhead.
 
 ### 28.1 Architecture Overview
 
@@ -2353,18 +2353,22 @@ same shared mel/embedding/VAD pipeline with minimal overhead.
 │                                  │   accumulate 1280      │
 │                                  │   samples per frame    │
 │                                  │                        │
-│                                  └── WakeWordInference    │
+│                                  └── MicroWakeWordInference│
 │                                       │                   │
 │  ┌────────────────────────────────────┘                   │
-│  │ 4-Model ONNX Pipeline:                                │
+│  │ microWakeWord TFLite Pipeline:                         │
 │  │                                                        │
-│  │  1. Melspectrogram (1760 samples → 8 mel frames)      │
-│  │  2. Embedding (76 mel frames → 96-dim vector)         │
-│  │  3. Silero VAD (2×640 sub-chunks → speech prob)       │
-│  │  4. Keyword classifier(s) (N embeddings → detection)  │
-│  │     └── Runs 1-2 classifiers on shared pipeline       │
+│  │  1. MicroFrontend (160-sample hop, 480-sample window)  │
+│  │     FFT → 40-ch mel filterbank → noise reduction       │
+│  │     → PCAN normalization → log scale → int8 quantize   │
 │  │                                                        │
-│  │  Detection = score > threshold AND VAD hangover        │
+│  │  2. Keyword classifier(s) (TFLite stateful models)     │
+│  │     Input: [1, N, 40] int8 feature frames              │
+│  │     Output: uint8 probability [0–255]                  │
+│  │     └── Runs 1-2 classifiers + optional stop model     │
+│  │                                                        │
+│  │  3. Sliding window detection (mean of last N probs)    │
+│  │  4. Energy-based sleep mode (RMS silence gating)       │
 │  └────────────────────────────────────────────────────────┘
 │                                                           │
 │  On detection:                                            │
@@ -2373,124 +2377,130 @@ same shared mel/embedding/VAD pipeline with minimal overhead.
 │      (skips server-side wake word)                        │
 └──────────────────────────────────────────────────────────┘
         │
-        │  ONNX models loaded from /voice_satellite/models/
-        │  onnxruntime-web loaded from /voice_satellite/ort/
+        │  TFLite models loaded from /voice_satellite/models/
+        │  TFLite WASM loaded from /voice_satellite/tflite/
         │
 ┌───────┴──────────────────────────────────────────────────┐
 │  Integration (static files)                               │
 │                                                           │
 │  models/                                                  │
-│    ├── melspectrogram.onnx     (shared)                   │
-│    ├── embedding_model.onnx   (shared)                   │
-│    ├── silero_vad.onnx        (shared)                   │
-│    ├── ok_nabu.onnx           (keyword — default)        │
-│    ├── hey_jarvis_v0.1.onnx   (keyword)                  │
-│    ├── alexa_v0.1.onnx        (keyword)                  │
-│    ├── hey_mycroft_v0.1.onnx  (keyword)                  │
-│    ├── hey_rhasspy_v0.1.onnx  (keyword)                  │
-│    └── my_custom_word.onnx    (user-provided keyword)    │
+│    ├── ok_nabu.tflite          (keyword — default)        │
+│    ├── hey_jarvis.tflite       (keyword)                  │
+│    ├── alexa.tflite            (keyword)                  │
+│    ├── hey_mycroft.tflite      (keyword)                  │
+│    ├── stop.tflite             (stop word — managed separately) │
+│    └── my_custom_word.tflite   (user-provided keyword)    │
 │                                                           │
-│  ort/                                                     │
-│    ├── ort.wasm.min.mjs       (ONNX Runtime entry)       │
-│    └── ort-wasm-*.wasm        (WASM binaries)            │
+│  tflite/                                                  │
+│    ├── tflite_web_api_client.js (TFLite WASM entry)      │
+│    └── tflite_web_api_cc_*.wasm (WASM binaries)          │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ### 28.2 File Structure
 
-| File | Lines | Responsibility |
-|------|-------|----------------|
-| `wake-word/index.js` | ~490 | `WakeWordManager` — orchestrator, dual-model lifecycle, settings, detection handler |
-| `wake-word/models.js` | ~155 | ONNX Runtime loading, per-name keyword session caching, unused session cleanup |
-| `wake-word/inference.js` | ~295 | `WakeWordInference` — stateful 4-model pipeline, multi-keyword classifier support |
+| File | Responsibility |
+|------|----------------|
+| `wake-word/index.js` | `WakeWordManager` — orchestrator, dual-model lifecycle, settings, detection handler |
+| `wake-word/micro-models.js` | TFLite WASM runtime loading, per-name model caching, unused model cleanup |
+| `wake-word/micro-inference.js` | `MicroWakeWordInference` — stateful TFLite pipeline, multi-keyword support, energy-based sleep |
+| `wake-word/micro-frontend.js` | `MicroFrontend` — audio feature extraction (FFT, mel filterbank, noise reduction, PCAN, quantization) |
 
-### 28.3 Inference Pipeline
+### 28.3 Audio Feature Extraction
 
-**File:** `src/wake-word/inference.js`
+**File:** `src/wake-word/micro-frontend.js`
 
-Implements the openWakeWord streaming pipeline in JavaScript, matching the
-Python reference implementation:
+Implements the TensorFlow micro_frontend audio preprocessing in pure JS,
+matching the reference wyoming-microWakeWord implementation:
 
-1. **Mel spectrogram** — Converts 1760 audio samples (1280 new + 480 context)
-   to 8 mel frames (32 bins each). Input scaled to int16 range. Context
-   ensures continuous mel frames across chunk boundaries.
+1. **Hann window** — Precomputed 480-coefficient window applied to each frame
+2. **512-point FFT** — Radix-2 inline implementation (no library dependency)
+3. **40-channel mel filterbank** — Triangular filters spanning 125–7500 Hz
+4. **Noise reduction** — Per-channel exponential smoothing with separate
+   attack/decay rates and minimum signal floor
+5. **PCAN normalization** — Per-channel automatic gain control
+   (strength=0.95, offset=80.0)
+6. **Log scale** — `log(1 + energy) * 64` for perceptual compression
+7. **Int8 quantization** — `round(val * 256 / 666) - 128` for model input
 
-2. **Embedding** — Runs on the last 76 mel frames (streaming mode), producing
-   one 96-dimensional embedding per chunk. Mel buffer pre-filled with ones
-   for immediate warmup.
+Parameters: 480-sample window, 160-sample hop (10ms step), producing ~8
+feature frames per 1280-sample (80ms) audio chunk. A ring buffer maintains
+overlap between frames.
 
-3. **Silero VAD** — Runs on 2×640-sample sub-chunks (averaged). Maintains
-   LSTM state (h, c tensors) across calls. Rolling score history for
-   hangover detection.
+### 28.4 Inference Pipeline
 
-4. **Keyword classifier(s)** — One or two classifiers run on the shared embedding
-   stream. Each runs on the last N embeddings (window size read from model metadata,
-   default 16) and returns a detection probability. The first model to exceed its
-   threshold (with VAD confirmation) triggers detection.
+**File:** `src/wake-word/micro-inference.js`
 
-**Detection gating:**
-- Keyword score must exceed the per-model configured threshold
-- VAD hangover check: speech must be detected in frames [-7:-4] (compensates
-  for keyword model latency)
-- 2-second cooldown after each detection prevents rapid re-triggers
+Each keyword model is a stateful TFLite model with internal ring buffers
+(VarHandleOp). The input tensor shape (auto-detected at init) determines
+how many feature frames are batched per inference call.
 
-**VAD-gated sleep mode:**
+1. **Feature accumulation** — Feature frames from MicroFrontend are collected
+   until `framesPerInfer` frames are ready (auto-detected from input tensor)
+2. **Model inference** — Feature frames copied into input tensor, `infer()`
+   called, output uint8 probability read and normalized to [0, 1]
+3. **Sliding window detection** — Circular buffer of last N probabilities
+   (default 3). Detection triggers when `mean(buffer) > cutoff`
+4. **Warmup** — First 100 feature frames (~1s) after init/reset are ignored
+   to let model state stabilize
+5. **Cooldown** — 2-second cooldown after each detection prevents re-triggers
 
-During silence, only the lightweight Silero VAD model runs — mel, embedding,
-and keyword inference are skipped entirely. This reduces wake word CPU usage
-by ~50% on typical hardware.
+**Energy-based sleep mode:**
+
+During silence, TFLite inference is skipped entirely. Feature extraction
+continues to keep the noise estimate warm for immediate wake-up.
 
 ```
 processChunk(samples)
-├── 1. Always run VAD (cheap LSTM, maintains h/c state)
+├── 1. Compute RMS energy of 1280-sample chunk
 ├── 2. Sleep/wake state machine:
-│     ├── vadScore < 0.2 → increment _silentFrames
-│     │   └── _silentFrames >= 30 (~2.4s) → _sleeping = true
-│     └── vadScore >= 0.3 → _silentFrames = 0, _sleeping = false
-├── 3. If sleeping:
-│     ├── Update _melContext (last 480 samples — no ONNX, ensures
-│     │   mel context continuity on wake-up)
-│     └── Return early (skip mel/embedding/keyword)
-└── 4. Full pipeline (mel → embedding → keyword) when awake
+│     ├── rms < 0.005 → increment _silentChunks
+│     │   └── _silentChunks >= 30 (~2.4s) → _sleeping = true
+│     └── rms >= 0.008 → _silentChunks = 0, _sleeping = false
+├── 3. Always run MicroFrontend.feed() (keeps noise estimate warm)
+├── 4. If sleeping → return early (skip TFLite inference)
+└── 5. Run keyword classifiers on each feature frame when awake
 ```
 
-On wake-up, the keyword classifier needs `windowSize` (16) new embeddings
-before it can produce valid scores — 16 × 80ms = ~1.28s. This aligns with
-the duration of the wake word itself: VAD triggers on the first voiced
-frame, and by the time the user finishes saying the keyword, the embedding
-buffer is full.
+Hysteresis (0.005 sleep / 0.008 wake) prevents flapping near the threshold.
+Wake is instantaneous — the first 80ms chunk with sound above threshold
+resumes inference, and the wake word utterance spans many subsequent chunks.
 
-### 28.4 Model Loading
+### 28.5 Model Loading
 
-**File:** `src/wake-word/models.js`
+**File:** `src/wake-word/micro-models.js`
 
-- **onnxruntime-web**: Loaded once via `import(/* webpackIgnore: true */)`
-  from `/voice_satellite/ort/ort.wasm.min.mjs`. Cached in module scope.
-- **Common models** (melspectrogram, embedding, VAD): Loaded once, shared
-  across all keyword models. Cached permanently.
-- **Keyword models**: Loaded per-name into `_keywordCache` (name → session map).
-  `loadModels(ort, modelNames)` deduplicates the names array and loads each unique
-  model once. `releaseUnusedKeywords(activeNames)` disposes sessions no longer in
-  use. Filename mapped via `KEYWORD_FILES[modelName] || modelName` — built-in
-  models have versioned filenames, custom models use their name directly.
-  When both wake word slots select the same model, only one ONNX session is loaded.
+- **TFLite WASM runtime**: Loaded once via `<script>` tag from
+  `/voice_satellite/tflite/tflite_web_api_client.js`. Sets `window.tfweb`.
+  WASM binary path configured via `tfweb.tflite_web_api.setWasmPath()`.
+- **Keyword models**: Loaded per-name into `_modelCache` (name → runner map).
+  `loadMicroModel(tfweb, name)` creates a `TFLiteWebModelRunner` from the
+  `.tflite` file. Filename mapped via `TFLITE_KEYWORD_FILES[name] || name` —
+  built-in models use known filenames, custom models use their name directly.
+  When both wake word slots select the same model, only one runner is loaded.
+- **Model parameters**: `MICRO_MODEL_PARAMS` defines per-model `cutoff`,
+  `slidingWindow`, and `stepSize`. Unknown/custom models default to V2
+  parameters (`cutoff: 0.90, slidingWindow: 3, stepSize: 10`).
+- **Cleanup**: `releaseUnusedMicroModels(activeNames)` disposes runners no
+  longer in use (skips the stop model). `releaseMicroModels()` disposes all.
 
-### 28.5 Sensitivity Thresholds
+### 28.6 Sensitivity Thresholds
 
-Browser ONNX inference produces lower raw scores than HA's Voice PE firmware.
-Thresholds are calibrated specifically for browser-side detection:
+Thresholds are calibrated for browser-side TFLite inference:
 
 | Model | Slightly | Moderately | Very |
 |-------|----------|------------|------|
 | ok_nabu | 0.65 | 0.50 | 0.35 |
-| hey_jarvis | 0.70 | 0.55 | 0.40 |
-| Others / custom | 0.70 | 0.55 | 0.40 |
+| hey_jarvis | 0.55 | 0.40 | 0.30 |
+| hey_mycroft | 0.55 | 0.40 | 0.30 |
+| alexa | 0.55 | 0.40 | 0.30 |
+| stop | 0.50 | 0.40 | 0.30 |
 
 Default sensitivity: **Moderately sensitive**.
 
-Custom models (not in `MODEL_THRESHOLDS`) use `DEFAULT_THRESHOLDS`.
+Custom models (not in `MODEL_THRESHOLDS`) use the same defaults as hey_jarvis.
 
-### 28.6 Settings Change Handling
+### 28.7 Settings Change Handling
 
 `WakeWordManager.checkSettingsChanged()` is called from `session.updateHass()`
 on every HA state change. It tracks four cached values:
@@ -2512,21 +2522,32 @@ the change is re-detected on the next `checkSettingsChanged()` call.
 `restart()` detects the stale `_loadedModelsKey` and performs a full `start()` to load
 the new models.
 
-### 28.7 Custom Wake Word Models
+### 28.8 Custom Wake Word Models
 
-Users can drop custom openWakeWord-trained `.onnx` keyword models into the
-`models/` directory. The integration's `discover_wake_word_models()` function
-scans the directory at startup:
+Users can drop custom microWakeWord `.tflite` keyword models into either:
+- **`/config/voice_satellite/models/`** (persistent — survives HACS updates)
+- `custom_components/voice_satellite/models/` (integration dir — wiped on update)
 
-1. Filters out common infrastructure models (`melspectrogram`, `embedding_model`, `silero_vad`)
-2. Maps built-in versioned filenames to friendly names (`hey_jarvis_v0.1` → `hey_jarvis`)
-3. Adds remaining `.onnx` files as custom options using the filename stem
+**Persistence:** `_sync_custom_models()` in `__init__.py` runs on every startup
+(via `async_add_executor_job`) before entity setup. It performs bidirectional sync:
+1. Saves custom models from integration dir → persistent dir (backs up models
+   placed directly in the integration dir)
+2. Restores custom models from persistent dir → integration dir (recovers models
+   after a HACS update)
+Built-in models (`ok_nabu`, `hey_jarvis`, `alexa`, `hey_mycroft`, `stop`) are
+never overwritten in either direction.
+
+**Discovery:** `discover_wake_word_models()` scans the integration's `models/`
+directory (which now includes restored custom models):
+1. Filters out the `stop` model (infrastructure, not a wake word)
+2. Adds all remaining `.tflite` files as options using the filename stem
 
 The JS model loader handles unknown models via fallback:
-`KEYWORD_FILES[modelName] || modelName` — so a custom model `my_word` loads
-from `/voice_satellite/models/my_word.onnx`.
+`TFLITE_KEYWORD_FILES[modelName] || modelName` — so a custom model `my_word` loads
+from `/voice_satellite/models/my_word.tflite`. Unknown models default to V2
+parameters (`cutoff: 0.90, slidingWindow: 3, stepSize: 10`).
 
-### 28.8 Cross-Satellite Duplicate Suppression
+### 28.9 Cross-Satellite Duplicate Suppression
 
 When on-device wake word detection triggers, the card starts the pipeline with
 `start_stage: 'stt'`, bypassing HA core's server-side wake word stage. To
@@ -2534,7 +2555,7 @@ participate in HA core's cross-satellite dedup (`DATA_LAST_WAKE_UP` dictionary),
 the card passes `wake_word_phrase` through the pipeline chain.
 
 **Phrase format:** HA core uses human-friendly phrases (`"Okay Nabu"`, not
-`"ok_nabu"`) as dedup keys — matching openWakeWord and microWakeWord conventions.
+`"ok_nabu"`) as dedup keys — matching microWakeWord conventions.
 `WAKE_WORD_PHRASES` maps model names to the correct phrases; custom models fall
 back to underscore→space + title case transformation.
 
@@ -2544,7 +2565,6 @@ WAKE_WORD_PHRASES = {
   hey_jarvis:  'Hey Jarvis',
   alexa:       'Alexa',
   hey_mycroft: 'Hey Mycroft',
-  hey_rhasspy: 'Hey Rhasspy',
 }
 ```
 
@@ -2680,25 +2700,30 @@ A step-by-step guide to recreate the card from scratch:
 ### Phase 13: On-Device Wake Word Detection
 
 - [ ] `WakeWordManager`: Lazy-loaded via webpack code splitting
-- [ ] `models.js`: ONNX Runtime loading from `/voice_satellite/ort/`
-- [ ] `models.js`: Common model caching (melspec, embedding, VAD)
-- [ ] `models.js`: Keyword model loading with `_keywordCache`, `KEYWORD_FILES` mapping + custom fallback
-- [ ] `models.js`: `releaseUnusedKeywords()` to dispose sessions no longer active
-- [ ] `inference.js`: `WakeWordInference` — mel → embedding → VAD → keyword(s) pipeline
-- [ ] `inference.js`: Mel context (480 samples), int16 scaling, buffer pre-fill
-- [ ] `inference.js`: Streaming embedding (76 mel frames → 96-dim vector)
-- [ ] `inference.js`: Silero VAD with LSTM state + hangover check
-- [ ] `inference.js`: Keyword classifier with configurable window size
+- [ ] `micro-models.js`: TFLite WASM runtime loading from `/voice_satellite/tflite/`
+- [ ] `micro-models.js`: Keyword model loading with `_modelCache`, `TFLITE_KEYWORD_FILES` mapping + custom fallback
+- [ ] `micro-models.js`: `releaseUnusedMicroModels()` to dispose runners no longer active
+- [ ] `micro-models.js`: `MICRO_MODEL_PARAMS` with per-model cutoff, slidingWindow, stepSize
+- [ ] `micro-frontend.js`: `MicroFrontend` — Hann window, 512-pt FFT, 40-ch mel filterbank
+- [ ] `micro-frontend.js`: Noise reduction (exponential smoothing, per-channel)
+- [ ] `micro-frontend.js`: PCAN normalization + log scale + int8 quantization
+- [ ] `micro-frontend.js`: Ring buffer for overlapping windows (hop=160, window=480)
+- [ ] `micro-inference.js`: `MicroWakeWordInference` — feature extraction + keyword classifier pipeline
+- [ ] `micro-inference.js`: Auto-detect input tensor shape for framesPerInfer
+- [ ] `micro-inference.js`: Sliding window detection (circular probability buffer)
+- [ ] `micro-inference.js`: Energy-based sleep mode (RMS silence gating with hysteresis)
+- [ ] `micro-inference.js`: Warmup period (100 frames) + 2s cooldown after detection
+- [ ] `micro-inference.js`: Multi-keyword support (`keywordConfigs[]` array)
+- [ ] `micro-inference.js`: `updateThresholds()` for live per-model threshold changes
 - [ ] `index.js`: feedAudio → chunk accumulation → serial drain queue
-- [ ] `inference.js`: Multi-keyword classifier support (`keywordConfigs[]` array)
-- [ ] `inference.js`: `updateThresholds()` for live per-model threshold changes
 - [ ] `index.js`: `getActiveModels()` deduplication, `getModelName2()`, `getThresholdForModel()`
 - [ ] `index.js`: Detection handler with model name (`_onDetection(modelName)`, `getWakeWordPhrase(modelName)`)
 - [ ] `index.js`: Settings change tracking (mode, model, model2, threshold) with deferred cache update
 - [ ] `index.js`: Live threshold updates without restart
 - [ ] `index.js`: PAUSED state handling — accept changes, reload models on resume via `restart()`
+- [ ] `index.js`: Stop model lifecycle (`enableStopModel()` / `disableStopModel()`)
 - [ ] Session integration: `_checkWakeWordActivation()`, `_loadWakeWordModule()`
-- [ ] Per-model sensitivity thresholds calibrated for browser inference
+- [ ] Per-model sensitivity thresholds calibrated for browser TFLite inference
 
 ### Phase 14: Polish
 

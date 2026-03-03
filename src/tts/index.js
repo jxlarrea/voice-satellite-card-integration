@@ -42,6 +42,9 @@ export class TtsManager {
 
     // TTS URL from the current play() call — used to correlate tts-audio-duration events
     this._ttsUrl = null;
+
+    // Stop word activation delay timer
+    this._stopWordTimer = null;
   }
 
   get isPlaying() { return this._playing; }
@@ -73,6 +76,9 @@ export class TtsManager {
         this._log.log('tts', 'Remote play service call failed - forcing completion');
         this._onComplete();
       });
+
+      // Enable stop word for remote playback (1s delay)
+      this._enableStopWordDelayed();
 
       // Safety timeout - if state monitoring never fires, clean up after 2 minutes
       this._endTimer = setTimeout(() => {
@@ -136,6 +142,8 @@ export class TtsManager {
         if (this._card.isReactiveBarEnabled && this._currentAudio) {
           this._card.analyser.attachAudio(this._currentAudio, this._card.audio.audioContext);
         }
+        // Enable stop word after 1s (avoid false triggers from wake word echo)
+        this._enableStopWordDelayed();
       },
     });
   }
@@ -148,6 +156,7 @@ export class TtsManager {
     this._remoteInitialContentId = null;
     this._pendingTtsEndUrl = null;
     this._clearWatchdog();
+    this._disableStopWord();
 
     if (this._endTimer) {
       clearTimeout(this._endTimer);
@@ -279,11 +288,31 @@ export class TtsManager {
     }
   }
 
+  _enableStopWordDelayed() {
+    if (this._stopWordTimer) clearTimeout(this._stopWordTimer);
+    this._stopWordTimer = setTimeout(() => {
+      this._stopWordTimer = null;
+      const wakeWord = this._card.wakeWord;
+      if (wakeWord && this._playing) {
+        wakeWord.enableStopModel(true);
+      }
+    }, 1000);
+  }
+
+  _disableStopWord() {
+    if (this._stopWordTimer) {
+      clearTimeout(this._stopWordTimer);
+      this._stopWordTimer = null;
+    }
+    this._card.wakeWord?.disableStopModel();
+  }
+
   /**
    * @param {boolean} [playbackFailed]
    */
   _onComplete(playbackFailed) {
     this._log.log('tts', `Complete - cleaning up UI${playbackFailed ? ' (playback failed)' : ''}`);
+    this._disableStopWord();
     this._card.analyser.detachAudio();
     this._currentAudio = null;
     this._playing = false;

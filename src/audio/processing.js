@@ -34,9 +34,9 @@ export async function setupAudioWorklet(mgr, sourceNode) {
   mgr.workletNode = new AudioWorkletNode(mgr.audioContext, 'voice-satellite-processor');
   mgr.workletNode.port.onmessage = (e) => {
     mgr.audioBuffer.push(e.data);
-    // Feed on-device wake word engine if active (resampled to 16kHz)
+    // Feed on-device wake word engine if active or in stop-only mode (resampled to 16kHz)
     const wakeWord = mgr.card?.wakeWord;
-    if (wakeWord?.active) {
+    if (wakeWord?.active || wakeWord?.stopOnlyMode) {
       const samples = mgr.actualSampleRate !== 16000
         ? resample(e.data, mgr.actualSampleRate, 16000)
         : e.data;

@@ -633,7 +633,6 @@ export class MiniUIManager {
     this._marqueePos = 0;
     this._marqueeSpeed = 0;
     this._ttsEstimatedDuration = 0;
-    this._marqueeRealDurLogged = false;
     if (this._transcriptEl) this._transcriptEl.textContent = '';
     this._stopMarquee();
     this._stopVScroll();
@@ -943,28 +942,8 @@ export class MiniUIManager {
       const ttsAudio = this._card.tts?.currentAudio;
       const realDuration = ttsAudio && isFinite(ttsAudio.duration) && ttsAudio.duration > 0
         ? ttsAudio.duration : 0;
-      // Log once when real duration first becomes known
-      if (realDuration && !this._marqueeRealDurLogged) {
-        this._marqueeRealDurLogged = true;
-        this._card.logger?.log?.('marquee',
-          `Real duration known: ${realDuration.toFixed(2)}s (estimate was ${this._ttsEstimatedDuration.toFixed(2)}s)`
-        );
-      }
       // Use real duration if available, otherwise fall back to text-based estimate
       const effectiveDuration = realDuration || this._ttsEstimatedDuration;
-
-      // Log every ~1s to avoid flooding
-      if (!this._marqueeLogTs || ts - this._marqueeLogTs > 1000) {
-        this._marqueeLogTs = ts;
-        const dur = ttsAudio ? ttsAudio.duration : 'no-audio';
-        const cur = ttsAudio ? ttsAudio.currentTime?.toFixed(1) : '-';
-        const playing = this._card.tts?.isPlaying;
-        this._card.logger?.log?.('marquee',
-          `speed=${this._marqueeSpeed.toFixed(1)} pos=${this._marqueePos.toFixed(0)}/${max.toFixed(0)} ` +
-          `effDur=${effectiveDuration.toFixed(1)} dur=${typeof dur === 'number' ? dur.toFixed(1) : dur} ` +
-          `cur=${cur} est=${this._ttsEstimatedDuration.toFixed(1)} playing=${playing}`
-        );
-      }
 
       if (effectiveDuration > 0 && ttsAudio && ttsAudio.currentTime >= 0) {
         const remaining = effectiveDuration - ttsAudio.currentTime;

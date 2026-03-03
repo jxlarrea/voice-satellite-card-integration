@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
+from pathlib import Path
 
 import voluptuous as vol
 
@@ -37,8 +39,58 @@ def _find_entity(hass: HomeAssistant, entity_id: str, predicate=None):
     return None
 
 
+_BUILTIN_MODELS = {"ok_nabu", "hey_jarvis", "alexa", "hey_mycroft", "stop"}
+
+
+def _sync_custom_models(config_dir: str) -> None:
+    """Sync custom .tflite models between persistent storage and integration dir.
+
+    HACS replaces the entire integration directory on update, wiping any
+    user-added model files.  We use a persistent directory outside
+    custom_components/ to survive updates:
+
+      /config/voice_satellite/models/
+
+    On each startup this function:
+      1. Creates the persistent dir if it doesn't exist.
+      2. Saves any custom models found in the integration dir → persistent dir
+         (catches models placed directly in the integration dir).
+      3. Restores custom models from the persistent dir → integration dir
+         (restores models lost during a HACS update).
+
+    Built-in models that ship with the integration are never overwritten.
+    """
+    persistent = Path(config_dir, "voice_satellite", "models")
+    persistent.mkdir(parents=True, exist_ok=True)
+
+    integration_models = Path(__file__).parent / "models"
+    if not integration_models.is_dir():
+        return
+
+    # Save: integration → persistent (backup custom models the user placed directly)
+    for src in integration_models.glob("*.tflite"):
+        if src.stem in _BUILTIN_MODELS:
+            continue
+        dest = persistent / src.name
+        if not dest.exists():
+            shutil.copy2(src, dest)
+            _LOGGER.info("Saved custom model to persistent storage: %s", src.name)
+
+    # Restore: persistent → integration (recover after HACS update)
+    for src in persistent.glob("*.tflite"):
+        if src.stem in _BUILTIN_MODELS:
+            continue
+        dest = integration_models / src.name
+        if not dest.exists():
+            shutil.copy2(src, dest)
+            _LOGGER.info("Restored custom model from persistent storage: %s", src.name)
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up integration-wide resources: frontend JS + WebSocket commands."""
+    # Sync custom wake word models with persistent storage
+    await hass.async_add_executor_job(_sync_custom_models, hass.config.config_dir)
+
     # Register WebSocket commands (once, not per-entry)
     websocket_api.async_register_command(hass, ws_announce_finished)
     websocket_api.async_register_command(hass, ws_update_state)

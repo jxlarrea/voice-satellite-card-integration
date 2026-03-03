@@ -232,6 +232,8 @@ function _playMain(mgr, ann, onComplete, logPrefix) {
 
   if (mediaUrl) {
     mgr.log.log(logPrefix, `Playing media: ${mediaUrl}`);
+    // Enable stop word after 1s of notification audio (voice-based dismiss)
+    _enableStopWordDelayed(mgr);
     playMediaFor(mgr, mediaUrl, logPrefix, () => onComplete(ann));
   } else {
     mgr.log.log(logPrefix, 'No media - completing after message display');
@@ -249,6 +251,8 @@ export function clearNotificationUI(mgr) {
     clearTimeout(mgr.clearTimeoutId);
     mgr.clearTimeoutId = null;
   }
+
+  _disableStopWord(mgr);
 
   mgr.card.ui.setAnnouncementMode(false);
   mgr.card.ui.clearAnnouncementBubbles();
@@ -410,4 +414,27 @@ export function initNotificationState(mgr) {
   mgr.queued = null;
   mgr._remotePlayback = null;
   mgr._remoteTimeout = null;
+  mgr._stopWordTimer = null;
+}
+
+
+// ── Stop word helpers ─────────────────────────────────────────────
+
+function _enableStopWordDelayed(mgr) {
+  if (mgr._stopWordTimer) clearTimeout(mgr._stopWordTimer);
+  mgr._stopWordTimer = setTimeout(() => {
+    mgr._stopWordTimer = null;
+    const wakeWord = mgr.card.wakeWord;
+    if (wakeWord && mgr.playing) {
+      wakeWord.enableStopModel(true);
+    }
+  }, 1000);
+}
+
+function _disableStopWord(mgr) {
+  if (mgr._stopWordTimer) {
+    clearTimeout(mgr._stopWordTimer);
+    mgr._stopWordTimer = null;
+  }
+  mgr.card.wakeWord?.disableStopModel();
 }

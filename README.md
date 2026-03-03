@@ -73,7 +73,7 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 
 ## Features
 
-- **On-Device Wake Word Detection** - Runs openWakeWord locally in the browser. No server-side processing needed, detects the wake word instantly on the device then streams audio to HA for STT. Supports dual wake words,  multiple built-in wake words, and custom user-trained models. Falls back to server-side detection (Wyoming openWakeWord/microWakeWord) when preferred.
+- **On-Device Wake Word Detection** - Runs microWakeWord locally in the browser via TFLite WASM. No server-side processing needed, detects the wake word instantly on the device then streams audio to HA for STT. Supports dual wake words, multiple built-in wake words, and custom models. Falls back to server-side detection (Wyoming openWakeWord/microWakeWord) when preferred.
 - **Works Across Views** - Pipeline stays active when switching dashboard views.
 - **Visual Feedback** - Themed gradient activity bar shows listening/processing/speaking states with optional reactive audio-level animation.
 - **Mini Card (Text-First UI)** - Optional `voice-satellite-mini-card` for a normal in-dashboard card layout (compact or tall) without the fullscreen overlay.
@@ -198,8 +198,8 @@ Each satellite device exposes configuration entities on its device page (**Setti
 | **Finished speaking detection** | Select | VAD sensitivity - how aggressively to detect end of speech |
 | **TTS Output** | Select | Where to play TTS audio: "Browser" (default) plays audio locally, or select any `media_player` entity to route TTS to an external speaker |
 | **Wake word detection** | Select | "On Device" (default) runs wake word inference locally in the browser. "Home Assistant" uses server-side detection via the pipeline's configured wake word engine |
-| **Wake word** | Select | Primary wake word to listen for when using on-device detection. Built-in models: ok_nabu, hey_jarvis, alexa, hey_mycroft, hey_rhasspy. Custom models are auto-discovered from the `models/` directory |
-| **Wake word 2** | Select | Optional second wake word for dual wake word detection. Set to "No wake word" (default) to disable. When both slots use the same model, the ONNX model is only loaded once |
+| **Wake word** | Select | Primary wake word to listen for when using on-device detection. Built-in models: ok_nabu, hey_jarvis, alexa, hey_mycroft. Custom `.tflite` models are auto-discovered from the `models/` directory |
+| **Wake word 2** | Select | Optional second wake word for dual wake word detection. Set to "No wake word" (default) to disable. When both slots use the same model, the TFLite model is only loaded once |
 | **Wake word sensitivity** | Select | Detection sensitivity for on-device wake word: "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive" |
 | **Screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
 | **Announcement display duration** | Number | How long (1-60 seconds) to show the announcement text on screen after playback completes |
@@ -443,11 +443,12 @@ The card includes built-in wake word detection that runs entirely in the browser
 
 ### How It Works
 
-On-device detection uses [openWakeWord](https://github.com/dscripka/openWakeWord) ONNX models running via ONNX Runtime WebAssembly. The browser continuously processes audio through a 4-model inference chain (melspectrogram → embedding → VAD → keyword classifier) and only starts streaming audio to Home Assistant after detecting the wake word. This means:
+On-device detection uses [microWakeWord](https://github.com/kahrendt/microWakeWord) TFLite models running via TensorFlow Lite WebAssembly. The browser continuously processes audio through a feature extraction pipeline (FFT → mel filterbank → noise reduction → PCAN normalization) and runs lightweight keyword classifiers to detect the wake word. Audio is only streamed to Home Assistant after detection. This means:
 
 - **Lower latency** — detection happens instantly on the device, no network round-trip
 - **Reduced server load** — audio is only sent to HA for STT after the wake word is detected
 - **No wake word add-on required** — works without openWakeWord or microWakeWord installed on HA
+- **Energy-efficient** — inference is automatically paused during silence and resumes instantly when sound is detected
 
 ### Built-in Wake Words
 
@@ -457,18 +458,21 @@ On-device detection uses [openWakeWord](https://github.com/dscripka/openWakeWord
 | **hey_jarvis** | "Hey Jarvis" |
 | **alexa** | "Alexa" |
 | **hey_mycroft** | "Hey Mycroft" |
-| **hey_rhasspy** | "Hey Rhasspy" |
 
 ### Custom Wake Words
 
-You can add your own openWakeWord-trained ONNX models:
+You can add your own microWakeWord TFLite models:
 
-1. Train a custom wake word model using [openWakeWord](https://github.com/dscripka/openWakeWord)
-2. Place the `.onnx` file in the integration's `models/` directory (`custom_components/voice_satellite/models/`)
+1. Train a custom wake word model using [microWakeWord](https://github.com/kahrendt/microWakeWord), or download a community model from the [esphome/micro-wake-word-models](https://github.com/esphome/micro-wake-word-models) repository
+2. Place the `.tflite` file in one of these directories:
+   - **`config/voice_satellite/models/`** (recommended) — persists across HACS updates
+   - `custom_components/voice_satellite/models/` — works but files are lost on integration updates
 3. Restart Home Assistant
 4. The custom model will appear in the "Wake word model" dropdown on the satellite's device page
 
-The filename (without `.onnx`) becomes the option name in the dropdown. For example, `hey_computer.onnx` appears as "hey_computer".
+The filename (without `.tflite`) becomes the option name in the dropdown. For example, `hey_computer.tflite` appears as "hey_computer".
+
+> **Note:** Custom models placed directly in the integration's `models/` directory are automatically backed up to `config/voice_satellite/models/` on startup and restored after updates.
 
 ### Configuration
 
@@ -476,7 +480,7 @@ All wake word settings are configured per-device on the satellite's device page 
 
 - **Wake word detection** — "On Device" (default) or "Home Assistant" (server-side)
 - **Wake word** — Select the primary wake word to listen for
-- **Wake word 2** — Optional second wake word (set to "No wake word" to disable). Both wake words run concurrently on the same shared inference pipeline with minimal overhead. If both slots select the same model, the ONNX model is only loaded once
+- **Wake word 2** — Optional second wake word (set to "No wake word" to disable). Both wake words run concurrently on the same shared inference pipeline with minimal overhead. If both slots select the same model, the TFLite model is only loaded once
 - **Wake word sensitivity** — "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive". Applies to both wake word slots
 
 To use server-side detection instead, set "Wake word detection" to "Home Assistant". This requires a wake word service (openWakeWord or microWakeWord) configured in your Assist pipeline.
@@ -609,7 +613,7 @@ The financial card uses the same featured panel layout as weather - it appears a
 
 1. **Check the device settings:** Go to the satellite's device page and verify "Wake word detection" is set to "On Device" and a wake word model is selected.
 2. **Try adjusting sensitivity:** Change "Wake word sensitivity" to "Very sensitive" to see if detection improves.
-3. **Check browser compatibility:** On-device detection uses WebAssembly (ONNX Runtime). Ensure your browser supports WASM — all modern browsers do, but very old versions may not.
+3. **Check browser compatibility:** On-device detection uses WebAssembly (TFLite). Ensure your browser supports WASM — all modern browsers do, but very old versions may not.
 4. Enable `debug: true` in the card config to see wake word scores in the browser console (F12).
 
 **Server-side mode ("Home Assistant"):**

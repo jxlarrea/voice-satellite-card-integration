@@ -1,45 +1,47 @@
 /**
  * WakeWordManager
  *
- * Orchestrates on-device wake word detection using openWakeWord
- * ONNX models via onnxruntime-web. Taps into the existing
- * AudioWorklet stream, runs inference, and triggers the pipeline
- * with start_stage: "stt" on detection.
+ * Orchestrates on-device wake word detection using microWakeWord
+ * (TFLite via WASM). Processes 16kHz audio through a micro_frontend
+ * feature extractor and runs TFLite keyword models with sliding
+ * window detection.
  *
  * Supports dual wake words — two keyword models can run
- * concurrently on the same shared mel/embedding/VAD pipeline.
+ * concurrently on the shared pipeline.
  */
 
 import { State, BlurReason } from '../constants.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 import { CHIME_WAKE } from '../audio/chime.js';
-import { loadOrt, loadModels, releaseModels, releaseUnusedKeywords, getKeywordWindowSize } from './models.js';
-import { WakeWordInference } from './inference.js';
+import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, releaseMicroModels } from './micro-models.js';
+import { MicroWakeWordInference } from './micro-inference.js';
+import { clearNotificationUI } from '../shared/satellite-notification.js';
+import { sendAck } from '../shared/notification-comms.js';
 
 const CHUNK_SIZE = 1280; // 80ms @ 16kHz
 const NO_WAKE_WORD = 'No wake word';
 
-// Per-model sensitivity thresholds tuned for browser-side inference.
-// Browser pipeline produces lower raw scores than HA Voice PE firmware,
-// so thresholds are calibrated lower to match observed detection ranges.
-// Values are floating-point probability cutoffs (higher = less sensitive).
+// ─── Detection thresholds ────────────────────────────────────────────
+// microWakeWord models output confidence scores (0–1 via uint8/255).
+// Detection uses sliding window mean > cutoff. Browser audio (WebRTC
+// AGC/NS) produces different feature profiles than ESP32, so these
+// cutoffs are lower than the model manifests' native values.
 const MODEL_THRESHOLDS = {
   ok_nabu:     { 'Slightly sensitive': 0.65, 'Moderately sensitive': 0.50, 'Very sensitive': 0.35 },
-  hey_jarvis:  { 'Slightly sensitive': 0.70, 'Moderately sensitive': 0.55, 'Very sensitive': 0.40 },
-  hey_mycroft: { 'Slightly sensitive': 0.70, 'Moderately sensitive': 0.55, 'Very sensitive': 0.40 },
-  alexa:       { 'Slightly sensitive': 0.70, 'Moderately sensitive': 0.55, 'Very sensitive': 0.40 },
-  hey_rhasspy: { 'Slightly sensitive': 0.70, 'Moderately sensitive': 0.55, 'Very sensitive': 0.40 },
+  hey_jarvis:  { 'Slightly sensitive': 0.55, 'Moderately sensitive': 0.40, 'Very sensitive': 0.30 },
+  hey_mycroft: { 'Slightly sensitive': 0.55, 'Moderately sensitive': 0.40, 'Very sensitive': 0.30 },
+  alexa:       { 'Slightly sensitive': 0.55, 'Moderately sensitive': 0.40, 'Very sensitive': 0.30 },
+  stop:        { 'Slightly sensitive': 0.50, 'Moderately sensitive': 0.40, 'Very sensitive': 0.30 },
 };
-const DEFAULT_THRESHOLDS = { 'Slightly sensitive': 0.70, 'Moderately sensitive': 0.55, 'Very sensitive': 0.40 };
+const DEFAULT_THRESHOLDS = { 'Slightly sensitive': 0.60, 'Moderately sensitive': 0.45, 'Very sensitive': 0.30 };
 
-// Wake word phrases matching openWakeWord / microWakeWord conventions.
+// Wake word phrases matching microWakeWord conventions.
 // DATA_LAST_WAKE_UP in HA core uses these exact strings for dedup.
 const WAKE_WORD_PHRASES = {
   ok_nabu: 'Okay Nabu',
   hey_jarvis: 'Hey Jarvis',
   alexa: 'Alexa',
   hey_mycroft: 'Hey Mycroft',
-  hey_rhasspy: 'Hey Rhasspy',
 };
 
 export class WakeWordManager {
@@ -48,12 +50,19 @@ export class WakeWordManager {
     this._log = session.logger;
 
     this._inference = null;
-    this._ort = null;
     this._active = false;
     this._sampleBuffer = new Float32Array(0);
     this._loadedModelsKey = null; // sorted model names string for change detection
     this._processing = false;
     this._frameQueue = [];
+
+    // TFLite WASM client (cached)
+    this._tfweb = null;
+
+    // Stop word state
+    this._stopOnlyMode = false;
+    this._stopMicroConfig = null;
+    this._suspendedKeywords = null;
 
     // Settings change tracking
     this._cachedEnabled = undefined;
@@ -65,6 +74,9 @@ export class WakeWordManager {
 
   /** True when actively listening for wake words. */
   get active() { return this._active; }
+
+  /** True when running stop-only inference (during TTS/notification playback). */
+  get stopOnlyMode() { return this._stopOnlyMode; }
 
   /**
    * Check if on-device wake word detection is enabled.
@@ -120,7 +132,7 @@ export class WakeWordManager {
   }
 
   /**
-   * Get the wake word phrase for pipeline dedup (matches openWakeWord/microWakeWord format).
+   * Get the wake word phrase for pipeline dedup (matches microWakeWord format).
    * @param {string} modelName - model name to look up
    * @returns {string}
    */
@@ -154,7 +166,7 @@ export class WakeWordManager {
   }
 
   /**
-   * Get the detection threshold for the primary model (legacy compat).
+   * Get the detection threshold for the primary model.
    * @returns {number}
    */
   getThreshold() {
@@ -163,20 +175,26 @@ export class WakeWordManager {
 
   /**
    * Build keywordConfigs array for the inference engine.
-   * @param {Record<string, object>} keywordSessions - name → ONNX session map
-   * @returns {{session: object, windowSize: number, threshold: number, name: string}[]}
+   * @param {Record<string, object>} runners - name → TFLiteWebModelRunner map
+   * @returns {{runner: object, name: string, cutoff: number, slidingWindow: number, stepSize: number}[]}
    */
-  _buildKeywordConfigs(keywordSessions) {
-    return Object.entries(keywordSessions).map(([name, session]) => ({
-      session,
-      windowSize: getKeywordWindowSize(session),
-      threshold: this.getThresholdForModel(name),
-      name,
-    }));
+  _buildKeywordConfigs(runners) {
+    return Object.entries(runners).map(([name, runner]) => {
+      const params = getMicroModelParams(name);
+      return {
+        runner,
+        name,
+        cutoff: this.getThresholdForModel(name),
+        slidingWindow: params.slidingWindow,
+        stepSize: params.stepSize,
+      };
+    });
   }
 
+  // ─── Start / Stop ───────────────────────────────────────────────────
+
   /**
-   * Start wake word detection. Loads models on first call.
+   * Start wake word detection. Loads the TFLite runtime on first call.
    */
   async start() {
     if (this._active) return;
@@ -186,31 +204,26 @@ export class WakeWordManager {
     this._log.log('wake-word', `Starting on-device detection (models: ${activeModels.join(', ')})`);
 
     try {
-      // Load ONNX Runtime (cached)
-      if (!this._ort) {
-        this._log.log('wake-word', 'Loading ONNX Runtime...');
-        this._ort = await loadOrt();
-        this._log.log('wake-word', 'ONNX Runtime loaded');
+      if (!this._tfweb) {
+        this._log.log('wake-word', 'Loading TFLite WASM runtime...');
+        this._tfweb = await loadTFLite();
+        this._log.log('wake-word', 'TFLite runtime loaded');
       }
 
-      // Load models (cached per-name, unless active set changed)
       if (!this._inference || this._loadedModelsKey !== modelsKey) {
-        this._log.log('wake-word', 'Loading wake word models...');
-        const { common, keywords } = await loadModels(this._ort, activeModels, (name) => {
+        this._log.log('wake-word', 'Loading TFLite wake word models...');
+        const runners = await loadMicroModels(this._tfweb, activeModels, (name) => {
           this._log.log('wake-word', `Loading model: ${name}`);
         });
+        await releaseUnusedMicroModels(activeModels);
 
-        // Release keyword sessions no longer in use
-        await releaseUnusedKeywords(activeModels);
-
-        const keywordConfigs = this._buildKeywordConfigs(keywords);
-        this._inference = new WakeWordInference(this._ort, common, keywordConfigs);
+        const keywordConfigs = this._buildKeywordConfigs(runners);
+        this._inference = new MicroWakeWordInference(keywordConfigs, this._log);
         this._loadedModelsKey = modelsKey;
 
-        const configSummary = keywordConfigs.map((k) => `${k.name}(w=${k.windowSize},t=${k.threshold})`).join(', ');
-        this._log.log('wake-word', `Models loaded: ${configSummary}`);
+        const configSummary = keywordConfigs.map((k) => `${k.name}(c=${k.cutoff},sw=${k.slidingWindow})`).join(', ');
+        this._log.log('wake-word', `TFLite models loaded: ${configSummary}`);
       } else {
-        // Same models, just reset state and update thresholds
         this._inference.updateThresholds(
           activeModels.map((name) => ({ name, threshold: this.getThresholdForModel(name) })),
         );
@@ -223,6 +236,9 @@ export class WakeWordManager {
       this._active = true;
       this._session.setState(State.LISTENING);
       this._log.log('wake-word', 'On-device wake word detection active');
+
+      // Pre-load stop model in the background
+      this._preloadStopModel();
     } catch (e) {
       this._log.error('wake-word', `Failed to start: ${e.message || e}`);
       throw e;
@@ -230,15 +246,40 @@ export class WakeWordManager {
   }
 
   /**
+   * Pre-load the stop model (non-blocking).
+   */
+  _preloadStopModel() {
+    if (this._stopMicroConfig) return;
+    if (!this._tfweb) return;
+    loadMicroModel(this._tfweb, 'stop').then((runner) => {
+      const params = getMicroModelParams('stop');
+      this._stopMicroConfig = {
+        runner,
+        name: 'stop',
+        cutoff: this.getThresholdForModel('stop'),
+        slidingWindow: params.slidingWindow,
+        stepSize: params.stepSize,
+      };
+      this._log.log('stop-word', `Stop model pre-loaded (c=${this._stopMicroConfig.cutoff})`);
+    }).catch((e) => {
+      this._log.log('stop-word', `Pre-load skipped — ${e.message || e}`);
+    });
+  }
+
+  /**
    * Stop wake word detection.
    */
   stop() {
-    if (!this._active) return;
+    if (!this._active && !this._stopOnlyMode) return;
     this._active = false;
+    this._stopOnlyMode = false;
+    this._suspendedKeywords = null;
     this._sampleBuffer = new Float32Array(0);
     this._frameQueue.length = 0;
     this._log.log('wake-word', 'Stopped');
   }
+
+  // ─── Audio feed + detection ─────────────────────────────────────────
 
   /**
    * Feed audio samples from the AudioWorklet.
@@ -246,7 +287,7 @@ export class WakeWordManager {
    * @param {Float32Array} chunk - raw audio samples from worklet
    */
   feedAudio(chunk) {
-    if (!this._active || !this._inference) return;
+    if ((!this._active && !this._stopOnlyMode) || !this._inference) return;
 
     // Accumulate samples
     const combined = new Float32Array(this._sampleBuffer.length + chunk.length);
@@ -272,13 +313,17 @@ export class WakeWordManager {
     this._processing = true;
 
     try {
-      while (this._frameQueue.length > 0 && this._active) {
+      while (this._frameQueue.length > 0 && (this._active || this._stopOnlyMode)) {
         const frame = this._frameQueue.shift();
         const result = await this._inference.processChunk(frame);
         if (result.detected) {
-          this._log.log('wake-word', `Wake word detected: ${result.model} (score: ${result.score.toFixed(3)}, vad: ${result.vadScore.toFixed(3)})`);
+          this._log.log('wake-word', `Detected: ${result.model} (score: ${result.score.toFixed(3)})`);
           this._frameQueue.length = 0;
-          await this._onDetection(result.model);
+          if (result.model === 'stop') {
+            await this._onStopDetection();
+          } else {
+            await this._onDetection(result.model);
+          }
           return;
         }
       }
@@ -356,13 +401,172 @@ export class WakeWordManager {
     }
   }
 
+  // ─── Stop model management ──────────────────────────────────────────
+
+  /**
+   * Enable the stop keyword model for interruptible states.
+   * @param {boolean} stopOnly - true for stop-only mode (TTS/notifications),
+   *   false to add stop alongside regular wake words (timer alerts)
+   */
+  async enableStopModel(stopOnly = false) {
+    if (!this._inference) {
+      this._log.log('stop-word', 'Cannot enable — inference not initialized');
+      return;
+    }
+
+    try {
+      if (!this._tfweb) return;
+
+      if (!this._stopMicroConfig) {
+        this._log.log('stop-word', 'Loading stop model...');
+        const runner = await loadMicroModel(this._tfweb, 'stop');
+        const params = getMicroModelParams('stop');
+        this._stopMicroConfig = {
+          runner,
+          name: 'stop',
+          cutoff: this.getThresholdForModel('stop'),
+          slidingWindow: params.slidingWindow,
+          stepSize: params.stepSize,
+        };
+        this._log.log('stop-word', `Stop model loaded (c=${this._stopMicroConfig.cutoff})`);
+      } else {
+        this._log.log('stop-word', 'Stop model already loaded (cached)');
+      }
+
+      this._inference.addKeyword(this._stopMicroConfig);
+
+      if (stopOnly) {
+        this._suspendedKeywords = this._inference._keywords.filter((k) => k.name !== 'stop');
+        for (const kw of this._suspendedKeywords) {
+          this._inference.removeKeyword(kw.name);
+        }
+        this._stopOnlyMode = true;
+        this._inference.reset();
+        this._sampleBuffer = new Float32Array(0);
+        this._frameQueue.length = 0;
+        this._processing = false;
+        this._log.log('stop-word', 'Enabled (stop-only mode)');
+      } else {
+        this._log.log('stop-word', 'Enabled (alongside wake words)');
+      }
+    } catch (e) {
+      this._log.error('stop-word', `Failed to enable: ${e.message || e}`);
+    }
+  }
+
+  /**
+   * Disable the stop keyword model and restore regular keywords if suspended.
+   */
+  disableStopModel() {
+    if (!this._inference) return;
+
+    this._inference.removeKeyword('stop');
+
+    if (this._stopOnlyMode) {
+      this._stopOnlyMode = false;
+      if (this._suspendedKeywords) {
+        for (const kw of this._suspendedKeywords) {
+          this._inference.addKeyword(kw);
+        }
+        this._suspendedKeywords = null;
+      }
+      this._sampleBuffer = new Float32Array(0);
+      this._frameQueue.length = 0;
+      this._processing = false;
+      this._log.log('stop-word', 'Disabled (stop-only mode off)');
+    } else {
+      this._log.log('stop-word', 'Disabled');
+    }
+  }
+
+  /**
+   * Handle stop word detection — cancel the current interruptible state.
+   * Priority chain matches DoubleTapHandler._cancel().
+   */
+  async _onStopDetection() {
+    const session = this._session;
+    this._log.log('stop-word', 'Stop detected');
+
+    // Disable stop model first
+    this.disableStopModel();
+
+    // 1. Timer alert — highest priority
+    if (session.timer.alertActive) {
+      this._log.log('stop-word', 'Dismissing timer alert');
+      session.timer.dismissAlert();
+      return;
+    }
+
+    // 2. Notification playing (announcement / ask-question / start-conversation)
+    const isNotification = session.announcement.playing
+      || session.askQuestion.playing
+      || session.startConversation.playing
+      || session.announcement.clearTimeoutId
+      || session.startConversation.clearTimeoutId;
+
+    if (isNotification) {
+      this._log.log('stop-word', 'Dismissing notification');
+      for (const mgr of [session.announcement, session.askQuestion, session.startConversation]) {
+        if (!mgr.playing && !mgr.clearTimeoutId) continue;
+        if (mgr.currentAnnounceId) {
+          sendAck(session, mgr.currentAnnounceId, 'stop-word');
+        }
+        if (mgr.currentAudio) {
+          mgr.currentAudio.pause();
+          mgr.currentAudio = null;
+        }
+        mgr.playing = false;
+        mgr.currentAnnounceId = null;
+        mgr.queued = null;
+        clearNotificationUI(mgr);
+      }
+      session.askQuestion.cancel();
+      session.chat.clear();
+      session.ui.clearNotificationStatusOverride();
+
+      const isRemote = !!session.ttsTarget;
+      if (getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+        session.tts.playChime('done');
+      }
+      session.pipeline.restart(0);
+      return;
+    }
+
+    // 3. TTS / active interaction
+    this._log.log('stop-word', 'Cancelling interaction');
+
+    if (session._imageLingerTimeout) {
+      clearTimeout(session._imageLingerTimeout);
+      session._imageLingerTimeout = null;
+    }
+
+    if (session.tts.isPlaying) {
+      session.tts.stop();
+    }
+
+    session.askQuestion.cancel();
+    session.pipeline.clearContinueState();
+    session.setState(State.IDLE);
+    session.chat.clear();
+    session.ui.hideBlurOverlay(BlurReason.PIPELINE);
+    session.ui.updateForState(State.IDLE, session.pipeline.serviceUnavailable, false);
+
+    const isRemote = !!session.ttsTarget;
+    if (getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+      session.tts.playChime('done');
+    }
+    session.pipeline.restart(0);
+  }
+
+  // ─── Restart / settings ─────────────────────────────────────────────
+
   /**
    * Restart wake word detection (e.g. after pipeline completes).
    */
   async restart() {
     if (!this.isEnabled()) return;
 
-    // If models changed while paused, do a full start to reload them
+    // If models changed while paused, do a full start
     const activeModels = this.getActiveModels();
     const modelsKey = activeModels.slice().sort().join(',');
     if (!this._inference || this._loadedModelsKey !== modelsKey) {
@@ -409,7 +613,7 @@ export class WakeWordManager {
 
     if (!enabledChanged && !modelChanged && !thresholdChanged) return;
 
-    // Always update threshold cache (applies immediately)
+    // Always update threshold cache
     this._cachedThreshold = threshold;
 
     // Live threshold update (no restart needed)
@@ -418,26 +622,22 @@ export class WakeWordManager {
       this._inference.updateThresholds(
         activeModels.map((name) => ({ name, threshold: this.getThresholdForModel(name) })),
       );
-      this._log.log('wake-word', `Thresholds updated`);
+      this._log.log('wake-word', 'Thresholds updated');
     }
 
     // Mode or model change requires switching
-    // Cache for enabled/model/model2 updated inside _applyModeOrModelChange
-    // AFTER the change is actually applied (not when deferred due to state)
     if (enabledChanged || modelChanged) {
       this._applyModeOrModelChange(enabled, model, model2, enabledChanged);
     }
   }
 
   /**
-   * Apply a detection mode or model change. Switches between
-   * on-device and HA pipeline, or reloads models.
+   * Apply a detection mode or model change.
    */
   async _applyModeOrModelChange(enabled, model, model2, enabledChanged) {
     const session = this._session;
 
     // Only switch while waiting for wake word, not mid-interaction.
-    // PAUSED is allowed — change is applied and takes effect on resume.
     if (![State.LISTENING, State.IDLE, State.PAUSED].includes(session.currentState)) {
       this._log.log('wake-word', 'Settings changed during interaction — will apply on next cycle');
       return;
@@ -475,7 +675,6 @@ export class WakeWordManager {
       this._cachedModel2 = model2;
     } catch (e) {
       this._log.error('wake-word', `Settings change failed: ${e.message || e}`);
-      // Update cache even on error to avoid infinite retry loop
       this._cachedEnabled = enabled;
       this._cachedModel = model;
       this._cachedModel2 = model2;
@@ -490,10 +689,14 @@ export class WakeWordManager {
    */
   async teardown() {
     this.stop();
+    if (this._stopMicroConfig) {
+      this._log.log('stop-word', 'Stop model unloaded');
+      this._stopMicroConfig = null;
+    }
     this._inference = null;
     this._loadedModelsKey = null;
     try {
-      await releaseModels();
+      await releaseMicroModels();
     } catch (_) { /* ignore */ }
   }
 }

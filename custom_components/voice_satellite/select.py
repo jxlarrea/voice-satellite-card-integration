@@ -350,50 +350,38 @@ WAKE_WORD_DETECTION_LOCAL = "On Device"
 WAKE_WORD_DETECTION_OPTIONS = [WAKE_WORD_DETECTION_HA, WAKE_WORD_DETECTION_LOCAL]
 
 # Common infrastructure models (not keyword models).
-_COMMON_MODELS = {"melspectrogram", "embedding_model", "silero_vad"}
+_COMMON_MODELS = {"stop"}
 
-# Built-in keyword models: versioned filename → friendly select name.
-_BUILTIN_FILENAME_MAP = {
-    "ok_nabu": "ok_nabu",
-    "hey_jarvis_v0.1": "hey_jarvis",
-    "alexa_v0.1": "alexa",
-    "hey_mycroft_v0.1": "hey_mycroft",
-    "hey_rhasspy_v0.1": "hey_rhasspy",
-}
-
-_BUILTIN_DEFAULTS = list(dict.fromkeys(_BUILTIN_FILENAME_MAP.values()))
+# Built-in keyword models (TFLite filenames without extension).
+_BUILTIN_MODELS = ["ok_nabu", "hey_jarvis", "alexa", "hey_mycroft"]
 
 
 def discover_wake_word_models() -> list[str]:
-    """Scan models/ directory for keyword ONNX files.
+    """Scan models/ directory for keyword TFLite files.
 
-    Built-in versioned filenames are mapped to friendly names.
-    Custom user-provided models use the filename (minus .onnx) as-is.
+    Returns model names (filename minus .tflite). Common infrastructure
+    models (e.g. stop) are excluded from the wake word selection.
     """
     models_dir = Path(__file__).parent / "models"
     if not models_dir.is_dir():
-        return list(_BUILTIN_DEFAULTS)
+        return list(_BUILTIN_MODELS)
 
     options: list[str] = []
-    for f in sorted(models_dir.glob("*.onnx")):
+    for f in sorted(models_dir.glob("*.tflite")):
         stem = f.stem
         if stem in _COMMON_MODELS:
             continue
-        if stem in _BUILTIN_FILENAME_MAP:
-            friendly = _BUILTIN_FILENAME_MAP[stem]
-            if friendly not in options:
-                options.append(friendly)
-        else:
+        if stem not in options:
             options.append(stem)
 
-    return options or list(_BUILTIN_DEFAULTS)
+    return options or list(_BUILTIN_MODELS)
 
 
 class VoiceSatelliteWakeWordDetectionSelect(SelectEntity, RestoreEntity):
     """Select entity for choosing wake word detection mode.
 
-    "Home Assistant" uses the server-side openWakeWord add-on.
-    "On Device" runs inference locally in the browser via ONNX Runtime.
+    "Home Assistant" uses the server-side wake word add-on.
+    "On Device" runs inference locally in the browser via TFLite WASM.
     """
 
     _attr_entity_category = EntityCategory.CONFIG

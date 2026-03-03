@@ -21,8 +21,8 @@ _LOGGER = logging.getLogger(__name__)
 FRONTEND_DIR = str(Path(__file__).parent / "frontend")
 MODELS_DIR = str(Path(__file__).parent / "models")
 MODELS_URL = f"{URL_BASE}/models"
-ORT_DIR = str(Path(__file__).parent / "ort")
-ORT_URL = f"{URL_BASE}/ort"
+TFLITE_DIR = str(Path(__file__).parent / "tflite")
+TFLITE_URL = f"{URL_BASE}/tflite"
 
 
 class JSModuleRegistration:
@@ -66,7 +66,7 @@ class JSModuleRegistration:
         except RuntimeError:
             _LOGGER.debug("Static path already registered: %s", URL_BASE)
 
-        # Serve ONNX wake word models from /voice_satellite/models/
+        # Serve wake word models from /voice_satellite/models/
         models_path = Path(MODELS_DIR)
         if models_path.is_dir():
             try:
@@ -77,16 +77,16 @@ class JSModuleRegistration:
             except RuntimeError:
                 _LOGGER.debug("Models path already registered: %s", MODELS_URL)
 
-        # Serve ONNX Runtime WASM files from /voice_satellite/ort/
-        ort_path = Path(ORT_DIR)
-        if ort_path.is_dir():
+        # Serve TFLite WASM files from /voice_satellite/tflite/
+        tflite_path = Path(TFLITE_DIR)
+        if tflite_path.is_dir():
             try:
                 await self.hass.http.async_register_static_paths(
-                    [StaticPathConfig(ORT_URL, ORT_DIR, True)]
+                    [StaticPathConfig(TFLITE_URL, TFLITE_DIR, True)]
                 )
-                _LOGGER.debug("ORT path registered: %s -> %s", ORT_URL, ORT_DIR)
+                _LOGGER.debug("TFLite path registered: %s -> %s", TFLITE_URL, TFLITE_DIR)
             except RuntimeError:
-                _LOGGER.debug("ORT path already registered: %s", ORT_URL)
+                _LOGGER.debug("TFLite path already registered: %s", TFLITE_URL)
 
     async def _async_wait_for_lovelace_resources(self) -> None:
         """Wait for Lovelace resources to be loaded, then register."""

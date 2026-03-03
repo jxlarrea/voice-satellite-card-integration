@@ -223,24 +223,23 @@ custom_components/voice_satellite/
 │   ├── voice-satellite-wake-word.js  ← Wake word chunk (lazy-loaded)
 │   └── voice-satellite-skin-*.js     ← Skin chunks (lazy-loaded)
 ├── models/
-│   ├── melspectrogram.onnx           ← Common: audio → mel features
-│   ├── embedding_model.onnx          ← Common: mel → 96-dim embeddings
-│   ├── silero_vad.onnx               ← Common: voice activity detection
-│   ├── ok_nabu.onnx                  ← Keyword model (default)
-│   ├── hey_jarvis_v0.1.onnx          ← Keyword model
-│   ├── alexa_v0.1.onnx               ← Keyword model
-│   ├── hey_mycroft_v0.1.onnx         ← Keyword model
-│   ├── hey_rhasspy_v0.1.onnx         ← Keyword model
-│   └── *.onnx                        ← User-provided custom keyword models
-└── ort/
-    ├── ort.wasm.min.mjs              ← ONNX Runtime entry point
-    └── ort-wasm-*.wasm               ← WASM binaries
+│   ├── ok_nabu.tflite                ← Keyword model (default)
+│   ├── hey_jarvis.tflite             ← Keyword model
+│   ├── alexa.tflite                  ← Keyword model
+│   ├── hey_mycroft.tflite            ← Keyword model
+│   ├── stop.tflite                   ← Stop word model (managed separately)
+│   └── *.tflite                      ← User-provided custom keyword models
+└── tflite/
+    ├── tflite_web_api_client.js      ← TFLite WASM entry point
+    └── tflite_web_api_cc_*.wasm      ← WASM binaries
 ```
 
 The `frontend/` subdirectory is resolved at runtime via `Path(__file__).parent / "frontend"`.
 The `models/` directory is scanned by `discover_wake_word_models()` in `select.py` to
-populate the wake word model select entity. The `ort/` directory contains onnxruntime-web
-files copied from `node_modules` during the build.
+populate the wake word model select entity. The `tflite/` directory contains TFLite WASM
+files copied from `node_modules` during the build. Custom models can also be placed in
+`/config/voice_satellite/models/` — `_sync_custom_models()` in `__init__.py` restores
+them to the integration's `models/` directory on startup (survives HACS updates).
 
 ### 4.3 Module-Level Constants
 
@@ -257,8 +256,8 @@ files copied from `node_modules` during the build.
 | `WAKE_WORD_DETECTION_HA` | `select.py` | `"Home Assistant"` | Server-side wake word option |
 | `WAKE_WORD_DETECTION_LOCAL` | `select.py` | `"On Device"` | On-device wake word option (default) |
 | `WAKE_WORD_SENSITIVITY_OPTIONS` | `select.py` | `["Slightly sensitive", "Moderately sensitive", "Very sensitive"]` | Wake word sensitivity levels |
-| `_COMMON_MODELS` | `select.py` | `{"melspectrogram", "embedding_model", "silero_vad"}` | Infrastructure ONNX models (excluded from keyword list) |
-| `_BUILTIN_FILENAME_MAP` | `select.py` | versioned filename → friendly name | Maps built-in keyword filenames |
+| `_COMMON_MODELS` | `select.py` | `{"stop"}` | Infrastructure models excluded from wake word keyword list |
+| `_BUILTIN_MODELS` | `select.py` | `["ok_nabu", "hey_jarvis", "alexa", "hey_mycroft"]` | Fallback list when models/ directory is missing |
 | `_CACHE_TTL` | `select.py` (class attr) | `30` (seconds) | Entity mapping cache lifetime |
 | `FRONTEND_DIR` | `frontend.py` | `Path(__file__).parent / "frontend"` | Static path to JS directory |
 
@@ -1101,7 +1100,7 @@ Card: pipeline.start({ start_stage: 'stt', wake_word_phrase: 'Okay Nabu' })
 **Key detail:** HA core's `DATA_LAST_WAKE_UP` uses human-friendly phrase strings
 as dictionary keys (e.g. `"Okay Nabu"`, not `"ok_nabu"`). The card maps model
 names to these phrases via `WAKE_WORD_PHRASES` in `wake-word/index.js` to match
-the conventions used by openWakeWord and microWakeWord (Voice PE). This ensures
+the conventions used by microWakeWord (Voice PE). This ensures
 card↔card and card↔Voice PE dedup works with the same unified infrastructure.
 
 The `wake_word_phrase` parameter is optional — omitted for server-side wake word
@@ -1983,8 +1982,8 @@ class VoiceSatelliteWakeWordDetectionSelect(SelectEntity, RestoreEntity):
 ```
 
 Simple two-option select:
-- **"Home Assistant"** — Server-side wake word via the Assist pipeline's openWakeWord add-on
-- **"On Device"** (default) — Browser-side ONNX inference via the card's WakeWordManager
+- **"Home Assistant"** — Server-side wake word via the Assist pipeline's configured wake word engine
+- **"On Device"** (default) — Browser-side TFLite inference via the card's WakeWordManager
 
 Default: `WAKE_WORD_DETECTION_LOCAL` ("On Device").
 
@@ -2005,13 +2004,17 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
 
 Options are **dynamically discovered** at startup by `discover_wake_word_models()`:
 
-1. Scans `models/` directory for `.onnx` files
-2. Filters out common infrastructure models (`melspectrogram`, `embedding_model`, `silero_vad`)
-3. Maps built-in versioned filenames to friendly names via `_BUILTIN_FILENAME_MAP`
-   (e.g., `hey_jarvis_v0.1.onnx` → `hey_jarvis`)
-4. Custom user-provided models use the filename stem as-is
-   (e.g., `my_custom_word.onnx` → `my_custom_word`)
-5. Falls back to `_BUILTIN_DEFAULTS` if directory is missing or empty
+1. Scans `models/` directory for `.tflite` files
+2. Filters out the `stop` model (infrastructure, not a wake word)
+3. Custom user-provided models use the filename stem as-is
+   (e.g., `my_custom_word.tflite` → `my_custom_word`)
+4. Falls back to `_BUILTIN_MODELS` if directory is missing or empty
+
+**Custom model persistence:** Before entity setup, `_sync_custom_models()` in
+`__init__.py` syncs custom `.tflite` files between the integration's `models/`
+directory and a persistent directory at `/config/voice_satellite/models/`. This
+ensures custom models survive HACS updates which replace the entire integration
+directory. See DESIGN-CARD.md §28.8 for details.
 
 **Key behaviors:**
 - `async_added_to_hass`: If restored state is not in current options (model file was removed),
@@ -2040,7 +2043,7 @@ wake word slot entirely.
 
 The card reads this via `getSelectState(hass, entity, 'wake_word_model_2')`. When the value
 is "No wake word", the card's `getActiveModels()` excludes it. When both slots select the
-same model, deduplication ensures the ONNX session is only loaded once.
+same model, deduplication ensures the TFLite runner is only loaded once.
 
 ### 19.8 Wake Word Sensitivity Select
 
