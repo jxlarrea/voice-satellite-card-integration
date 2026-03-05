@@ -2450,19 +2450,29 @@ how many feature frames are batched per inference call.
 During silence, TFLite inference is skipped entirely. Feature extraction
 continues to keep the noise estimate warm for immediate wake-up.
 
+RMS thresholds are tied to the **Wake Word Sensitivity** setting:
+
+| Sensitivity | Sleep RMS | Wake RMS |
+|---|---|---|
+| Slightly sensitive | 0.12 | 0.15 |
+| Moderately sensitive (default) | 0.07 | 0.09 |
+| Very sensitive | 0.035 | 0.045 |
+
 ```
 processChunk(samples)
 ├── 1. Compute RMS energy of 1280-sample chunk
-├── 2. Sleep/wake state machine:
-│     ├── rms < 0.005 → increment _silentChunks
+├── 2. Sleep/wake state machine (thresholds from ENERGY_THRESHOLDS):
+│     ├── rms < sleepRms → increment _silentChunks
 │     │   └── _silentChunks >= 30 (~2.4s) → _sleeping = true
-│     └── rms >= 0.008 → _silentChunks = 0, _sleeping = false
+│     └── rms >= wakeRms → _silentChunks = 0, _sleeping = false
 ├── 3. Always run MicroFrontend.feed() (keeps noise estimate warm)
 ├── 4. If sleeping → return early (skip TFLite inference)
 └── 5. Run keyword classifiers on each feature frame when awake
 ```
 
-Hysteresis (0.005 sleep / 0.008 wake) prevents flapping near the threshold.
+Hysteresis (sleep < wake) prevents flapping near the threshold.
+Energy thresholds update live via `updateEnergyThresholds()` when
+the sensitivity setting changes — no restart needed.
 Wake is instantaneous — the first 80ms chunk with sound above threshold
 resumes inference, and the wake word utterance spans many subsequent chunks.
 
@@ -2711,10 +2721,11 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] `micro-inference.js`: `MicroWakeWordInference` — feature extraction + keyword classifier pipeline
 - [ ] `micro-inference.js`: Auto-detect input tensor shape for framesPerInfer
 - [ ] `micro-inference.js`: Sliding window detection (circular probability buffer)
-- [ ] `micro-inference.js`: Energy-based sleep mode (RMS silence gating with hysteresis)
+- [ ] `micro-inference.js`: Energy-based sleep mode (RMS silence gating with sensitivity-aware thresholds)
 - [ ] `micro-inference.js`: Warmup period (100 frames) + 2s cooldown after detection
 - [ ] `micro-inference.js`: Multi-keyword support (`keywordConfigs[]` array)
 - [ ] `micro-inference.js`: `updateThresholds()` for live per-model threshold changes
+- [ ] `micro-inference.js`: `updateEnergyThresholds()` for live energy gate changes
 - [ ] `index.js`: feedAudio → chunk accumulation → serial drain queue
 - [ ] `index.js`: `getActiveModels()` deduplication, `getModelName2()`, `getThresholdForModel()`
 - [ ] `index.js`: Detection handler with model name (`_onDetection(modelName)`, `getWakeWordPhrase(modelName)`)
