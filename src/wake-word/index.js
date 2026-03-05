@@ -218,7 +218,7 @@ export class WakeWordManager {
         await releaseUnusedMicroModels(activeModels);
 
         const keywordConfigs = this._buildKeywordConfigs(runners);
-        this._inference = new MicroWakeWordInference(keywordConfigs, this._log);
+        this._inference = new MicroWakeWordInference(keywordConfigs, this._log, this._getSensitivityLabel());
         this._loadedModelsKey = modelsKey;
 
         const configSummary = keywordConfigs.map((k) => `${k.name}(c=${k.cutoff},sw=${k.slidingWindow})`).join(', ');
@@ -227,6 +227,7 @@ export class WakeWordManager {
         this._inference.updateThresholds(
           activeModels.map((name) => ({ name, threshold: this.getThresholdForModel(name) })),
         );
+        this._inference.updateEnergyThresholds(this._getSensitivityLabel());
         this._inference.reset();
       }
 
@@ -582,6 +583,7 @@ export class WakeWordManager {
     this._inference.updateThresholds(
       activeModels.map((name) => ({ name, threshold: this.getThresholdForModel(name) })),
     );
+    this._inference.updateEnergyThresholds(this._getSensitivityLabel());
     this._inference.reset();
     this._active = true;
   }
@@ -622,6 +624,7 @@ export class WakeWordManager {
       this._inference.updateThresholds(
         activeModels.map((name) => ({ name, threshold: this.getThresholdForModel(name) })),
       );
+      this._inference.updateEnergyThresholds(this._getSensitivityLabel());
       this._log.log('wake-word', 'Thresholds updated');
     }
 

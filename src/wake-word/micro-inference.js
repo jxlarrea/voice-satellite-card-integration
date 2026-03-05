@@ -23,8 +23,13 @@ const WARMUP_FRAMES = 100;
 
 // Energy-based sleep mode — skip TFLite inference during silence.
 // RMS thresholds are for float32 audio in [-1, 1] range.
-const SLEEP_RMS_THRESHOLD = 0.005;  // ~50dB below full scale
-const WAKE_RMS_THRESHOLD = 0.008;   // hysteresis to avoid flapping
+// Keyed by sensitivity label; higher thresholds = more noise filtered out.
+const ENERGY_THRESHOLDS = {
+  'Slightly sensitive':   { sleep: 0.12,  wake: 0.15  },
+  'Moderately sensitive': { sleep: 0.07,  wake: 0.09  },
+  'Very sensitive':       { sleep: 0.035, wake: 0.045 },
+};
+const DEFAULT_ENERGY = ENERGY_THRESHOLDS['Moderately sensitive'];
 const SLEEP_CHUNKS = 30;            // ~2.4s of silence before sleeping
 
 export class MicroWakeWordInference {
@@ -37,14 +42,18 @@ export class MicroWakeWordInference {
    *   - slidingWindow: number of probabilities to average (e.g. 5)
    *   - stepSize: feature frames per inference (10 for V2 models)
    * @param {object} log - logger with .log(category, message) method
+   * @param {string} [sensitivityLabel] - sensitivity level for energy gate
    */
-  constructor(keywordConfigs, log) {
+  constructor(keywordConfigs, log, sensitivityLabel) {
     this._frontend = new MicroFrontend();
     this._log = log;
     this._keywords = [];
     this._lastDetectionTime = 0;
 
     // Energy-based sleep mode state
+    const energy = ENERGY_THRESHOLDS[sensitivityLabel] || DEFAULT_ENERGY;
+    this._sleepRms = energy.sleep;
+    this._wakeRms = energy.wake;
     this._sleeping = false;
     this._silentChunks = 0;
 
@@ -104,17 +113,17 @@ export class MicroWakeWordInference {
     for (let i = 0; i < samples.length; i++) sumSq += samples[i] * samples[i];
     const rms = Math.sqrt(sumSq / samples.length);
 
-    if (rms < SLEEP_RMS_THRESHOLD) {
+    if (rms < this._sleepRms) {
       this._silentChunks++;
       if (!this._sleeping && this._silentChunks >= SLEEP_CHUNKS) {
         this._sleeping = true;
-        this._log.log('wake-word', 'Sleep — inference paused (silence)');
+        this._log.log('wake-word', `Sleep — inference paused (rms=${rms.toFixed(4)})`);
       }
-    } else if (rms >= WAKE_RMS_THRESHOLD) {
+    } else if (rms >= this._wakeRms) {
       this._silentChunks = 0;
       if (this._sleeping) {
         this._sleeping = false;
-        this._log.log('wake-word', 'Wake — inference resumed');
+        this._log.log('wake-word', `Wake — inference resumed (rms=${rms.toFixed(4)})`);
       }
     }
 
@@ -222,6 +231,16 @@ export class MicroWakeWordInference {
       const kw = this._keywords.find((k) => k.name === u.name);
       if (kw) kw.cutoff = u.threshold;
     }
+  }
+
+  /**
+   * Update energy gate thresholds (live, no restart needed).
+   * @param {string} sensitivityLabel
+   */
+  updateEnergyThresholds(sensitivityLabel) {
+    const energy = ENERGY_THRESHOLDS[sensitivityLabel] || DEFAULT_ENERGY;
+    this._sleepRms = energy.sleep;
+    this._wakeRms = energy.wake;
   }
 
   /**
