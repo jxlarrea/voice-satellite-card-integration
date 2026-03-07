@@ -345,6 +345,15 @@ export class WakeWordManager {
 
     const session = this._session;
 
+    // If the tab is paused (screen off / background), unpause so pipeline
+    // events aren't dropped. The wake word worklet keeps running while
+    // paused, but handlePipelineMessage blocks all events when isPaused.
+    if (session.visibility.isPaused) {
+      this._log.log('wake-word', 'Unpausing — detection while tab paused');
+      await session.audio.resume();
+      session.visibility._isPaused = false;
+    }
+
     // If muted, silently ignore the detection and resume listening
     if (getSwitchState(session.hass, session.config.satellite_entity, 'mute') === true) {
       this._log.log('wake-word', 'Muted — ignoring wake word detection');

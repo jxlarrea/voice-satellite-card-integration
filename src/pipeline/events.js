@@ -27,9 +27,14 @@ export function handleRunStart(mgr, eventData) {
     return;
   }
 
-  mgr.card.setState(State.LISTENING);
+  // When start_stage is 'stt' (on-device wake word), we're already in
+  // WAKE_WORD_DETECTED — don't regress to LISTENING (which maps to idle
+  // in HA and would cause automations to see a brief idle bounce).
+  if (mgr._startStage !== 'stt') {
+    mgr.card.setState(State.LISTENING);
+  }
   mgr.log.log('pipeline', `Running - binary handler ID: ${mgr.binaryHandlerId}`);
-  mgr.log.log('pipeline', 'Listening for wake word...');
+  mgr.log.log('pipeline', mgr._startStage === 'stt' ? 'Listening for speech...' : 'Listening for wake word...');
 }
 
 /** @param {import('./index.js').PipelineManager} mgr */

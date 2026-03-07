@@ -154,6 +154,7 @@ export class PipelineManager {
 
     // Reset run-start tracking - used to detect stale run-end events
     this._runStartReceived = false;
+    this._startStage = runConfig.start_stage;
 
     this._log.log('pipeline', `Starting pipeline: ${JSON.stringify(runConfig)}`);
 
