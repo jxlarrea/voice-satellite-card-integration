@@ -155,6 +155,8 @@ To change the selected satellite or re-enable a disabled device, toggle the opti
 
 All options are available in the visual card editor with a live preview that updates as you change settings.
 
+<img width="1024" height="730" alt="editor" src="https://github.com/user-attachments/assets/2ce34e0a-3761-48c4-a7b7-ea76816f633f" />
+
 ### Full Configuration Reference
 
 ```yaml
