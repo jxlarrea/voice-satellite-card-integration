@@ -1,16 +1,18 @@
 {
-    "type": "micro",
-    "wake_word": "hey_luna",
-    "author": "adamlonsdale",
-    "website": "https://github.com/adamlonsdale",
-    "model": "hey_luna.tflite",
-    "version": 2,
-    "trained_languages": ["en"],
-    "micro": {
-      "probability_cutoff": 0.63,
-      "sliding_window_size": 5,
-      "feature_step_size": 10,
-      "tensor_arena_size": 22860,
-      "minimum_esphome_version": "2024.7.0"
-    }
+  "type": "micro",
+  "wake_word": "hey_luna",
+  "author": "Tater Totterson",
+  "website": "https://github.com/TaterTotterson/microWakeWord-Trainer-AppleSilicon",
+  "model": "hey_luna.tflite",
+  "trained_languages": [
+    "en"
+  ],
+  "version": 2,
+  "micro": {
+    "probability_cutoff": 0.97,
+    "sliding_window_size": 5,
+    "feature_step_size": 10,
+    "tensor_arena_size": 30000,
+    "minimum_esphome_version": "2024.7.0"
   }
+}
