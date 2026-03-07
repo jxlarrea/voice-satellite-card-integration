@@ -43,14 +43,15 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up select entities from a config entry."""
+    wake_word_models = await hass.async_add_executor_job(discover_wake_word_models)
     entities = [
         VoiceSatellitePipelineSelect(hass, entry),
         VoiceSatelliteVadSensitivitySelect(hass, entry),
         VoiceSatelliteScreensaverSelect(hass, entry),
         VoiceSatelliteTTSOutputSelect(hass, entry),
         VoiceSatelliteWakeWordDetectionSelect(hass, entry),
-        VoiceSatelliteWakeWordModelSelect(hass, entry),
-        VoiceSatelliteWakeWordModel2Select(hass, entry),
+        VoiceSatelliteWakeWordModelSelect(hass, entry, wake_word_models),
+        VoiceSatelliteWakeWordModel2Select(hass, entry, wake_word_models),
         VoiceSatelliteWakeWordSensitivitySelect(hass, entry),
     ]
     async_add_entities(entities)
@@ -434,11 +435,11 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
     _attr_translation_key = "wake_word_model"
     _attr_icon = "mdi:microphone-message"
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, models: list[str]) -> None:
         """Initialize the wake word model select entity."""
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_wake_word_model"
-        self._options = discover_wake_word_models()
+        self._options = models
         self._selected_option: str = self._options[0] if self._options else "ok_nabu"
 
     @property
@@ -487,11 +488,11 @@ class VoiceSatelliteWakeWordModel2Select(SelectEntity, RestoreEntity):
     _attr_translation_key = "wake_word_model_2"
     _attr_icon = "mdi:microphone-message"
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, models: list[str]) -> None:
         """Initialize the wake word model 2 select entity."""
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_wake_word_model_2"
-        self._model_options = discover_wake_word_models()
+        self._model_options = models
         self._selected_option: str = NO_WAKE_WORD
 
     @property
