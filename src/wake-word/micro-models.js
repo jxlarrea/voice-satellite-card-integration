@@ -36,6 +36,8 @@ export const MICRO_MODEL_PARAMS = {
 let _tfweb = null;
 /** @type {Record<string, object>} name → TFLiteWebModelRunner */
 let _modelCache = {};
+/** @type {Record<string, object>} name → params from companion JSON */
+const _jsonParamsCache = {};
 
 /**
  * Load the TFLite WASM runtime via script tag (cached after first load).
@@ -66,7 +68,35 @@ export async function loadTFLite() {
 }
 
 /**
+ * Try to load a companion JSON manifest for a model.
+ * Caches the result (including failures) so we only fetch once per model.
+ * @param {string} filename - model base name (without extension)
+ * @returns {Promise<object|null>} parsed JSON or null
+ */
+async function _loadModelManifest(filename) {
+  if (filename in _jsonParamsCache) return _jsonParamsCache[filename];
+  try {
+    const resp = await fetch(`${MODELS_BASE}/${filename}.json`);
+    if (!resp.ok) { _jsonParamsCache[filename] = null; return null; }
+    const json = await resp.json();
+    const micro = json.micro || {};
+    const params = {
+      cutoff: micro.probability_cutoff ?? 0.90,
+      slidingWindow: micro.sliding_window_size ?? 3,
+      stepSize: micro.feature_step_size ?? 10,
+      _source: `${filename}.json`,
+    };
+    _jsonParamsCache[filename] = params;
+    return params;
+  } catch (_) {
+    _jsonParamsCache[filename] = null;
+    return null;
+  }
+}
+
+/**
  * Load a single microWakeWord TFLite model (cached per name).
+ * Also attempts to load a companion JSON manifest for model parameters.
  * @param {object} tfweb - the tfweb namespace
  * @param {string} modelName - e.g. 'ok_nabu', 'stop'
  * @param {Function} [onProgress] - callback(modelName)
@@ -78,8 +108,11 @@ export async function loadMicroModel(tfweb, modelName, onProgress) {
   const filename = TFLITE_KEYWORD_FILES[modelName] || modelName;
   if (onProgress) onProgress(modelName);
 
-  const url = `${MODELS_BASE}/${filename}.tflite`;
-  const runner = await tfweb.TFLiteWebModelRunner.create(url);
+  // Load model and companion JSON in parallel
+  const [runner] = await Promise.all([
+    tfweb.TFLiteWebModelRunner.create(`${MODELS_BASE}/${filename}.tflite`),
+    _loadModelManifest(filename),
+  ]);
   _modelCache[modelName] = runner;
   return runner;
 }
@@ -102,11 +135,13 @@ export async function loadMicroModels(tfweb, modelNames, onProgress) {
 
 /**
  * Get model parameters for a keyword name.
+ * Checks companion JSON manifest first, then hardcoded defaults.
  * @param {string} modelName
  * @returns {{cutoff: number, slidingWindow: number, stepSize: number}}
  */
 export function getMicroModelParams(modelName) {
-  return MICRO_MODEL_PARAMS[modelName] || { cutoff: 0.90, slidingWindow: 3, stepSize: 10 };
+  const filename = TFLITE_KEYWORD_FILES[modelName] || modelName;
+  return _jsonParamsCache[filename] || MICRO_MODEL_PARAMS[modelName] || { cutoff: 0.90, slidingWindow: 3, stepSize: 10 };
 }
 
 /**

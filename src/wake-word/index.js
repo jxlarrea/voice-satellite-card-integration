@@ -181,6 +181,9 @@ export class WakeWordManager {
   _buildKeywordConfigs(runners) {
     return Object.entries(runners).map(([name, runner]) => {
       const params = getMicroModelParams(name);
+      this._log.log('wake-word',
+        `${name}: cutoff=${params.cutoff} slidingWindow=${params.slidingWindow} stepSize=${params.stepSize} (${params._source || 'hardcoded'})`
+      );
       return {
         runner,
         name,
