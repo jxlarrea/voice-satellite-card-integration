@@ -10,10 +10,10 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 
 ## Screenshots
 <p align="center">
- <img src="https://github.com/user-attachments/assets/4a6ca843-af42-4854-8d42-daa84c469855" alt="Assist" width="49%"/>
- <img src="https://github.com/user-attachments/assets/64a59c56-a2e8-434f-a814-ad36248b624b" alt="Video Search" width="49%"/>
-    <img src="https://github.com/user-attachments/assets/bf7ad673-2aec-4c26-9a5f-5ff5f254c33a" alt="Weather" width="49%"/>
-  <img src="https://github.com/user-attachments/assets/88eb4d51-ba64-453d-875b-0ed8f02f644c" alt="Stocks" width="49%"/>
+ <img src="https://github.com/user-attachments/assets/7462ea47-a4fb-4954-be8b-e59b94436b1b" alt="Assist" width="49%"/>
+ <img src="https://github.com/user-attachments/assets/0c476572-7b10-455c-bba1-d72036ceb711" alt="Video Search" width="49%"/>
+ <img src="https://github.com/user-attachments/assets/422780e8-a0fc-4d13-9e47-ab410b5e9c39" alt="Stocks" width="49%"/>
+ <img src="https://github.com/user-attachments/assets/3f295cb3-729c-491f-85e3-6ae092ce6eca" alt="Weather" width="49%"/>
 </p>
 
 ## Table of Contents
