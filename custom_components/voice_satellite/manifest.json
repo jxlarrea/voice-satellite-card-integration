@@ -19,5 +19,5 @@
   "requirements": [
     "mutagen>=1.47.0"
   ],
-  "version": "5.9.6"
+  "version": "5.9.7"
 }

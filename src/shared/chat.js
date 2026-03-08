@@ -1,6 +1,8 @@
 /** Chat rendering state and incremental streaming updates. */
 
-const FADE_LEN = 24;
+const FADE_GROUPS = 4;
+const CHARS_PER_GROUP = 2;
+const FADE_LEN = FADE_GROUPS * CHARS_PER_GROUP; // 8 chars total
 
 export class ChatManager {
   constructor(card) {
@@ -10,7 +12,7 @@ export class ChatManager {
     this._streamEl = null;
     this._streamedResponse = '';
 
-    // Reusable fade span pool - avoids creating/destroying 24 DOM nodes per update
+    // Reusable fade span pool - grouped spans for efficient DOM updates
     this._fadeSpans = null;
     this._solidNode = null;
     this._fadeContainer = null;
@@ -119,8 +121,9 @@ export class ChatManager {
 
     // Update text nodes in-place - no innerHTML, no DOM creation/destruction
     this._solidNode.textContent = solid;
-    for (let i = 0; i < FADE_LEN; i++) {
-      this._fadeSpans[i].textContent = i < tail.length ? tail[i] : '';
+    for (let g = 0; g < FADE_GROUPS; g++) {
+      const start = g * CHARS_PER_GROUP;
+      this._fadeSpans[g].textContent = tail.slice(start, start + CHARS_PER_GROUP);
     }
 
     this._autoScroll();
@@ -136,16 +139,16 @@ export class ChatManager {
     this._card.ui._scrollTranscriptToEnd?.();
   }
 
-  /** Build the fade DOM structure once: a text node for solid text + 24 reusable spans. */
+  /** Build the fade DOM structure once: a text node for solid text + grouped fade spans. */
   _initFadeNodes() {
     this._streamEl.textContent = '';
     this._solidNode = document.createTextNode('');
     this._streamEl.appendChild(this._solidNode);
 
     this._fadeSpans = [];
-    for (let i = 0; i < FADE_LEN; i++) {
+    for (let g = 0; g < FADE_GROUPS; g++) {
       const span = document.createElement('span');
-      span.style.opacity = ((FADE_LEN - i) / FADE_LEN).toFixed(2);
+      span.style.opacity = ((FADE_GROUPS - g) / FADE_GROUPS).toFixed(2);
       this._fadeSpans.push(span);
       this._streamEl.appendChild(span);
     }

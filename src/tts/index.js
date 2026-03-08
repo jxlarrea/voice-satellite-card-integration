@@ -45,6 +45,10 @@ export class TtsManager {
 
     // Stop word activation delay timer
     this._stopWordTimer = null;
+
+    // Preloaded audio element for streaming TTS early-start
+    this._preloadedAudio = null;
+    this._preloadedUrl = null;
   }
 
   get isPlaying() { return this._playing; }
@@ -107,7 +111,13 @@ export class TtsManager {
       this._onComplete();
     }, Timing.PLAYBACK_WATCHDOG);
 
+    // Reuse preloaded audio element if URL matches (connection already warm)
+    const preloadedAudio = (this._preloadedUrl === url) ? this._preloadedAudio : null;
+    this._preloadedAudio = null;
+    this._preloadedUrl = null;
+
     this._currentAudio = playMediaUrl(url, this._card.mediaPlayer.volume, {
+      preloadedAudio,
       onEnd: () => {
         this._log.log('tts', 'Playback complete');
         this._clearWatchdog();
@@ -150,6 +160,8 @@ export class TtsManager {
 
   stop() {
     this._playing = false;
+    this._preloadedAudio = null;
+    this._preloadedUrl = null;
     this._remoteTarget = null;
     this._remoteSawPlaying = false;
     this._remoteInitialState = null;
@@ -181,10 +193,20 @@ export class TtsManager {
    */
   storeStreamingUrl(eventData) {
     this._streamingUrl = null;
+    this._preloadedAudio = null;
+    this._preloadedUrl = null;
     if (eventData.tts_output?.url && eventData.tts_output?.stream_response) {
       const url = eventData.tts_output.url;
       this._streamingUrl = url.startsWith('http') ? url : window.location.origin + url;
       this._log.log('tts', `Streaming TTS URL available: ${this._streamingUrl}`);
+
+      // Preload audio element so the browser connection is warm when play() fires
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.src = this._streamingUrl;
+      audio.load();
+      this._preloadedAudio = audio;
+      this._preloadedUrl = this._streamingUrl;
     }
   }
 
