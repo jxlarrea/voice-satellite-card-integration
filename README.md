@@ -1,5 +1,4 @@
 <p align="center">
-
 <img width="80%" alt="Voice Satellite for Home Assistant" src="https://github.com/user-attachments/assets/d24f52bc-d88f-42ac-8ebf-429028d12507" />
 </p>
 
@@ -28,7 +27,6 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 
 - [How It Works](#how-it-works)
 - [Important: Browser Requirements](#important-browser-requirements)
-- [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Setup](#setup)
@@ -46,22 +44,16 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 
 ## How It Works
 
-Voice Satellite runs as a **global engine** that loads on every page of Home Assistant — not just dashboards with cards. Once you assign a satellite entity in the sidebar panel, the engine starts automatically and listens for wake words across all page navigations.
+Voice Satellite runs as a **global engine** that loads on every page of Home Assistant — no dashboard card required. Once you assign a satellite entity in the sidebar panel, the engine starts automatically and listens for wake words across all page navigations.
 
-- **No card needed** — the engine runs globally via the sidebar panel
-- **Turns your browser into a real satellite** — registered as a proper `assist_satellite` device in Home Assistant
-- **Uses your browser's microphone** — no additional hardware needed
-- **Supports wake words** — say "OK Nabu" or your custom wake word to activate, with both on-device and server-side detection
-- **Plays TTS responses** — hear responses directly from your device or a remote media player
-- **Media player entity** — each satellite exposes a media player in HA for volume control, `tts.speak` targeting, and `media_player.play_media` from automations
-- **Voice-activated timers** — set, update, and cancel timers with on-screen countdown pills
-- **Announcements** — push TTS messages to specific devices from automations
-- **Interactive conversations** — automations can proactively ask questions and listen for responses
-- **Visual feedback** — themed gradient bar shows current state, with transcription and response text
-- **Skin system** — choose between built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) that theme the entire UI
+- **Turns your browser into a real satellite** — registered as a proper `assist_satellite` device in HA with full feature parity with physical voice assistants
+- **On-device wake word detection** — runs microWakeWord locally via TFLite WASM with dual wake word support, custom models, and voice-activated stop. Falls back to server-side detection when preferred
+- **Timers, announcements, conversations** — voice-activated timers with countdown pills, `assist_satellite.announce` / `start_conversation` / `ask_question` from automations
+- **Media player entity** — volume control, `tts.speak` targeting, and `media_player.play_media` from automations. TTS can route to browser or a remote speaker
+- **Skins** — 6 built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) with CSS overrides. Reactive audio-level animation on the activity bar
+- **Mini card** — optional `voice-satellite-mini-card` for in-dashboard text display without the fullscreen overlay
+- **LLM tools** *(experimental)* — image/video/web/Wikipedia search, weather, stocks/crypto with visual panels. Requires [Voice Satellite - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)
 - **Works on any device** — tablets, phones, computers, kiosks
-
-Perfect for wall-mounted tablets, kiosk displays, or any browser-based Home Assistant setup.
 
 ### Demo Video (**Make sure your volume is up**)
 
@@ -78,20 +70,6 @@ https://github.com/user-attachments/assets/af3956a8-3f58-420a-85ef-872ab9e33e8f
 For kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/details?id=de.ozerov.fully), make sure to enable microphone permissions and use the screensaver feature (not screen off) to keep the microphone active while dimming the display.
 
 For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings -> Companion App -> Other settings. Without this, the WebView will block TTS audio playback.
-
-## Features
-
-- **Global Engine** — runs on every page, not just dashboards. No card placement required.
-- **Sidebar Panel** — all configuration (entity, skin, microphone, debug) in one place, accessible from the HA sidebar.
-- **On-Device Wake Word Detection** — runs microWakeWord locally in the browser via TFLite WASM. No server-side processing needed, detects the wake word instantly on the device then streams audio to HA for STT. Supports dual wake words, multiple built-in wake words, and custom models. Falls back to server-side detection (Wyoming openWakeWord/microWakeWord) when preferred.
-- **Visual Feedback** — themed gradient activity bar shows listening/processing/speaking states with optional reactive audio-level animation.
-- **Mini Card (Text-First UI)** — optional `voice-satellite-mini-card` for a normal in-dashboard card layout (compact or tall) without the fullscreen overlay.
-- **Skins** — built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) that theme the activity bar, text display, timers, and overlay. Customizable with CSS overrides.
-- **Timers** — voice-activated timers with on-screen countdown pills, alert chimes, and cancel via double-tap or voice.
-- **Announcements** — receive `assist_satellite.announce` service calls with pre-announcement chimes and TTS playback. Queues behind active conversations. Also supports Conversations and Ask Question.
-- **Screensaver Control** — automatically dismisses a configured screensaver entity when a voice interaction begins.
-- **Auto Start Control** — toggle auto-start on or off per browser. When off, use the Start button in the panel to activate manually.
-- **LLM Tools** *(Experimental)* — enhance your voice assistant with visual tools: search for images and YouTube videos displayed in a media panel, get web search results with featured images, look up Wikipedia articles with summaries and images, view weather forecasts with current conditions and scrollable daily/hourly rows, and check stock prices, crypto prices, and currency conversions with color-coded change indicators. Requires the [Voice Satellite - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration.
 
 ## Prerequisites
 
