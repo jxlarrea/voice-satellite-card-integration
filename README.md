@@ -3,12 +3,13 @@
 <img width="80%" alt="Voice Satellite for Home Assistant" src="https://github.com/user-attachments/assets/d24f52bc-d88f-42ac-8ebf-429028d12507" />
 </p>
 
-
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-blue.svg?style=for-the-badge)](https://www.hacs.xyz/docs/faq/custom_repositories/)
-[![Downloads](https://img.shields.io/github/downloads/jxlarrea/voice-satellite-card-integration/total?style=for-the-badge&label=Downloads&color=red)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
-[![version](https://shields.io/github/v/release/jxlarrea/voice-satellite-card-integration?style=for-the-badge&color=orange)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
-[![Build](https://img.shields.io/github/actions/workflow/status/jxlarrea/voice-satellite-card-integration/release.yml?style=for-the-badge&label=Build)](https://github.com/jxlarrea/voice-satellite-card-integration/actions/workflows/release.yml)
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jxlarrea)
+<p align="center">
+<a href="https://www.hacs.xyz/docs/faq/custom_repositories/"><img src="https://img.shields.io/badge/HACS-Custom-blue.svg?style=for-the-badge" alt="hacs_badge"></a>
+<a href="https://github.com/jxlarrea/voice-satellite-card-integration/releases"><img src="https://img.shields.io/github/downloads/jxlarrea/voice-satellite-card-integration/total?style=for-the-badge&label=Downloads&color=red" alt="Downloads"></a>
+<a href="https://github.com/jxlarrea/voice-satellite-card-integration/releases"><img src="https://shields.io/github/v/release/jxlarrea/voice-satellite-card-integration?style=for-the-badge&color=orange" alt="version"></a>
+<a href="https://github.com/jxlarrea/voice-satellite-card-integration/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/jxlarrea/voice-satellite-card-integration/release.yml?style=for-the-badge&label=Build" alt="Build"></a>
+<a href="https://buymeacoffee.com/jxlarrea"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee"></a>
+</p>
 
 Transform any browser into a full-featured voice satellite for Home Assistant's Assist. Voice Satellite runs as a **global engine** on every page — no dashboard card required. A **sidebar panel** provides all configuration, and each browser gets its own satellite identity with feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/), including wake word detection, timers, announcements, conversations, and more.
 
