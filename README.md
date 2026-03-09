@@ -63,9 +63,9 @@ https://github.com/user-attachments/assets/af3956a8-3f58-420a-85ef-872ab9e33e8f
 
 **Warning:** Voice Satellite requires microphone access and works best when:
 
-1. **The browser has microphone permissions granted** — you will be prompted on first use.
-2. **The page is served over HTTPS** — required for microphone access in modern browsers.
-3. **The screen stays on** — if the device screen turns off completely, the microphone will stop working. Use a screensaver instead of screen-off to keep the mic active.
+1. **The browser has microphone permissions granted** - you will be prompted on first use.
+2. **The page is served over HTTPS** - required for microphone access in modern browsers.
+3. **The screen stays on** - if the device screen turns off completely, the microphone will stop working. Use a screensaver instead of screen-off to keep the mic active.
 
 For kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/details?id=de.ozerov.fully), make sure to enable microphone permissions and use the screensaver feature (not screen off) to keep the microphone active while dimming the display.
 
@@ -77,7 +77,7 @@ Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_re
    - Speech-to-Text ([Whisper](https://www.home-assistant.io/integrations/whisper/), OpenAI, etc.)
    - Conversation agent ([Home Assistant](https://www.home-assistant.io/integrations/conversation/), OpenAI, Qwen, etc.)
    - Text-to-Speech ([Piper](https://www.home-assistant.io/integrations/piper/), Kokoro, etc.)
-   - *(Optional)* Wake word detection (e.g., [openWakeWord](https://www.home-assistant.io/voice_control/install_wake_word_add_on/), [microWakeWord](https://www.home-assistant.io/integrations/micro_wake_word/)) — only needed if using server-side ("Home Assistant") wake word detection mode. On-device detection works without any server-side wake word service.
+   - *(Optional)* Wake word detection (e.g., [openWakeWord](https://www.home-assistant.io/voice_control/install_wake_word_add_on/), [microWakeWord](https://www.home-assistant.io/integrations/micro_wake_word/)) - only needed if using server-side ("Home Assistant") wake word detection mode. On-device detection works without any server-side wake word service.
 
 ## Installation
 
@@ -102,7 +102,7 @@ Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_re
 
 Each entry creates a full satellite device. After installation, a **Voice Satellite** entry appears in the sidebar. Open it to assign a satellite entity to this browser and configure settings.
 
-The engine starts automatically once an entity is assigned. If the browser blocks auto-start due to missing user gesture, a floating microphone button will appear — tap it to start.
+The engine starts automatically once an entity is assigned. If the browser blocks auto-start due to missing user gesture, a floating microphone button will appear - tap it to start.
 
 ## Sidebar Panel
 
@@ -116,7 +116,7 @@ The top of the panel shows the current engine state (running/dormant) and pipeli
 
 ### Satellite Entity
 
-Select which satellite device this browser should use. Each browser needs its own satellite entity — create one per device in **Settings -> Devices & Services -> Voice Satellite**.
+Select which satellite device this browser should use. Each browser needs its own satellite entity - create one per device in **Settings -> Devices & Services -> Voice Satellite**.
 
 ### Settings
 
@@ -178,7 +178,7 @@ The engine syncs its pipeline state back to the entity in real time. This means 
 | `processing` | Processing the user's intent |
 | `responding` | Speaking a TTS response |
 
-You can use this in automations — for example, muting a TV when the nearby satellite starts listening:
+You can use this in automations - for example, muting a TV when the nearby satellite starts listening:
 
 ```yaml
 trigger:
@@ -219,7 +219,7 @@ Example template to check for active timers:
 
 ### Starting the Satellite
 
-Once you assign a satellite entity in the sidebar panel, the engine starts automatically and begins listening for wake words. If the browser blocks auto-start due to restrictions, a floating microphone button will appear — tap it to start.
+Once you assign a satellite entity in the sidebar panel, the engine starts automatically and begins listening for wake words. If the browser blocks auto-start due to restrictions, a floating microphone button will appear - tap it to start.
 
 If **Auto start** is disabled in the panel settings, the engine won't start on page load. Use the **Start** button in the sidebar panel to activate it manually.
 
@@ -228,7 +228,7 @@ If **Auto start** is disabled in the panel settings, the engine won't start on p
 Once running, the satellite continuously listens for your configured wake word. When detected:
 
 1. A **wake chime** plays (if enabled) and the activity bar appears
-2. **Speak your command** — the engine streams audio to your STT engine and displays the transcription in real time
+2. **Speak your command** - the engine streams audio to your STT engine and displays the transcription in real time
 3. The assistant **processes your intent** and the bar animates while thinking
 4. The **TTS response plays** and the response text appears on screen
 5. The bar fades and the satellite returns to **wake word listening**
@@ -331,9 +331,9 @@ The engine provides audio and visual feedback: a done chime on successful match,
 Each satellite automatically exposes a `media_player` entity in Home Assistant. This entity:
 
 - **Controls volume** for all satellite audio (chimes, TTS, announcements) via the HA volume slider
-- **Reflects playback state** — shows "Playing" whenever any sound is active on the satellite
-- **Supports `tts.speak`** — target the satellite as a TTS device in automations
-- **Supports `media_player.play_media`** — play arbitrary audio files on the satellite
+- **Reflects playback state** - shows "Playing" whenever any sound is active on the satellite
+- **Supports `tts.speak`** - target the satellite as a TTS device in automations
+- **Supports `media_player.play_media`** - play arbitrary audio files on the satellite
 - **Supports browsing** the HA media library
 
 ```yaml
@@ -354,18 +354,18 @@ data:
   message: "The laundry is done!"
 ```
 
-The entity supports play, pause, resume, stop, volume set, and volume mute — all controllable from the HA UI or automations.
+The entity supports play, pause, resume, stop, volume set, and volume mute - all controllable from the HA UI or automations.
 
 ## Mini Card
 
-`voice-satellite-mini-card` is a text-first dashboard card that shows conversation status and transcripts inline. It shares the global engine — no separate entity or microphone configuration needed.
+`voice-satellite-mini-card` is a text-first dashboard card that shows conversation status and transcripts inline. It shares the global engine - no separate entity or microphone configuration needed.
 
 <img width="100%" alt="minicards" src="https://github.com/user-attachments/assets/a6ecf9e1-24fc-4731-8e82-82dbaa221080" />
 
 ### Modes
 
-- **Compact** — single-line status + conversation text with marquee scrolling when content overflows
-- **Tall** — status row + scrolling transcript + timer badges inside the card. Occupies 3 grid rows by default in Sections dashboards (min 2, max 12)
+- **Compact** - single-line status + conversation text with marquee scrolling when content overflows
+- **Tall** - status row + scrolling transcript + timer badges inside the card. Occupies 3 grid rows by default in Sections dashboards (min 2, max 12)
 
 ### Mini Card Features
 
@@ -387,20 +387,20 @@ suppress_full_card: true           # Hide the fullscreen overlay when this mini 
 custom_css: ''                     # CSS overrides inside the mini card shadow DOM
 ```
 
-> **Note:** Entity selection, microphone settings, and debug logging are configured globally in the sidebar panel — not in the mini card editor.
+> **Note:** Entity selection, microphone settings, and debug logging are configured globally in the sidebar panel - not in the mini card editor.
 
 ## On-Device Wake Word Detection
 
-Voice Satellite includes built-in wake word detection that runs entirely in the browser — no server-side wake word service required.
+Voice Satellite includes built-in wake word detection that runs entirely in the browser - no server-side wake word service required.
 
 ### How It Works
 
 On-device detection uses [microWakeWord](https://github.com/kahrendt/microWakeWord) TFLite models running via TensorFlow Lite WebAssembly. The browser continuously processes audio and runs lightweight keyword classifiers to detect the wake word. Audio is only streamed to Home Assistant after detection. This means:
 
-- **Lower latency** — detection happens instantly on the device, no network round-trip
-- **Reduced server load** — audio is only sent to HA for STT after the wake word is detected
-- **No wake word add-on required** — works without openWakeWord or microWakeWord installed on HA
-- **Energy-efficient** — inference is automatically paused during silence and resumes instantly when sound is detected
+- **Lower latency** - detection happens instantly on the device, no network round-trip
+- **Reduced server load** - audio is only sent to HA for STT after the wake word is detected
+- **No wake word add-on required** - works without openWakeWord or microWakeWord installed on HA
+- **Energy-efficient** - inference is automatically paused during silence and resumes instantly when sound is detected
 
 ### Built-in Wake Words
 
@@ -417,8 +417,8 @@ You can add your own microWakeWord TFLite models:
 
 1. Train a custom wake word model using [microWakeWord](https://github.com/kahrendt/microWakeWord), or download a community model from the [esphome/micro-wake-word-models](https://github.com/esphome/micro-wake-word-models) repository
 2. Place the `.tflite` file in one of these directories:
-   - **`config/voice_satellite/models/`** (recommended) — persists across HACS updates
-   - `custom_components/voice_satellite/models/` — works but files are lost on integration updates
+   - **`config/voice_satellite/models/`** (recommended) - persists across HACS updates
+   - `custom_components/voice_satellite/models/` - works but files are lost on integration updates
 3. Restart Home Assistant
 4. The custom model will appear in the "Wake word model" dropdown on the satellite's device page
 
@@ -430,16 +430,16 @@ The filename (without `.tflite`) becomes the option name in the dropdown. For ex
 
 All wake word settings are configured per-device on the satellite's device page (**Settings -> Devices & Services -> Voice Satellite -> [device]**):
 
-- **Wake word detection** — "On Device" (default) or "Home Assistant" (server-side)
-- **Wake word** — select the primary wake word to listen for
-- **Wake word 2** — optional second wake word (set to "No wake word" to disable). Both wake words run concurrently on the same shared inference pipeline with minimal overhead. If both slots select the same model, the TFLite model is only loaded once
-- **Wake word sensitivity** — "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive". Applies to both wake word slots
+- **Wake word detection** - "On Device" (default) or "Home Assistant" (server-side)
+- **Wake word** - select the primary wake word to listen for
+- **Wake word 2** - optional second wake word (set to "No wake word" to disable). Both wake words run concurrently on the same shared inference pipeline with minimal overhead. If both slots select the same model, the TFLite model is only loaded once
+- **Wake word sensitivity** - "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive". Applies to both wake word slots
 
 To use server-side detection instead, set "Wake word detection" to "Home Assistant". This requires a wake word service (openWakeWord or microWakeWord) configured in your Assist pipeline.
 
 ## Skins
 
-Voice Satellite includes a skin system that themes the entire overlay UI — activity bar, text display, timers, and background. Select a skin in the sidebar panel under **Settings**.
+Voice Satellite includes a skin system that themes the entire overlay UI - activity bar, text display, timers, and background. Select a skin in the sidebar panel under **Settings**.
 
 ![skins](https://github.com/user-attachments/assets/436029a8-c199-4773-b50f-428598e66ff4)
 
@@ -554,7 +554,7 @@ The financial card uses the same featured panel layout as weather — it appears
 
 1. **Check the device settings:** Go to the satellite's device page and verify "Wake word detection" is set to "On Device" and a wake word model is selected.
 2. **Try adjusting sensitivity:** Change "Wake word sensitivity" to "Very sensitive" to see if detection improves.
-3. **Check browser compatibility:** On-device detection uses WebAssembly (TFLite). Ensure your browser supports WASM — all modern browsers do, but very old versions may not.
+3. **Check browser compatibility:** On-device detection uses WebAssembly (TFLite). Ensure your browser supports WASM - all modern browsers do, but very old versions may not.
 4. Enable **Debug logging** in the sidebar panel to see wake word scores in the browser console (F12).
 
 **Server-side mode ("Home Assistant"):**
