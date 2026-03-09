@@ -13,8 +13,8 @@
 <a href="https://github.com/jxlarrea/voice-satellite-card-integration/releases"><img src="https://img.shields.io/github/downloads/jxlarrea/voice-satellite-card-integration/total?style=for-the-badge&label=Downloads&color=red" alt="Downloads"></a>
 <a href="https://github.com/jxlarrea/voice-satellite-card-integration/releases"><img src="https://shields.io/github/v/release/jxlarrea/voice-satellite-card-integration?style=for-the-badge&color=orange" alt="version"></a>
 <a href="https://github.com/jxlarrea/voice-satellite-card-integration/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/jxlarrea/voice-satellite-card-integration/release.yml?style=for-the-badge&label=Build" alt="Build"></a>
-</p
- >
+</p>
+
 <p align="center">
 <a href="https://buymeacoffee.com/jxlarrea"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee"></a>
 </p>
@@ -23,13 +23,9 @@ Turn any tablet, phone, or browser into a hands-free voice assistant for [Home A
 
 Voice Satellite works as a drop-in integration that transforms any web browser into a full [Assist satellite](https://www.home-assistant.io/voice-pe/) with wake word detection, media playback, and visual feedback.
 
-## Screenshots
-<p align="center">
- <img src="https://github.com/user-attachments/assets/7462ea47-a4fb-4954-be8b-e59b94436b1b" alt="Assist" width="49%"/>
- <img src="https://github.com/user-attachments/assets/0c476572-7b10-455c-bba1-d72036ceb711" alt="Video Search" width="49%"/>
- <img src="https://github.com/user-attachments/assets/b0f516f6-e520-4c6a-902f-9aef57aa9d38" alt="Weather" width="49%"/>
- <img src="https://github.com/user-attachments/assets/422780e8-a0fc-4d13-9e47-ab410b5e9c39" alt="Stocks" width="49%"/>
-</p>
+### Demo Video (**Make sure your volume is up**)
+
+https://github.com/user-attachments/assets/af3956a8-3f58-420a-85ef-872ab9e33e8f
 
 ## Table of Contents
 
@@ -63,9 +59,13 @@ Voice Satellite runs as a **global engine** that loads on every page of Home Ass
 - **LLM tools** *(experimental)* - image/video/web/Wikipedia search, weather, stocks/crypto with visual panels. Requires [Voice Satellite - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)
 - **Works on any device** - tablets, phones, computers, kiosks
 
-### Demo Video (**Make sure your volume is up**)
-
-https://github.com/user-attachments/assets/af3956a8-3f58-420a-85ef-872ab9e33e8f
+## Screenshots
+<p align="center">
+ <img src="https://github.com/user-attachments/assets/7462ea47-a4fb-4954-be8b-e59b94436b1b" alt="Assist" width="49%"/>
+ <img src="https://github.com/user-attachments/assets/0c476572-7b10-455c-bba1-d72036ceb711" alt="Video Search" width="49%"/>
+ <img src="https://github.com/user-attachments/assets/b0f516f6-e520-4c6a-902f-9aef57aa9d38" alt="Weather" width="49%"/>
+ <img src="https://github.com/user-attachments/assets/422780e8-a0fc-4d13-9e47-ab410b5e9c39" alt="Stocks" width="49%"/>
+</p>
 
 ## Important: Browser Requirements
 
