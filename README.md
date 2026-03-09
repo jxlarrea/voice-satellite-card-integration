@@ -13,7 +13,7 @@
 <a href="https://buymeacoffee.com/jxlarrea"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee"></a>
 </p>
 
-Transform any browser into a full-featured voice satellite for Home Assistant's Assist. Voice Satellite runs as a **global engine** on every page — no dashboard card required. A **sidebar panel** provides all configuration, and each browser gets its own satellite identity with feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/), including wake word detection, timers, announcements, conversations, and more.
+Transform any browser into a full-featured voice satellite for Home Assistant's Assist. Voice Satellite runs as a **global engine** on every page - no dashboard card required. A **sidebar panel** provides all configuration, and each browser gets its own satellite identity with feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/), including wake word detection, timers, announcements, conversations, and more.
 
 ## Screenshots
 <p align="center">
@@ -44,16 +44,16 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 
 ## How It Works
 
-Voice Satellite runs as a **global engine** that loads on every page of Home Assistant — no dashboard card required. Once you assign a satellite entity in the sidebar panel, the engine starts automatically and listens for wake words across all page navigations.
+Voice Satellite runs as a **global engine** that loads on every page of Home Assistant - no dashboard card required. Once you assign a satellite entity in the sidebar panel, the engine starts automatically and listens for wake words across all page navigations.
 
-- **Turns your browser into a real satellite** — registered as a proper `assist_satellite` device in HA with full feature parity with physical voice assistants
-- **On-device wake word detection** — runs microWakeWord locally via TFLite WASM with dual wake word support, custom models, and voice-activated stop. Falls back to server-side detection when preferred
-- **Timers, announcements, conversations** — voice-activated timers with countdown pills, `assist_satellite.announce` / `start_conversation` / `ask_question` from automations
-- **Media player entity** — volume control, `tts.speak` targeting, and `media_player.play_media` from automations. TTS can route to browser or a remote speaker
-- **Skins** — 6 built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) with CSS overrides. Reactive audio-level animation on the activity bar
-- **Mini card** — optional `voice-satellite-mini-card` for in-dashboard text display without the fullscreen overlay
-- **LLM tools** *(experimental)* — image/video/web/Wikipedia search, weather, stocks/crypto with visual panels. Requires [Voice Satellite - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)
-- **Works on any device** — tablets, phones, computers, kiosks
+- **Turns your browser into a real satellite** - registered as a proper `assist_satellite` device in HA with full feature parity with physical voice assistants
+- **On-device wake word detection** - runs microWakeWord locally via TFLite WASM with dual wake word support, custom models, and voice-activated stop. Falls back to server-side detection when preferred
+- **Timers, announcements, conversations** - voice-activated timers with countdown pills, `assist_satellite.announce` / `start_conversation` / `ask_question` from automations
+- **Media player entity** - volume control, `tts.speak` targeting, and `media_player.play_media` from automations. TTS can route to browser or a remote speaker
+- **Skins** - 6 built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) with CSS overrides. Reactive audio-level animation on the activity bar
+- **Mini card** - optional `voice-satellite-mini-card` for in-dashboard text display without the fullscreen overlay
+- **LLM tools** *(experimental)* - image/video/web/Wikipedia search, weather, stocks/crypto with visual panels. Requires [Voice Satellite - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)
+- **Works on any device** - tablets, phones, computers, kiosks
 
 ### Demo Video (**Make sure your volume is up**)
 
