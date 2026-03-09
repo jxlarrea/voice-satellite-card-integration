@@ -161,7 +161,7 @@ A live preview of the selected skin updates as you change appearance settings.
 
 The integration creates a virtual Assist Satellite device for each browser, enabling timers, announcements, conversations, media player, and per-device configuration. This section covers the integration-specific features.
 
-![Screenshot](https://github.com/user-attachments/assets/03c80c6e-7c21-473b-9975-c012212d8251)
+<img width="100%" alt="integration" src="https://github.com/user-attachments/assets/573dcbbf-ae9c-42c0-b7d9-b7ad3ec8a790" />
 
 ### Device Settings
 
