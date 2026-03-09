@@ -1,4 +1,4 @@
-# <img width="48" height="48" alt="icon" src="https://github.com/user-attachments/assets/31b4a789-bae3-4428-a543-85063f17109c" /> Voice Satellite for Home Assistant
+# <img align="top" width="48" height="48" alt="icon" src="https://github.com/user-attachments/assets/2d655a30-21eb-4243-8920-8ccbea6af2ba" />  Voice Satellite for Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-blue.svg?style=for-the-badge)](https://www.hacs.xyz/docs/faq/custom_repositories/)
 [![Downloads](https://img.shields.io/github/downloads/jxlarrea/voice-satellite-card-integration/total?style=for-the-badge&label=Downloads&color=red)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
