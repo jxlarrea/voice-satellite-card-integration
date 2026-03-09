@@ -1,8 +1,8 @@
-# Voice Satellite Card — Design Document
+# Voice Satellite — Frontend Design Document
 
-> Comprehensive design reference for the Voice Satellite Card frontend.
+> Comprehensive design reference for the Voice Satellite frontend.
 > This document contains everything needed to understand, maintain, or
-> recreate the card from scratch.
+> recreate the frontend from scratch.
 
 ---
 
@@ -12,51 +12,69 @@
 2. [Architecture](#2-architecture)
 3. [Integration Interface](#3-integration-interface)
 4. [File Map](#4-file-map)
-5. [Entry Point & Registration](#5-entry-point--registration)
-6. [Session Singleton](#6-session-singleton)
-7. [Card Types](#7-card-types)
-8. [Broadcast Proxies](#8-broadcast-proxies)
-9. [Manager Inventory](#9-manager-inventory)
-10. [Pipeline Lifecycle](#10-pipeline-lifecycle)
-11. [Audio Architecture](#11-audio-architecture)
-12. [Reactive Bar & AnalyserManager](#12-reactive-bar--analysermanager)
-13. [TTS & Chimes](#13-tts--chimes)
-14. [Notification System](#14-notification-system)
-15. [Timer System](#15-timer-system)
-16. [Media Player](#16-media-player)
-17. [Visibility Management](#17-visibility-management)
-18. [Double-Tap / Escape Handler](#18-double-tap--escape-handler)
-19. [Entity Resolution & Browser Override](#19-entity-resolution--browser-override)
-20. [Editor & Preview System](#20-editor--preview-system)
-21. [Skins & Styling](#21-skins--styling)
-22. [Rich Media](#22-rich-media)
-23. [Chat & Streaming Text](#23-chat--streaming-text)
-24. [Full Card Suppression](#24-full-card-suppression)
-25. [Internationalization](#25-internationalization)
-26. [Constants & Configuration](#26-constants--configuration)
-27. [Build & Versioning](#27-build--versioning)
-28. [On-Device Wake Word Detection](#28-on-device-wake-word-detection)
-29. [Implementation Checklist](#29-implementation-checklist)
+5. [Entry Point & Engine Bootstrap](#5-entry-point--engine-bootstrap)
+6. [Sidebar Panel](#6-sidebar-panel)
+7. [Session Singleton](#7-session-singleton)
+8. [Card Types](#8-card-types)
+9. [Broadcast Proxies](#9-broadcast-proxies)
+10. [Manager Inventory](#10-manager-inventory)
+11. [Pipeline Lifecycle](#11-pipeline-lifecycle)
+12. [Audio Architecture](#12-audio-architecture)
+13. [Reactive Bar & AnalyserManager](#13-reactive-bar--analysermanager)
+14. [TTS & Chimes](#14-tts--chimes)
+15. [Notification System](#15-notification-system)
+16. [Timer System](#16-timer-system)
+17. [Media Player](#17-media-player)
+18. [Visibility Management](#18-visibility-management)
+19. [Double-Tap / Escape Handler](#19-double-tap--escape-handler)
+20. [Entity Resolution & Browser Override](#20-entity-resolution--browser-override)
+21. [Editor & Preview System](#21-editor--preview-system)
+22. [Skins & Styling](#22-skins--styling)
+23. [Rich Media](#23-rich-media)
+24. [Chat & Streaming Text](#24-chat--streaming-text)
+25. [Full Card Suppression](#25-full-card-suppression)
+26. [Internationalization](#26-internationalization)
+27. [Constants & Configuration](#27-constants--configuration)
+28. [Build & Versioning](#28-build--versioning)
+29. [On-Device Wake Word Detection](#29-on-device-wake-word-detection)
+30. [Implementation Checklist](#30-implementation-checklist)
 
 ---
 
 ## 1. Overview
 
-The Voice Satellite Card turns a browser tab into a voice satellite for
-Home Assistant Assist. It acquires the microphone, streams audio to a
-custom HA integration (`voice_satellite`) via WebSocket, and renders
-visual feedback for each pipeline stage (wake word → STT → intent → TTS).
+Voice Satellite turns a browser tab into a voice satellite for Home
+Assistant Assist. It acquires the microphone, streams audio to a custom
+HA integration (`voice_satellite`) via WebSocket, and renders visual
+feedback for each pipeline stage (wake word → STT → intent → TTS).
 
-Two card types ship in one JS bundle:
+### 1.1 Engine + Panel Architecture (v6.0)
 
-| Card | Custom Element | Purpose |
-|------|---------------|---------|
-| **Full** | `voice-satellite-card` | Global overlay in `document.body`. Skin-themed rainbow bar, chat bubbles, rich media panels, lightbox. |
-| **Mini** | `voice-satellite-mini-card` | In-card text display. Compact (single-row marquee) or tall (scrollable transcript). No bar, no rich media. |
+The frontend uses a **global engine** pattern — no dashboard card
+placement is required. The integration's `frontend.py` registers the
+main JS bundle via `add_extra_js_url`, so it loads on **every page**.
+On load, the engine bootstraps the session singleton, resolves the
+satellite entity from localStorage, and starts the voice pipeline
+automatically.
 
-Both cards share a **session singleton** that owns all managers (pipeline,
-audio, TTS, timers, notifications, etc.). Cards are thin rendering shells
-that register with the session and receive broadcast UI/chat events.
+Users configure settings via a **sidebar panel** (Settings → Voice
+Satellite), not via a card editor. The panel stores config in
+`localStorage` (`vs-panel-config` key) per-browser, so each device
+can have independent settings.
+
+### 1.2 Component Summary
+
+| Component | Custom Element | Bundle | Purpose |
+|-----------|---------------|--------|---------|
+| **Engine** | *(none — runs inline)* | `voice-satellite-card.js` | Global bootstrap: session init, hass observer, auto-start |
+| **Panel** | `voice-satellite-panel` | `voice-satellite-panel.js` | Sidebar settings UI: entity picker, skin/mic/debug config, live preview |
+| **Full Card** | `voice-satellite-card` | `voice-satellite-card.js` | Global overlay in `document.body`. Skin-themed rainbow bar, chat bubbles, rich media panels, lightbox. Created by the engine (hidden `display:none` element) for UI rendering. **Deprecated as a dashboard card** — shows migration message if placed on a dashboard. |
+| **Mini Card** | `voice-satellite-mini-card` | `voice-satellite-card.js` | In-card text display. Compact (single-row marquee) or tall (scrollable transcript). No bar, no rich media. Still available as a dashboard card. |
+
+All components share a **session singleton** that owns all managers
+(pipeline, audio, TTS, timers, notifications, etc.). Cards are thin
+rendering shells that register with the session and receive broadcast
+UI/chat events.
 
 ---
 
@@ -65,6 +83,17 @@ that register with the session and receive broadcast UI/chat events.
 ### 2.1 High-Level Diagram
 
 ```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Engine (src/engine/index.js) — runs on every page via add_extra_js │
+│                                                                     │
+│  initEngine() → waitForHass() → bootstrapEngine()                  │
+│    ├── VoiceSatelliteSession.getInstance()                         │
+│    ├── startHassObserver(ha, session)  — 1s polling, survives navs │
+│    └── attemptStart(hass, session)    — auto_start check, entity   │
+│          └── ensureEngineCard()       — hidden full card for UI    │
+└───────────────────────────┬─────────────────────────────────────────┘
+                            │ creates & feeds
+                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    VoiceSatelliteSession (singleton)                │
 │                      window.__vsSession                            │
@@ -101,26 +130,47 @@ that register with the session and receive broadcast UI/chat events.
    │  │  ChatMgr │         │ ChatMgr  │   │
    │  └──────────┘         └──────────┘   │
    └───────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│  Sidebar Panel (src/panel/index.js) — separate webpack entry        │
+│                                                                     │
+│  voice-satellite-panel custom element                               │
+│    ├── Entity picker (ha-form with entitySchema)                   │
+│    ├── Settings form (behavior + skin + mic + debug schemas)       │
+│    ├── Live preview (shadow DOM, renderPreview)                    │
+│    ├── Engine status + Start/Stop buttons                          │
+│    └── Config stored in localStorage (vs-panel-config)             │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 2.2 Key Design Principles
 
-1. **Session owns all state.** Pipeline, audio context, WebSocket
+1. **Engine runs globally.** The main JS loads on every page via
+   `add_extra_js_url`. The engine creates the session, observes hass
+   changes across page navigations, and auto-starts the pipeline when
+   an entity is configured and `auto_start !== false`.
+
+2. **Panel replaces the card editor.** All user-facing configuration
+   lives in the sidebar panel. Config is stored in `localStorage`
+   (`vs-panel-config`) per-browser. The panel reads/writes the same
+   session singleton the engine uses.
+
+3. **Session owns all state.** Pipeline, audio context, WebSocket
    subscription, notification queue, and timer state live on the
    singleton. Cards hold only rendering state (DOM refs, CSS classes).
 
-2. **Manager polymorphism.** Every manager receives the session as its
+4. **Manager polymorphism.** Every manager receives the session as its
    `card` constructor argument. Managers call `this._card.setState()`,
    `this._card.ui.updateForState()`, `this._card.chat.showResponse()`,
    etc. The session implements the same interface, so **zero manager code
    was changed** during the migration from per-card to session ownership.
 
-3. **Broadcast proxies.** `session.ui` and `session.chat` are proxy
+5. **Broadcast proxies.** `session.ui` and `session.chat` are proxy
    objects that iterate `session._cards` and forward every call to each
    card's local `UIManager` / `ChatManager`. Query methods (e.g.
    `isLightboxVisible()`) aggregate with logical OR across cards.
 
-4. **Registration lifecycle.** Cards call `session.register(this)` to
+6. **Registration lifecycle.** Cards call `session.register(this)` to
    join and `session.unregister(this)` to leave. The session auto-syncs
    new cards to the current state on registration. Full cards never
    unregister (their DOM persists in `document.body`); mini cards
@@ -130,12 +180,12 @@ that register with the session and receive broadcast UI/chat events.
 
 ## 3. Integration Interface
 
-The card does not talk to HA's voice pipeline directly. All communication
-is brokered through the `voice_satellite` custom integration via
-WebSocket. The integration creates a device with 12 entities per config
-entry. A separate document (`DESIGN-INTEGRATION.md`) covers the
-integration in detail; this section documents the interface contract
-from the card's perspective.
+The frontend does not talk to HA's voice pipeline directly. All
+communication is brokered through the `voice_satellite` custom
+integration via WebSocket. The integration creates a device with 13
+entities per config entry. A separate document (`DESIGN-INTEGRATION.md`)
+covers the integration in detail; this section documents the interface
+contract from the frontend's perspective.
 
 ### 3.1 Communication Diagram
 
@@ -480,9 +530,15 @@ enters a full pipeline via `restartContinue()` (skips wake word).
 
 ```
 src/
-├── index.js                  Entry point: registers custom elements
-├── constants.js              State enum, timing, default config
+├── index.js                  Entry point: registers custom elements, calls initEngine()
+├── constants.js              State enum, timing, default config (incl. auto_start)
 ├── logger.js                 Debug logger with domain prefixes
+│
+├── engine/
+│   └── index.js              Global engine bootstrap: session init, hass observer, auto-start
+│
+├── panel/
+│   └── index.js              Sidebar panel: entity picker, settings, preview, engine controls
 │
 ├── session/
 │   ├── index.js              VoiceSatelliteSession singleton
@@ -536,10 +592,10 @@ src/
 │   └── index.js              MediaPlayerManager (play/pause/stop/volume, state reporting)
 │
 ├── wake-word/                   (lazy-loaded via webpack code splitting)
-│   ├── index.js              WakeWordManager (orchestrator, detection lifecycle)
-│   ├── micro-models.js       TFLite WASM runtime + model loading/caching
-│   ├── micro-inference.js    MicroWakeWordInference (feature extraction + keyword classifier)
-│   └── micro-frontend.js    MicroFrontend (FFT → mel filterbank → noise reduction → PCAN)
+│   ├── index.js              WakeWordManager (orchestrator, detection + stop model lifecycle)
+│   ├── micro-models.js       TFLite WASM runtime + model/manifest loading/caching
+│   ├── micro-inference.js    MicroWakeWordInference (keyword classifier + energy sleep)
+│   └── micro-frontend.js    MicroFrontend (Hann → FFT → mel → sqrt → NR → PCAN → log₂ → int8)
 │
 ├── shared/
 │   ├── chat.js               ChatManager (streaming text with 24-char fade)
@@ -582,23 +638,232 @@ src/
 
 ---
 
-## 5. Entry Point & Registration
+## 5. Entry Point & Engine Bootstrap
+
+### 5.1 Entry Point
 
 **File:** `src/index.js`
 
-```
+```javascript
 customElements.define('voice-satellite-card', VoiceSatelliteCard)
 customElements.define('voice-satellite-mini-card', VoiceSatelliteMiniCard)
 
-window.customCards.push({ type: 'voice-satellite-card', ... })
+// Only the mini card is registered for dashboard use
 window.customCards.push({ type: 'voice-satellite-mini-card', ... })
+
+// Start the global engine (runs on every page, not just dashboards)
+initEngine()
 ```
 
-HA discovers both card types through `window.customCards`. The
-integration's `frontend.py` auto-registers the JS bundle via
-`async_setup_entry` → `hass.http.register_static_path`.
+The main JS bundle is loaded globally via `add_extra_js_url` in the
+integration's `frontend.py`. The full card is **not** registered in
+`window.customCards` — it is deprecated as a dashboard card. If a user
+still has one on their dashboard, it shows a deprecation message
+directing them to the sidebar panel.
 
-### 5.1 Logger
+### 5.2 Engine Bootstrap
+
+**File:** `src/engine/index.js`
+
+The engine runs on every page load. It creates the session singleton,
+starts a continuous hass observer, and auto-starts the pipeline.
+
+```
+initEngine()
+├── Guard: window.__vsEngine already set? → return
+├── Log styled banner: [VOICE-SATELLITE-ENGINE v6.0.0]
+└── bootstrapEngine()
+    ├── waitForHass()  → poll for home-assistant element with hass.connection
+    ├── VoiceSatelliteSession.getInstance()
+    ├── startHassObserver(ha, session)
+    │   └── setInterval(1000ms): feed hass updates, re-attempt start if not running
+    └── attemptStart(hass, session)
+        ├── Guard: isStarted, _starting, _userStopped → return
+        ├── Guard: auto_start === false (from localStorage) → return
+        ├── resolveEntity(hass) → find satellite entity
+        ├── Merge config: DEFAULT_CONFIG + localStorage + entity
+        ├── ensureEngineCard(hass, session, config)
+        │   └── If no cards registered: create hidden voice-satellite-card
+        │       element in document.body (_engineOwned = true)
+        └── requestAnimationFrame → session.start()
+```
+
+**Key design decisions:**
+
+- **`auto_start` check:** Reads `vs-panel-config` from localStorage. When
+  `auto_start === false`, the engine does not start automatically. The
+  user must click the Start button in the panel.
+- **`_userStopped` flag:** Set when the user explicitly stops the engine
+  (via panel Stop button or toggling auto_start off). Prevents the hass
+  observer from re-starting the engine.
+- **Engine card:** A hidden `voice-satellite-card` element is created in
+  `document.body` so the global UI overlay (rainbow bar, start button,
+  chat bubbles) renders even without any dashboard card. The card is
+  marked `_engineOwned = true` and has `display: none`.
+- **`waitForHass()`:** Polls every 200ms for the `home-assistant` element
+  with a valid `hass.connection`. Waits for `DOMContentLoaded` first if
+  still loading.
+- **Hass observer:** A 1-second `setInterval` that feeds hass updates to
+  the session and re-attempts entity resolution if the session hasn't
+  started yet (covers the case where the integration was just added).
+
+---
+
+## 6. Sidebar Panel
+
+**File:** `src/panel/index.js`
+
+The panel is a separate webpack entry point (`voice-satellite-panel.js`)
+registered as a sidebar panel via `async_register_built_in_panel` in
+`frontend.py`. It uses the `ha-panel-custom` pattern.
+
+### 6.1 Panel Registration (Integration Side)
+
+```python
+async_register_built_in_panel(
+    hass,
+    component_name="custom",
+    sidebar_title="Voice Satellite",
+    sidebar_icon="mdi:microphone-message",
+    frontend_url_path="voice-satellite",
+    require_admin=False,
+    config={
+        "_panel_custom": {
+            "name": "voice-satellite-panel",
+            "js_url": f"/voice_satellite/voice-satellite-panel.js?v={VERSION}",
+        }
+    },
+)
+```
+
+### 6.2 Panel Element
+
+```javascript
+class VoiceSatellitePanel extends HTMLElement {
+  set hass(hass)   { /* renders on first hass, updates forms */ }
+  set narrow(n)    { /* unused */ }
+  set route(r)     { /* unused */ }
+  set panel(p)     { /* unused */ }
+}
+customElements.define('voice-satellite-panel', VoiceSatellitePanel)
+```
+
+**Light DOM:** The panel uses light DOM (no shadow root) because
+`ha-panel-custom` renders panels in light DOM and HA components like
+`ha-form` break inside nested shadow roots.
+
+### 6.3 Config Persistence
+
+Config is stored in `localStorage` under the key `vs-panel-config`:
+
+```javascript
+const CONFIG_KEY = 'vs-panel-config';
+function getStoredConfig() { return JSON.parse(localStorage.getItem(CONFIG_KEY)) || {}; }
+function setStoredConfig(config) { localStorage.setItem(CONFIG_KEY, JSON.stringify(config)); }
+```
+
+Both the engine and panel read from the same key. Changes in the panel
+are immediately propagated to the running session via
+`session.updateConfig()`.
+
+### 6.4 Panel Structure
+
+The panel renders a toolbar + content area:
+
+```
+┌─────────────────────────────────────────────┐
+│  [icon] Voice Satellite       v6.0.0  [?]   │  ← toolbar (HA-native style)
+├─────────────────────────────────────────────┤
+│  Engine Status Card                          │  ← running/dormant + Start/Stop
+│  Satellite Entity Card                       │  ← ha-form entity picker
+│  Preview Card                                │  ← shadow DOM skin preview
+│  Settings Card                               │  ← ha-form with all schemas
+└─────────────────────────────────────────────┘
+```
+
+**Toolbar:** Matches the standard HA toolbar pattern (like Browser Mod):
+- Uses `--header-height`, `--app-header-background-color`,
+  `--app-header-text-color` CSS variables
+- Brand icon (`/voice_satellite/brand/icon.png`) + title + version + help link
+
+### 6.5 Engine Controls
+
+The panel provides Start/Stop buttons that directly control the session:
+
+**Start button:**
+```javascript
+startBtn.addEventListener('click', () => {
+  const session = window.__vsSession;
+  if (session && !session.isStarted && config.satellite_entity) {
+    // Ensure an engine card exists for UI rendering
+    if (session._cards.size === 0) {
+      const card = document.createElement('voice-satellite-card');
+      card._engineOwned = true;
+      card.setConfig(config);
+      card.style.display = 'none';
+      document.body.appendChild(card);
+      card.hass = this._hass;
+    }
+    session._userStopped = false;
+    session._startAttempted = false;
+    requestAnimationFrame(() => { if (!session.isStarted) session.start(); });
+  }
+});
+```
+
+**Stop button:** Sets `session._userStopped = true`, calls
+`session.teardown()`.
+
+### 6.6 Config Change Handler
+
+`_onConfigChange(newData)` handles all settings changes:
+
+1. Merge with `DEFAULT_CONFIG`, save to localStorage
+2. Sync entity to dedicated storage (`setStoredEntity`)
+3. Update running session (`session.updateConfig()`)
+4. If entity configured + `auto_start !== false` + not started → create
+   engine card + start session
+5. If entity cleared or `auto_start === false` + started → stop session
+   (sets `_userStopped` when auto_start toggled off)
+6. Sync both ha-form instances with updated data
+7. Re-render preview
+
+### 6.7 Settings Schema
+
+The panel assembles its form schema from the same editor modules used
+by the card editors:
+
+```javascript
+const panelSchema = [
+  ...behaviorSchema,    // browser_satellite_override, debug
+  ...autoStartSchema,   // auto_start toggle
+  ...skinSchema,        // skin, reactive_bar, text_scale, opacity, custom_css
+  ...microphoneSchema,  // noise_suppression, echo_cancellation, etc.
+  ...debugSchema,       // debug toggle
+];
+```
+
+### 6.8 Engine Status Display
+
+The panel polls session state every 1 second to update:
+- **Engine status:** "Engine running" (green) or "Engine dormant" (orange)
+- **Pipeline state:** Colored dot + label (Idle, Listening, Speaking, etc.)
+- **Start/Stop button visibility:** Based on `isStarted` and entity config
+
+### 6.9 HA Component Loading
+
+The panel needs `ha-form` and `ha-entity-picker`, which are lazy-loaded
+by HA. `ensureHaComponents()` triggers their loading:
+
+```
+ensureHaComponents()
+├── customElements.get('ha-form') exists? → done
+├── Resolve partial-panel-resolver → load lovelace route
+├── loadCardHelpers() → triggers ha-form import side-effect
+└── Fallback: iterate card types until ha-form is defined
+```
+
+### 6.10 Logger
 
 **File:** `src/logger.js`
 
@@ -637,7 +902,7 @@ Categories used throughout the codebase:
 
 ---
 
-## 6. Session Singleton
+## 7. Session Singleton
 
 **File:** `src/session/index.js`
 
@@ -645,7 +910,7 @@ The `VoiceSatelliteSession` is stored at `window.__vsSession`. Multiple
 bundle loads (e.g. HACS + custom) share the same instance. Created lazily
 on first `getInstance()` call.
 
-### 6.1 Construction
+### 7.1 Construction
 
 The constructor instantiates all 11 core managers, passing `this` as the
 `card` argument. The `WakeWordManager` is **lazy-loaded** — its chunk is
@@ -677,7 +942,7 @@ activation. The chunk includes the WakeWordManager, inference pipeline, and
 model-loading code. The TFLite WASM runtime is loaded separately at
 runtime from `/voice_satellite/tflite/` (not bundled in any chunk).
 
-### 6.2 Card Interface
+### 7.2 Card Interface
 
 The session exposes the same getters/methods that managers expect from a
 card instance:
@@ -697,7 +962,7 @@ card instance:
 | `ttsTarget` | Remote TTS entity ID (from select entity) |
 | `announcementDisplayDuration` | Seconds (from number entity) |
 
-### 6.3 Card Registration
+### 7.3 Card Registration
 
 ```
 register(card)
@@ -720,7 +985,7 @@ unregister(card)
 └── _syncFullCardSuppression()
 ```
 
-### 6.4 Session Startup
+### 7.4 Session Startup
 
 ```
 start()  or  registerAndStart(card)
@@ -735,7 +1000,7 @@ start()  or  registerAndStart(card)
     └── doubleTap.setup()           → document-level listeners
 ```
 
-### 6.5 Session Teardown
+### 7.5 Session Teardown
 
 ```
 teardown()
@@ -748,7 +1013,7 @@ teardown()
 └── Reset flags (_hasStarted, _starting, _startAttempted)
 ```
 
-### 6.6 Config Merging
+### 7.6 Config Merging
 
 `updateConfig(config)` copies only session-relevant keys:
 
@@ -762,7 +1027,7 @@ Card-specific keys (skin, mini_mode, text_scale, custom_css, etc.)
 stay on the card instance. If `satellite_entity` changes while the
 session is running, the session tears down for a fresh start.
 
-### 6.7 setState Broadcast Chain
+### 7.7 setState Broadcast Chain
 
 **File:** `src/session/events.js`
 
@@ -793,9 +1058,9 @@ Key design decisions:
 
 ---
 
-## 7. Card Types
+## 8. Card Types
 
-### 7.1 Full Card — `VoiceSatelliteCard`
+### 8.1 Full Card — `VoiceSatelliteCard`
 
 **Files:** `src/card/index.js`, `src/card/ui.js`
 
@@ -847,7 +1112,7 @@ Key design decisions:
     9. Forward session-relevant keys to `session.updateConfig()`
     10. If entity was just configured + session not running → start
 
-### 7.2 Mini Card — `VoiceSatelliteMiniCard`
+### 8.2 Mini Card — `VoiceSatelliteMiniCard`
 
 **Files:** `src/mini/index.js`, `src/mini/ui.js`, `src/mini/constants.js`
 
@@ -891,7 +1156,7 @@ Key design decisions:
   - `set hass(h)`: Same entity resolution + registration logic as full.
   - `setConfig(c)`: Same config + session forwarding as full.
 
-### 7.3 Common Card Structure
+### 8.3 Common Card Structure
 
 Both cards follow the same delegation pattern:
 
@@ -922,9 +1187,9 @@ onTTSComplete(failed)    { this._session.onTTSComplete(failed); }
 
 ---
 
-## 8. Broadcast Proxies
+## 9. Broadcast Proxies
 
-### 8.1 UIBroadcastProxy
+### 9.1 UIBroadcastProxy
 
 **File:** `src/session/ui-proxy.js`
 
@@ -966,7 +1231,7 @@ clearTimerAlert         _scrollTranscriptToEnd
 - `showTimerAlert`: Skips full card when `_fullCardSuppressed` is true
   (timer alerts render in `document.body` outside `#voice-satellite-ui`).
 
-### 8.2 ChatBroadcastProxy
+### 9.2 ChatBroadcastProxy
 
 **File:** `src/session/chat-proxy.js`
 
@@ -992,7 +1257,7 @@ addWeather   addFinancial   clear
 
 ---
 
-## 9. Manager Inventory
+## 10. Manager Inventory
 
 All managers are constructed in the session with `this` (session) as
 their `card` argument. They access the pipeline/audio/TTS/UI through
@@ -1015,9 +1280,9 @@ their `card` argument. They access the pipeline/audio/TTS/UI through
 
 ---
 
-## 10. Pipeline Lifecycle
+## 11. Pipeline Lifecycle
 
-### 10.1 Pipeline Flow Diagram
+### 11.1 Pipeline Flow Diagram
 
 ```
 pipeline.start()
@@ -1064,14 +1329,14 @@ pipeline.start()
 │   └──────────────────────────────────────────────────────────────────┘
 ```
 
-### 10.2 Generation Counter
+### 11.2 Generation Counter
 
 `_pipelineGen` is incremented by `stop()`. Any in-flight `start()` call
 checks the generation after each `await` and aborts if it was
 superseded. This prevents stale subscriptions from clobbering active
 ones.
 
-### 10.3 Restart Modes
+### 11.3 Restart Modes
 
 Three distinct restart paths:
 
@@ -1089,7 +1354,7 @@ enters STT state directly (skipping LISTENING). It optionally stores an
 `askQuestionCallback` for STT-only pipelines (ask_question flow) and
 supports `extra_system_prompt` for start_conversation.
 
-### 10.4 Error Recovery
+### 11.4 Error Recovery
 
 **File:** `src/pipeline/events.js`
 
@@ -1144,19 +1409,19 @@ handleWakeWordEnd(valid output):
 └── serviceUnavailable = false, retryCount = 0, clearServiceError()
 ```
 
-### 10.5 Mute Polling
+### 11.5 Mute Polling
 
 When `getSwitchState(mute) === true`, `start()` skips the WS subscription
 and instead sets a 2s poll timer that re-calls `start()`. On unmute the
 next poll succeeds and the pipeline starts normally.
 
-### 10.6 Token Refresh
+### 11.6 Token Refresh
 
 Streaming TTS tokens have a server-side TTL. The pipeline restarts
 periodically (`TOKEN_REFRESH_INTERVAL` = 4 minutes) while idle in
 LISTENING state to allocate a fresh token.
 
-### 10.7 Reconnect Handling
+### 11.7 Reconnect Handling
 
 **File:** `src/pipeline/comms.js`
 
@@ -1175,7 +1440,7 @@ The `'ready'` event is fired by the HA WebSocket client after a
 successful reconnection. The 2s delay (`RECONNECT_DELAY`) gives HA
 time to finish re-initializing before the pipeline subscribes.
 
-### 10.8 Stale Event Filtering
+### 11.8 Stale Event Filtering
 
 Multiple guards prevent stale events from corrupting state:
 
@@ -1188,9 +1453,9 @@ Multiple guards prevent stale events from corrupting state:
 
 ---
 
-## 11. Audio Architecture
+## 12. Audio Architecture
 
-### 11.1 AudioManager
+### 12.1 AudioManager
 
 **File:** `src/audio/index.js`
 
@@ -1223,7 +1488,7 @@ pause()  → disable tracks + stop sending
 resume() → flush stale buffer, re-enable tracks, resume AudioContext
 ```
 
-### 11.2 AnalyserManager (Dual-Analyser)
+### 12.2 AnalyserManager (Dual-Analyser)
 
 **File:** `src/audio/analyser.js`
 
@@ -1258,7 +1523,7 @@ _activeAnalyser: points to whichever node _tick() reads from
 - Quantizes to 0.05 steps, writes `--vs-audio-level` CSS variable.
 - Performance logging every 1 second (debug mode).
 
-### 11.3 Audio Processing
+### 12.3 Audio Processing
 
 **File:** `src/audio/processing.js`
 
@@ -1303,14 +1568,14 @@ worklet only taps audio for analysis — it never produces output.
    `s < 0 ? s * 0x8000 : s * 0x7FFF` (clamps to [-1, 1] first)
 4. **Send** via `sendBinaryAudio(card, pcmData, handlerId)`
 
-### 11.4 Audio Binary Encoding
+### 12.4 Audio Binary Encoding
 
 **File:** `src/audio/comms.js`
 
 Audio frames are packed into a binary WebSocket message:
 `[handlerId (1 byte)] [PCM data (Int16)]`
 
-### 11.5 Media Playback Helper
+### 12.5 Media Playback Helper
 
 **File:** `src/audio/media-playback.js`
 
@@ -1322,7 +1587,7 @@ Audio frames are packed into a binary WebSocket message:
 
 ---
 
-## 12. Reactive Bar & AnalyserManager
+## 13. Reactive Bar & AnalyserManager
 
 The reactive bar is the primary visual feedback element of the full card.
 It is a rainbow gradient strip (`.vs-rainbow-bar`) positioned at the bottom
@@ -1331,7 +1596,7 @@ reactive mode is enabled, the bar physically responds to real-time audio
 levels — growing, glowing, and pulsing in sync with mic input and TTS
 playback.
 
-### 12.1 State-Driven Animation Classes
+### 13.1 State-Driven Animation Classes
 
 `UIManager.updateForState()` maps each pipeline state to a bar
 configuration:
@@ -1358,7 +1623,7 @@ Guard logic prevents the bar from hiding when:
 - An image linger timeout is active
 - A video or lightbox is visible
 
-### 12.2 Reactive Mode
+### 13.2 Reactive Mode
 
 Skins opt in to reactive mode via `reactiveBar: true` in their skin
 definition. The user can disable it per-card with `reactive_bar: false` in
@@ -1388,7 +1653,7 @@ manager's `playing` flag is still `true`), so `startReactive()` directly
 adds the `reactive` class, reconnects the mic analyser, and starts the
 tick loop.
 
-### 12.3 AnalyserManager — Dual-Analyser Architecture
+### 13.3 AnalyserManager — Dual-Analyser Architecture
 
 **File:** `src/audio/analyser.js`
 
@@ -1417,7 +1682,7 @@ data. This makes feedback structurally impossible.
   output audio
 - On detach: `null` — tick loop stops
 
-### 12.4 Source Lifecycle
+### 13.4 Source Lifecycle
 
 | Method | When Called | What It Does |
 |--------|-----------|--------------|
@@ -1427,7 +1692,7 @@ data. This makes feedback structurally impossible.
 | `detachAudio()` | TTS end, notification end | Disconnects audio graph. Sets active to `null` (does NOT auto-revert to mic — `reconnectMic()` must be called explicitly). |
 | `reconnectMic()` | `updateForState()` for mic-reactive states | Switches active back to mic analyser. No-op if audio is still attached (prevents bar from showing mic levels during TTS). |
 
-### 12.5 The Tick Loop
+### 13.5 The Tick Loop
 
 `start(barEl, { deferred })` begins the animation loop:
 
@@ -1455,7 +1720,7 @@ Each `_tick()` frame:
 `stop()` cancels the RAF, removes the visibility handler, resets the CSS
 variable, and clears perf counters.
 
-### 12.6 AnalyserNode Configuration
+### 13.6 AnalyserNode Configuration
 
 ```
 fftSize: 128          // Smallest useful window — 64 frequency bins
@@ -1466,7 +1731,7 @@ Each analyser gets its own `Uint8Array` buffer cached in a `WeakMap` keyed
 by the analyser node, so switching between mic/audio analysers reuses
 existing buffers without allocation.
 
-### 12.7 Deferred Start for Notifications
+### 13.7 Deferred Start for Notifications
 
 When a notification starts playing, the bar enters `speaking` + `reactive`
 mode immediately (via `onNotificationStart()`), but the tick loop is started
@@ -1479,7 +1744,7 @@ The tick loop auto-starts when `attachAudio()` is called (the notification's
 audio element gets routed through the audio analyser). This prevents the bar
 from reacting to mic input during the pre-announce chime.
 
-### 12.8 CSS: How Skins Use `--vs-audio-level`
+### 13.8 CSS: How Skins Use `--vs-audio-level`
 
 Each skin defines how `--vs-audio-level` (0.00–1.00) drives visual effects:
 
@@ -1511,7 +1776,7 @@ Siri's bar is a full-screen `border-image: conic-gradient(...)` frame. The
 reactive effect modulates the `drop-shadow` blur radius and opacity — the
 edge glow brightens with louder audio instead of growing in height.
 
-### 12.9 Gradient Animation Sync
+### 13.9 Gradient Animation Sync
 
 The bar gradient flows horizontally via `background-position` animation.
 In non-reactive mode, a simple `@keyframes vs-gradient-flow` animates
@@ -1538,7 +1803,7 @@ animates the custom property:
 Without `@property`, CSS cannot animate custom properties — the transition
 would snap between values instead of interpolating smoothly.
 
-### 12.10 Layout Impact
+### 13.10 Layout Impact
 
 When reactive mode is active, the bar can grow significantly in height
 (up to 2× default for Default skin, up to 4× for Google Home). The
@@ -1551,7 +1816,7 @@ upward to prevent overlap:
 }
 ```
 
-### 12.11 Editor Configuration
+### 13.11 Editor Configuration
 
 Two editor fields in the Skin section control the reactive bar:
 
@@ -1560,7 +1825,7 @@ Two editor fields in the Skin section control the reactive bar:
 | `reactive_bar` | boolean | `true` | Enable/disable reactive mode |
 | `reactive_bar_update_interval_ms` | number | 33 | Tick interval. Min 17ms (≈60fps). Higher values save CPU. |
 
-### 12.12 Mini Card
+### 13.12 Mini Card
 
 The mini card always returns `isReactiveBarEnabled = false`. It has no
 rainbow bar element and no analyser integration. The `AnalyserManager`
@@ -1569,9 +1834,9 @@ co-registered), but the mini card never triggers it.
 
 ---
 
-## 13. TTS & Chimes
+## 14. TTS & Chimes
 
-### 13.1 TtsManager
+### 14.1 TtsManager
 
 **File:** `src/tts/index.js`
 
@@ -1622,7 +1887,7 @@ play(url)
 - `tts-end`: if already playing (streaming), stores URL as retry
   fallback. Otherwise starts normal playback.
 
-### 13.2 Chimes
+### 14.2 Chimes
 
 **File:** `src/audio/chime.js`
 
@@ -1642,9 +1907,9 @@ All chimes use the MediaPlayer's volume (perceptual curve).
 
 ---
 
-## 14. Notification System
+## 15. Notification System
 
-### 14.1 Event Routing
+### 15.1 Event Routing
 
 **File:** `src/shared/satellite-notification.js`
 
@@ -1669,7 +1934,7 @@ event. `dispatchSatelliteEvent` routes it to both:
   (finds the active notification manager with `_remotePlayback` set and
   replaces the 30s safety timeout with a `(duration + 2s)` timer)
 
-### 14.2 Delivery & Queueing
+### 15.2 Delivery & Queueing
 
 ```
 _deliverToManager(mgr, ann, logPrefix)
@@ -1679,7 +1944,7 @@ _deliverToManager(mgr, ann, logPrefix)
 └── Else: playNotification(mgr, ann, onComplete, logPrefix)
 ```
 
-### 14.3 Playback Flow
+### 15.3 Playback Flow
 
 ```
 playNotification(mgr, ann, onComplete, logPrefix)
@@ -1712,7 +1977,7 @@ external media player (e.g. Sonos). Remote playback uses:
 chimes (wake/done/error already skip when `isRemote`). Custom
 pre-announce media still plays on the remote device via `playMediaFor()`.
 
-### 14.4 AnnouncementManager
+### 15.4 AnnouncementManager
 
 **File:** `src/announcement/index.js`
 
@@ -1727,7 +1992,7 @@ After media playback completes (`_onComplete`):
      blocked during linger)
    - Clear UI or play next queued notification
 
-### 14.5 AskQuestionManager
+### 15.5 AskQuestionManager
 
 **File:** `src/ask-question/index.js`
 
@@ -1745,7 +2010,7 @@ After prompt playback:
 6. Safety timeout (30s): sends empty answer if STT never produces result
 7. Cleanup: clear UI, hide blur, restart pipeline or play next queued
 
-### 14.6 StartConversationManager
+### 15.6 StartConversationManager
 
 **File:** `src/start-conversation/index.js`
 
@@ -1758,9 +2023,9 @@ After prompt playback:
 
 ---
 
-## 15. Timer System
+## 16. Timer System
 
-### 15.1 Overview
+### 16.1 Overview
 
 **Files:** `src/timer/index.js`, `events.js`, `comms.js`, `ui.js`
 
@@ -1768,7 +2033,7 @@ Timers are tracked via the satellite entity's `active_timers` attribute.
 The `TimerManager` subscribes to entity state changes and maintains a
 local timer list with 1-second tick updates.
 
-### 15.2 Lifecycle
+### 16.2 Lifecycle
 
 ```
 1. Entity state_changed → active_timers gets new entry
@@ -1789,7 +2054,7 @@ local timer list with 1-second tick updates.
    └── clearAlert() → stop chime, hide blur, remove pills if empty
 ```
 
-### 15.3 Timer Cancellation
+### 16.3 Timer Cancellation
 
 Double-tap on a timer pill calls `cancelTimer(timerId)`:
 1. `sendCancelTimer` → WS command `voice_satellite/cancel_timer`
@@ -1800,13 +2065,13 @@ Double-tap on a timer pill calls `cancelTimer(timerId)`:
 
 ---
 
-## 16. Media Player
+## 17. Media Player
 
 **File:** `src/media-player/index.js`
 
 The `MediaPlayerManager` has two roles:
 
-### 16.1 Browser Media Playback
+### 17.1 Browser Media Playback
 
 Handles `media_player` commands from the integration via satellite events:
 - `play`: Sign relative URLs, create Audio element, play
@@ -1816,7 +2081,7 @@ Handles `media_player` commands from the integration via satellite events:
 Volume applies globally — `_applyVolumeToExternalAudio` propagates to
 any active TTS or notification Audio elements.
 
-### 16.2 Unified Audio-State Reporter
+### 17.2 Unified Audio-State Reporter
 
 All audio sources (TTS, chimes, notifications, media playback) call
 `notifyAudioStart(source)` / `notifyAudioEnd(source)`.
@@ -1828,7 +2093,7 @@ via `voice_satellite/media_player_event`:
 
 This keeps the HA media_player entity in sync with all browser audio.
 
-### 16.3 Volume Sync
+### 17.3 Volume Sync
 
 On first volume access after page load, syncs from the HA entity's
 `volume_level` and `is_volume_muted` attributes. Subsequent changes
@@ -1836,7 +2101,7 @@ come from `volume_set` / `volume_mute` commands.
 
 ---
 
-## 17. Visibility Management
+## 18. Visibility Management
 
 **File:** `src/shared/visibility.js`
 
@@ -1873,7 +2138,7 @@ The sequenced `restart(0)` (which calls `stop()` internally before
 
 ---
 
-## 18. Double-Tap / Escape Handler
+## 19. Double-Tap / Escape Handler
 
 **File:** `src/shared/double-tap.js`
 
@@ -1905,15 +2170,15 @@ Document-level listeners for `touchstart`, `click`, and `keydown`
 
 ---
 
-## 19. Entity Resolution & Browser Override
+## 20. Entity Resolution & Browser Override
 
 **File:** `src/shared/entity-picker.js`
 
-### 19.1 Normal Mode
+### 20.1 Normal Mode
 
 Card config specifies `satellite_entity` directly.
 
-### 19.2 Browser Override Mode
+### 20.2 Browser Override Mode
 
 When `browser_satellite_override: true`:
 
@@ -1925,7 +2190,7 @@ When `browser_satellite_override: true`:
 4. **Picker** uses a `MutationObserver` to detect when HA's dialog
    container appears, then injects the picker UI.
 
-### 19.3 Entity Subscription
+### 20.3 Entity Subscription
 
 **File:** `src/shared/entity-subscription.js`
 
@@ -1934,9 +2199,9 @@ Generic entity state subscription wrapper. Used by TimerManager to watch
 
 ---
 
-## 20. Editor & Preview System
+## 21. Editor & Preview System
 
-### 20.1 Config Forms
+### 21.1 Config Forms
 
 - **Full card:** `src/editor/index.js`, `behavior.js`, `skin.js`
   - Uses HA's native form schema system.
@@ -1947,7 +2212,7 @@ Generic entity state subscription wrapper. Used by TimerManager to watch
   - Mini mode selector (compact/tall), entity, browser override,
     suppress_full_card toggle, text scale, custom CSS, debug.
 
-### 20.2 Editor Preview Detection
+### 21.2 Editor Preview Detection
 
 **File:** `src/editor/preview.js`
 
@@ -1962,7 +2227,7 @@ starting the live pipeline. This prevents:
 - Microphone acquisition in the editor
 - Entity picker showing during editing
 
-### 20.3 Preview Renderers
+### 21.3 Preview Renderers
 
 - Full: `src/editor/preview.js` + `preview.css`
 - Mini: `src/mini-editor/preview.js` + `preview.css`
@@ -1972,9 +2237,9 @@ instantiated.
 
 ---
 
-## 21. Skins & Styling
+## 22. Skins & Styling
 
-### 21.1 Skin Registry (Lazy-Loaded)
+### 22.1 Skin Registry (Lazy-Loaded)
 
 **File:** `src/skins/index.js`
 
@@ -2035,7 +2300,7 @@ Each skin exports:
 - `defaultOpacity`: Default blur overlay opacity (0-1).
 - `previewCSS`: Additional CSS injected into the editor preview renderer.
 
-### 21.2 Style Application
+### 22.2 Style Application
 
 Full card (`UIManager.applyStyles()`):
 1. Inject skin CSS into `document.head`
@@ -2048,7 +2313,7 @@ Mini card (`MiniUIManager.applyStyles()`):
 2. Apply custom CSS into shadow DOM `<style>` element
 3. Re-sync state presentation
 
-### 21.3 Z-Index Stacking
+### 22.3 Z-Index Stacking
 
 Full card UI layers (all skins use identical values):
 
@@ -2070,11 +2335,11 @@ remain visible even when full card suppression hides the main UI element.
 
 ---
 
-## 22. Rich Media
+## 23. Rich Media
 
 The full card supports rich media panels. Mini card no-ops all these.
 
-### 22.1 Image Panel
+### 23.1 Image Panel
 
 `showImagePanel(results, autoDisplay, featured)`:
 - Creates 2-column image grid in `.vs-image-panel`.
@@ -2083,7 +2348,7 @@ The full card supports rich media panels. Mini card no-ops all these.
 - `featured`: narrower panel for Wikipedia/web search featured images.
 - Scroll handler cancels image linger timeout (user is browsing).
 
-### 22.2 Video Panel
+### 23.2 Video Panel
 
 `showVideoPanel(results, autoPlay)`:
 - Creates video cards with thumbnails, duration badges, titles.
@@ -2091,14 +2356,14 @@ The full card supports rich media panels. Mini card no-ops all these.
 - `autoPlay`: auto-opens first video.
 - Video lightbox stops TTS, sets `_videoPlaying = true`.
 
-### 22.3 Weather Panel
+### 23.3 Weather Panel
 
 `showWeatherPanel(data)`:
 - Renders current conditions (icon, temp, humidity) + forecast rows.
 - Supports hourly, daily, and twice_daily forecast types.
 - Uses featured panel mode (narrower, no linger timeout).
 
-### 22.4 Financial Panel
+### 23.4 Financial Panel
 
 `showFinancialPanel(data)`:
 - Stock/crypto: header (logo, name, exchange badge) + price + change
@@ -2106,7 +2371,7 @@ The full card supports rich media panels. Mini card no-ops all these.
 - Currency: conversion display + exchange rate.
 - Uses featured panel mode.
 
-### 22.5 Lightbox
+### 23.5 Lightbox
 
 Full-screen overlay for enlarged images or embedded YouTube videos.
 - Click to close (returns to panel).
@@ -2115,14 +2380,14 @@ Full-screen overlay for enlarged images or embedded YouTube videos.
 
 ---
 
-## 23. Chat & Streaming Text
+## 24. Chat & Streaming Text
 
 **File:** `src/shared/chat.js`
 
 Each card owns its own `ChatManager` instance. The session's
 `ChatBroadcastProxy` broadcasts operations to all.
 
-### 23.1 Message Types
+### 24.1 Message Types
 
 | Method | Chat Bubble Type | Visual |
 |--------|-----------------|--------|
@@ -2130,7 +2395,7 @@ Each card owns its own `ChatManager` instance. The session's
 | `showResponse(text)` | `'assistant'` | Primary text color |
 | `addChatMessage(text, 'announcement')` | `'announcement'` | Centered (full card) |
 
-### 23.2 Streaming Text
+### 24.2 Streaming Text
 
 During `intent-progress` events, text arrives as `chat_log_delta.content`
 chunks. The flow:
@@ -2152,7 +2417,7 @@ _updateStreaming(text):
           (pooled — created once, text updated in-place)
 ```
 
-### 23.3 Mini Card Specifics
+### 24.3 Mini Card Specifics
 
 **Compact mode:** Messages appear as inline `<span>` elements in a
 single-line marquee track. Separator dots (`·`) between messages.
@@ -2166,7 +2431,7 @@ when the Audio element's real duration isn't available yet.
 
 ---
 
-## 24. Full Card Suppression
+## 25. Full Card Suppression
 
 When any registered mini card has `config.suppress_full_card === true`,
 the session hides the full card's UI:
@@ -2191,7 +2456,7 @@ alerts are skipped when suppressed because they render directly in
 
 ---
 
-## 25. Internationalization
+## 26. Internationalization
 
 **Files:** `src/i18n/index.js`, `src/i18n/en.js`
 
@@ -2203,11 +2468,11 @@ alerts are skipped when suppressed because they render directly in
 
 ---
 
-## 26. Constants & Configuration
+## 27. Constants & Configuration
 
 **File:** `src/constants.js`
 
-### 26.1 State Enum
+### 27.1 State Enum
 
 ```
 IDLE → CONNECTING → LISTENING → WAKE_WORD_DETECTED → STT → INTENT → TTS
@@ -2217,14 +2482,14 @@ PAUSED (tab hidden)                                              ERROR ←
 
 `INTERACTING_STATES = [WAKE_WORD_DETECTED, STT, INTENT, TTS]`
 
-### 26.2 Expected Errors
+### 27.2 Expected Errors
 
 Pipeline errors that are normal and should restart silently:
 ```
 timeout, wake-word-timeout, stt-no-text-recognized, duplicate_wake_up_detected
 ```
 
-### 26.3 Blur Reasons
+### 27.3 Blur Reasons
 
 Reference-counted blur overlay:
 ```
@@ -2233,7 +2498,7 @@ TIMER       — timer finished alert
 ANNOUNCEMENT — notification playback
 ```
 
-### 26.4 Timing Constants
+### 27.4 Timing Constants
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
@@ -2257,12 +2522,12 @@ ANNOUNCEMENT — notification playback
 | `IDLE_DEBOUNCE` | 200ms | Media player idle state debounce |
 | `AUTH_SIGN_EXPIRES` | 3600s | Signed URL expiration |
 
-### 26.5 Default Config
+### 27.5 Default Config
 
 ```javascript
 {
   satellite_entity: '',
-  browser_satellite_override: false,
+  auto_start: true,
   debug: false,
   noise_suppression: true,
   echo_cancellation: true,
@@ -2276,25 +2541,40 @@ ANNOUNCEMENT — notification playback
 }
 ```
 
+**`auto_start`:** When `false`, the engine does not automatically start the
+pipeline on page load. The user must click the Start button in the panel
+or on the full card's start overlay. The panel toggles this setting, and
+the engine reads it from `localStorage` on boot.
+
 ---
 
-## 27. Build & Versioning
+## 28. Build & Versioning
 
-### 27.1 Build System
+### 28.1 Build System
 
-- **Webpack** bundles JS with code splitting into a main file + on-demand chunks.
+- **Webpack** bundles JS with code splitting into two entry points + on-demand chunks.
 - `npm run dev`: Development build (unminified + source map) + xcopy to
   `\\hassio\config\custom_components\voice_satellite\`.
 - `npm run build`: Production build (minified, no source map) — CI only.
 
-### 27.2 Code Splitting
+**Two entry points** in `webpack.config.js`:
+
+```javascript
+entry: {
+  'voice-satellite-card': './src/index.js',    // Main bundle (card + engine)
+  'voice-satellite-panel': './src/panel/index.js', // Sidebar panel (separate)
+}
+```
+
+### 28.2 Code Splitting
 
 Webpack splits the bundle into a main file and several lazy-loaded chunks
 using dynamic `import()` with `webpackChunkName` hints:
 
 | Chunk | Trigger | Contents |
 |-------|---------|----------|
-| `voice-satellite-card.js` | Page load | Core card, session, pipeline, audio, TTS, all managers |
+| `voice-satellite-card.js` | Every page (via `add_extra_js_url`) | Engine, card, session, pipeline, audio, TTS, all managers |
+| `voice-satellite-panel.js` | Sidebar panel navigation | Panel element, settings forms, preview renderer |
 | `voice-satellite-wake-word.js` | On-device wake word enabled | WakeWordManager, inference pipeline, model loader |
 | `voice-satellite-skin-alexa.js` | Alexa skin selected | Alexa CSS + skin definition |
 | `voice-satellite-skin-google-home.js` | Google Home skin selected | Google Home CSS + skin definition |
@@ -2319,29 +2599,31 @@ a `<script>` tag pointing to `/voice_satellite/tflite/tflite_web_api_client.js`.
 The TFLite files are copied from `node_modules` to the `tflite/` directory
 by `scripts/copy-tflite.js` during the build.
 
-### 27.3 Versioning
+### 28.3 Versioning
 
 - `package.json` is the single source of truth for the version.
 - `scripts/sync-version.js` propagates to `manifest.json` + `const.py`.
 - Webpack `DefinePlugin` injects `__VERSION__` into JS as a compile-time
   constant. Accessed via `constants.js` → `export const VERSION = __VERSION__`.
 
-### 27.4 Output
+### 28.4 Output
 
 Built JS: `custom_components/voice_satellite/frontend/voice-satellite-card.js`
 + chunk files (gitignored — CI builds for releases).
 
 ---
 
-## 28. On-Device Wake Word Detection
+## 29. On-Device Wake Word Detection
 
-The card supports on-device wake word detection using microWakeWord TFLite
+The frontend supports on-device wake word detection using microWakeWord TFLite
 models running entirely in the browser via TensorFlow Lite WASM. This
 eliminates the need for a server-side wake word add-on. Supports dual
 wake words — two keyword classifiers can run concurrently on the same
-shared feature extraction pipeline with minimal overhead.
+shared feature extraction pipeline with minimal overhead. Also supports
+a **stop model** that can interrupt TTS playback, notifications, and
+timer alerts via voice command.
 
-### 28.1 Architecture Overview
+### 29.1 Architecture Overview
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -2359,8 +2641,9 @@ shared feature extraction pipeline with minimal overhead.
 │  │ microWakeWord TFLite Pipeline:                         │
 │  │                                                        │
 │  │  1. MicroFrontend (160-sample hop, 480-sample window)  │
-│  │     FFT → 40-ch mel filterbank → noise reduction       │
-│  │     → PCAN normalization → log scale → int8 quantize   │
+│  │     Hann window → FFT → mel filterbank → sqrt          │
+│  │     → noise floor → noise reduction → PCAN → log₂     │
+│  │     → int8 quantize                                    │
 │  │                                                        │
 │  │  2. Keyword classifier(s) (TFLite stateful models)     │
 │  │     Input: [1, N, 40] int8 feature frames              │
@@ -2368,13 +2651,22 @@ shared feature extraction pipeline with minimal overhead.
 │  │     └── Runs 1-2 classifiers + optional stop model     │
 │  │                                                        │
 │  │  3. Sliding window detection (mean of last N probs)    │
-│  │  4. Energy-based sleep mode (RMS silence gating)       │
+│  │  4. Energy-based sleep mode (RMS silence gating        │
+│  │     with feature buffering for onset replay)           │
 │  └────────────────────────────────────────────────────────┘
 │                                                           │
-│  On detection:                                            │
-│    → Play wake chime                                      │
+│  On wake word detection:                                  │
+│    → Check mute state (ignore if muted)                   │
+│    → Interrupt media player                               │
+│    → Unpause tab if paused                                │
+│    → Play wake chime (if enabled)                         │
 │    → Start pipeline with start_stage: "stt"               │
 │      (skips server-side wake word)                        │
+│                                                           │
+│  On stop word detection:                                  │
+│    → Priority chain: timer alert > notification > TTS     │
+│    → Dismiss/cancel the active interruptible state        │
+│    → Play done chime (if enabled + not remote TTS)        │
 └──────────────────────────────────────────────────────────┘
         │
         │  TFLite models loaded from /voice_satellite/models/
@@ -2397,37 +2689,57 @@ shared feature extraction pipeline with minimal overhead.
 └──────────────────────────────────────────────────────────┘
 ```
 
-### 28.2 File Structure
+### 29.2 File Structure
 
 | File | Responsibility |
 |------|----------------|
-| `wake-word/index.js` | `WakeWordManager` — orchestrator, dual-model lifecycle, settings, detection handler |
-| `wake-word/micro-models.js` | TFLite WASM runtime loading, per-name model caching, unused model cleanup |
-| `wake-word/micro-inference.js` | `MicroWakeWordInference` — stateful TFLite pipeline, multi-keyword support, energy-based sleep |
-| `wake-word/micro-frontend.js` | `MicroFrontend` — audio feature extraction (FFT, mel filterbank, noise reduction, PCAN, quantization) |
+| `wake-word/index.js` | `WakeWordManager` — orchestrator, dual-model lifecycle, stop model, settings, detection/stop handlers |
+| `wake-word/micro-models.js` | TFLite WASM runtime loading, per-name model caching, companion JSON manifest loading, unused model cleanup |
+| `wake-word/micro-inference.js` | `MicroWakeWordInference` — stateful TFLite pipeline, multi-keyword support, energy-based sleep with feature buffering |
+| `wake-word/micro-frontend.js` | `MicroFrontend` — audio feature extraction (Hann, FFT, mel, sqrt, noise floor, NR, PCAN, log₂, int8) |
 
-### 28.3 Audio Feature Extraction
+### 29.3 Audio Feature Extraction
 
 **File:** `src/wake-word/micro-frontend.js`
 
 Implements the TensorFlow micro_frontend audio preprocessing in pure JS,
-matching the reference wyoming-microWakeWord implementation:
+matching the reference ESPHome micro_wake_word component. Key browser
+adaptation: browser mic + WebRTC AGC produces ~10× the amplitude of ESP32's
+I2S ADC, so the audio is scaled down (`AUDIO_SCALE = 2500`) and a synthetic
+noise floor is injected to match ESP32's analog noise profile.
 
-1. **Hann window** — Precomputed 480-coefficient window applied to each frame
-2. **512-point FFT** — Radix-2 inline implementation (no library dependency)
-3. **40-channel mel filterbank** — Triangular filters spanning 125–7500 Hz
-4. **Noise reduction** — Per-channel exponential smoothing with separate
-   attack/decay rates and minimum signal floor
-5. **PCAN normalization** — Per-channel automatic gain control
+Pipeline (9 steps, matching `_processWindow()` method):
+
+1. **Hann window + amplitude scaling** — 480-coefficient window applied per
+   frame, samples scaled by `AUDIO_SCALE` (2500) instead of full int16 range
+   (32767), zero-padded to 512
+2. **512-point FFT** — Radix-2 Cooley-Tukey inline implementation (no library)
+3. **Power spectrum** — `|FFT[k]|²` for k = 0..256 (257 bins)
+4. **40-channel mel filterbank** — Triangular filters spanning 125–7500 Hz,
+   weighted sum of power spectrum
+5. **FilterbankSqrt** — `sqrt(melEnergy)` to reduce dynamic range (matches
+   FilterbankSqrt in the C reference code), floored to 1.0
+6. **Noise floor injection** — Adds `NOISE_FLOOR = 1000` to each channel.
+   Browser mic silence is ~10-100 sqrt_mel (vs ESP32's ~500-1000 from
+   ADC/preamp noise). Without this, the noise reduction stage has nothing
+   to subtract and features are flat.
+7. **Noise reduction** — Per-channel asymmetric exponential smoothing.
+   Upward tracking is 40× slower than C default (`NR_UP_MULT = 0.025`) so
+   features persist for the full ~0.5s duration of a wake word. Downward
+   tracking is 2× faster (`NR_DOWN_MULT = 2.0`) for quick recovery.
+   Minimum signal floor: `NR_MIN_SIGNAL = 0.05`.
+8. **PCAN gain control** — Per-channel automatic gain from noise estimate:
+   `gain = (offset/noise)^strength` with `PcanShrink` compression
    (strength=0.95, offset=80.0)
-6. **Log scale** — `log(1 + energy) * 64` for perceptual compression
-7. **Int8 quantization** — `round(val * 256 / 666) - 128` for model input
+9. **Log₂ scale** — `log₂(1 + energy) × 64` (`scale_shift = 6`)
+10. **Int8 quantization** — `round(val × 256 / 666) − 128`, clamped to
+    [-128, 127]
 
 Parameters: 480-sample window, 160-sample hop (10ms step), producing ~8
 feature frames per 1280-sample (80ms) audio chunk. A ring buffer maintains
 overlap between frames.
 
-### 28.4 Inference Pipeline
+### 29.4 Inference Pipeline
 
 **File:** `src/wake-word/micro-inference.js`
 
@@ -2436,14 +2748,25 @@ Each keyword model is a stateful TFLite model with internal ring buffers
 how many feature frames are batched per inference call.
 
 1. **Feature accumulation** — Feature frames from MicroFrontend are collected
-   until `framesPerInfer` frames are ready (auto-detected from input tensor)
+   until `framesPerInfer` frames are ready (auto-detected from input tensor
+   size: `inputBuffer.length / 40`)
 2. **Model inference** — Feature frames copied into input tensor, `infer()`
    called, output uint8 probability read and normalized to [0, 1]
 3. **Sliding window detection** — Circular buffer of last N probabilities
-   (default 3). Detection triggers when `mean(buffer) > cutoff`
-4. **Warmup** — First 100 feature frames (~1s) after init/reset are ignored
+   (N from model params, typically 3). Detection triggers when
+   `mean(buffer) > cutoff`. Buffer must be full before detection is checked.
+4. **Warmup** — First `WARMUP_FRAMES = 100` feature frames (~1s) after
+   init/reset are ignored — probabilities are not stored during this period
    to let model state stabilize
-5. **Cooldown** — 2-second cooldown after each detection prevents re-triggers
+5. **Cooldown** — `COOLDOWN_MS = 2000` after each detection prevents
+   re-triggers. `_lastDetectionTime` is preserved across `reset()` calls
+   since VarHandle ring buffers in the model persist.
+
+**Dynamic keyword management:**
+
+Keywords can be added (`addKeyword(config)`) or removed
+(`removeKeyword(name)`) at runtime without recreating the inference engine.
+This is used by the stop model system (§29.10).
 
 **Energy-based sleep mode:**
 
@@ -2466,37 +2789,74 @@ processChunk(samples)
 │     │   └── _silentChunks >= 30 (~2.4s) → _sleeping = true
 │     └── rms >= wakeRms → _silentChunks = 0, _sleeping = false
 ├── 3. Always run MicroFrontend.feed() (keeps noise estimate warm)
-├── 4. If sleeping → return early (skip TFLite inference)
-└── 5. Run keyword classifiers on each feature frame when awake
+├── 4. If sleeping:
+│     ├── Buffer features in _sleepFeatureBuffer (rolling window)
+│     │   └── max SLEEP_BUFFER_CHUNKS × 8 = 40 frames (~400ms)
+│     └── return early (skip TFLite inference)
+└── 5. When awake:
+      ├── Prepend any buffered sleep features (onset replay)
+      └── Run keyword classifiers on each feature frame
 ```
+
+**Sleep buffer replay:** During sleep, features are buffered in a rolling
+window of `SLEEP_BUFFER_CHUNKS = 5` chunks (~400ms). When the energy gate
+wakes up, these buffered features are prepended to the current chunk's
+features before running inference. This captures the onset of the wake
+word utterance that triggered the energy gate wake-up.
 
 Hysteresis (sleep < wake) prevents flapping near the threshold.
 Energy thresholds update live via `updateEnergyThresholds()` when
 the sensitivity setting changes — no restart needed.
-Wake is instantaneous — the first 80ms chunk with sound above threshold
-resumes inference, and the wake word utterance spans many subsequent chunks.
 
-### 28.5 Model Loading
+### 29.5 Model Loading
 
 **File:** `src/wake-word/micro-models.js`
 
 - **TFLite WASM runtime**: Loaded once via `<script>` tag from
   `/voice_satellite/tflite/tflite_web_api_client.js`. Sets `window.tfweb`.
+  The script has a CommonJS epilogue that needs a `window.exports = {}` stub.
   WASM binary path configured via `tfweb.tflite_web_api.setWasmPath()`.
 - **Keyword models**: Loaded per-name into `_modelCache` (name → runner map).
   `loadMicroModel(tfweb, name)` creates a `TFLiteWebModelRunner` from the
   `.tflite` file. Filename mapped via `TFLITE_KEYWORD_FILES[name] || name` —
   built-in models use known filenames, custom models use their name directly.
   When both wake word slots select the same model, only one runner is loaded.
-- **Model parameters**: `MICRO_MODEL_PARAMS` defines per-model `cutoff`,
-  `slidingWindow`, and `stepSize`. Unknown/custom models default to V2
-  parameters (`cutoff: 0.90, slidingWindow: 3, stepSize: 10`).
+- **Companion JSON manifests**: Each model can have a `.json` file alongside
+  its `.tflite` file (e.g. `ok_nabu.json`). The manifest is fetched in
+  parallel with model loading via `_loadModelManifest()` and cached in
+  `_jsonParamsCache`. The JSON structure is:
+  ```json
+  { "micro": { "probability_cutoff": 0.97, "sliding_window_size": 3, "feature_step_size": 10 } }
+  ```
+  This allows model parameters to be updated without code changes.
+- **Model parameters**: `getMicroModelParams(name)` resolves parameters in
+  priority order:
+  1. Companion JSON manifest (`_jsonParamsCache[filename]`)
+  2. Hardcoded `MICRO_MODEL_PARAMS` (built-in models)
+  3. V2 fallback defaults (`cutoff: 0.90, slidingWindow: 3, stepSize: 10`)
+- **Hardcoded `MICRO_MODEL_PARAMS`**:
+  | Model | cutoff | slidingWindow | stepSize |
+  |-------|--------|---------------|----------|
+  | ok_nabu | 0.97 | 3 | 10 |
+  | hey_jarvis | 0.97 | 3 | 10 |
+  | hey_mycroft | 0.95 | 3 | 10 |
+  | alexa | 0.90 | 3 | 10 |
+  | stop | 0.50 | 3 | 10 |
+
+  Note: these cutoffs are the model's native thresholds from their manifests.
+  At runtime, `WakeWordManager.getThresholdForModel()` overrides the cutoff
+  with browser-calibrated `MODEL_THRESHOLDS` based on sensitivity (§29.6).
+  The `slidingWindow` and `stepSize` values are still used from the params.
 - **Cleanup**: `releaseUnusedMicroModels(activeNames)` disposes runners no
   longer in use (skips the stop model). `releaseMicroModels()` disposes all.
 
-### 28.6 Sensitivity Thresholds
+### 29.6 Sensitivity Thresholds
 
-Thresholds are calibrated for browser-side TFLite inference:
+**File:** `src/wake-word/index.js` (`MODEL_THRESHOLDS`, `DEFAULT_THRESHOLDS`)
+
+Browser audio (WebRTC AGC/NS) produces different feature profiles than ESP32,
+so these cutoffs are lower than the model manifests' native values. These
+override the `cutoff` from `MICRO_MODEL_PARAMS` / JSON manifests at runtime.
 
 | Model | Slightly | Moderately | Very |
 |-------|----------|------------|------|
@@ -2505,12 +2865,14 @@ Thresholds are calibrated for browser-side TFLite inference:
 | hey_mycroft | 0.55 | 0.40 | 0.30 |
 | alexa | 0.55 | 0.40 | 0.30 |
 | stop | 0.50 | 0.40 | 0.30 |
+| *(custom/unknown)* | 0.60 | 0.45 | 0.30 |
 
 Default sensitivity: **Moderately sensitive**.
 
-Custom models (not in `MODEL_THRESHOLDS`) use the same defaults as hey_jarvis.
+Custom models (not in `MODEL_THRESHOLDS`) use `DEFAULT_THRESHOLDS`:
+`{ 'Slightly sensitive': 0.60, 'Moderately sensitive': 0.45, 'Very sensitive': 0.30 }`.
 
-### 28.7 Settings Change Handling
+### 29.7 Settings Change Handling
 
 `WakeWordManager.checkSettingsChanged()` is called from `session.updateHass()`
 on every HA state change. It tracks four cached values:
@@ -2532,7 +2894,7 @@ the change is re-detected on the next `checkSettingsChanged()` call.
 `restart()` detects the stale `_loadedModelsKey` and performs a full `start()` to load
 the new models.
 
-### 28.8 Custom Wake Word Models
+### 29.8 Custom Wake Word Models
 
 Users can drop custom microWakeWord `.tflite` keyword models into either:
 - **`/config/voice_satellite/models/`** (persistent — survives HACS updates)
@@ -2554,10 +2916,15 @@ directory (which now includes restored custom models):
 
 The JS model loader handles unknown models via fallback:
 `TFLITE_KEYWORD_FILES[modelName] || modelName` — so a custom model `my_word` loads
-from `/voice_satellite/models/my_word.tflite`. Unknown models default to V2
-parameters (`cutoff: 0.90, slidingWindow: 3, stepSize: 10`).
+from `/voice_satellite/models/my_word.tflite`.
 
-### 28.9 Cross-Satellite Duplicate Suppression
+**Parameter resolution for custom models:**
+1. If a companion `my_word.json` manifest exists alongside the `.tflite` file,
+   parameters are loaded from it (see §29.5)
+2. Otherwise, V2 fallback defaults: `cutoff: 0.90, slidingWindow: 3, stepSize: 10`
+3. Detection threshold is overridden by `DEFAULT_THRESHOLDS` (see §29.6)
+
+### 29.9 Cross-Satellite Duplicate Suppression
 
 When on-device wake word detection triggers, the card starts the pipeline with
 `start_stage: 'stt'`, bypassing HA core's server-side wake word stage. To
@@ -2581,41 +2948,128 @@ WAKE_WORD_PHRASES = {
 **Flow:**
 ```
 _onDetection(modelName)
-├── pipeline.start({ start_stage: 'stt', wake_word_phrase: getWakeWordPhrase(modelName) })
-│     └── runConfig includes wake_word_phrase → spread into WS message
-│           └── ws_run_pipeline extracts wake_word_phrase → async_run_pipeline
-│                 └── async_accept_pipeline_from_satellite(wake_word_phrase=...)
-│                       └── HA core checks DATA_LAST_WAKE_UP[phrase]
-│                             ├── Not within 2s cooldown → record + proceed
-│                             └── Within cooldown → DuplicateWakeUpDetectedError
-│                                   └── error event: "duplicate_wake_up_detected"
-│                                         └── handleError → hideBlurOverlay → restart(0) → ww.restart()
+├── 1. Stop listening (_active = false)
+├── 2. Unpause tab if paused (visibility._isPaused → false, audio.resume())
+├── 3. Check mute — if muted, silently re-enable listening and return
+├── 4. Interrupt media player (mediaPlayer.interrupt())
+├── 5. Stop TTS if playing
+├── 6. Clear previous interaction state (timeouts, chat, continue state)
+├── 7. setState(WAKE_WORD_DETECTED), showBlurOverlay(PIPELINE)
+├── 8. Play wake chime if enabled (stopSending → playChime → wait duration + 50ms → discard buffered audio)
+└── 9. pipeline.start({ start_stage: 'stt', wake_word_phrase: getWakeWordPhrase(modelName) })
+      └── runConfig includes wake_word_phrase → spread into WS message
+            └── ws_run_pipeline extracts wake_word_phrase → async_run_pipeline
+                  └── async_accept_pipeline_from_satellite(wake_word_phrase=...)
+                        └── HA core checks DATA_LAST_WAKE_UP[phrase]
+                              ├── Not within 2s cooldown → record + proceed
+                              └── Within cooldown → DuplicateWakeUpDetectedError
+                                    └── error event: "duplicate_wake_up_detected"
+                                          └── handleError → hideBlurOverlay → restart(0) → ww.restart()
 ```
 
 This is the same infrastructure Voice PE satellites use — fully unified. No
 custom dedup logic. Works for card↔card and card↔Voice PE suppression.
 
+### 29.10 Stop Model
+
+**File:** `src/wake-word/index.js` (`enableStopModel`, `disableStopModel`,
+`_onStopDetection`)
+
+The `stop.tflite` model enables voice-based interruption of interruptible
+states (TTS playback, notifications, timer alerts). It runs through the same
+TFLite inference pipeline as wake word models.
+
+**Pre-loading:** The stop model is loaded in the background via
+`_preloadStopModel()` immediately after wake word detection starts. This
+avoids a loading delay when stop is first needed.
+
+**Two modes:**
+
+| Mode | Trigger | Active Keywords | Use Case |
+|------|---------|-----------------|----------|
+| Stop-only | `enableStopModel(true)` | Only `stop` (wake words suspended) | TTS playback, notification playback |
+| Alongside | `enableStopModel(false)` | Wake words + `stop` | Timer alerts |
+
+**Stop-only mode mechanics:**
+1. Current wake word keywords are saved to `_suspendedKeywords`
+2. All keywords except `stop` are removed from the inference engine
+3. `_stopOnlyMode = true`, inference state reset
+4. On `disableStopModel()`: stop keyword removed, suspended keywords restored
+
+**Integration points:**
+- **Notifications** (`satellite-notification.js`): Enables stop-only mode
+  after 1s delay (skip false triggers during chime), disables on completion
+- **Timer alerts** (`timer/ui.js`): Enables stop alongside wake words when
+  alert is showing, disables when dismissed
+- **Audio processing** (`audio/processing.js`): Feeds audio to wake word
+  when `wakeWord?.active` or `wakeWord?.stopOnlyMode`
+
+**`_onStopDetection()` priority chain** (matches `DoubleTapHandler._cancel()`):
+
+```
+_onStopDetection()
+├── disableStopModel()
+├── 1. Timer alert (highest priority)
+│     └── timer.dismissAlert()
+├── 2. Notification (announcement / ask-question / start-conversation)
+│     ├── Send ACK for each active notification
+│     ├── Pause audio, clear state, cancel askQuestion
+│     ├── Clear notification status override
+│     ├── Play done chime (if wake_sound enabled + not remote TTS)
+│     └── pipeline.restart(0)
+└── 3. TTS / active interaction (lowest priority)
+      ├── Stop TTS, clear image linger timeout
+      ├── Cancel askQuestion, clear continue state
+      ├── setState(IDLE), clear chat, hide blur overlay
+      ├── Play done chime (if wake_sound enabled + not remote TTS)
+      └── pipeline.restart(0)
+```
+
 ---
 
-## 29. Implementation Checklist
+## 30. Implementation Checklist
 
-A step-by-step guide to recreate the card from scratch:
+A step-by-step guide to recreate the frontend from scratch:
 
 ### Phase 1: Foundation
 
-- [ ] Set up Webpack with DefinePlugin for `__VERSION__`
-- [ ] Create `constants.js` with State enum, timing, default config
+- [ ] Set up Webpack with two entry points (`voice-satellite-card`, `voice-satellite-panel`) and DefinePlugin for `__VERSION__`
+- [ ] Create `constants.js` with State enum, timing, default config (including `auto_start`)
 - [ ] Create `logger.js` with domain-prefixed debug logging
-- [ ] Create `index.js` entry point registering both custom elements
+- [ ] Create `index.js` entry point registering both custom elements + calling `initEngine()`
 
-### Phase 2: Session Singleton
+### Phase 2: Engine Bootstrap
+
+- [ ] Create `engine/index.js` with `initEngine()`, `bootstrapEngine()`, `waitForHass()`
+- [ ] Implement `attemptStart()` with `auto_start` check from `vs-panel-config` localStorage
+- [ ] Implement `ensureEngineCard()` — create hidden `voice-satellite-card` for UI overlay
+- [ ] Implement `startHassObserver()` — 1s interval feeding hass to session, re-attempting start
+- [ ] Guard against double-init via `window.__vsEngine`
+- [ ] Handle `_userStopped` flag to prevent auto-restart after explicit stop
+
+### Phase 3: Sidebar Panel
+
+- [ ] Create `panel/index.js` as separate webpack entry point
+- [ ] Implement `VoiceSatellitePanel` custom element with light DOM
+- [ ] HA-native toolbar: brand icon, title, version (`v${VERSION}`), help link
+- [ ] Engine status card: running/dormant indicator, state dot, Start/Stop buttons
+- [ ] Entity picker card: `ha-form` with `entitySchema`
+- [ ] Settings card: `ha-form` with `panelSchema` (behavior + autoStart + skin + mic + debug)
+- [ ] Live preview card: shadow DOM with `renderPreview()`
+- [ ] Config persistence: read/write `vs-panel-config` in localStorage
+- [ ] `_onConfigChange()`: update session, manage engine start/stop, sync forms
+- [ ] `ensureHaComponents()`: lazy-load `ha-form` and `ha-entity-picker`
+- [ ] Start button: create engine card if needed, clear `_userStopped`, rAF start
+- [ ] Stop button: set `_userStopped`, call `session.teardown()`
+
+### Phase 4: Session Singleton
 
 - [ ] Create `VoiceSatelliteSession` class with `window.__vsSession`
 - [ ] Implement card interface (all getters managers expect)
 - [ ] Implement `register()`, `unregister()`, editor preview guard
 - [ ] Implement `start()`, `teardown()`, `updateHass()`, `updateConfig()`
 
-### Phase 3: Audio Pipeline
+### Phase 5: Audio Pipeline
 
 - [ ] `AudioManager`: getUserMedia, AudioContext, AudioWorklet
 - [ ] `audio/processing.js`: AudioWorkletProcessor + sample rate conversion
@@ -2625,7 +3079,7 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] `pipeline/events.js`: All event handlers (run-start through error)
 - [ ] Session events: setState, startListening, handlePipelineMessage
 
-### Phase 4: TTS & Audio Output
+### Phase 6: TTS & Audio Output
 
 - [ ] `audio/chime.js`: Web Audio API chime synthesis
 - [ ] `audio/media-playback.js`: HTML5 Audio helper
@@ -2633,7 +3087,7 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] `tts/comms.js`: Remote media player service calls
 - [ ] Session events: onTTSComplete with continue-conversation
 
-### Phase 5: Reactive Bar
+### Phase 7: Reactive Bar
 
 - [ ] `AnalyserManager`: Dual-analyser architecture
 - [ ] Mic analyser path (no destination)
@@ -2641,7 +3095,7 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] rAF tick loop with FPS cap and `--vs-audio-level` CSS variable
 - [ ] Deferred start for notification playback
 
-### Phase 6: Full Card UI
+### Phase 8: Full Card UI
 
 - [ ] `UIManager`: Global overlay in document.body
 - [ ] Rainbow bar with state-driven animations
@@ -2652,7 +3106,7 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] Lightbox (image + YouTube video embed)
 - [ ] Timer pill DOM + finished-alert overlay
 
-### Phase 7: Mini Card UI
+### Phase 9: Mini Card UI
 
 - [ ] `MiniUIManager`: Shadow DOM with ha-card shell
 - [ ] Compact mode: single-line marquee with TTS-synced scroll
@@ -2662,14 +3116,14 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] Timer alert overlay within card bounds
 - [ ] Notification status override (Announcement/Question/Conversation)
 
-### Phase 8: Broadcast Proxies
+### Phase 10: Broadcast Proxies
 
 - [ ] `UIBroadcastProxy`: Forward all UI calls to all registered cards
 - [ ] Query method aggregation (isLightboxVisible, hasVisibleImages, etc.)
 - [ ] Timer pill per-UI reference tracking (`_uiEls` Map)
 - [ ] `ChatBroadcastProxy`: Forward chat calls, shared streamedResponse
 
-### Phase 9: Notification System
+### Phase 11: Notification System
 
 - [ ] `satellite-notification.js`: dispatch, queue, playback flow
 - [ ] `satellite-subscription.js`: WS event subscription with retry
@@ -2679,7 +3133,7 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] Pre-announce chime + custom preannounce media support
 - [ ] Tab-hidden event queuing with visibility replay
 
-### Phase 10: Timer System
+### Phase 12: Timer System
 
 - [ ] `TimerManager`: Entity subscription, timer sync, 1s tick
 - [ ] `timer/events.js`: Detect add/remove/finish from state changes
@@ -2687,7 +3141,7 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] `timer/comms.js`: Cancel timer WS command
 - [ ] Double-tap pill cancellation
 
-### Phase 11: Supporting Systems
+### Phase 13: Supporting Systems
 
 - [ ] `MediaPlayerManager`: Play/pause/stop, volume, state reporting
 - [ ] `VisibilityManager`: Pause/resume with debounce
@@ -2696,7 +3150,7 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] `satellite-state.js`: Read switch/select/number entity states
 - [ ] `ChatManager`: Streaming text with 24-char fade + RAF coalescing
 
-### Phase 12: Skins & Editor
+### Phase 14: Skins & Editor
 
 - [ ] Skin registry with lazy-loaded chunks (default bundled, 5 others on demand)
 - [ ] `getSkin()` sync accessor + `loadSkin()` async loader with cache
@@ -2707,36 +3161,42 @@ A step-by-step guide to recreate the card from scratch:
 - [ ] Editor preview detection and static preview rendering
 - [ ] Full card suppression toggle
 
-### Phase 13: On-Device Wake Word Detection
+### Phase 15: On-Device Wake Word Detection
 
 - [ ] `WakeWordManager`: Lazy-loaded via webpack code splitting
-- [ ] `micro-models.js`: TFLite WASM runtime loading from `/voice_satellite/tflite/`
+- [ ] `micro-models.js`: TFLite WASM runtime loading from `/voice_satellite/tflite/` (script tag + `window.exports` stub)
 - [ ] `micro-models.js`: Keyword model loading with `_modelCache`, `TFLITE_KEYWORD_FILES` mapping + custom fallback
-- [ ] `micro-models.js`: `releaseUnusedMicroModels()` to dispose runners no longer active
-- [ ] `micro-models.js`: `MICRO_MODEL_PARAMS` with per-model cutoff, slidingWindow, stepSize
+- [ ] `micro-models.js`: Companion JSON manifest loading (`_loadModelManifest()`) with `_jsonParamsCache`
+- [ ] `micro-models.js`: `getMicroModelParams()` priority chain: JSON → hardcoded → V2 fallback
+- [ ] `micro-models.js`: `releaseUnusedMicroModels()` to dispose runners no longer active (skip stop)
 - [ ] `micro-frontend.js`: `MicroFrontend` — Hann window, 512-pt FFT, 40-ch mel filterbank
-- [ ] `micro-frontend.js`: Noise reduction (exponential smoothing, per-channel)
-- [ ] `micro-frontend.js`: PCAN normalization + log scale + int8 quantization
+- [ ] `micro-frontend.js`: FilterbankSqrt + noise floor injection (NOISE_FLOOR=1000, AUDIO_SCALE=2500)
+- [ ] `micro-frontend.js`: Noise reduction (asymmetric smoothing, NR_UP_MULT=0.025, NR_DOWN_MULT=2.0)
+- [ ] `micro-frontend.js`: PCAN gain control + log₂ scale + int8 quantization
 - [ ] `micro-frontend.js`: Ring buffer for overlapping windows (hop=160, window=480)
 - [ ] `micro-inference.js`: `MicroWakeWordInference` — feature extraction + keyword classifier pipeline
 - [ ] `micro-inference.js`: Auto-detect input tensor shape for framesPerInfer
 - [ ] `micro-inference.js`: Sliding window detection (circular probability buffer)
-- [ ] `micro-inference.js`: Energy-based sleep mode (RMS silence gating with sensitivity-aware thresholds)
-- [ ] `micro-inference.js`: Warmup period (100 frames) + 2s cooldown after detection
-- [ ] `micro-inference.js`: Multi-keyword support (`keywordConfigs[]` array)
+- [ ] `micro-inference.js`: Energy-based sleep mode with feature buffering (SLEEP_BUFFER_CHUNKS=5, onset replay)
+- [ ] `micro-inference.js`: Warmup period (WARMUP_FRAMES=100) + cooldown (COOLDOWN_MS=2000)
+- [ ] `micro-inference.js`: Dynamic keyword add/remove (`addKeyword()`, `removeKeyword()`)
 - [ ] `micro-inference.js`: `updateThresholds()` for live per-model threshold changes
 - [ ] `micro-inference.js`: `updateEnergyThresholds()` for live energy gate changes
 - [ ] `index.js`: feedAudio → chunk accumulation → serial drain queue
 - [ ] `index.js`: `getActiveModels()` deduplication, `getModelName2()`, `getThresholdForModel()`
-- [ ] `index.js`: Detection handler with model name (`_onDetection(modelName)`, `getWakeWordPhrase(modelName)`)
+- [ ] `index.js`: `_onDetection(modelName)` — mute check, tab unpause, media interrupt, chime, pipeline start
+- [ ] `index.js`: `WAKE_WORD_PHRASES` for cross-satellite dedup + custom model fallback (underscore→space+titleCase)
 - [ ] `index.js`: Settings change tracking (mode, model, model2, threshold) with deferred cache update
 - [ ] `index.js`: Live threshold updates without restart
 - [ ] `index.js`: PAUSED state handling — accept changes, reload models on resume via `restart()`
-- [ ] `index.js`: Stop model lifecycle (`enableStopModel()` / `disableStopModel()`)
+- [ ] `index.js`: Stop model — `_preloadStopModel()` background loading on start
+- [ ] `index.js`: Stop model — `enableStopModel(stopOnly)` with keyword suspend/restore
+- [ ] `index.js`: Stop model — `disableStopModel()` with keyword restore
+- [ ] `index.js`: Stop model — `_onStopDetection()` priority chain (timer > notification > TTS)
 - [ ] Session integration: `_checkWakeWordActivation()`, `_loadWakeWordModule()`
-- [ ] Per-model sensitivity thresholds calibrated for browser TFLite inference
+- [ ] Per-model `MODEL_THRESHOLDS` + `DEFAULT_THRESHOLDS` calibrated for browser TFLite inference
 
-### Phase 14: Polish
+### Phase 16: Polish
 
 - [ ] i18n system with HA locale integration
 - [ ] Version sync script (package.json → manifest.json → const.py)

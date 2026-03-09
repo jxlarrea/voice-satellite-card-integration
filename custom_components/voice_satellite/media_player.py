@@ -1,4 +1,4 @@
-"""Media Player entity for Voice Satellite Card.
+"""Media Player entity for Voice Satellite.
 
 Exposes a media_player entity on the satellite device so HA can target
 browser tablets with tts.speak, media_player.play_media, and

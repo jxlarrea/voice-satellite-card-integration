@@ -1,9 +1,9 @@
-"""Voice Satellite Card integration.
+"""Voice Satellite integration.
 
 Registers browser tablets as Assist Satellite devices in Home Assistant,
-giving the Voice Satellite Card a device identity. This unlocks timers,
-announcements, and per-device LLM context. Also serves the card's
-JavaScript frontend automatically.
+giving each Voice Satellite a device identity. This unlocks timers,
+announcements, and per-device LLM context. Also serves the frontend
+JavaScript automatically.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from homeassistant.helpers import config_validation as cv
 from .const import DOMAIN
 from .frontend import (
     async_register_resource,
+    async_register_sidebar_panel,
     async_register_static_paths,
     async_unregister_resource,
 )
@@ -104,10 +105,11 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     websocket_api.async_register_command(hass, ws_cancel_timer)
     websocket_api.async_register_command(hass, ws_media_player_event)
 
-    # Register frontend static paths and Lovelace resource
+    # Register frontend static paths, Lovelace resource, and sidebar panel
     try:
         await async_register_static_paths(hass)
         await async_register_resource(hass)
+        await async_register_sidebar_panel(hass)
     except Exception as err:
         _LOGGER.warning("Failed to register frontend resources: %s", err)
 
@@ -115,7 +117,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Voice Satellite Card from a config entry."""
+    """Set up Voice Satellite from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
     # Safety net: verify frontend resources exist (covers HACS update edge cases

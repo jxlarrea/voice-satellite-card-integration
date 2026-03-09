@@ -24,7 +24,6 @@ import { AskQuestionManager } from '../ask-question';
 import { StartConversationManager } from '../start-conversation';
 import { MediaPlayerManager } from '../media-player';
 import { getSelectEntityId, getNumberState, getSelectState } from '../shared/satellite-state.js';
-import { DISABLED_VALUE } from '../shared/entity-picker.js';
 import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
 import { dispatchSatelliteEvent, checkRemoteNotificationPlayback } from '../shared/satellite-notification.js';
 import { isEditorPreview } from '../editor/preview.js';
@@ -279,20 +278,32 @@ export class VoiceSatelliteSession {
   }
 
   /**
-   * Merge session-relevant config keys. Card-specific keys (skin,
-   * mini_mode, etc.) stay on the card.
-   * @param {object} config
+   * Merge session-relevant config keys and propagate to registered cards.
+   * @param {object} config  Full config object (session + card keys).
+   * @param {object} [options]
+   * @param {boolean} [options.fromPanel]  True when called from the sidebar panel.
    */
-  updateConfig(config) {
+  updateConfig(config, { fromPanel } = {}) {
     if (!config) return;
     const sessionKeys = [
-      'satellite_entity', 'debug', 'browser_satellite_override',
+      'satellite_entity', 'debug',
       'echo_cancellation', 'noise_suppression', 'auto_gain_control',
       'voice_isolation', 'reactive_bar', 'reactive_bar_update_interval_ms',
     ];
+    const micKeys = [
+      'echo_cancellation', 'noise_suppression', 'auto_gain_control',
+      'voice_isolation',
+    ];
+
     const oldEntity = this._config.satellite_entity;
+    let micChanged = false;
     for (const key of sessionKeys) {
-      if (config[key] !== undefined) this._config[key] = config[key];
+      if (config[key] !== undefined) {
+        if (micKeys.includes(key) && this._config[key] !== config[key]) {
+          micChanged = true;
+        }
+        this._config[key] = config[key];
+      }
     }
     this._logger.debug = !!this._config.debug;
 
@@ -301,7 +312,25 @@ export class VoiceSatelliteSession {
         && oldEntity !== this._config.satellite_entity && this._hasStarted) {
       this._logger.log('session', `Entity changed: ${oldEntity} → ${this._config.satellite_entity}`);
       this.teardown();
+      return;
     }
+
+    // Restart mic if audio constraints changed while running
+    if (micChanged && this._hasStarted && this._audio._mediaStream) {
+      this._logger.log('session', 'Mic constraints changed — restarting mic');
+      this._audio.stopMicrophone();
+      this._audio.startMicrophone().catch((e) => {
+        this._logger.error('session', `Mic restart failed: ${e.message || e}`);
+      });
+    }
+
+    // Propagate full config to registered cards so skin/appearance updates apply
+    if (fromPanel) {
+      for (const c of this._cards) {
+        c.setConfig(config);
+      }
+    }
+
     this._syncFullCardSuppression();
   }
 
@@ -330,18 +359,13 @@ export class VoiceSatelliteSession {
   }
 
   /**
-   * Handle an entity picker selection. Updates the card's config,
+   * Handle an entity selection. Updates the card's config,
    * tears down a stale session if needed, then registers and starts.
    * @param {HTMLElement} card
    * @param {string} entityId
    */
   handleEntityPick(card, entityId) {
-    if (entityId === DISABLED_VALUE) {
-      card._deviceDisabled = true;
-      return;
-    }
     card._config.satellite_entity = entityId;
-    card._isLocalStorageEntity = true;
     if (this.isStarted) {
       this.teardown();
     }

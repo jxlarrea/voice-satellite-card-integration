@@ -29,8 +29,7 @@ Please confirm:
 ## Environment
 
 - **Home Assistant version:**
-- **Voice Satellite Card Integration version:**
-- **Voice Satellite Card version:**
+- **Voice Satellite version:**
 - **Browser / app:**
 - **Device:**
 

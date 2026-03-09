@@ -90,7 +90,7 @@ export default {
     },
   },
   cards: {
-    full_name: 'Voice Satellite Card',
+    full_name: 'Voice Satellite',
     full_description: 'Transform your browser into a voice satellite for Home Assistant Assist',
     mini_name: 'Voice Satellite Mini Card',
     mini_description: 'Text-only in-card voice satellite (compact or tall)',
@@ -99,14 +99,12 @@ export default {
     behavior: {
       microphone_processing: 'Microphone Processing',
       satellite_entity: 'Satellite entity',
-      browser_satellite_override: 'Per-device satellite override',
       debug: 'Debug logging',
       noise_suppression: 'Noise suppression',
       echo_cancellation: 'Echo cancellation',
       auto_gain_control: 'Auto gain control',
       voice_isolation: 'Voice isolation (Chrome only)',
-      helper_satellite_entity: 'Required. Install the Voice Satellite Card Integration: https://github.com/jxlarrea/voice-satellite-card-integration',
-      helper_browser_override: 'For shared dashboards across multiple devices. When enabled, each device selects its own satellite via a browser popup, overriding the entity configured above.',
+      helper_satellite_entity: 'Add a satellite device first via Settings → Devices & Services → Voice Satellite.',
       helper_voice_isolation: 'AI-based voice isolation, currently only available in Chrome',
     },
     skin: {

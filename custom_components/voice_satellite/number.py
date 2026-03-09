@@ -1,4 +1,4 @@
-"""Number entities for Voice Satellite Card integration.
+"""Number entities for Voice Satellite integration.
 
 Announcement display duration - how long to show announcement bubbles.
 """

@@ -1,4 +1,4 @@
-"""Select entities for Voice Satellite Card integration.
+"""Select entities for Voice Satellite integration.
 
 Pipeline select - choose which Assist pipeline to use.
 VAD sensitivity select - configure finished speaking detection.

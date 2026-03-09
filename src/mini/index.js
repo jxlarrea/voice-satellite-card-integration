@@ -14,12 +14,7 @@ import { renderMiniPreview, teardownMiniPreview } from '../mini-editor/preview.j
 import { getMiniConfigForm } from '../mini-editor/index.js';
 import { getMiniGridRows } from './constants.js';
 import { VoiceSatelliteSession } from '../session';
-import {
-  applyBrowserOverride,
-  resolveEntity,
-  showPicker,
-  DISABLED_VALUE,
-} from '../shared/entity-picker.js';
+import { resolveEntity } from '../shared/entity-picker.js';
 import { MiniUIManager } from './ui.js';
 
 export class VoiceSatelliteMiniCard extends HTMLElement {
@@ -33,9 +28,6 @@ export class VoiceSatelliteMiniCard extends HTMLElement {
     this._configuredMiniMode = null;
     this._hass = null;
     this._disconnectTimeout = null;
-    this._pickerTeardown = null;
-    this._isLocalStorageEntity = false;
-    this._deviceDisabled = false;
     this._editorCheckDone = false;
     this._renderMode = 'live';
 
@@ -113,24 +105,16 @@ export class VoiceSatelliteMiniCard extends HTMLElement {
       this._editorCheckDone = true;
       this._session._rejectedPreviews.delete(this);
 
-      if (this._deviceDisabled) return;
-
-      if (!this._config.satellite_entity) {
-        if (this._config.browser_satellite_override && this._hass?.entities) {
-          const resolved = resolveEntity(this._hass);
-          if (resolved === DISABLED_VALUE) {
-            this._deviceDisabled = true;
-            return;
-          } else if (resolved) {
-            this._config.satellite_entity = resolved;
-            this._isLocalStorageEntity = true;
-          } else {
-            return;
-          }
+      if (!this._config.satellite_entity && this._hass?.entities) {
+        const resolved = resolveEntity(this._hass);
+        if (resolved) {
+          this._config.satellite_entity = resolved;
         } else {
           return;
         }
       }
+
+      if (!this._config.satellite_entity) return;
 
       this._session.register(this);
       this._session.updateHass(this._hass);
@@ -153,10 +137,6 @@ export class VoiceSatelliteMiniCard extends HTMLElement {
   }
 
   disconnectedCallback() {
-    if (this._pickerTeardown) {
-      this._pickerTeardown();
-      this._pickerTeardown = null;
-    }
     if (this.shadowRoot) teardownMiniPreview(this.shadowRoot);
     this._disconnectTimeout = setTimeout(() => {
       if (!this.isConnected) {
@@ -170,10 +150,6 @@ export class VoiceSatelliteMiniCard extends HTMLElement {
     const hadEntity = !!this._config.satellite_entity;
     this._config = Object.assign({}, DEFAULT_CONFIG, { mini_mode: 'compact' }, config);
     this._logger.debug = this._config.debug;
-
-    const override = applyBrowserOverride(this._config);
-    this._isLocalStorageEntity = override.isLocalStorageEntity;
-    this._deviceDisabled = override.deviceDisabled;
 
     if (this.shadowRoot) {
       if (this._syncRenderMode()) {
@@ -214,24 +190,12 @@ export class VoiceSatelliteMiniCard extends HTMLElement {
       return;
     }
 
-    if (this._deviceDisabled) return;
     if (!hass?.connection) return;
 
     if (!this._config.satellite_entity) {
-      if (this._config.browser_satellite_override) {
-        const resolved = resolveEntity(hass);
-        if (resolved === DISABLED_VALUE) {
-          this._deviceDisabled = true;
-          return;
-        } else if (resolved) {
-          this._config.satellite_entity = resolved;
-          this._isLocalStorageEntity = true;
-        } else if (hass.entities && Object.keys(hass.entities).length > 0 && !this._pickerTeardown) {
-          this._showEntityPicker(hass);
-          return;
-        } else {
-          return;
-        }
+      const resolved = resolveEntity(hass);
+      if (resolved) {
+        this._config.satellite_entity = resolved;
       } else {
         return;
       }
@@ -271,15 +235,6 @@ export class VoiceSatelliteMiniCard extends HTMLElement {
   onStartClick() { this._session.onStartClick(); }
   onPipelineMessage(message) { this._session.onPipelineMessage(message); }
   onTTSComplete(playbackFailed) { this._session.onTTSComplete(playbackFailed); }
-
-  // ── Entity picker ─────────────────────────────────────────────────
-
-  _showEntityPicker(hass) {
-    this._pickerTeardown = showPicker(hass, (entityId) => {
-      this._pickerTeardown = null;
-      this._session.handleEntityPick(this, entityId);
-    });
-  }
 
   // ── Render / preview ──────────────────────────────────────────────
 

@@ -4,10 +4,11 @@
 
 import { t } from '../i18n/index.js';
 
-export const behaviorSchema = [
+export const behaviorSchema = [];
+
+export const entitySchema = [
   {
     name: 'satellite_entity',
-    required: true,
     selector: { entity: { filter: { domain: 'assist_satellite', integration: 'voice_satellite' } } },
   },
 ];
@@ -27,14 +28,17 @@ export const microphoneSchema = [
   },
 ];
 
+export const autoStartSchema = [
+  { name: 'auto_start', default: true, selector: { boolean: {} } },
+];
+
 export const debugSchema = [
-  { name: 'browser_satellite_override', selector: { boolean: {} } },
   { name: 'debug', selector: { boolean: {} } },
 ];
 
 export const behaviorLabels = {
   satellite_entity: t(null, 'editor.behavior.satellite_entity', 'Satellite entity'),
-  browser_satellite_override: t(null, 'editor.behavior.browser_satellite_override', 'Per-device satellite override'),
+  auto_start: t(null, 'editor.behavior.auto_start', 'Auto start'),
   debug: t(null, 'editor.behavior.debug', 'Debug logging'),
   noise_suppression: t(null, 'editor.behavior.noise_suppression', 'Noise suppression'),
   echo_cancellation: t(null, 'editor.behavior.echo_cancellation', 'Echo cancellation'),
@@ -43,7 +47,7 @@ export const behaviorLabels = {
 };
 
 export const behaviorHelpers = {
-  satellite_entity: t(null, 'editor.behavior.helper_satellite_entity', 'Required. Install the Voice Satellite Card Integration: https://github.com/jxlarrea/voice-satellite-card-integration'),
-  browser_satellite_override: t(null, 'editor.behavior.helper_browser_override', 'For shared dashboards across multiple devices. When enabled, each device selects its own satellite via a browser popup, overriding the entity configured above.'),
+  satellite_entity: t(null, 'editor.behavior.helper_satellite_entity', 'Add a satellite device first via Settings → Devices & Services → Voice Satellite.'),
+  auto_start: t(null, 'editor.behavior.helper_auto_start', 'Automatically start the voice engine when the page loads. When off, use the Start button to activate manually.'),
   voice_isolation: t(null, 'editor.behavior.helper_voice_isolation', 'AI-based voice isolation, currently only available in Chrome'),
 };

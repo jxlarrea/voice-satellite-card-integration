@@ -1,4 +1,4 @@
-"""Switch entities for Voice Satellite Card integration.
+"""Switch entities for Voice Satellite integration.
 
 Wake sound switch - enable/disable the wake word chime.
 Mute switch - mute/unmute the satellite microphone.

@@ -66,7 +66,7 @@ export const Timing = {
 export const DEFAULT_CONFIG = {
   // Behavior
   satellite_entity: '',
-  browser_satellite_override: false,
+  auto_start: true,
   debug: false,
 
   // Microphone Processing

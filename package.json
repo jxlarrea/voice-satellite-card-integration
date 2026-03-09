@@ -1,7 +1,7 @@
 {
   "name": "voice-satellite-card-integration",
-  "version": "5.9.7",
-  "description": "Voice Satellite Card for Home Assistant — turns browsers into Assist satellites.",
+  "version": "6.0.0",
+  "description": "Voice Satellite for Home Assistant — turns browsers into Assist satellites.",
   "private": true,
   "scripts": {
     "prebuild": "node scripts/sync-version.js && node scripts/copy-tflite.js",

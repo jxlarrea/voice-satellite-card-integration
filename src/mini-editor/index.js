@@ -8,15 +8,13 @@ import { DEFAULT_CONFIG } from '../constants.js';
 import { t } from '../i18n/index.js';
 import {
   behaviorSchema,
-  microphoneSchema,
-  debugSchema,
   behaviorLabels,
   behaviorHelpers,
 } from '../editor/behavior.js';
 
 const miniLayoutSchema = [
   {
-    type: 'expandable', name: '', title: t(null, 'mini_editor.layout', 'Layout'), flatten: true,
+    type: 'expandable', name: '', title: t(null, 'mini_editor.layout', 'Layout'), flatten: true, expanded: true,
     schema: [
       {
         name: 'mini_mode',
@@ -66,7 +64,7 @@ const labels = {
   ...behaviorLabels,
   mini_mode: t(null, 'mini_editor.mode', 'Mode'),
   text_scale: t(null, 'mini_editor.text_scale', 'Text Scale'),
-  suppress_full_card: t(null, 'mini_editor.suppress_full_card', 'Suppress Full Card'),
+  suppress_full_card: t(null, 'mini_editor.suppress_full_card', 'Suppress overlay'),
   custom_css: t(null, 'mini_editor.custom_css_override', 'Custom CSS Override'),
 };
 
@@ -74,7 +72,7 @@ const helpers = {
   ...behaviorHelpers,
   mini_mode: t(null, 'mini_editor.helper_mode', 'Compact is a single scrolling line; Tall shows status and a scrolling transcript.'),
   text_scale: t(null, 'mini_editor.helper_text_scale', 'Scales text sizes in the mini card while keeping Home Assistant theme typography as the base.'),
-  suppress_full_card: t(null, 'mini_editor.helper_suppress_full_card', 'Hides the full-screen voice satellite overlay when this mini card is active.'),
+  suppress_full_card: t(null, 'mini_editor.helper_suppress_full_card', 'Hides the full-screen voice satellite overlay while this mini card is on screen.'),
   custom_css: t(null, 'mini_editor.helper_custom_css', 'Advanced: CSS overrides applied inside the mini card shadow DOM'),
 };
 
@@ -84,8 +82,6 @@ export function getMiniConfigForm() {
       ...behaviorSchema,
       ...miniLayoutSchema,
       ...miniAdvancedSchema,
-      ...microphoneSchema,
-      ...debugSchema,
     ],
     assertConfig(config) {
       const editor = this;

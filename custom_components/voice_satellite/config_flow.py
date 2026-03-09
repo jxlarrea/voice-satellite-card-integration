@@ -1,4 +1,4 @@
-"""Config flow for Voice Satellite Card integration."""
+"""Config flow for Voice Satellite integration."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .const import DOMAIN
 
 
 class VoiceSatelliteConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Voice Satellite Card."""
+    """Handle a config flow for Voice Satellite."""
 
     VERSION = 1
 

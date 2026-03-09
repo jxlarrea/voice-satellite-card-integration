@@ -11,15 +11,9 @@ import { getSkin, loadSkin } from '../skins/index.js';
 import { Logger } from '../logger.js';
 import { UIManager } from './ui.js';
 import { ChatManager } from '../shared/chat.js';
-import { getConfigForm } from '../editor';
 import { isEditorPreview, renderPreview } from '../editor/preview.js';
 import { VoiceSatelliteSession } from '../session';
-import {
-  applyBrowserOverride,
-  resolveEntity,
-  showPicker,
-  DISABLED_VALUE,
-} from '../shared/entity-picker.js';
+import { resolveEntity } from '../shared/entity-picker.js';
 
 export class VoiceSatelliteCard extends HTMLElement {
   constructor() {
@@ -29,10 +23,7 @@ export class VoiceSatelliteCard extends HTMLElement {
     this._config = Object.assign({}, DEFAULT_CONFIG);
     this._hass = null;
     this._disconnectTimeout = null;
-    this._pickerTeardown = null;
-    this._isLocalStorageEntity = false;
     this._activeSkin = null;
-    this._deviceDisabled = false;
     this._editorCheckDone = false;
 
     this._logger = new Logger();
@@ -107,43 +98,34 @@ export class VoiceSatelliteCard extends HTMLElement {
     this._editorCheckDone = false;
     this._render();
 
-    requestAnimationFrame(() => {
-      if (isEditorPreview(this) && this.shadowRoot) {
-        renderPreview(this.shadowRoot, this._config);
-        return; // _editorCheckDone stays false — no registration paths will fire
-      }
+    // Dashboard-placed cards are deprecated — show removal message only
+    if (!this._engineOwned) return;
 
+    requestAnimationFrame(() => {
       this._editorCheckDone = true;
       this._session._rejectedPreviews.delete(this);
 
-      if (this._deviceDisabled) return;
-
-      if (!this._config.satellite_entity) {
-        if (this._config.browser_satellite_override && this._hass?.entities) {
-          const resolved = resolveEntity(this._hass);
-          if (resolved === DISABLED_VALUE) {
-            this._deviceDisabled = true;
-            return;
-          } else if (resolved) {
-            this._config.satellite_entity = resolved;
-            this._isLocalStorageEntity = true;
-          } else {
-            return; // picker shows from set hass()
-          }
+      if (!this._config.satellite_entity && this._hass?.entities) {
+        const resolved = resolveEntity(this._hass);
+        if (resolved) {
+          this._config.satellite_entity = resolved;
         } else {
           return;
         }
       }
 
-      this._session.registerAndStart(this);
+      if (this._config.satellite_entity) {
+        // Register only — the engine's waitForGesture handles starting.
+        // Calling start() here would set _startAttempted before any user
+        // gesture, preventing the gesture-based start from working.
+        this._session.register(this);
+        this._session.updateHass(this._hass);
+        this._session.updateConfig(this._config);
+      }
     });
   }
 
   disconnectedCallback() {
-    if (this._pickerTeardown) {
-      this._pickerTeardown();
-      this._pickerTeardown = null;
-    }
     // Full card's global UI persists in document.body across dashboard
     // navigations — do NOT unregister on disconnect. Stale instances are
     // evicted by the session when a new full card registers.
@@ -162,11 +144,6 @@ export class VoiceSatelliteCard extends HTMLElement {
       }
     });
     this._logger.debug = this._config.debug;
-
-    // When browser_satellite_override is on, localStorage takes full control
-    const override = applyBrowserOverride(this._config);
-    this._isLocalStorageEntity = override.isLocalStorageEntity;
-    this._deviceDisabled = override.deviceDisabled;
 
     if (this._ui.element) {
       this._ui.applyStyles();
@@ -206,9 +183,7 @@ export class VoiceSatelliteCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
 
-    // Preview cards in the editor should never start or subscribe.
-    // isEditorPreview is unreliable synchronously (DOM ancestors not attached
-    // yet), so also gate on the rAF-confirmed _editorCheckDone flag.
+    if (!this._engineOwned) return;
     if (isEditorPreview(this)) return;
     if (!this._editorCheckDone) return;
 
@@ -223,24 +198,12 @@ export class VoiceSatelliteCard extends HTMLElement {
       return;
     }
 
-    if (this._deviceDisabled) return;
     if (!hass?.connection) return;
 
     if (!this._config.satellite_entity) {
-      if (this._config.browser_satellite_override) {
-        const resolved = resolveEntity(hass);
-        if (resolved === DISABLED_VALUE) {
-          this._deviceDisabled = true;
-          return;
-        } else if (resolved) {
-          this._config.satellite_entity = resolved;
-          this._isLocalStorageEntity = true;
-        } else if (hass.entities && Object.keys(hass.entities).length > 0 && !this._pickerTeardown) {
-          this._showEntityPicker(hass);
-          return;
-        } else {
-          return;
-        }
+      const resolved = resolveEntity(hass);
+      if (resolved) {
+        this._config.satellite_entity = resolved;
       } else {
         return;
       }
@@ -251,9 +214,6 @@ export class VoiceSatelliteCard extends HTMLElement {
 
   getCardSize() { return 0; }
 
-  static getConfigForm() { return getConfigForm(); }
-  static getStubConfig() { return { skin: 'default', text_scale: 100 }; }
-
   // ── Event callbacks (delegated to session) ────────────────────────
 
   setState(newState) { this._session.setState(newState); }
@@ -261,24 +221,21 @@ export class VoiceSatelliteCard extends HTMLElement {
   onPipelineMessage(message) { this._session.onPipelineMessage(message); }
   onTTSComplete(playbackFailed) { this._session.onTTSComplete(playbackFailed); }
 
-  // ── Entity picker ─────────────────────────────────────────────────
-
-  _showEntityPicker(hass) {
-    this._pickerTeardown = showPicker(hass, (entityId) => {
-      this._pickerTeardown = null;
-      this._session.handleEntityPick(this, entityId);
-    });
-  }
-
   _render() {
     if (!this.shadowRoot) {
       this.attachShadow({ mode: 'open' });
     }
 
-    if (isEditorPreview(this)) {
-      renderPreview(this.shadowRoot, this._config);
-    } else {
+    if (this._engineOwned) {
       this.shadowRoot.innerHTML = '<div id="voice-satellite-card" style="display:none;"></div>';
+    } else {
+      this.shadowRoot.innerHTML = `
+        <ha-card>
+          <div style="padding: 16px; text-align: center; color: var(--secondary-text-color, #999); font-size: 14px; line-height: 1.5;">
+            <p style="margin: 0 0 8px; font-weight: 500; color: var(--primary-text-color, #fff);">Voice Satellite Card has been deprecated</p>
+            <p style="margin: 0;">Settings have moved to the Voice Satellite sidebar panel. You can safely delete this card.</p>
+          </div>
+        </ha-card>`;
     }
   }
 }

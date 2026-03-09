@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Add Voice Satellite",
-        "description": "Create a virtual Assist satellite for a browser tablet running the Voice Satellite Card.",
+        "description": "Create a virtual Assist satellite for a browser tablet running Voice Satellite.",
         "data": {
           "name": "Satellite name"
         },

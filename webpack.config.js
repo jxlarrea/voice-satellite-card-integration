@@ -5,7 +5,10 @@ const webpack = require('webpack');
 const frontendDir = path.resolve(__dirname, 'custom_components/voice_satellite/frontend');
 
 const baseConfig = {
-  entry: './src/index.js',
+  entry: {
+    'voice-satellite-card': './src/index.js',
+    'voice-satellite-panel': './src/panel/index.js',
+  },
   module: {
     rules: [
       {
@@ -40,7 +43,7 @@ module.exports = (env, argv) => {
       ...baseConfig,
       output: {
         ...baseConfig.output,
-        filename: 'voice-satellite-card.js',
+        filename: '[name].js',
         chunkFilename: 'voice-satellite-[name].js',
         path: frontendDir,
       },
@@ -55,7 +58,7 @@ module.exports = (env, argv) => {
     ...baseConfig,
     output: {
       ...baseConfig.output,
-      filename: 'voice-satellite-card.js',
+      filename: '[name].js',
       chunkFilename: 'voice-satellite-[name].js',
       path: frontendDir,
     },

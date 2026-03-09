@@ -1,4 +1,4 @@
-# <img width="48" height="48" alt="icon" src="https://github.com/user-attachments/assets/31b4a789-bae3-4428-a543-85063f17109c" /> Voice Satellite Card for Home Assistant
+# <img width="48" height="48" alt="icon" src="https://github.com/user-attachments/assets/31b4a789-bae3-4428-a543-85063f17109c" /> Voice Satellite for Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-blue.svg?style=for-the-badge)](https://www.hacs.xyz/docs/faq/custom_repositories/)
 [![Downloads](https://img.shields.io/github/downloads/jxlarrea/voice-satellite-card-integration/total?style=for-the-badge&label=Downloads&color=red)](https://github.com/jxlarrea/voice-satellite-card-integration/releases)
@@ -6,7 +6,7 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/jxlarrea/voice-satellite-card-integration/release.yml?style=for-the-badge&label=Build)](https://github.com/jxlarrea/voice-satellite-card-integration/actions/workflows/release.yml)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jxlarrea)
 
-Transform any browser into a full-featured voice satellite for Home Assistant's Assist. This single package includes both a **Lovelace card** and a **custom integration** that work together to give your browser-based devices true satellite identity - with feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/), including wake word detection, timers, announcements, conversations, and more.
+Transform any browser into a full-featured voice satellite for Home Assistant's Assist. Voice Satellite runs as a **global engine** on every page — no dashboard card required. A **sidebar panel** provides all configuration, and each browser gets its own satellite identity with feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/), including wake word detection, timers, announcements, conversations, and more.
 
 ## Screenshots
 <p align="center">
@@ -18,12 +18,13 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 
 ## Table of Contents
 
-- [Why This Card?](#why-this-card)
+- [How It Works](#how-it-works)
 - [Important: Browser Requirements](#important-browser-requirements)
 - [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Setup](#setup)
+- [Sidebar Panel](#sidebar-panel)
 - [Integration](#integration)
 - [Usage](#usage)
 - [Mini Card](#mini-card)
@@ -35,23 +36,22 @@ Transform any browser into a full-featured voice satellite for Home Assistant's 
 - [Contributing](#contributing)
 - [License](#license)
 
-## Why This Card?
+## How It Works
 
-Home Assistant's built-in voice features require dedicated hardware like ESPHome devices or the Home Assistant Voice Preview Edition. But what if you already have a tablet mounted on your wall running the Home Assistant dashboard?
+Voice Satellite runs as a **global engine** that loads on every page of Home Assistant — not just dashboards with cards. Once you assign a satellite entity in the sidebar panel, the engine starts automatically and listens for wake words across all page navigations.
 
-**Voice Satellite Card** solves this by:
-
-- **Turning your browser into a real satellite** - Registered as a proper `assist_satellite` device in Home Assistant, with the same capabilities as hardware satellites.
-- **Using your browser's microphone** - No additional hardware needed.
-- **Supporting wake words** - Say "OK Nabu" or your custom wake word to activate, with both on-device and server-side detection.
-- **Playing TTS responses** - Hear responses directly from your device or a remote media player.
-- **Media player entity** - Each satellite exposes a media player in HA for volume control, `tts.speak` targeting, and `media_player.play_media` from automations.
-- **Providing voice-activated timers** - Set, update, and cancel timers with on-screen countdown pills.
-- **Receiving announcements** - Push TTS messages to specific devices from automations.
-- **Supporting interactive conversations** - Automations can proactively ask questions and listen for responses.
-- **Providing visual feedback** - Themed gradient bar shows current state, with transcription and response text.
-- **Skin system** - Choose between built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) that theme the entire UI.
-- **Working on any device** - Tablets, phones, computers, kiosks.
+- **No card needed** — the engine runs globally via the sidebar panel
+- **Turns your browser into a real satellite** — registered as a proper `assist_satellite` device in Home Assistant
+- **Uses your browser's microphone** — no additional hardware needed
+- **Supports wake words** — say "OK Nabu" or your custom wake word to activate, with both on-device and server-side detection
+- **Plays TTS responses** — hear responses directly from your device or a remote media player
+- **Media player entity** — each satellite exposes a media player in HA for volume control, `tts.speak` targeting, and `media_player.play_media` from automations
+- **Voice-activated timers** — set, update, and cancel timers with on-screen countdown pills
+- **Announcements** — push TTS messages to specific devices from automations
+- **Interactive conversations** — automations can proactively ask questions and listen for responses
+- **Visual feedback** — themed gradient bar shows current state, with transcription and response text
+- **Skin system** — choose between built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) that theme the entire UI
+- **Works on any device** — tablets, phones, computers, kiosks
 
 Perfect for wall-mounted tablets, kiosk displays, or any browser-based Home Assistant setup.
 
@@ -61,11 +61,11 @@ https://github.com/user-attachments/assets/af3956a8-3f58-420a-85ef-872ab9e33e8f
 
 ## Important: Browser Requirements
 
-**Warning:** This card requires microphone access and works best when:
+**Warning:** Voice Satellite requires microphone access and works best when:
 
-1. **The browser has microphone permissions granted** - You will be prompted on first use.
-2. **The page is served over HTTPS** - Required for microphone access in modern browsers.
-3. **The screen stays on** - If the device screen turns off completely, the microphone will stop working. Use a screensaver instead of screen-off to keep the mic active.
+1. **The browser has microphone permissions granted** — you will be prompted on first use.
+2. **The page is served over HTTPS** — required for microphone access in modern browsers.
+3. **The screen stays on** — if the device screen turns off completely, the microphone will stop working. Use a screensaver instead of screen-off to keep the mic active.
 
 For kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/details?id=de.ozerov.fully), make sure to enable microphone permissions and use the screensaver feature (not screen off) to keep the microphone active while dimming the display.
 
@@ -73,17 +73,17 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 
 ## Features
 
-- **On-Device Wake Word Detection** - Runs microWakeWord locally in the browser via TFLite WASM. No server-side processing needed, detects the wake word instantly on the device then streams audio to HA for STT. Supports dual wake words, multiple built-in wake words, and custom models. Falls back to server-side detection (Wyoming openWakeWord/microWakeWord) when preferred.
-- **Works Across Views** - Pipeline stays active when switching dashboard views.
-- **Visual Feedback** - Themed gradient activity bar shows listening/processing/speaking states with optional reactive audio-level animation.
-- **Mini Card (Text-First UI)** - Optional `voice-satellite-mini-card` for a normal in-dashboard card layout (compact or tall) without the fullscreen overlay.
-- **Skins** - Built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) that theme the activity bar, text display, timers, and overlay. Customizable with CSS overrides.
-- **Transcription & Response Display** - Shows what was understood and the assistant's response with real-time streaming.
-- **Timers** - Voice-activated timers with on-screen countdown pills, alert chimes, and cancel via double-tap or voice.
-- **Announcements** - Receive `assist_satellite.announce` service calls with pre-announcement chimes and TTS playback. Queues behind active conversations. Also supports Conversations and Ask Question.
-- **Screensaver Control** - Automatically dismisses a configured screensaver entity when a voice interaction begins.
-- **Media Player Entity** - Each satellite exposes a `media_player` entity. Volume is controlled via the entity's volume slider in HA and applies to all audio (chimes, TTS, announcements). Supports `tts.speak` and `media_player.play_media` targeting from automations.
-- **LLM Tools** *(Experimental)* - Enhance your voice assistant with visual tools: search for images and YouTube videos displayed in a media panel, get web search results with featured images, look up Wikipedia articles with summaries and images, view weather forecasts with current conditions and scrollable daily/hourly rows, and check stock prices, crypto prices, and currency conversions with color-coded change indicators. Requires the [Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration.
+- **Global Engine** — runs on every page, not just dashboards. No card placement required.
+- **Sidebar Panel** — all configuration (entity, skin, microphone, debug) in one place, accessible from the HA sidebar.
+- **On-Device Wake Word Detection** — runs microWakeWord locally in the browser via TFLite WASM. No server-side processing needed, detects the wake word instantly on the device then streams audio to HA for STT. Supports dual wake words, multiple built-in wake words, and custom models. Falls back to server-side detection (Wyoming openWakeWord/microWakeWord) when preferred.
+- **Visual Feedback** — themed gradient activity bar shows listening/processing/speaking states with optional reactive audio-level animation.
+- **Mini Card (Text-First UI)** — optional `voice-satellite-mini-card` for a normal in-dashboard card layout (compact or tall) without the fullscreen overlay.
+- **Skins** — built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) that theme the activity bar, text display, timers, and overlay. Customizable with CSS overrides.
+- **Timers** — voice-activated timers with on-screen countdown pills, alert chimes, and cancel via double-tap or voice.
+- **Announcements** — receive `assist_satellite.announce` service calls with pre-announcement chimes and TTS playback. Queues behind active conversations. Also supports Conversations and Ask Question.
+- **Screensaver Control** — automatically dismisses a configured screensaver entity when a voice interaction begins.
+- **Auto Start Control** — toggle auto-start on or off per browser. When off, use the Start button in the panel to activate manually.
+- **LLM Tools** *(Experimental)* — enhance your voice assistant with visual tools: search for images and YouTube videos displayed in a media panel, get web search results with featured images, look up Wikipedia articles with summaries and images, view weather forecasts with current conditions and scrollable daily/hourly rows, and check stock prices, crypto prices, and currency conversions with color-coded change indicators. Requires the [Voice Satellite - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools) integration.
 
 ## Prerequisites
 
@@ -100,7 +100,7 @@ Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_re
 ### HACS (Recommended)
 
 1. Add this repository as a custom repository in HACS (type: Integration)
-2. Search for `Voice Satellite Card` and install
+2. Search for `Voice Satellite` and install
 3. Restart Home Assistant
 
 ### Manual
@@ -112,77 +112,48 @@ Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_re
 ## Setup
 
 1. Go to **Settings -> Devices & Services -> Add Integration**
-2. Search for **Voice Satellite Card**
+2. Search for **Voice Satellite**
 3. Enter a name for the device (e.g., "Kitchen Tablet")
 4. Repeat for each browser device that will act as a satellite
 
-Each entry creates a full satellite device. Then add the card to any dashboard view and select your satellite entity:
+Each entry creates a full satellite device. After installation, a **Voice Satellite** entry appears in the sidebar. Open it to assign a satellite entity to this browser and configure settings.
 
-```yaml
-type: custom:voice-satellite-card
-satellite_entity: assist_satellite.kitchen_tablet
-```
+The engine starts automatically once an entity is assigned. If the browser blocks auto-start due to missing user gesture, a floating microphone button will appear — tap it to start.
 
-The card will start listening automatically using your configured pipeline.
+## Sidebar Panel
 
-If you prefer a normal in-dashboard card instead of the fullscreen overlay UI, use the mini card:
+The sidebar panel is the central configuration hub for Voice Satellite.
 
-```yaml
-type: custom:voice-satellite-mini-card
-satellite_entity: assist_satellite.kitchen_tablet
-mini_mode: compact # or tall
-```
+### Engine Status
 
-### Per-Device Satellite Override
+The top of the panel shows the current engine state (running/dormant) and pipeline status (idle, listening, processing, etc.). **Start** and **Stop** buttons let you manually control the engine.
 
-If you share a single dashboard across multiple wall-mounted tablets, each device needs to use a different satellite entity. Normally this requires a separate dashboard or view per device. The **Per-device satellite override** option solves this by letting each browser pick its own satellite at runtime.
+### Satellite Entity
 
-When enabled, a popup appears on each device asking the user to select which satellite to use. The selection is saved in the browser's local storage, so it persists across page reloads and only needs to be set once per device. This overrides whatever `satellite_entity` is configured in the card YAML.
+Select which satellite device this browser should use. Each browser needs its own satellite entity — create one per device in **Settings -> Devices & Services -> Voice Satellite**.
 
-```yaml
-type: custom:voice-satellite-card
-satellite_entity: assist_satellite.kitchen_tablet
-browser_satellite_override: true
-```
+### Settings
 
-If only one satellite entity exists, it is auto-selected without showing the popup.
+All settings are stored per-browser in local storage and persist across sessions:
 
-The popup also includes a **Disable on this device** option for devices where you don't want the satellite to activate at all (e.g., phones, desktop browsers). Disabled devices will not prompt for microphone access or start any voice pipeline.
+| Setting | Description |
+|---------|-------------|
+| **Auto start** | Start the engine automatically on page load. When off, use the Start button to activate manually |
+| **Skin** | Select a built-in skin for the overlay UI |
+| **Text Scale** | Scale all text 50-200% |
+| **Background Opacity** | Override the skin's default overlay opacity (0-100%) |
+| **Reactive activity bar** | Bar animates in response to mic and audio levels. Disable on slow devices |
+| **Reactive bar update interval** | Controls animation smoothness (default 33ms / ~30fps) |
+| **Custom CSS** | Advanced CSS overrides applied on top of the selected skin |
+| **Noise suppression** | Browser-level noise suppression on the microphone input |
+| **Echo cancellation** | Browser-level echo cancellation |
+| **Auto gain control** | Browser-level automatic gain control |
+| **Voice isolation** | AI-based voice isolation (Chrome only) |
+| **Debug logging** | Show debug info in the browser console |
 
-To change the selected satellite or re-enable a disabled device, toggle the option off and on again in the card editor.
+### Preview
 
-### Visual Editor
-
-All options are available in the visual card editor with a live preview that updates as you change settings.
-
-<img width="1024" height="730" alt="editor" src="https://github.com/user-attachments/assets/2ce34e0a-3761-48c4-a7b7-ea76816f633f" />
-
-### Full Configuration Reference
-
-```yaml
-type: custom:voice-satellite-card
-
-# Behavior
-satellite_entity: ''               # (Required) assist_satellite entity from the integration
-browser_satellite_override: false  # Per-device satellite selection via browser popup
-debug: false                       # Show debug info in browser console
-
-# Appearance
-skin: default                      # 'default', 'alexa', 'google-home', 'home-assistant', 'retro-terminal', or 'siri'
-reactive_bar: true                 # Activity bar reacts to audio levels
-reactive_bar_update_interval_ms: 33 # Reactive bar update cadence (try 50 on slow tablets)
-text_scale: 100                    # Scale all text 50-200%
-background_opacity: 100            # Override skin's default overlay opacity (0-100%)
-custom_css: ''                     # CSS overrides applied on top of the selected skin
-
-# Microphone Processing
-noise_suppression: true            # Enable noise suppression
-echo_cancellation: true            # Enable echo cancellation
-auto_gain_control: true            # Enable automatic gain control
-voice_isolation: false             # AI-based voice isolation (Chrome only)
-```
-
-> **Note:** Settings like TTS output, screensaver entity, and announcement display duration are configured per-device in the integration's device page (**Settings -> Devices & Services -> Voice Satellite Card -> [device]**).
+A live preview of the selected skin updates as you change appearance settings.
 
 ## Integration
 
@@ -192,7 +163,7 @@ The integration creates a virtual Assist Satellite device for each browser, enab
 
 ### Device Settings
 
-Each satellite device exposes configuration entities on its device page (**Settings -> Devices & Services -> Voice Satellite Card -> [device]**):
+Each satellite device exposes configuration entities on its device page (**Settings -> Devices & Services -> Voice Satellite -> [device]**):
 
 | Entity | Type | Description |
 |--------|------|-------------|
@@ -212,7 +183,7 @@ All settings persist across restarts.
 
 ### Satellite State Sync
 
-The card syncs its pipeline state back to the entity in real time. This means the entity accurately reflects what the satellite is doing:
+The engine syncs its pipeline state back to the entity in real time. This means the entity accurately reflects what the satellite is doing:
 
 | Entity State | Meaning |
 |-------------|---------|
@@ -221,7 +192,7 @@ The card syncs its pipeline state back to the entity in real time. This means th
 | `processing` | Processing the user's intent |
 | `responding` | Speaking a TTS response |
 
-You can use this in automations - for example, muting a TV when the nearby satellite starts listening:
+You can use this in automations — for example, muting a TV when the nearby satellite starts listening:
 
 ```yaml
 trigger:
@@ -262,19 +233,21 @@ Example template to check for active timers:
 
 ### Starting the Satellite
 
-The card will automatically request microphone access and begin listening when loaded. If the browser blocks auto-start due to restrictions, a floating microphone button will appear - click it to start.
+Once you assign a satellite entity in the sidebar panel, the engine starts automatically and begins listening for wake words. If the browser blocks auto-start due to restrictions, a floating microphone button will appear — tap it to start.
+
+If **Auto start** is disabled in the panel settings, the engine won't start on page load. Use the **Start** button in the sidebar panel to activate it manually.
 
 ### Voice Interaction
 
 Once running, the satellite continuously listens for your configured wake word. When detected:
 
 1. A **wake chime** plays (if enabled) and the activity bar appears
-2. **Speak your command** - the card streams audio to your STT engine and displays the transcription in real time
+2. **Speak your command** — the engine streams audio to your STT engine and displays the transcription in real time
 3. The assistant **processes your intent** and the bar animates while thinking
 4. The **TTS response plays** and the response text appears on screen
 5. The bar fades and the satellite returns to **wake word listening**
 
-If the assistant asks a follow-up question or you want to continue the conversation, the card automatically re-enters listening mode without requiring the wake word again, allowing a natural back-and-forth exchange. This requires a conversation agent that supports multi-turn conversations, such as OpenAI, Google Generative AI, Anthropic, or Ollama. The built-in Home Assistant conversation agent does not support follow-up conversations.
+If the assistant asks a follow-up question or you want to continue the conversation, the engine automatically re-enters listening mode without requiring the wake word again, allowing a natural back-and-forth exchange. This requires a conversation agent that supports multi-turn conversations, such as OpenAI, Google Generative AI, Anthropic, or Ollama. The built-in Home Assistant conversation agent does not support follow-up conversations.
 
 ### Visual States
 
@@ -312,7 +285,7 @@ data:
   message: "Dinner is ready!"
 ```
 
-Announcements include a pre-announcement chime (ding-dong), play the TTS message, and show the text on screen. If a voice interaction is in progress, the announcement queues and plays after the conversation ends. The announcement blocks until the card confirms playback is complete (or a 120-second timeout expires), so you can chain actions that depend on the user hearing the message.
+Announcements include a pre-announcement chime (ding-dong), play the TTS message, and show the text on screen. If a voice interaction is in progress, the announcement queues and plays after the conversation ends. The announcement blocks until the browser confirms playback is complete (or a 120-second timeout expires), so you can chain actions that depend on the user hearing the message.
 
 The display duration is configurable in the integration's device settings.
 
@@ -329,7 +302,7 @@ data:
   extra_system_prompt: "The user was asked about the garage door. If they confirm, call the close_cover service on cover.garage_door."
 ```
 
-After the announcement plays, the card automatically enters listening mode (skipping wake word detection) so the user can respond immediately. The response is processed through the configured conversation agent as a normal voice interaction.
+After the announcement plays, the engine automatically enters listening mode (skipping wake word detection) so the user can respond immediately. The response is processed through the configured conversation agent as a normal voice interaction.
 
 ### Ask Question
 
@@ -355,7 +328,7 @@ data:
 response_variable: answer
 ```
 
-After the question plays, a wake chime signals the user to speak. The card enters STT-only mode to capture the response, then matches it against the provided sentence templates using [hassil](https://github.com/home-assistant/hassil). The result is returned to the automation via `response_variable`:
+After the question plays, a wake chime signals the user to speak. The engine enters STT-only mode to capture the response, then matches it against the provided sentence templates using [hassil](https://github.com/home-assistant/hassil). The result is returned to the automation via `response_variable`:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -365,16 +338,16 @@ After the question plays, a wake chime signals the user to speak. The card enter
 
 Sentence templates use [hassil](https://github.com/home-assistant/hassil) syntax: `[optional words]` and `{wildcard}` placeholders. For example, `"play {genre} music"` captures the genre value in `answer.slots.genre`.
 
-The card provides audio and visual feedback: a done chime on successful match, or an error chime with a flashing red gradient bar when the response doesn't match any answer.
+The engine provides audio and visual feedback: a done chime on successful match, or an error chime with a flashing red gradient bar when the response doesn't match any answer.
 
 ### Media Player
 
 Each satellite automatically exposes a `media_player` entity in Home Assistant. This entity:
 
 - **Controls volume** for all satellite audio (chimes, TTS, announcements) via the HA volume slider
-- **Reflects playback state** - shows "Playing" whenever any sound is active on the satellite
-- **Supports `tts.speak`** - target the satellite as a TTS device in automations
-- **Supports `media_player.play_media`** - play arbitrary audio files on the satellite
+- **Reflects playback state** — shows "Playing" whenever any sound is active on the satellite
+- **Supports `tts.speak`** — target the satellite as a TTS device in automations
+- **Supports `media_player.play_media`** — play arbitrary audio files on the satellite
 - **Supports browsing** the HA media library
 
 ```yaml
@@ -395,25 +368,25 @@ data:
   message: "The laundry is done!"
 ```
 
-The entity supports play, pause, resume, stop, volume set, and volume mute - all controllable from the HA UI or automations.
+The entity supports play, pause, resume, stop, volume set, and volume mute — all controllable from the HA UI or automations.
 
 ## Mini Card
 
-`voice-satellite-mini-card` is a text-first, normal Home Assistant card variant of the Voice Satellite Card. It uses the same integration and voice pipeline stack, but renders a local UI inside the card instead of the fullscreen/global overlay.
+`voice-satellite-mini-card` is a text-first dashboard card that shows conversation status and transcripts inline. It shares the global engine — no separate entity or microphone configuration needed.
 
 ![minicard](https://github.com/user-attachments/assets/72dfb522-632d-43ed-ad24-02fc0706de74)
 
 ### Modes
 
-- **Compact** - Single-line status + conversation text with marquee scrolling when content overflows
-- **Tall** - Status row + scrolling transcript + timer badges inside the card. Occupies 3 grid rows by default in Sections dashboards (min 2, max 12)
+- **Compact** — single-line status + conversation text with marquee scrolling when content overflows
+- **Tall** — status row + scrolling transcript + timer badges inside the card. Occupies 3 grid rows by default in Sections dashboards (min 2, max 12)
 
 ### Mini Card Features
 
 - Home Assistant theme colors, radius, and typography variables
 - `text_scale` support plus `custom_css` override
 - Timers, announcements, `ask_question`, and `start_conversation` status/text feedback
-- Static editor preview (no live mic/pipeline in the card editor)
+- **Suppress overlay** option hides the fullscreen voice UI while the mini card is on screen
 - Works in Sections and Masonry dashboards
 
 ### Mini Card Configuration Reference
@@ -421,31 +394,22 @@ The entity supports play, pause, resume, stop, volume set, and volume mute - all
 ```yaml
 type: custom:voice-satellite-mini-card
 
-# Behavior
-satellite_entity: ''               # (Required) assist_satellite entity from the integration
-browser_satellite_override: false  # Per-device satellite selection via browser popup
-debug: false                       # Show debug info in browser console
-
-# Mini Layout
+# Layout
 mini_mode: compact                 # 'compact' or 'tall'
 text_scale: 100                    # Scale text 50-200%
 suppress_full_card: true           # Hide the fullscreen overlay when this mini card is active
 custom_css: ''                     # CSS overrides inside the mini card shadow DOM
-
-# Microphone Processing
-noise_suppression: true            # Enable noise suppression
-echo_cancellation: true            # Enable echo cancellation
-auto_gain_control: true            # Enable automatic gain control
-voice_isolation: false             # AI-based voice isolation (Chrome only)
 ```
+
+> **Note:** Entity selection, microphone settings, and debug logging are configured globally in the sidebar panel — not in the mini card editor.
 
 ## On-Device Wake Word Detection
 
-The card includes built-in wake word detection that runs entirely in the browser — no server-side wake word service required. This is the default mode for new installations.
+Voice Satellite includes built-in wake word detection that runs entirely in the browser — no server-side wake word service required.
 
 ### How It Works
 
-On-device detection uses [microWakeWord](https://github.com/kahrendt/microWakeWord) TFLite models running via TensorFlow Lite WebAssembly. The browser continuously processes audio through a feature extraction pipeline (FFT → mel filterbank → noise reduction → PCAN normalization) and runs lightweight keyword classifiers to detect the wake word. Audio is only streamed to Home Assistant after detection. This means:
+On-device detection uses [microWakeWord](https://github.com/kahrendt/microWakeWord) TFLite models running via TensorFlow Lite WebAssembly. The browser continuously processes audio and runs lightweight keyword classifiers to detect the wake word. Audio is only streamed to Home Assistant after detection. This means:
 
 - **Lower latency** — detection happens instantly on the device, no network round-trip
 - **Reduced server load** — audio is only sent to HA for STT after the wake word is detected
@@ -478,18 +442,18 @@ The filename (without `.tflite`) becomes the option name in the dropdown. For ex
 
 ### Configuration
 
-All wake word settings are configured per-device on the satellite's device page (**Settings -> Devices & Services -> Voice Satellite Card -> [device]**):
+All wake word settings are configured per-device on the satellite's device page (**Settings -> Devices & Services -> Voice Satellite -> [device]**):
 
 - **Wake word detection** — "On Device" (default) or "Home Assistant" (server-side)
-- **Wake word** — Select the primary wake word to listen for
-- **Wake word 2** — Optional second wake word (set to "No wake word" to disable). Both wake words run concurrently on the same shared inference pipeline with minimal overhead. If both slots select the same model, the TFLite model is only loaded once
+- **Wake word** — select the primary wake word to listen for
+- **Wake word 2** — optional second wake word (set to "No wake word" to disable). Both wake words run concurrently on the same shared inference pipeline with minimal overhead. If both slots select the same model, the TFLite model is only loaded once
 - **Wake word sensitivity** — "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive". Applies to both wake word slots
 
 To use server-side detection instead, set "Wake word detection" to "Home Assistant". This requires a wake word service (openWakeWord or microWakeWord) configured in your Assist pipeline.
 
 ## Skins
 
-The card includes a skin system that themes the entire UI - activity bar, text display, timers, and background overlay. Select a skin in the card editor under **Appearance**.
+Voice Satellite includes a skin system that themes the entire overlay UI — activity bar, text display, timers, and background. Select a skin in the sidebar panel under **Settings**.
 
 ![skins](https://github.com/user-attachments/assets/436029a8-c199-4773-b50f-428598e66ff4)
 
@@ -504,20 +468,9 @@ The card includes a skin system that themes the entire UI - activity bar, text d
 | **Retro Terminal** | Green phosphor CRT aesthetic with scanlines, bezel frame, monospace font, and screen-edge glow |
 | **Siri** | Full-screen gradient border glow (purple -> blue -> teal -> pink), dark frosted overlay, centered clean text, Apple-inspired design |
 
-### Appearance Options
-
-| Option | Description |
-|--------|-------------|
-| **Skin** | Select a built-in skin |
-| **Reactive activity bar** | Bar animates in response to mic and audio levels. Disable on slow devices to save resources |
-| **Reactive bar update interval (ms)** | Controls how often audio-reactive level updates are pushed to the bar. Default `33ms` (~30fps). Recommended for slow tablets: `50ms` (~20fps). Minimum `17ms` (~60fps cap). |
-| **Text Scale** | Scale all text (transcriptions, responses, timers) from 50% to 200% |
-| **Background Opacity** | Override the skin's default overlay opacity (0-100%) |
-| **Custom CSS** | Advanced: CSS rules applied on top of the selected skin for fine-tuning colors, fonts, sizes, etc. |
-
 ### Custom CSS
 
-Each skin defines CSS classes for all UI elements. Use the **Custom CSS** field to override any skin style. For example, to change the font family across all elements:
+Each skin defines CSS classes for all UI elements. Use the **Custom CSS** field in the sidebar panel to override any skin style. For example, to change the font family across all elements:
 
 ```css
 #voice-satellite-ui {
@@ -527,10 +480,10 @@ Each skin defines CSS classes for all UI elements. Use the **Custom CSS** field 
 
 ## Experimental: LLM Tools
 
-The card supports displaying rich visual results from LLM tool calls inline during voice interactions. These features require the **[Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)** integration, which provides the tools to your conversation agent.
+Voice Satellite supports displaying rich visual results from LLM tool calls inline during voice interactions. These features require the **[Voice Satellite - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)** integration, which provides the tools to your conversation agent.
 
 > **Requirements:**
-> - Install the **[Voice Satellite Card - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)** integration, which provides the search tools to your conversation agent.
+> - Install the **[Voice Satellite - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)** integration, which provides the search tools to your conversation agent.
 > - Your Assist pipeline must use a **conversational AI agent** (e.g., OpenAI, Google Generative AI, Anthropic, Ollama, etc.). The built-in Home Assistant conversation agent does not support tool calling and cannot use these features.
 
 ### Image Search
@@ -582,7 +535,7 @@ Ask your assistant about the weather:
 - *"What's the weather today?"*
 - *"What's the forecast for this week?"*
 
-The assistant responds with a spoken summary while displaying a weather card in the media panel showing the current temperature, condition, humidity, and a scrollable forecast (hourly, daily, or twice-daily depending on the range requested). The weather icon is sourced from Google Weather SVGs via Home Assistant. The weather card uses the same featured panel layout as web search and Wikipedia - it appears alongside the chat response and dismisses immediately after TTS completes (no 30-second linger).
+The assistant responds with a spoken summary while displaying a weather card in the media panel showing the current temperature, condition, humidity, and a scrollable forecast (hourly, daily, or twice-daily depending on the range requested). The weather icon is sourced from Google Weather SVGs via Home Assistant. The weather card uses the same featured panel layout as web search and Wikipedia — it appears alongside the chat response and dismisses immediately after TTS completes (no 30-second linger).
 
 ### Financial Data
 
@@ -598,16 +551,16 @@ Ask your assistant about stocks, crypto, or currency conversions:
 
 **Currency conversions** display the converted amount prominently with the exchange rate below.
 
-The financial card uses the same featured panel layout as weather - it appears alongside the chat response and dismisses immediately after TTS completes.
+The financial card uses the same featured panel layout as weather — it appears alongside the chat response and dismisses immediately after TTS completes.
 
 ## Troubleshooting
 
-### Nothing happens when I tap the microphone
+### Nothing happens when I tap Start
 
 1. **Check HTTPS:** Browsers require HTTPS for microphone access. If you're using HTTP, the microphone permission prompt won't appear. Use HTTPS or access via `localhost`.
 2. **Check browser permissions:** Make sure the browser has microphone permission for your HA URL. Look for a microphone icon in the address bar.
 3. **Check Fully Kiosk settings:** If using Fully Kiosk, ensure **Web Content Settings -> Enable Microphone Access** and **Autoplay Audio** are enabled.
-4. **Try the manual start:** If auto-start fails, tap the blue microphone button to start manually. Check the browser console (F12) for errors.
+4. **Check the browser console:** Open the developer tools (F12) and look for errors.
 
 ### Wake word not detected
 
@@ -616,13 +569,13 @@ The financial card uses the same featured panel layout as weather - it appears a
 1. **Check the device settings:** Go to the satellite's device page and verify "Wake word detection" is set to "On Device" and a wake word model is selected.
 2. **Try adjusting sensitivity:** Change "Wake word sensitivity" to "Very sensitive" to see if detection improves.
 3. **Check browser compatibility:** On-device detection uses WebAssembly (TFLite). Ensure your browser supports WASM — all modern browsers do, but very old versions may not.
-4. Enable `debug: true` in the card config to see wake word scores in the browser console (F12).
+4. Enable **Debug logging** in the sidebar panel to see wake word scores in the browser console (F12).
 
 **Server-side mode ("Home Assistant"):**
 
-1. **Verify your wake word service is running:** Check that your wake word engine (e.g., openWakeWord, microWakeWord) is available to Home Assistant - either as an add-on (**Settings -> Add-ons**) or as a Wyoming integration (**Settings -> Devices & Services**).
-2. **Verify wake word detection is enabled in your pipeline:** Go to **Settings -> Voice assistants**, select your pipeline, and check that a wake word is selected. **This setting is hidden by default** - click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown.
-3. Enable `debug: true` in the card config to see pipeline events in the browser console (F12).
+1. **Verify your wake word service is running:** Check that your wake word engine (e.g., openWakeWord, microWakeWord) is available to Home Assistant — either as an add-on (**Settings -> Add-ons**) or as a Wyoming integration (**Settings -> Devices & Services**).
+2. **Verify wake word detection is enabled in your pipeline:** Go to **Settings -> Voice assistants**, select your pipeline, and check that a wake word is selected. **This setting is hidden by default** — click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown.
+3. Enable **Debug logging** in the sidebar panel to see pipeline events in the browser console (F12).
 
 ### No audio response
 
@@ -631,11 +584,7 @@ The financial card uses the same featured panel layout as weather - it appears a
 3. If **using Fully Kiosk**, ensure that **Web Content Settings** -> **Autoplay Audio** is enabled.
 4. The **Home Assistant Companion App** may block audio autoplay by default, ensure that **Settings** -> **Companion App** -> **Other settings** -> **Autoplay videos** is enabled.
 
-Without these settings, the card will still function (wake word detection, speech-to-text, and visual feedback all work normally) but TTS audio won't play. The UI will clean up gracefully after the interaction completes.
-
-### Card not visible
-
-This is intentional. The card itself is invisible and only shows the gradient bar and transcription text when active. Add it to any view and it will work in the background.
+Without these settings, Voice Satellite will still function (wake word detection, speech-to-text, and visual feedback all work normally) but TTS audio won't play. The UI will clean up gracefully after the interaction completes.
 
 ## Requirements
 
@@ -648,4 +597,3 @@ Contributions are welcome. Please feel free to submit issues or pull requests.
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-

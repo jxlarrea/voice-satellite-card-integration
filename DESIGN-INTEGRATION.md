@@ -1,7 +1,7 @@
-# Voice Satellite Card Integration — Design Document
+# Voice Satellite Integration — Design Document
 
 > Comprehensive design reference for the Python integration component.
-> Companion document to DESIGN-CARD.md which covers the JavaScript card.
+> Companion document to DESIGN-CARD.md which covers the JavaScript frontend.
 > A future implementer should be able to recreate the entire integration
 > from this document alone.
 
@@ -40,8 +40,8 @@
 
 ## 1. Overview
 
-Voice Satellite Card is a custom Home Assistant integration that registers browser
-tablets as virtual Assist Satellite devices. This gives the JavaScript card
+Voice Satellite is a custom Home Assistant integration that registers browser
+tabs/tablets as virtual Assist Satellite devices. This gives the JavaScript frontend
 (documented in DESIGN-CARD.md) a proper device identity in HA, unlocking:
 
 - **Timers** — LLM-triggered `HassStartTimer` routed to the correct device
@@ -109,8 +109,8 @@ connection.
 │  Browser                  │                             │
 │                           │                             │
 │  ┌────────────────────────┴──────────────────────────┐ │
-│  │            Voice Satellite Card (JS)               │ │
-│  │  Pipeline ↔ Audio ↔ TTS ↔ Chat ↔ UI               │ │
+│  │        Voice Satellite Frontend (JS)                │ │
+│  │  Engine ↔ Pipeline ↔ Audio ↔ TTS ↔ Chat ↔ UI      │ │
 │  └────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -189,19 +189,19 @@ update to the card.
 
 | File | Lines | Purpose |
 |---|---|---|
-| `__init__.py` | 418 | Integration setup, 7 WebSocket handlers, `_find_entity()` helper |
-| `assist_satellite.py` | 1181 | `VoiceSatelliteEntity` — main satellite entity, pipeline bridging, announcements, ask_question, timers, screensaver |
-| `media_player.py` | 263 | `VoiceSatelliteMediaPlayer` — media player entity with command push |
-| `select.py` | ~590 | 8 select entities: Pipeline, VAD, Screensaver, TTS Output, Wake Word Detection, Wake Word Model, Wake Word Model 2, Wake Word Sensitivity |
-| `switch.py` | 112 | 2 switch entities: Wake Sound, Mute |
-| `number.py` | 76 | 1 number entity: Announcement Display Duration |
-| `frontend.py` | 135 | `JSModuleRegistration` — auto-registers card JS in Lovelace |
-| `config_flow.py` | 41 | Name-based config flow with duplicate detection |
-| `const.py` | 14 | Constants: `DOMAIN`, `SCREENSAVER_INTERVAL`, `INTEGRATION_VERSION`, `URL_BASE`, `JS_FILENAME` |
-| `manifest.json` | 20 | Integration metadata, dependencies, version |
-| `strings.json` | 62 | Entity translations and config flow strings |
+| `__init__.py` | ~483 | Integration setup, 7 WebSocket handlers, `_find_entity()` helper, custom model sync |
+| `assist_satellite.py` | ~1309 | `VoiceSatelliteEntity` — main satellite entity, pipeline bridging, announcements, ask_question, timers, screensaver |
+| `media_player.py` | ~262 | `VoiceSatelliteMediaPlayer` — media player entity with command push |
+| `select.py` | ~582 | 8 select entities: Pipeline, VAD, Screensaver, TTS Output, Wake Word Detection, Wake Word Model, Wake Word Model 2, Wake Word Sensitivity |
+| `switch.py` | ~111 | 2 switch entities: Wake Sound, Mute |
+| `number.py` | ~75 | 1 number entity: Announcement Display Duration |
+| `frontend.py` | ~177 | Frontend registration — static paths, Lovelace resource, sidebar panel |
+| `config_flow.py` | ~40 | Name-based config flow with duplicate detection |
+| `const.py` | 13 | Constants: `DOMAIN`, `SCREENSAVER_INTERVAL`, `INTEGRATION_VERSION`, `URL_BASE`, `JS_FILENAME` |
+| `manifest.json` | 23 | Integration metadata, dependencies, version |
+| `strings.json` | 73 | Entity translations and config flow strings |
 
-**Total: ~2662 lines** across 11 files (10 Python + 1 JSON manifest + 1 JSON strings).
+**Total: ~3148 lines** across 11 files (9 Python + 1 JSON manifest + 1 JSON strings).
 
 ### 4.2 Directory Structure
 
@@ -218,8 +218,11 @@ custom_components/voice_satellite/
 ├── select.py
 ├── strings.json
 ├── switch.py
+├── brand/
+│   └── icon.png                      ← Integration brand icon (sidebar panel toolbar)
 ├── frontend/
-│   ├── voice-satellite-card.js       ← Main bundle (gitignored, CI builds)
+│   ├── voice-satellite-card.js       ← Main bundle + engine (gitignored, CI builds)
+│   ├── voice-satellite-panel.js      ← Sidebar panel bundle (gitignored, CI builds)
 │   ├── voice-satellite-wake-word.js  ← Wake word chunk (lazy-loaded)
 │   └── voice-satellite-skin-*.js     ← Skin chunks (lazy-loaded)
 ├── models/
@@ -247,9 +250,10 @@ them to the integration's `models/` directory on startup (survives HACS updates)
 |---|---|---|---|
 | `DOMAIN` | `const.py` | `"voice_satellite"` | Integration domain identifier |
 | `SCREENSAVER_INTERVAL` | `const.py` | `5` (seconds) | Keep-alive periodic timer interval |
-| `INTEGRATION_VERSION` | `const.py` | `"5.8.0"` | Synced from `package.json` by `scripts/sync-version.js` |
+| `INTEGRATION_VERSION` | `const.py` | `"6.0.0"` | Synced from `package.json` by `scripts/sync-version.js` |
 | `URL_BASE` | `const.py` | `"/voice_satellite"` | HTTP static path prefix |
 | `JS_FILENAME` | `const.py` | `"voice-satellite-card.js"` | Built JS filename |
+| `PANEL_FILENAME` | `frontend.py` | `"voice-satellite-panel.js"` | Sidebar panel JS filename |
 | `ANNOUNCE_TIMEOUT` | `assist_satellite.py` | `120` (seconds) | Timeout for announcement/question ACK wait |
 | `SCREENSAVER_DISABLED` | `select.py` | `"Disabled"` | Default option for screensaver select |
 | `TTS_OUTPUT_BROWSER` | `select.py` | `"Browser"` | Default option for TTS output select |
@@ -260,6 +264,9 @@ them to the integration's `models/` directory on startup (survives HACS updates)
 | `_BUILTIN_MODELS` | `select.py` | `["ok_nabu", "hey_jarvis", "alexa", "hey_mycroft"]` | Fallback list when models/ directory is missing |
 | `_CACHE_TTL` | `select.py` (class attr) | `30` (seconds) | Entity mapping cache lifetime |
 | `FRONTEND_DIR` | `frontend.py` | `Path(__file__).parent / "frontend"` | Static path to JS directory |
+| `MODELS_DIR` | `frontend.py` | `Path(__file__).parent / "models"` | Static path to wake word models |
+| `TFLITE_DIR` | `frontend.py` | `Path(__file__).parent / "tflite"` | Static path to TFLite WASM files |
+| `BRAND_DIR` | `frontend.py` | `Path(__file__).parent / "brand"` | Static path to brand assets (icon) |
 
 ---
 
@@ -267,14 +274,18 @@ them to the integration's `models/` directory on startup (survives HACS updates)
 
 ### 5.1 `async_setup()` — Integration-Wide Setup
 
-Called once when HA loads the integration (not per entry). Two responsibilities:
+Called once when HA loads the integration (not per entry). Three responsibilities:
 
-1. **Register 7 WebSocket commands** — All WS handlers are registered here (once, not per-entry)
-2. **Register frontend JS** — Creates `JSModuleRegistration` and calls `async_register()`
+1. **Sync custom wake word models** — Runs `_sync_custom_models()` in executor (see §29 Wake Word in DESIGN-CARD.md)
+2. **Register 7 WebSocket commands** — All WS handlers are registered here (once, not per-entry)
+3. **Register frontend resources** — Calls three `frontend.py` functions directly (no deferral)
 
 ```python
 async def async_setup(hass, config):
-    # 1. WebSocket commands
+    # 1. Sync custom wake word models with persistent storage
+    await hass.async_add_executor_job(_sync_custom_models, hass.config.config_dir)
+
+    # 2. WebSocket commands
     websocket_api.async_register_command(hass, ws_announce_finished)
     websocket_api.async_register_command(hass, ws_update_state)
     websocket_api.async_register_command(hass, ws_question_answered)
@@ -283,20 +294,24 @@ async def async_setup(hass, config):
     websocket_api.async_register_command(hass, ws_cancel_timer)
     websocket_api.async_register_command(hass, ws_media_player_event)
 
-    # 2. Frontend JS (deferred if HA not fully started)
-    if hass.state is CoreState.running:
-        await _register_frontend()
-    else:
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_frontend)
+    # 3. Frontend: static paths, Lovelace resource, sidebar panel
+    try:
+        await async_register_static_paths(hass)
+        await async_register_resource(hass)
+        await async_register_sidebar_panel(hass)
+    except Exception as err:
+        _LOGGER.warning("Failed to register frontend resources: %s", err)
 ```
 
-The frontend registration is deferred to `EVENT_HOMEASSISTANT_STARTED` because the
-Lovelace resources collection may not be loaded yet during early startup.
+Frontend registration is called **directly** — no `EVENT_HOMEASSISTANT_STARTED`
+deferral is needed because `async_register_resource()` uses
+`resources.async_get_info()` to force-load the Lovelace resources collection
+synchronously, regardless of HA startup timing.
 
 ### 5.2 `async_setup_entry()` — Per-Entry Setup
 
-Called for each config entry. Minimal — just initializes the data store and forwards
-to all 5 platforms:
+Called for each config entry. Initializes the data store, re-verifies the frontend
+resource exists (safety net), and forwards to all 5 platforms:
 
 ```python
 PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER,
@@ -304,6 +319,14 @@ PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER,
 
 async def async_setup_entry(hass, entry):
     hass.data.setdefault(DOMAIN, {})
+
+    # Safety net: verify frontend resource exists (covers edge cases
+    # where async_setup registration failed or resource was deleted)
+    try:
+        await async_register_resource(hass)
+    except Exception as err:
+        _LOGGER.warning("Failed to verify frontend resource: %s", err)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 ```
 
@@ -319,8 +342,7 @@ async def async_unload_entry(hass, entry):
         hass.data[DOMAIN].pop(entry.entry_id, None)
         hass.data[DOMAIN].pop(f"{entry.entry_id}_media_player", None)
         if not hass.data[DOMAIN]:  # Last entry removed
-            registration = JSModuleRegistration(hass)
-            await registration.async_unregister()
+            await async_unregister_resource(hass)
 ```
 
 ### 5.4 Entity Registration in `hass.data`
@@ -391,105 +413,169 @@ satellite display name.
 
 ## 7. Frontend Registration
 
-### 7.1 `JSModuleRegistration` Class
+**File:** `frontend.py`
 
-Handles auto-registering the card's built JavaScript file as a Lovelace resource
-so users don't need to manually add it.
+The integration serves multiple static directories, registers the main JS as a
+Lovelace resource (for legacy dashboard cards), loads the engine JS on every page,
+and registers a sidebar panel. All functions are called directly from
+`async_setup()` — no deferral or polling is needed.
 
-```python
-class JSModuleRegistration:
-    def __init__(self, hass):
-        self.hass = hass
-        self.lovelace = hass.data.get("lovelace")
-        # HA 2026.2 renamed lovelace.mode -> lovelace.resource_mode
-        self.resource_mode = getattr(
-            self.lovelace, "resource_mode",
-            getattr(self.lovelace, "mode", "yaml"),
-        )
-```
+### 7.1 Static Paths
 
-### 7.2 Registration Flow
-
-```
-async_register()
-  ├── _async_register_path()          # Static HTTP path
-  │     └── hass.http.async_register_static_paths(
-  │           [StaticPathConfig("/voice_satellite", FRONTEND_DIR, False)]
-  │         )
-  └── if MODE_STORAGE:
-        └── _async_wait_for_lovelace_resources()
-              └── poll until lovelace.resources.loaded (12 retries × 5s = 60s)
-                    └── _async_register_module()
-                          ├── Check if URL already registered
-                          ├── Update version if URL changed
-                          └── Create new resource if not found
-```
-
-### 7.3 Static Path
-
-The integration serves its `frontend/` directory at `/voice_satellite`.
-The directory path is computed at module level:
+Registers up to four HTTP static paths depending on which directories exist:
 
 ```python
 FRONTEND_DIR = str(Path(__file__).parent / "frontend")
+MODELS_DIR   = str(Path(__file__).parent / "models")
+TFLITE_DIR   = str(Path(__file__).parent / "tflite")
+BRAND_DIR    = str(Path(__file__).parent / "brand")
+
+async def async_register_static_paths(hass):
+    paths = [StaticPathConfig(URL_BASE, FRONTEND_DIR, False)]
+    if Path(MODELS_DIR).is_dir():
+        paths.append(StaticPathConfig(f"{URL_BASE}/models", MODELS_DIR, True))
+    if Path(TFLITE_DIR).is_dir():
+        paths.append(StaticPathConfig(f"{URL_BASE}/tflite", TFLITE_DIR, True))
+    if Path(BRAND_DIR).is_dir():
+        paths.append(StaticPathConfig(f"{URL_BASE}/brand", BRAND_DIR, True))
+    for cfg in paths:
+        try:
+            await hass.http.async_register_static_paths([cfg])
+        except RuntimeError:
+            pass  # Already registered
 ```
 
-This means the built JS file must exist at:
-```
-custom_components/voice_satellite/frontend/voice-satellite-card.js
-```
+| URL Path | Directory | Cache | Content |
+|----------|-----------|-------|---------|
+| `/voice_satellite` | `frontend/` | No | JS bundles |
+| `/voice_satellite/models` | `models/` | Yes | `.tflite` wake word models |
+| `/voice_satellite/tflite` | `tflite/` | Yes | TFLite WASM binaries |
+| `/voice_satellite/brand` | `brand/` | Yes | Brand icon (sidebar toolbar) |
 
-### 7.4 Versioned URL
+### 7.2 Lovelace Resource Registration
 
-The Lovelace resource URL includes a version query parameter for cache busting:
-
-```
-/voice_satellite/voice-satellite-card.js?v=5.7.3
-```
-
-When the integration updates, `_async_register_module()` detects the version
-mismatch and updates the resource URL. URL comparison strips the query parameter
-to match base paths: `resource["url"].split("?")[0] == url`. This ensures the
-version-stamped URL (`?v=5.7.3`) still matches the base URL for update detection.
-
-### 7.5 YAML Mode Fallback
-
-If Lovelace is in YAML mode (`resource_mode != MODE_STORAGE`), auto-registration
-is not possible. The integration logs a message instructing the user:
+Registers the main JS bundle as a Lovelace module resource with version-stamped URL:
 
 ```
-Lovelace is in YAML mode - add this resource manually:
-url: /voice_satellite/voice-satellite-card.js, type: module
+/voice_satellite/voice-satellite-card.js?v=6.0.0
 ```
 
-### 7.6 Unregistration
-
-When the last config entry is removed, `async_unregister()` removes the Lovelace
-resource entry:
+**Force-load pattern**: Uses `resources.async_get_info()` to force the
+`ResourceStorageCollection` to load immediately, replacing the old polling
+mechanism (12 retries × 5s). This works reliably regardless of HA startup timing.
 
 ```python
-async def async_unregister(self):
-    if self.lovelace is None or self.resource_mode != MODE_STORAGE:
-        return
-    if not self.lovelace.resources.loaded:
-        await self.lovelace.resources.async_load()
+async def async_register_resource(hass):
     url = f"{URL_BASE}/{JS_FILENAME}"
-    for resource in self.lovelace.resources.async_items():
-        if resource["url"].split("?")[0] == url:
-            await self.lovelace.resources.async_delete_item(resource["id"])
-            break
+    versioned_url = f"{url}?v={INTEGRATION_VERSION}"
+
+    resources = _get_resources(hass)
+    if resources is None:
+        # Not storage mode — use add_extra_js_url fallback
+        add_extra_js_url(hass, versioned_url)
+        return
+
+    await resources.async_get_info()  # Force-load storage
+
+    # Remove legacy standalone card resources that conflict
+    for item in resources.async_items():
+        if any(marker in item.get("url", "") for marker in _LEGACY_RESOURCE_MARKERS):
+            await resources.async_delete_item(item["id"])
+
+    # Update existing or create new
+    for item in resources.async_items():
+        if item.get("url", "").split("?")[0] == url:
+            if not item["url"].endswith(INTEGRATION_VERSION):
+                await resources.async_update_item(
+                    item["id"], {"res_type": "module", "url": versioned_url}
+                )
+            return
+    await resources.async_create_item({"res_type": "module", "url": versioned_url})
 ```
 
-### 7.7 HA 2026.2 Compatibility
-
-HA 2026.2 renamed `lovelace.mode` to `lovelace.resource_mode`. The constructor
-uses `getattr` with fallback to handle both versions:
+**Resource access helper**: Handles both newer (`lovelace.resources`) and older
+(`lovelace["resources"]`) HA versions:
 
 ```python
-self.resource_mode = getattr(
-    self.lovelace, "resource_mode",
-    getattr(self.lovelace, "mode", "yaml"),
-)
+def _get_resources(hass):
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None:
+        return None
+    resources = (
+        lovelace.resources if hasattr(lovelace, "resources")
+        else lovelace.get("resources") if isinstance(lovelace, dict) else None
+    )
+    if resources is None or not isinstance(resources, ResourceStorageCollection):
+        return None
+    return resources
+```
+
+**YAML mode fallback**: When `_get_resources()` returns `None` (YAML mode or
+lovelace unavailable), the resource is registered via `add_extra_js_url()` instead,
+which works for all Lovelace modes.
+
+**Legacy resource cleanup**: Removes resources from the archived standalone card repo
+(`/voice-satellite-card/voice-satellite-card.js` and similar) that conflict with the
+integrated version.
+
+### 7.3 Sidebar Panel Registration
+
+Registers the sidebar panel and loads the engine JS globally:
+
+```python
+PANEL_FILENAME = "voice-satellite-panel.js"
+
+async def async_register_sidebar_panel(hass):
+    card_url = f"{URL_BASE}/{JS_FILENAME}?v={INTEGRATION_VERSION}"
+    panel_url = f"{URL_BASE}/{PANEL_FILENAME}?v={INTEGRATION_VERSION}"
+
+    # Load main JS on every page (engine runs globally)
+    add_extra_js_url(hass, card_url)
+
+    # Register sidebar panel
+    async_register_built_in_panel(
+        hass,
+        component_name="custom",
+        sidebar_title="Voice Satellite",
+        sidebar_icon="mdi:microphone-message",
+        frontend_url_path="voice-satellite",
+        require_admin=False,
+        config={
+            "_panel_custom": {
+                "name": "voice-satellite-panel",
+                "js_url": panel_url,
+            }
+        },
+    )
+```
+
+**Key design decisions:**
+- `add_extra_js_url(card_url)` loads the main bundle (containing the engine) on
+  **every page**, not just dashboards with cards. This is what enables the global
+  engine pattern (see DESIGN-CARD.md §5).
+- The panel uses `async_register_built_in_panel` with `component_name="custom"`,
+  which tells HA to load the panel's JS from the `js_url` in the `_panel_custom`
+  config. This is the same pattern used by browser_mod and other integrations.
+- `require_admin=False` allows all users to access the sidebar panel.
+- The panel appears in the sidebar as "Voice Satellite" with `mdi:microphone-message`.
+
+### 7.4 Unregistration
+
+When the last config entry is removed, `async_unregister_resource()` removes the
+Lovelace resource:
+
+```python
+async def async_unregister_resource(hass):
+    resources = _get_resources(hass)
+    if resources is None:
+        return
+    if not resources.loaded:
+        await resources.async_load()
+    url = f"{URL_BASE}/{JS_FILENAME}"
+    for item in resources.async_items():
+        if item.get("url", "").split("?")[0] == url:
+            await resources.async_delete_item(item["id"])
+            break
 ```
 
 ---
@@ -498,7 +584,7 @@ self.resource_mode = getattr(
 
 ### 8.1 Single Device Per Entry
 
-Each config entry creates exactly one device in the device registry. All 12 entities
+Each config entry creates exactly one device in the device registry. All 13 entities
 share this device via identical `device_info`:
 
 ```python
@@ -517,7 +603,7 @@ def device_info(self):
     return {
         "identifiers": {(DOMAIN, self._entry.entry_id)},
         "name": self._satellite_name,
-        "manufacturer": "Voice Satellite Card Integration",
+        "manufacturer": "Voice Satellite Integration",
         "model": "Browser Satellite",
         "sw_version": INTEGRATION_VERSION,
     }
@@ -1527,7 +1613,7 @@ The `finally` block also:
 
 ---
 
-## 15.7 TTS Audio Duration Measurement
+### 15.7 TTS Audio Duration Measurement
 
 Remote media players (e.g. Sonos) often don't provide reliable entity state
 transitions for playback completion detection. The integration measures TTS
@@ -2612,19 +2698,22 @@ Step-by-step guide to recreate the integration from scratch.
 
 ### Phase 2: Frontend Registration
 
-- [ ] Create `frontend.py` with `JSModuleRegistration` class
-- [ ] Implement `_async_register_path()` — register `/voice_satellite` static path
-- [ ] Implement `_async_wait_for_lovelace_resources()` — 12-retry poll with 5s intervals
-- [ ] Implement `_async_register_module()` — versioned URL, create or update resource
-- [ ] Implement `async_unregister()` — remove resource on last entry unload
-- [ ] Handle HA 2026.2 compat: `resource_mode` vs `mode` attribute
+- [ ] Create `frontend.py` with standalone async functions (no class)
+- [ ] Implement `async_register_static_paths()` — register `/voice_satellite` + models/tflite/brand static paths
+- [ ] Implement `_get_resources()` helper — robust resource collection access for both new/old HA
+- [ ] Implement `async_register_resource()` — force-load via `resources.async_get_info()`, versioned URL, create or update; fallback to `add_extra_js_url` for YAML mode
+- [ ] Implement `async_register_sidebar_panel()` — `add_extra_js_url` for engine JS + `async_register_built_in_panel` for sidebar
+- [ ] Implement `async_unregister_resource()` — remove resource on last entry unload
+- [ ] Add legacy resource cleanup for archived standalone card repo URLs
 
 ### Phase 3: Integration Setup
 
 - [ ] Create `__init__.py` with `async_setup()`, `async_setup_entry()`, `async_unload_entry()`
 - [ ] Register 7 WebSocket commands in `async_setup()`
-- [ ] Defer frontend registration to `EVENT_HOMEASSISTANT_STARTED` if HA not running
+- [ ] Call `async_register_static_paths()`, `async_register_resource()`, `async_register_sidebar_panel()` directly (no deferral)
+- [ ] Implement `_sync_custom_models()` — sync user `.tflite` models with persistent `/config/voice_satellite/models/`
 - [ ] Implement `_find_entity()` helper for WS handler entity lookup
+- [ ] Add safety-net `async_register_resource()` call in `async_setup_entry()`
 - [ ] Forward to 5 platforms: `ASSIST_SATELLITE`, `MEDIA_PLAYER`, `NUMBER`, `SELECT`, `SWITCH`
 
 ### Phase 4: Satellite Entity

@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug with the Voice Satellite Card Integration
+description: Report a bug with the Voice Satellite integration
 labels: ["bug"]
 body:
   - type: markdown
@@ -17,9 +17,9 @@ body:
           required: true
         - label: I have granted **microphone permission** when prompted by the browser (a user gesture like tapping the mic button is required to trigger the permission prompt; in **Fully Kiosk**, enable **Web Content Settings → Enable Microphone Access** and **Autoplay Audio**; in **Home Assistant Companion App**, enable **Settings → Companion App → Autoplay Videos**)
           required: true
-        - label: I have added at least one device via **Settings > Devices & Services > Add Integration > Voice Satellite Card**.
+        - label: I have added at least one device via **Settings > Devices & Services > Add Integration > Voice Satellite**.
           required: true
-        - label: I have selected the correct `assist_satellite.*` entity in the Voice Satellite Card editor.
+        - label: I have selected the correct `assist_satellite.*` entity in the Voice Satellite panel.
           required: true
         - label: "I have wake word detection configured: either **On Device** (default — no server-side setup needed) or **Home Assistant** mode with wake word detection enabled in my Assist pipeline (Settings → Voice assistants → pipeline → ⋮ three-dot menu)."
           required: true
@@ -52,7 +52,7 @@ body:
       description: Please provide the following details.
       value: |
         - Home Assistant version:
-        - Voice Satellite Card version:
+        - Voice Satellite version:
         - Browser / app:
         - Device (tablet model, phone, desktop):
         - Assist pipeline (name or configuration):

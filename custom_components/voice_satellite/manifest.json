@@ -1,6 +1,6 @@
 {
   "domain": "voice_satellite",
-  "name": "Voice Satellite Card",
+  "name": "Voice Satellite",
   "codeowners": [
     "@jxlarrea"
   ],
@@ -19,5 +19,5 @@
   "requirements": [
     "mutagen>=1.47.0"
   ],
-  "version": "5.9.7"
+  "version": "6.0.0"
 }

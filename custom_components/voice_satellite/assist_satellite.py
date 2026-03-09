@@ -1,4 +1,4 @@
-"""Assist Satellite entity for Voice Satellite Card.
+"""Assist Satellite entity for Voice Satellite.
 
 Registers a virtual satellite device that gives browser-based voice
 tablets a proper device identity in Home Assistant. This enables:
@@ -145,7 +145,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
             "name": self._satellite_name,
-            "manufacturer": "Voice Satellite Card Integration",
+            "manufacturer": "Voice Satellite Integration",
             "model": "Browser Satellite",
             "sw_version": INTEGRATION_VERSION,
         }
