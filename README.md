@@ -13,7 +13,9 @@
 <a href="https://buymeacoffee.com/jxlarrea"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee"></a>
 </p>
 
-Transform any browser into a full-featured voice satellite for Home Assistant's Assist. Voice Satellite runs as a **global engine** on every page - no dashboard card required. A **sidebar panel** provides all configuration, and each browser gets its own satellite identity with feature parity with physical voice assistants like the [Home Assistant Voice Preview Edition](https://www.home-assistant.io/voice-pe/), including wake word detection, timers, announcements, conversations, and more.
+Turn any tablet, phone, or browser into a hands-free voice assistant for [Home Assistant](https://www.home-assistant.io) - like Alexa, Siri, or Google Home, but fully private and running on your own hardware. Just say the wake word and go: ask questions, control devices, set timers, get announcements, and see rich visual results - all without touching the screen.
+
+Voice Satellite works as a drop-in integration that transforms any web browser into a full [Assist satellite](https://www.home-assistant.io/voice-pe/) with wake word detection, media playback, and visual feedback.
 
 ## Screenshots
 <p align="center">
