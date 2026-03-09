@@ -124,6 +124,8 @@ The engine starts automatically once an entity is assigned. If the browser block
 
 The sidebar panel is the central configuration hub for Voice Satellite.
 
+<img width="100%" alt="settings" src="https://github.com/user-attachments/assets/4032b8e5-3ec9-40a0-a137-a761d8d41192" />
+
 ### Engine Status
 
 The top of the panel shows the current engine state (running/dormant) and pipeline status (idle, listening, processing, etc.). **Start** and **Stop** buttons let you manually control the engine.
