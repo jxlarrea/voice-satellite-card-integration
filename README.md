@@ -79,8 +79,6 @@ Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_re
    - Text-to-Speech ([Piper](https://www.home-assistant.io/integrations/piper/), Kokoro, etc.)
    - *(Optional)* Wake word detection (e.g., [openWakeWord](https://www.home-assistant.io/voice_control/install_wake_word_add_on/), [microWakeWord](https://www.home-assistant.io/integrations/micro_wake_word/)) — only needed if using server-side ("Home Assistant") wake word detection mode. On-device detection works without any server-side wake word service.
 
-> **Note:** If using server-side wake word detection, your wake word service must be **available to Home Assistant as a Wyoming integration** (either as an add-on or an external Wyoming instance) AND **enabled in your Assist pipeline**. The wake word option is hidden by default in the pipeline settings - go to **Settings -> Voice assistants**, select your pipeline, click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown.
-
 ## Installation
 
 ### HACS (Recommended)
