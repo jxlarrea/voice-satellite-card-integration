@@ -1,6 +1,12 @@
-<p align="center">
-<img width="80%" alt="Voice Satellite for Home Assistant" src="https://github.com/user-attachments/assets/d24f52bc-d88f-42ac-8ebf-429028d12507" />
-</p>
+<h1 align="center" style="border-bottom: none">
+    <div>
+      <picture>
+         <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/banner_dark.png">
+         <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/banner_light.png">
+         <img alt="Voice Satellite for Home Assistant" src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/banner_light.png" width="75%" />
+      </picture>
+    </div>
+</h1>
 
 <p align="center">
 <a href="https://www.hacs.xyz/docs/faq/custom_repositories/"><img src="https://img.shields.io/badge/HACS-Custom-blue.svg?style=for-the-badge" alt="hacs_badge"></a>
