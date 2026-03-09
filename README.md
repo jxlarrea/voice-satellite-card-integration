@@ -376,7 +376,7 @@ The entity supports play, pause, resume, stop, volume set, and volume mute — a
 
 `voice-satellite-mini-card` is a text-first dashboard card that shows conversation status and transcripts inline. It shares the global engine — no separate entity or microphone configuration needed.
 
-![minicard](https://github.com/user-attachments/assets/72dfb522-632d-43ed-ad24-02fc0706de74)
+<img width="100%" alt="minicards" src="https://github.com/user-attachments/assets/a6ecf9e1-24fc-4731-8e82-82dbaa221080" />
 
 ### Modes
 
