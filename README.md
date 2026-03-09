@@ -124,7 +124,7 @@ The engine starts automatically once an entity is assigned. If the browser block
 
 The sidebar panel is the central configuration hub for Voice Satellite.
 
-<img width="100%" alt="settings" src="https://github.com/user-attachments/assets/4032b8e5-3ec9-40a0-a137-a761d8d41192" />
+<img width="100%" alt="settings" src="https://github.com/user-attachments/assets/c5a11ea2-8aa8-4f5b-8abf-6f0585d4e8e7" />
 
 ### Engine Status
 
