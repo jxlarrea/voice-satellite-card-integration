@@ -44,7 +44,7 @@ def _find_entity(hass: HomeAssistant, entity_id: str, predicate=None):
     return None
 
 
-_BUILTIN_MODELS = {"ok_nabu", "hey_jarvis", "alexa", "hey_mycroft", "stop"}
+_BUILTIN_MODELS = {"ok_nabu", "hey_jarvis", "alexa", "hey_mycroft", "hey_home_assistant", "hey_luna", "okay_computer", "stop"}
 
 
 def _sync_custom_models(config_dir: str) -> None:

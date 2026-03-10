@@ -42,6 +42,9 @@ const WAKE_WORD_PHRASES = {
   hey_jarvis: 'Hey Jarvis',
   alexa: 'Alexa',
   hey_mycroft: 'Hey Mycroft',
+  hey_home_assistant: 'Hey Home Assistant',
+  hey_luna: 'Hey Luna',
+  okay_computer: 'Okay Computer',
 };
 
 export class WakeWordManager {

@@ -18,6 +18,9 @@ const TFLITE_KEYWORD_FILES = {
   hey_jarvis: 'hey_jarvis',
   hey_mycroft: 'hey_mycroft',
   alexa: 'alexa',
+  hey_home_assistant: 'hey_home_assistant',
+  hey_luna: 'hey_luna',
+  okay_computer: 'okay_computer',
   stop: 'stop',
 };
 
@@ -26,11 +29,14 @@ const TFLITE_KEYWORD_FILES = {
 // feature_step_size controls how many feature frames per model inference.
 // V2 models use feature_step_size=10 → input shape [1, 10, 40].
 export const MICRO_MODEL_PARAMS = {
-  ok_nabu:     { cutoff: 0.97, slidingWindow: 3, stepSize: 10 },
-  hey_jarvis:  { cutoff: 0.97, slidingWindow: 3, stepSize: 10 },
-  hey_mycroft: { cutoff: 0.95, slidingWindow: 3, stepSize: 10 },
-  alexa:       { cutoff: 0.90, slidingWindow: 3, stepSize: 10 },
-  stop:        { cutoff: 0.50, slidingWindow: 3, stepSize: 10 },
+  ok_nabu:              { cutoff: 0.97, slidingWindow: 3, stepSize: 10 },
+  hey_jarvis:           { cutoff: 0.97, slidingWindow: 3, stepSize: 10 },
+  hey_mycroft:          { cutoff: 0.95, slidingWindow: 3, stepSize: 10 },
+  alexa:                { cutoff: 0.90, slidingWindow: 3, stepSize: 10 },
+  hey_home_assistant:   { cutoff: 0.97, slidingWindow: 5, stepSize: 10 },
+  hey_luna:             { cutoff: 0.97, slidingWindow: 5, stepSize: 10 },
+  okay_computer:        { cutoff: 0.97, slidingWindow: 5, stepSize: 10 },
+  stop:                 { cutoff: 0.50, slidingWindow: 3, stepSize: 10 },
 };
 
 let _tfweb = null;

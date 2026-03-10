@@ -354,7 +354,7 @@ WAKE_WORD_DETECTION_OPTIONS = [WAKE_WORD_DETECTION_HA, WAKE_WORD_DETECTION_LOCAL
 _COMMON_MODELS = {"stop"}
 
 # Built-in keyword models (TFLite filenames without extension).
-_BUILTIN_MODELS = ["ok_nabu", "hey_jarvis", "alexa", "hey_mycroft"]
+_BUILTIN_MODELS = ["ok_nabu", "hey_jarvis", "alexa", "hey_mycroft", "hey_home_assistant", "hey_luna", "okay_computer"]
 
 
 def discover_wake_word_models() -> list[str]:

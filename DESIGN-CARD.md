@@ -2680,6 +2680,9 @@ timer alerts via voice command.
 │    ├── hey_jarvis.tflite       (keyword)                  │
 │    ├── alexa.tflite            (keyword)                  │
 │    ├── hey_mycroft.tflite      (keyword)                  │
+│    ├── hey_home_assistant.tflite (keyword)                │
+│    ├── hey_luna.tflite         (keyword)                  │
+│    ├── okay_computer.tflite    (keyword)                  │
 │    ├── stop.tflite             (stop word — managed separately) │
 │    └── my_custom_word.tflite   (user-provided keyword)    │
 │                                                           │
@@ -2841,6 +2844,9 @@ the sensitivity setting changes — no restart needed.
   | hey_jarvis | 0.97 | 3 | 10 |
   | hey_mycroft | 0.95 | 3 | 10 |
   | alexa | 0.90 | 3 | 10 |
+  | hey_home_assistant | 0.97 | 5 | 10 |
+  | hey_luna | 0.97 | 5 | 10 |
+  | okay_computer | 0.97 | 5 | 10 |
   | stop | 0.50 | 3 | 10 |
 
   Note: these cutoffs are the model's native thresholds from their manifests.
@@ -2865,7 +2871,7 @@ override the `cutoff` from `MICRO_MODEL_PARAMS` / JSON manifests at runtime.
 | hey_mycroft | 0.55 | 0.40 | 0.30 |
 | alexa | 0.55 | 0.40 | 0.30 |
 | stop | 0.50 | 0.40 | 0.30 |
-| *(custom/unknown)* | 0.60 | 0.45 | 0.30 |
+| *(other built-in / custom)* | 0.60 | 0.45 | 0.30 |
 
 Default sensitivity: **Moderately sensitive**.
 
@@ -2906,8 +2912,9 @@ Users can drop custom microWakeWord `.tflite` keyword models into either:
    placed directly in the integration dir)
 2. Restores custom models from persistent dir → integration dir (recovers models
    after a HACS update)
-Built-in models (`ok_nabu`, `hey_jarvis`, `alexa`, `hey_mycroft`, `stop`) are
-never overwritten in either direction.
+Built-in models (`ok_nabu`, `hey_jarvis`, `alexa`, `hey_mycroft`,
+`hey_home_assistant`, `hey_luna`, `okay_computer`, `stop`) are never
+overwritten in either direction.
 
 **Discovery:** `discover_wake_word_models()` scans the integration's `models/`
 directory (which now includes restored custom models):
@@ -2938,10 +2945,13 @@ back to underscore→space + title case transformation.
 
 ```
 WAKE_WORD_PHRASES = {
-  ok_nabu:     'Okay Nabu',
-  hey_jarvis:  'Hey Jarvis',
-  alexa:       'Alexa',
-  hey_mycroft: 'Hey Mycroft',
+  ok_nabu:              'Okay Nabu',
+  hey_jarvis:           'Hey Jarvis',
+  alexa:                'Alexa',
+  hey_mycroft:          'Hey Mycroft',
+  hey_home_assistant:   'Hey Home Assistant',
+  hey_luna:             'Hey Luna',
+  okay_computer:        'Okay Computer',
 }
 ```
 

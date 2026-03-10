@@ -36,7 +36,6 @@ https://github.com/user-attachments/assets/af3956a8-3f58-420a-85ef-872ab9e33e8f
 - [Skins](#skins)
 - [Experimental: LLM Tools](#experimental-llm-tools)
 - [Troubleshooting](#troubleshooting)
-- [Requirements](#requirements)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -75,11 +74,11 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 
 ## Prerequisites
 
-Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/) with:
+- **Home Assistant 2025.2.1** or later
+- An [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/) with:
    - Speech-to-Text ([Whisper](https://www.home-assistant.io/integrations/whisper/), OpenAI, etc.)
    - Conversation agent ([Home Assistant](https://www.home-assistant.io/integrations/conversation/), OpenAI, Qwen, etc.)
    - Text-to-Speech ([Piper](https://www.home-assistant.io/integrations/piper/), Kokoro, etc.)
-   - *(Optional)* Wake word detection (e.g., [openWakeWord](https://www.home-assistant.io/voice_control/install_wake_word_add_on/), [microWakeWord](https://www.home-assistant.io/integrations/micro_wake_word/)) - only needed if using server-side ("Home Assistant") wake word detection mode. On-device detection works without any server-side wake word service.
 
 ## Installation
 
@@ -91,9 +90,9 @@ Set up an [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_re
 
 ### Manual
 
-1. Download the [latest release ZIP file](https://github.com/jxlarrea/voice-satellite-card-integration/releases/latest).
-1. Copy the `custom_components/voice_satellite` folder to your `config/custom_components/` directory
-2. Restart Home Assistant
+1. Download the [latest release ZIP file](https://github.com/jxlarrea/voice-satellite-card-integration/releases/latest)
+2. Copy the `custom_components/voice_satellite` folder to your `config/custom_components/` directory
+3. Restart Home Assistant
 
 ## Setup
 
@@ -159,7 +158,7 @@ Each satellite device exposes configuration entities on its device page (**Setti
 | **Finished speaking detection** | Select | VAD sensitivity - how aggressively to detect end of speech |
 | **TTS Output** | Select | Where to play TTS audio: "Browser" (default) plays audio locally, or select any `media_player` entity to route TTS to an external speaker |
 | **Wake word detection** | Select | "On Device" (default) runs wake word inference locally in the browser. "Home Assistant" uses server-side detection via the pipeline's configured wake word engine |
-| **Wake word** | Select | Primary wake word to listen for when using on-device detection. Built-in models: ok_nabu, hey_jarvis, alexa, hey_mycroft. Custom `.tflite` models are auto-discovered from the `models/` directory |
+| **Wake word** | Select | Primary wake word to listen for when using on-device detection. Built-in models: ok_nabu, hey_jarvis, alexa, hey_mycroft, hey_home_assistant, hey_luna, okay_computer. Custom `.tflite` models are auto-discovered from the `models/` directory |
 | **Wake word 2** | Select | Optional second wake word for dual wake word detection. Set to "No wake word" (default) to disable. When both slots use the same model, the TFLite model is only loaded once |
 | **Wake word sensitivity** | Select | Detection sensitivity for on-device wake word: "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive" |
 | **Screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
@@ -412,6 +411,9 @@ On-device detection uses [microWakeWord](https://github.com/kahrendt/microWakeWo
 | **hey_jarvis** | "Hey Jarvis" |
 | **alexa** | "Alexa" |
 | **hey_mycroft** | "Hey Mycroft" |
+| **hey_home_assistant** | "Hey Home Assistant" |
+| **hey_luna** | "Hey Luna" |
+| **okay_computer** | "Okay Computer" |
 
 ### Custom Wake Words
 
@@ -573,10 +575,6 @@ The financial card uses the same featured panel layout as weather — it appears
 4. The **Home Assistant Companion App** may block audio autoplay by default, ensure that **Settings** -> **Companion App** -> **Other settings** -> **Autoplay videos** is enabled.
 
 Without these settings, Voice Satellite will still function (wake word detection, speech-to-text, and visual feedback all work normally) but TTS audio won't play. The UI will clean up gracefully after the interaction completes.
-
-## Requirements
-
-- Home Assistant 2025.2.1 or later
 
 ## Contributing
 

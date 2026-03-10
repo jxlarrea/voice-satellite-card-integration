@@ -230,6 +230,9 @@ custom_components/voice_satellite/
 │   ├── hey_jarvis.tflite             ← Keyword model
 │   ├── alexa.tflite                  ← Keyword model
 │   ├── hey_mycroft.tflite            ← Keyword model
+│   ├── hey_home_assistant.tflite     ← Keyword model
+│   ├── hey_luna.tflite               ← Keyword model
+│   ├── okay_computer.tflite          ← Keyword model
 │   ├── stop.tflite                   ← Stop word model (managed separately)
 │   └── *.tflite                      ← User-provided custom keyword models
 └── tflite/
@@ -261,7 +264,7 @@ them to the integration's `models/` directory on startup (survives HACS updates)
 | `WAKE_WORD_DETECTION_LOCAL` | `select.py` | `"On Device"` | On-device wake word option (default) |
 | `WAKE_WORD_SENSITIVITY_OPTIONS` | `select.py` | `["Slightly sensitive", "Moderately sensitive", "Very sensitive"]` | Wake word sensitivity levels |
 | `_COMMON_MODELS` | `select.py` | `{"stop"}` | Infrastructure models excluded from wake word keyword list |
-| `_BUILTIN_MODELS` | `select.py` | `["ok_nabu", "hey_jarvis", "alexa", "hey_mycroft"]` | Fallback list when models/ directory is missing |
+| `_BUILTIN_MODELS` | `select.py` | `["ok_nabu", "hey_jarvis", "alexa", "hey_mycroft", "hey_home_assistant", "hey_luna", "okay_computer"]` | Fallback list when models/ directory is missing |
 | `_CACHE_TTL` | `select.py` (class attr) | `30` (seconds) | Entity mapping cache lifetime |
 | `FRONTEND_DIR` | `frontend.py` | `Path(__file__).parent / "frontend"` | Static path to JS directory |
 | `MODELS_DIR` | `frontend.py` | `Path(__file__).parent / "models"` | Static path to wake word models |
