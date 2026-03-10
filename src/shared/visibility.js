@@ -106,6 +106,15 @@ export class VisibilityManager {
   async _resume() {
     if (!this._isPaused) return;
 
+    // If wake word detection is already handling the resume (AudioContext +
+    // pipeline start), bail out — _onDetection owns the full resume flow
+    // and will clear _isPaused itself.
+    if (this._wakeWordResuming) {
+      this._log.log('visibility', 'Tab visible - wake word already resuming, skipping');
+      this._wakeWordResuming = false;
+      return;
+    }
+
     const { pipeline, audio } = this._card;
 
     // Cancel any pending restart timeout BEFORE yielding to the event loop.

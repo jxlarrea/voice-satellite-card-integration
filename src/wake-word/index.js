@@ -356,8 +356,20 @@ export class WakeWordManager {
     // paused, but handlePipelineMessage blocks all events when isPaused.
     if (session.visibility.isPaused) {
       this._log.log('wake-word', 'Unpausing — detection while tab paused');
+
+      // Signal visibility manager that we own the resume — prevents the
+      // visibilitychange → _resume() path from racing with us (both would
+      // resume AudioContext + restart pipeline concurrently).
+      session.visibility._wakeWordResuming = true;
+
       await session.audio.resume();
       session.visibility._isPaused = false;
+
+      // Yield to the browser so it can paint the first frame after the
+      // screen wakes up. Without this, the AudioContext resume + TFLite
+      // sleep-buffer replay + pipeline start all block the main thread
+      // back-to-back and the UI appears frozen.
+      await new Promise((r) => requestAnimationFrame(r));
     }
 
     // If muted, silently ignore the detection and resume listening

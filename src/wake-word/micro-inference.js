@@ -150,7 +150,9 @@ export class MicroWakeWordInference {
     // Prepend any buffered frames from sleep — these contain the onset
     // of the audio that triggered the energy gate wake-up.
     let allFeatures = features;
+    let replayCount = 0;
     if (this._sleepFeatureBuffer.length > 0) {
+      replayCount = this._sleepFeatureBuffer.length;
       allFeatures = this._sleepFeatureBuffer.concat(features);
       this._sleepFeatureBuffer = [];
     }
@@ -162,8 +164,16 @@ export class MicroWakeWordInference {
     const now = Date.now();
     const cooldownOk = now - this._lastDetectionTime > COOLDOWN_MS;
 
-    // Process each feature frame through all keyword models
-    for (const frame of allFeatures) {
+    // Process each feature frame through all keyword models.
+    // During sleep-buffer replay (many frames at once), yield to the
+    // browser every REPLAY_YIELD_INTERVAL frames so the UI can paint
+    // instead of freezing on the TFLite inference burst.
+    const REPLAY_YIELD_INTERVAL = 10;
+    for (let fi = 0; fi < allFeatures.length; fi++) {
+      if (replayCount > 0 && fi > 0 && fi < replayCount && fi % REPLAY_YIELD_INTERVAL === 0) {
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      const frame = allFeatures[fi];
       for (const kw of this._keywords) {
         kw.framesProcessed++;
 
