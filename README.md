@@ -54,10 +54,10 @@ Voice Satellite runs as a **global engine** that loads on every page of Home Ass
 
 ## Screenshots
 <p align="center">
- <img src="https://github.com/user-attachments/assets/7462ea47-a4fb-4954-be8b-e59b94436b1b" alt="Assist" width="49%"/>
- <img src="https://github.com/user-attachments/assets/0c476572-7b10-455c-bba1-d72036ceb711" alt="Video Search" width="49%"/>
- <img src="https://github.com/user-attachments/assets/b0f516f6-e520-4c6a-902f-9aef57aa9d38" alt="Weather" width="49%"/>
- <img src="https://github.com/user-attachments/assets/422780e8-a0fc-4d13-9e47-ab410b5e9c39" alt="Stocks" width="49%"/>
+ <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/locks.jpg" alt="Assist" width="49%"/>
+ <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/videos.jpg" alt="Video Search" width="49%"/>
+ <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/weather.jpg" alt="Weather" width="49%"/>
+ <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/currency.jpg" alt="Stocks" width="49%"/>
 </p>
 
 ## Important: Browser Requirements
@@ -109,7 +109,9 @@ The engine starts automatically once an entity is assigned. If the browser block
 
 The sidebar panel is the central configuration hub for Voice Satellite.
 
-<img width="100%" alt="settings" src="https://github.com/user-attachments/assets/c5a11ea2-8aa8-4f5b-8abf-6f0585d4e8e7" />
+<p align="center">
+   <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/sidepanel.png" alt="Sidebar Panel" width="650"/>
+</p>
 
 ### Engine Status
 
@@ -146,7 +148,9 @@ A live preview of the selected skin updates as you change appearance settings.
 
 The integration creates a virtual Assist Satellite device for each browser, enabling timers, announcements, conversations, media player, and per-device configuration. This section covers the integration-specific features.
 
-<img width="100%" alt="integration" src="https://github.com/user-attachments/assets/573dcbbf-ae9c-42c0-b7d9-b7ad3ec8a790" />
+<p align="center">
+   <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/integration.png" alt="Integration" width="650"/>
+</p>
 
 ### Device Settings
 
@@ -361,7 +365,9 @@ The entity supports play, pause, resume, stop, volume set, and volume mute - all
 
 `voice-satellite-mini-card` is a text-first dashboard card that shows conversation status and transcripts inline. It shares the global engine - no separate entity or microphone configuration needed.
 
-<img width="100%" alt="minicards" src="https://github.com/user-attachments/assets/a6ecf9e1-24fc-4731-8e82-82dbaa221080" />
+<p align="center">
+   <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/minicard.png" alt="Mini card" width="650"/>
+</p>
 
 ### Modes
 
@@ -445,7 +451,7 @@ To use server-side detection instead, set "Wake word detection" to "Home Assista
 
 Voice Satellite includes a skin system that themes the entire overlay UI - activity bar, text display, timers, and background. Select a skin in the sidebar panel under **Settings**.
 
-![skins](https://github.com/user-attachments/assets/436029a8-c199-4773-b50f-428598e66ff4)
+<img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/skins.jpg" alt="Skins" width="100%"/>
 
 ### Built-in Skins
 
@@ -478,7 +484,9 @@ Voice Satellite supports displaying rich visual results from LLM tool calls inli
 
 ### Image Search
 
-![Screenshot_20260223_202424_Fully Kiosk Browser](https://github.com/user-attachments/assets/bad9d374-4ecb-4572-86da-1993a400b368)
+<p align="center">
+   <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/cats.jpg" alt="Image Search" width="650"/>
+</p>
 
 Ask your assistant to search for images:
 
@@ -489,7 +497,9 @@ Results appear as a thumbnail grid in the media panel. Tap any image to view it 
 
 ### Video Search
 
-![Screenshot_20260223_202336_Fully Kiosk Browser](https://github.com/user-attachments/assets/010f9501-e637-470a-97be-3ecf1585d884)
+<p align="center">
+   <img src="https://github.com/jxlarrea/voice-satellite-card-integration/blob/main/assets/screenshots/mrbeast.jpg" alt="Video Search" width="650"/>
+</p>
 
 Ask your assistant to search for videos:
 
@@ -518,7 +528,9 @@ The assistant responds with a summary from the Wikipedia article. If the article
 
 ### Weather Forecast
 
-![Weather](https://github.com/user-attachments/assets/f0e0766e-f570-4892-b0bc-e532c0ce80c9)
+<p align="center">
+   <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/weather2.jpg" alt="Weather" width="650"/>
+</p>
 
 Ask your assistant about the weather:
 
@@ -529,7 +541,9 @@ The assistant responds with a spoken summary while displaying a weather card in 
 
 ### Financial Data
 
-![Stocks](https://github.com/user-attachments/assets/e3e25cde-fe6b-4c21-9131-582fa7db3a5e)
+<p align="center">
+   <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/currency2.jpg" alt="Stocks" width="650"/>
+</p>
 
 Ask your assistant about stocks, crypto, or currency conversions:
 
