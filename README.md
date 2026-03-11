@@ -99,11 +99,11 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 1. Go to **Settings -> Devices & Services -> Add Integration**
 2. Search for **Voice Satellite**
 3. Enter a name for the device (e.g., "Kitchen Tablet")
-4. Repeat for each browser device that will act as a satellite
-
-Each entry creates a full satellite device. After installation, a **Voice Satellite** entry appears in the sidebar. Open it to assign a satellite entity to this browser and configure settings.
-
-The engine starts automatically once an entity is assigned. If the browser blocks auto-start due to missing user gesture, a floating microphone button will appear - tap it to start.
+4. Repeat for each browser/tablet that will act as a satellite
+5. On each browser/tablet, open the **Voice Satellite** sidebar panel
+6. Select the satellite entity you created for this device
+7. Configure wake word, audio, and appearance settings as needed
+8. The engine starts automatically once an entity is assigned - if the browser blocks auto-start due to a missing user gesture, a floating microphone button will appear; tap it to start
 
 ## Sidebar Panel
 
