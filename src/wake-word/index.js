@@ -54,7 +54,8 @@ export class WakeWordManager {
 
     this._inference = null;
     this._active = false;
-    this._sampleBuffer = new Float32Array(0);
+    this._sampleBuf = new Float32Array(CHUNK_SIZE * 2);
+    this._sampleBufLen = 0;
     this._loadedModelsKey = null; // sorted model names string for change detection
     this._processing = false;
     this._frameQueue = [];
@@ -237,7 +238,7 @@ export class WakeWordManager {
         this._inference.reset();
       }
 
-      this._sampleBuffer = new Float32Array(0);
+      this._sampleBufLen = 0;
       this._frameQueue.length = 0;
       this._processing = false;
       this._active = true;
@@ -281,7 +282,7 @@ export class WakeWordManager {
     this._active = false;
     this._stopOnlyMode = false;
     this._suspendedKeywords = null;
-    this._sampleBuffer = new Float32Array(0);
+    this._sampleBufLen = 0;
     this._frameQueue.length = 0;
     this._log.log('wake-word', 'Stopped');
   }
@@ -296,16 +297,23 @@ export class WakeWordManager {
   feedAudio(chunk) {
     if ((!this._active && !this._stopOnlyMode) || !this._inference) return;
 
-    // Accumulate samples
-    const combined = new Float32Array(this._sampleBuffer.length + chunk.length);
-    combined.set(this._sampleBuffer);
-    combined.set(chunk, this._sampleBuffer.length);
-    this._sampleBuffer = combined;
+    // Grow pre-allocated buffer if needed (rare — only if chunk is unusually large)
+    const needed = this._sampleBufLen + chunk.length;
+    if (needed > this._sampleBuf.length) {
+      const newBuf = new Float32Array(needed * 2);
+      newBuf.set(this._sampleBuf.subarray(0, this._sampleBufLen));
+      this._sampleBuf = newBuf;
+    }
+
+    // Append into pre-allocated buffer (no allocation)
+    this._sampleBuf.set(chunk, this._sampleBufLen);
+    this._sampleBufLen += chunk.length;
 
     // Queue complete chunks for serial processing
-    while (this._sampleBuffer.length >= CHUNK_SIZE) {
-      this._frameQueue.push(this._sampleBuffer.slice(0, CHUNK_SIZE));
-      this._sampleBuffer = this._sampleBuffer.slice(CHUNK_SIZE);
+    while (this._sampleBufLen >= CHUNK_SIZE) {
+      this._frameQueue.push(this._sampleBuf.slice(0, CHUNK_SIZE));
+      this._sampleBuf.copyWithin(0, CHUNK_SIZE, this._sampleBufLen);
+      this._sampleBufLen -= CHUNK_SIZE;
     }
 
     this._drainQueue();
@@ -470,7 +478,7 @@ export class WakeWordManager {
         }
         this._stopOnlyMode = true;
         this._inference.reset();
-        this._sampleBuffer = new Float32Array(0);
+        this._sampleBufLen = 0;
         this._frameQueue.length = 0;
         this._processing = false;
         this._log.log('stop-word', 'Enabled (stop-only mode)');
@@ -498,7 +506,7 @@ export class WakeWordManager {
         }
         this._suspendedKeywords = null;
       }
-      this._sampleBuffer = new Float32Array(0);
+      this._sampleBufLen = 0;
       this._frameQueue.length = 0;
       this._processing = false;
       this._log.log('stop-word', 'Disabled (stop-only mode off)');
@@ -604,7 +612,7 @@ export class WakeWordManager {
     }
 
     this._log.log('wake-word', 'Restarting detection');
-    this._sampleBuffer = new Float32Array(0);
+    this._sampleBufLen = 0;
     this._frameQueue.length = 0;
     this._processing = false;
     this._inference.updateThresholds(

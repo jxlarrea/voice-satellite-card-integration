@@ -83,24 +83,32 @@ export function sendAudioBuffer(mgr, binaryHandlerId) {
 
 /**
  * Linear interpolation resampler.
+ * Reuses a cached output buffer when the output length matches (which is
+ * the common case — worklet chunks are always the same size). The caller
+ * must consume or copy the returned data before the next call.
  * @param {Float32Array} inputSamples
  * @param {number} fromSampleRate
  * @param {number} toSampleRate
  * @returns {Float32Array}
  */
+let _resampleBuf = null;
+let _resampleBufLen = 0;
 function resample(inputSamples, fromSampleRate, toSampleRate) {
   if (fromSampleRate === toSampleRate) return inputSamples;
   const ratio = fromSampleRate / toSampleRate;
   const outputLength = Math.round(inputSamples.length / ratio);
-  const output = new Float32Array(outputLength);
+  if (outputLength !== _resampleBufLen) {
+    _resampleBuf = new Float32Array(outputLength);
+    _resampleBufLen = outputLength;
+  }
   for (let i = 0; i < outputLength; i++) {
     const srcIndex = i * ratio;
     const low = Math.floor(srcIndex);
     const high = Math.min(low + 1, inputSamples.length - 1);
     const frac = srcIndex - low;
-    output[i] = inputSamples[low] * (1 - frac) + inputSamples[high] * frac;
+    _resampleBuf[i] = inputSamples[low] * (1 - frac) + inputSamples[high] * frac;
   }
-  return output;
+  return _resampleBuf;
 }
 
 /**

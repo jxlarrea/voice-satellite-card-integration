@@ -204,8 +204,14 @@ export class MicroFrontend {
     this._fftReal = new Float64Array(FFT_SIZE);
     this._fftImag = new Float64Array(FFT_SIZE);
 
-    // Audio sample accumulator (handles partial windows across chunks)
-    this._audioBuffer = new Float32Array(0);
+    // Audio sample accumulator (pre-allocated, handles partial windows across chunks)
+    this._audioBuf = new Float32Array(WINDOW_SIZE * 4);
+    this._audioBufLen = 0;
+
+    // Scratch buffers for _processWindow (reused every frame)
+    this._power = new Float64Array(NUM_BINS);
+    this._melEnergies = new Float64Array(NUM_CHANNELS);
+    this._logFeatures = new Float64Array(NUM_CHANNELS);
 
     // Noise reduction state (per-channel noise floor estimate)
     this._noiseEstimate = new Float64Array(NUM_CHANNELS);
@@ -222,17 +228,24 @@ export class MicroFrontend {
    *   one per feature frame produced (may be 0 if not enough samples yet)
    */
   feed(samples) {
-    // Append to internal buffer
-    const combined = new Float32Array(this._audioBuffer.length + samples.length);
-    combined.set(this._audioBuffer);
-    combined.set(samples, this._audioBuffer.length);
-    this._audioBuffer = combined;
+    // Grow pre-allocated buffer if needed (rare)
+    const needed = this._audioBufLen + samples.length;
+    if (needed > this._audioBuf.length) {
+      const newBuf = new Float32Array(needed * 2);
+      newBuf.set(this._audioBuf.subarray(0, this._audioBufLen));
+      this._audioBuf = newBuf;
+    }
+
+    // Append into pre-allocated buffer (no allocation)
+    this._audioBuf.set(samples, this._audioBufLen);
+    this._audioBufLen += samples.length;
 
     const features = [];
-    while (this._audioBuffer.length >= WINDOW_SIZE) {
-      features.push(this._processWindow(this._audioBuffer.subarray(0, WINDOW_SIZE)));
+    while (this._audioBufLen >= WINDOW_SIZE) {
+      features.push(this._processWindow(this._audioBuf.subarray(0, WINDOW_SIZE)));
       // Advance by hop size — keep overlap for next window
-      this._audioBuffer = this._audioBuffer.slice(HOP_SIZE);
+      this._audioBuf.copyWithin(0, HOP_SIZE, this._audioBufLen);
+      this._audioBufLen -= HOP_SIZE;
     }
     return features;
   }
@@ -255,13 +268,13 @@ export class MicroFrontend {
     fft(real, imag, FFT_SIZE);
 
     // 3. Power spectrum: |FFT[k]|² for k = 0..256
-    const power = new Float64Array(NUM_BINS);
+    const power = this._power;
     for (let i = 0; i < NUM_BINS; i++) {
       power[i] = real[i] * real[i] + imag[i] * imag[i];
     }
 
     // 4. Mel filterbank: weighted sum of power spectrum → 40 channels
-    const melEnergies = new Float64Array(NUM_CHANNELS);
+    const melEnergies = this._melEnergies;
     for (let ch = 0; ch < NUM_CHANNELS; ch++) {
       let sum = 0;
       for (const tap of this._melFilterbank[ch]) {
@@ -287,7 +300,7 @@ export class MicroFrontend {
     this._pcanGainControl(melEnergies);
 
     // 8. Log₂ scale: log₂(1 + energy) × (1 << scale_shift)
-    const logFeatures = new Float64Array(NUM_CHANNELS);
+    const logFeatures = this._logFeatures;
     for (let i = 0; i < NUM_CHANNELS; i++) {
       logFeatures[i] = Math.max(0, Math.log2(1.0 + melEnergies[i]) * (1 << LOG_SCALE_SHIFT));
     }
@@ -349,7 +362,7 @@ export class MicroFrontend {
    * Reset all internal state (for restarting detection).
    */
   reset() {
-    this._audioBuffer = new Float32Array(0);
+    this._audioBufLen = 0;
     this._noiseEstimate.fill(0);
     this._noiseInitialized = false;
   }
