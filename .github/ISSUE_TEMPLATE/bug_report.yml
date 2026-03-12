@@ -33,7 +33,7 @@ body:
     attributes:
       label: Describe the bug
       description: A clear description of what's happening.
-      placeholder: "Timers don't appear on the card after saying 'set a timer for 5 minutes'..."
+      placeholder: "Timers don't appear on screen after saying 'set a timer for 5 minutes'..."
     validations:
       required: true
 
