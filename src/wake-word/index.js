@@ -13,7 +13,7 @@
 import { State, BlurReason } from '../constants.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 import { CHIME_WAKE } from '../audio/chime.js';
-import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, releaseMicroModels } from './micro-models.js';
+import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, releaseMicroModels, releaseMicroModel } from './micro-models.js';
 import { MicroWakeWordInference } from './micro-inference.js';
 import { clearNotificationUI } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
@@ -455,21 +455,17 @@ export class WakeWordManager {
     try {
       if (!this._tfweb) return;
 
-      if (!this._stopMicroConfig) {
-        this._log.log('stop-word', 'Loading stop model...');
-        const runner = await loadMicroModel(this._tfweb, 'stop');
-        const params = getMicroModelParams('stop');
-        this._stopMicroConfig = {
-          runner,
-          name: 'stop',
-          cutoff: this.getThresholdForModel('stop'),
-          slidingWindow: params.slidingWindow,
-          stepSize: params.stepSize,
-        };
-        this._log.log('stop-word', `Stop model loaded (c=${this._stopMicroConfig.cutoff})`);
-      } else {
-        this._log.log('stop-word', 'Stop model already loaded (cached)');
-      }
+      this._log.log('stop-word', 'Loading stop model...');
+      const runner = await loadMicroModel(this._tfweb, 'stop');
+      const params = getMicroModelParams('stop');
+      this._stopMicroConfig = {
+        runner,
+        name: 'stop',
+        cutoff: this.getThresholdForModel('stop'),
+        slidingWindow: params.slidingWindow,
+        stepSize: params.stepSize,
+      };
+      this._log.log('stop-word', `Stop model loaded (c=${this._stopMicroConfig.cutoff})`);
 
       this._inference.addKeyword(this._stopMicroConfig);
 
@@ -494,11 +490,19 @@ export class WakeWordManager {
 
   /**
    * Disable the stop keyword model and restore regular keywords if suspended.
+   * Releases the stop model from the WASM heap to free memory on constrained devices.
    */
   disableStopModel() {
     if (!this._inference) return;
 
     this._inference.removeKeyword('stop');
+
+    // Release stop model from WASM heap — it will be re-loaded on next use.
+    // On low-memory devices, keeping unused models allocated causes pressure.
+    if (this._stopMicroConfig) {
+      releaseMicroModel('stop');
+      this._stopMicroConfig = null;
+    }
 
     if (this._stopOnlyMode) {
       this._stopOnlyMode = false;
@@ -511,9 +515,9 @@ export class WakeWordManager {
       this._sampleBufLen = 0;
       this._frameQueue.length = 0;
       this._processing = false;
-      this._log.log('stop-word', 'Disabled (stop-only mode off)');
+      this._log.log('stop-word', 'Disabled (stop-only mode off, model released)');
     } else {
-      this._log.log('stop-word', 'Disabled');
+      this._log.log('stop-word', 'Disabled (model released)');
     }
   }
 

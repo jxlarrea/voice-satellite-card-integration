@@ -35,6 +35,7 @@ const SLEEP_CHUNKS = 30;            // ~2.4s of silence before sleeping
 // Each 80ms chunk produces ~8 feature frames. 5 chunks = 400ms of lookback,
 // enough to capture the onset of a wake word that triggered the energy gate.
 const SLEEP_BUFFER_CHUNKS = 5;
+const SLEEP_BUFFER_MAX_FRAMES = SLEEP_BUFFER_CHUNKS * 8;
 
 export class MicroWakeWordInference {
   /**
@@ -60,7 +61,10 @@ export class MicroWakeWordInference {
     this._wakeRms = energy.wake;
     this._sleeping = false;
     this._silentChunks = 0;
-    this._sleepFeatureBuffer = [];  // rolling buffer of feature frames during sleep
+    // Fixed-size ring buffer for sleep feature frames (avoids splice/push growth)
+    this._sleepFeatureBuffer = new Array(SLEEP_BUFFER_MAX_FRAMES);
+    this._sleepBufWrite = 0;
+    this._sleepBufCount = 0;
 
     // Initialize per-keyword state
     for (const cfg of keywordConfigs) {
@@ -127,7 +131,8 @@ export class MicroWakeWordInference {
       this._silentChunks++;
       if (!this._sleeping && this._silentChunks >= SLEEP_CHUNKS) {
         this._sleeping = true;
-        this._sleepFeatureBuffer = [];
+        this._sleepBufWrite = 0;
+        this._sleepBufCount = 0;
         this._log.log('wake-word', `Sleep — inference paused (rms=${rms.toFixed(4)})`);
       }
     } else if (rms >= this._wakeRms) {
@@ -142,12 +147,12 @@ export class MicroWakeWordInference {
     const features = this._frontend.feed(samples);
 
     if (this._sleeping) {
-      // Buffer features during sleep — keep a rolling window so we can
-      // replay the onset of speech when the energy gate wakes us up.
-      for (const f of features) this._sleepFeatureBuffer.push(f);
-      const maxFrames = SLEEP_BUFFER_CHUNKS * 8; // ~8 frames per 80ms chunk
-      if (this._sleepFeatureBuffer.length > maxFrames) {
-        this._sleepFeatureBuffer.splice(0, this._sleepFeatureBuffer.length - maxFrames);
+      // Buffer features during sleep — ring buffer keeps a rolling window
+      // so we can replay the onset of speech when the energy gate wakes us.
+      for (const f of features) {
+        this._sleepFeatureBuffer[this._sleepBufWrite] = f;
+        this._sleepBufWrite = (this._sleepBufWrite + 1) % SLEEP_BUFFER_MAX_FRAMES;
+        if (this._sleepBufCount < SLEEP_BUFFER_MAX_FRAMES) this._sleepBufCount++;
       }
       return { detected: false, score: 0, vadScore: 0, model: null };
     }
@@ -156,10 +161,19 @@ export class MicroWakeWordInference {
     // of the audio that triggered the energy gate wake-up.
     let allFeatures = features;
     let replayCount = 0;
-    if (this._sleepFeatureBuffer.length > 0) {
-      replayCount = this._sleepFeatureBuffer.length;
-      allFeatures = this._sleepFeatureBuffer.concat(features);
-      this._sleepFeatureBuffer = [];
+    if (this._sleepBufCount > 0) {
+      replayCount = this._sleepBufCount;
+      // Drain ring buffer in order (oldest first)
+      const buffered = new Array(replayCount);
+      let readIdx = (this._sleepBufWrite - this._sleepBufCount + SLEEP_BUFFER_MAX_FRAMES) % SLEEP_BUFFER_MAX_FRAMES;
+      for (let i = 0; i < replayCount; i++) {
+        buffered[i] = this._sleepFeatureBuffer[readIdx];
+        this._sleepFeatureBuffer[readIdx] = null; // release ref
+        readIdx = (readIdx + 1) % SLEEP_BUFFER_MAX_FRAMES;
+      }
+      this._sleepBufWrite = 0;
+      this._sleepBufCount = 0;
+      allFeatures = buffered.concat(features);
     }
 
     if (allFeatures.length === 0) {
@@ -345,7 +359,8 @@ export class MicroWakeWordInference {
     this._frontend.reset();
     this._sleeping = false;
     this._silentChunks = 0;
-    this._sleepFeatureBuffer = [];
+    this._sleepBufWrite = 0;
+    this._sleepBufCount = 0;
     // Preserve _lastDetectionTime — the 2s cooldown prevents false
     // re-detection from stale model state (VarHandle ring buffers persist).
     for (const kw of this._keywords) {

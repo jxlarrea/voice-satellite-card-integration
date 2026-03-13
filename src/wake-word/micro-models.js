@@ -114,9 +114,13 @@ export async function loadMicroModel(tfweb, modelName, onProgress) {
   const filename = TFLITE_KEYWORD_FILES[modelName] || modelName;
   if (onProgress) onProgress(modelName);
 
-  // Load model and companion JSON in parallel
+  // Load model and companion JSON in parallel.
+  // numThreads: 1 avoids spawning Web Workers — each worker receives a copy
+  // of the WASM module and shares memory, adding overhead that constrained
+  // devices (e.g. Echo Show 8) cannot afford. Wake word models are tiny
+  // (~50–80KB) and single-threaded inference is fast enough (<2ms per call).
   const [runner] = await Promise.all([
-    tfweb.TFLiteWebModelRunner.create(`${MODELS_BASE}/${filename}.tflite`),
+    tfweb.TFLiteWebModelRunner.create(`${MODELS_BASE}/${filename}.tflite`, { numThreads: 1 }),
     _loadModelManifest(filename),
   ]);
   _modelCache[modelName] = runner;
@@ -175,4 +179,16 @@ export async function releaseMicroModels() {
     try { runner.cleanUp(); } catch (_) { /* ignore */ }
   }
   _modelCache = {};
+}
+
+/**
+ * Release a single model by name.
+ * @param {string} modelName
+ */
+export function releaseMicroModel(modelName) {
+  const runner = _modelCache[modelName];
+  if (runner) {
+    try { runner.cleanUp(); } catch (_) { /* ignore */ }
+    delete _modelCache[modelName];
+  }
 }
