@@ -90,7 +90,8 @@
   transition: opacity 0.4s ease;
   z-index: 10000;
   pointer-events: none;
-  will-change: filter, opacity;
+  transform: translateZ(0);
+  will-change: transform, filter, opacity;
   contain: layout style;
 }
 

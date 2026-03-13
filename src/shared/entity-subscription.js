@@ -23,7 +23,7 @@ export function subscribeToEntity(manager, connection, entityId, onAttrs, logTag
 
       manager.log.log(logTag, 'Connection reconnected - re-subscribing');
       if (manager._unsubscribe) {
-        try { manager._unsubscribe(); } catch (_) { /* cleanup */ }
+        try { manager._unsubscribe().catch(() => {}); } catch (_) { /* cleanup */ }
         manager._unsubscribe = null;
       }
       const conn = manager.card.connection;
@@ -64,7 +64,7 @@ function doSubscribe(manager, connection, entityId, onAttrs, logTag) {
  */
 export function unsubscribeEntity(manager) {
   if (manager._unsubscribe) {
-    manager._unsubscribe();
+    try { manager._unsubscribe().catch(() => {}); } catch (_) { /* cleanup */ }
     manager._unsubscribe = null;
   }
   if (manager._reconnectListener && manager.card.connection) {

@@ -199,7 +199,7 @@ export class PipelineManager {
     if (this._pipelineGen !== gen) {
       this._log.log('pipeline', 'Aborting stale start() after init - pipeline was stopped');
       if (this._unsubscribe) {
-        try { this._unsubscribe(); } catch (_) { /* cleanup */ }
+        try { this._unsubscribe().catch(() => {}); } catch (_) { /* cleanup */ }
         this._unsubscribe = null;
       }
       return;

@@ -218,11 +218,13 @@ export class WakeWordManager {
       }
 
       if (!this._inference || this._loadedModelsKey !== modelsKey) {
+        // Release models no longer needed BEFORE loading new ones to reduce
+        // peak memory — each TFLite runner has its own WASM instance.
+        await releaseUnusedMicroModels(activeModels);
         this._log.log('wake-word', 'Loading TFLite wake word models...');
         const runners = await loadMicroModels(this._tfweb, activeModels, (name) => {
           this._log.log('wake-word', `Loading model: ${name}`);
         });
-        await releaseUnusedMicroModels(activeModels);
 
         const keywordConfigs = this._buildKeywordConfigs(runners);
         this._inference = new MicroWakeWordInference(keywordConfigs, this._log, this._getSensitivityLabel());
@@ -244,34 +246,10 @@ export class WakeWordManager {
       this._active = true;
       this._session.setState(State.LISTENING);
       this._log.log('wake-word', 'On-device wake word detection active');
-
-      // Pre-load stop model in the background
-      this._preloadStopModel();
     } catch (e) {
       this._log.error('wake-word', `Failed to start: ${e.message || e}`);
       throw e;
     }
-  }
-
-  /**
-   * Pre-load the stop model (non-blocking).
-   */
-  _preloadStopModel() {
-    if (this._stopMicroConfig) return;
-    if (!this._tfweb) return;
-    loadMicroModel(this._tfweb, 'stop').then((runner) => {
-      const params = getMicroModelParams('stop');
-      this._stopMicroConfig = {
-        runner,
-        name: 'stop',
-        cutoff: this.getThresholdForModel('stop'),
-        slidingWindow: params.slidingWindow,
-        stepSize: params.stepSize,
-      };
-      this._log.log('stop-word', `Stop model pre-loaded (c=${this._stopMicroConfig.cutoff})`);
-    }).catch((e) => {
-      this._log.log('stop-word', `Pre-load skipped — ${e.message || e}`);
-    });
   }
 
   /**
@@ -691,8 +669,12 @@ export class WakeWordManager {
             await this.start();
           }
         } else {
-          this._log.log('wake-word', 'Mode → Home Assistant');
+          this._log.log('wake-word', 'Mode → Home Assistant — releasing models');
           this.stop();
+          this._inference = null;
+          this._loadedModelsKey = null;
+          this._stopMicroConfig = null;
+          await releaseUnusedMicroModels([]);
           if (session.currentState !== State.PAUSED) {
             session.setState(State.CONNECTING);
             await session.pipeline.start();

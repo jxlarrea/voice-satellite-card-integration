@@ -237,6 +237,7 @@ export class AnalyserManager {
       this._rafId = requestAnimationFrame(() => this._tick());
       return;
     }
+
     this._lastTick = now;
 
     // Use time-domain waveform amplitude for a simple level meter. This is

@@ -135,7 +135,7 @@ export class AudioManager {
     this._mediaStream?.getAudioTracks().forEach((track) => {
       track.enabled = true;
     });
-    // Browser suspends AudioContext when tab is in background  - 
+    // Browser suspends AudioContext when tab is in background  -
     // worklet/processor stops producing audio until we resume it.
     if (this._audioContext?.state === 'suspended') {
       this._log.log('mic', 'Resuming suspended AudioContext');

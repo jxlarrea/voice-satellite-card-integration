@@ -39,6 +39,28 @@ import {
 
 // Singleton via window namespace so multiple bundles share state
 const SESSION_KEY = '__vsSession';
+const REJECTION_KEY = '__vsUnhandledRejection';
+
+// Catch unhandled promise rejections from HA's WebSocket library.
+// When the connection drops and reconnects, the library internally tries to
+// re-subscribe stale subscriptions.  The server responds with
+// {code: 'not_found', message: 'Subscription not found.'} and the library
+// doesn't catch the resulting rejection, causing an uncaught promise error
+// that can crash the page in some browsers.
+if (!window[REJECTION_KEY]) {
+  window[REJECTION_KEY] = true;
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    if (
+      reason &&
+      typeof reason === 'object' &&
+      reason.code === 'not_found' &&
+      reason.message === 'Subscription not found.'
+    ) {
+      event.preventDefault();
+    }
+  });
+}
 
 export class VoiceSatelliteSession {
   /**

@@ -106,7 +106,7 @@ function _cleanup() {
   }
   _retryCount = 0;
   if (_unsubscribe) {
-    try { _unsubscribe(); } catch (_) { /* cleanup */ }
+    try { _unsubscribe().catch(() => {}); } catch (_) { /* cleanup */ }
     _unsubscribe = null;
   }
   _subscribed = false;

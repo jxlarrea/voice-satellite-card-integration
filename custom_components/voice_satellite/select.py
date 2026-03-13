@@ -44,15 +44,16 @@ async def async_setup_entry(
 ) -> None:
     """Set up select entities from a config entry."""
     wake_word_models = await hass.async_add_executor_job(discover_wake_word_models)
+    detection_select = VoiceSatelliteWakeWordDetectionSelect(hass, entry)
     entities = [
         VoiceSatellitePipelineSelect(hass, entry),
         VoiceSatelliteVadSensitivitySelect(hass, entry),
         VoiceSatelliteScreensaverSelect(hass, entry),
         VoiceSatelliteTTSOutputSelect(hass, entry),
-        VoiceSatelliteWakeWordDetectionSelect(hass, entry),
-        VoiceSatelliteWakeWordModelSelect(hass, entry, wake_word_models),
-        VoiceSatelliteWakeWordModel2Select(hass, entry, wake_word_models),
-        VoiceSatelliteWakeWordSensitivitySelect(hass, entry),
+        detection_select,
+        VoiceSatelliteWakeWordModelSelect(hass, entry, wake_word_models, detection_select),
+        VoiceSatelliteWakeWordModel2Select(hass, entry, wake_word_models, detection_select),
+        VoiceSatelliteWakeWordSensitivitySelect(hass, entry, detection_select),
     ]
     async_add_entities(entities)
 
@@ -395,6 +396,11 @@ class VoiceSatelliteWakeWordDetectionSelect(SelectEntity, RestoreEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_wake_word_detection"
         self._selected_option: str = WAKE_WORD_DETECTION_LOCAL
+        self._dependents: list[SelectEntity] = []
+
+    def register_dependent(self, entity: SelectEntity) -> None:
+        """Register an entity that depends on this selection for availability."""
+        self._dependents.append(entity)
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -425,6 +431,8 @@ class VoiceSatelliteWakeWordDetectionSelect(SelectEntity, RestoreEntity):
         if option in WAKE_WORD_DETECTION_OPTIONS:
             self._selected_option = option
             self.async_write_ha_state()
+            for dep in self._dependents:
+                dep.async_write_ha_state()
 
 
 class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
@@ -435,12 +443,19 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
     _attr_translation_key = "wake_word_model"
     _attr_icon = "mdi:microphone-message"
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, models: list[str]) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, models: list[str], detection_select: VoiceSatelliteWakeWordDetectionSelect) -> None:
         """Initialize the wake word model select entity."""
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_wake_word_model"
         self._options = models
         self._selected_option: str = self._options[0] if self._options else "ok_nabu"
+        self._detection_select = detection_select
+        detection_select.register_dependent(self)
+
+    @property
+    def available(self) -> bool:
+        """Only available when wake word detection is on-device."""
+        return self._detection_select.current_option == WAKE_WORD_DETECTION_LOCAL
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -488,12 +503,19 @@ class VoiceSatelliteWakeWordModel2Select(SelectEntity, RestoreEntity):
     _attr_translation_key = "wake_word_model_2"
     _attr_icon = "mdi:microphone-message"
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, models: list[str]) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, models: list[str], detection_select: VoiceSatelliteWakeWordDetectionSelect) -> None:
         """Initialize the wake word model 2 select entity."""
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_wake_word_model_2"
         self._model_options = models
         self._selected_option: str = NO_WAKE_WORD
+        self._detection_select = detection_select
+        detection_select.register_dependent(self)
+
+    @property
+    def available(self) -> bool:
+        """Only available when wake word detection is on-device."""
+        return self._detection_select.current_option == WAKE_WORD_DETECTION_LOCAL
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -545,11 +567,18 @@ class VoiceSatelliteWakeWordSensitivitySelect(SelectEntity, RestoreEntity):
     _attr_translation_key = "wake_word_sensitivity"
     _attr_icon = "mdi:tune-variant"
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, detection_select: VoiceSatelliteWakeWordDetectionSelect) -> None:
         """Initialize the wake word sensitivity select entity."""
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_wake_word_sensitivity"
         self._selected_option: str = WAKE_WORD_SENSITIVITY_OPTIONS[1]  # Moderately sensitive
+        self._detection_select = detection_select
+        detection_select.register_dependent(self)
+
+    @property
+    def available(self) -> bool:
+        """Only available when wake word detection is on-device."""
+        return self._detection_select.current_option == WAKE_WORD_DETECTION_LOCAL
 
     @property
     def device_info(self) -> dict[str, Any]:
