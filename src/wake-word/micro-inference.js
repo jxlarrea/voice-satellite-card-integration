@@ -66,6 +66,11 @@ export class MicroWakeWordInference {
     for (const cfg of keywordConfigs) {
       this._keywords.push(this._initKeyword(cfg));
     }
+
+    // [DIAG] Inference timing (only computed when debug=true)
+    this._diagInferCount = 0;
+    this._diagInferTotal = 0;
+    this._diagChunkCount = 0;
   }
 
   /**
@@ -161,6 +166,14 @@ export class MicroWakeWordInference {
       return { detected: false, score: 0, vadScore: 0, model: null };
     }
 
+    const dbg = this._log._debug;
+
+    // [DIAG] Log replay info
+    if (dbg && replayCount > 0) {
+      this._log.log('wake-word', `[DIAG] Sleep buffer replay: ${replayCount} buffered + ${features.length} new = ${allFeatures.length} total frames, ${this._keywords.length} models`);
+    }
+    const _tInfer0 = (dbg && replayCount > 0) ? performance.now() : 0; // [DIAG]
+
     const now = Date.now();
     const cooldownOk = now - this._lastDetectionTime > COOLDOWN_MS;
 
@@ -171,6 +184,10 @@ export class MicroWakeWordInference {
     const REPLAY_YIELD_INTERVAL = 10;
     for (let fi = 0; fi < allFeatures.length; fi++) {
       if (replayCount > 0 && fi > 0 && fi < replayCount && fi % REPLAY_YIELD_INTERVAL === 0) {
+        // [DIAG] Log yield points during replay
+        if (dbg && fi === REPLAY_YIELD_INTERVAL) {
+          this._log.log('wake-word', `[DIAG] Replay: first ${REPLAY_YIELD_INTERVAL} frames took ${(performance.now() - _tInfer0).toFixed(1)}ms, yielding`);
+        }
         await new Promise((r) => setTimeout(r, 0));
       }
       const frame = allFeatures[fi];
@@ -183,8 +200,13 @@ export class MicroWakeWordInference {
         if (kw.featureAccum.length < kw.framesPerInfer) continue;
 
         // Run model inference with exactly framesPerInfer frames
+        const t0 = dbg ? performance.now() : 0;
         const probability = this._runModel(kw);
-        kw.featureAccum = [];
+        if (dbg) {
+          this._diagInferTotal += performance.now() - t0;
+          this._diagInferCount++;
+        }
+        kw.featureAccum.length = 0;
 
         // Skip warmup period — model state from previous detection may still
         // be warm, so don't store probs until state has flushed with silence.
@@ -211,6 +233,25 @@ export class MicroWakeWordInference {
             };
           }
         }
+      }
+    }
+
+    if (dbg) {
+      // [DIAG] Log total inference time for replay
+      if (_tInfer0 > 0) {
+        this._log.log('wake-word', `[DIAG] Sleep buffer replay total inference: ${(performance.now() - _tInfer0).toFixed(1)}ms for ${allFeatures.length} frames`);
+      }
+
+      // [DIAG] Log inference rate every ~250 chunks (~20s)
+      this._diagChunkCount++;
+      if (this._diagChunkCount >= 250) {
+        const avgMs = this._diagInferCount > 0
+          ? (this._diagInferTotal / this._diagInferCount).toFixed(2)
+          : 'n/a';
+        this._log.log('DIAG', `[inference] ${this._diagInferCount} infers in ${this._diagChunkCount} chunks, avg=${avgMs}ms/infer`);
+        this._diagChunkCount = 0;
+        this._diagInferCount = 0;
+        this._diagInferTotal = 0;
       }
     }
 

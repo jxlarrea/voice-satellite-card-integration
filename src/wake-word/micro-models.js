@@ -151,13 +151,15 @@ export function getMicroModelParams(modelName) {
 }
 
 /**
- * Release models no longer in use (skips 'stop' — managed separately).
+ * Release models no longer in use.
  * @param {string[]} activeNames
+ * @param {object} [opts]
+ * @param {boolean} [opts.includeStop] - also release the stop model (default: skip it)
  */
-export async function releaseUnusedMicroModels(activeNames) {
+export async function releaseUnusedMicroModels(activeNames, { includeStop } = {}) {
   const active = new Set(activeNames);
   for (const [name, runner] of Object.entries(_modelCache)) {
-    if (name === 'stop') continue;
+    if (name === 'stop' && !includeStop) continue;
     if (!active.has(name)) {
       try { runner.cleanUp(); } catch (_) { /* ignore */ }
       delete _modelCache[name];

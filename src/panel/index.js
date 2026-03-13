@@ -211,18 +211,16 @@ class VoiceSatellitePanel extends HTMLElement {
     }
   }
 
-  _onConfigChange(newData) {
-    this._config = Object.assign({}, DEFAULT_CONFIG, newData);
+  _onEntityChange(newData) {
+    this._config = Object.assign({}, this._config, newData);
     setStoredConfig(this._config);
 
-    // Keep entity storage in sync for engine compatibility
     if (this._config.satellite_entity) {
       setStoredEntity(this._config.satellite_entity);
     } else {
       clearStoredEntity();
     }
 
-    // Update running session
     const session = this._getSession();
     if (session) {
       session.updateConfig(Object.assign({}, this._config), { fromPanel: true });
@@ -237,7 +235,6 @@ class VoiceSatellitePanel extends HTMLElement {
           document.body.appendChild(card);
           card.hass = this._hass;
         }
-        // Wait for card to register (rAF in connectedCallback) before starting
         requestAnimationFrame(() => {
           if (!session.isStarted) {
             session._userStopped = false;
@@ -246,23 +243,33 @@ class VoiceSatellitePanel extends HTMLElement {
           }
         });
       }
-      if ((!this._config.satellite_entity || this._config.auto_start === false) && session.isStarted) {
-        session._userStopped = this._config.auto_start === false;
+      if (!this._config.satellite_entity && session.isStarted) {
         session.teardown();
         this._updateStatus();
       }
     }
 
-    // Sync both forms with updated config
+    // Sync entity form
     const entityForm = this.querySelector(`.${P}-entity-container ha-form`);
     if (entityForm) entityForm.data = Object.assign({}, this._config);
+    this._updateStatus();
+    this._updatePreview();
+  }
+
+  _onSettingsChange(newData) {
+    Object.assign(this._config, newData);
+    setStoredConfig(this._config);
+
+    // Propagate to running session (debug, mic constraints, reactive bar, etc.)
+    const session = this._getSession();
+    if (session) {
+      session.updateConfig(Object.assign({}, this._config), { fromPanel: true });
+    }
+
+    // Sync settings form
     const settingsForm = this.querySelector(`.${P}-form-container ha-form`);
     if (settingsForm) settingsForm.data = Object.assign({}, this._config);
-
-    // Update start button visibility
     this._updateStatus();
-
-    // Re-render preview
     this._updatePreview();
   }
 
@@ -571,7 +578,7 @@ class VoiceSatellitePanel extends HTMLElement {
       entityForm.computeLabel = () => '';
       entityForm.computeHelper = () => '';
       entityForm.addEventListener('value-changed', (e) => {
-        this._onConfigChange(e.detail.value);
+        this._onEntityChange(e.detail.value);
       });
       entityContainer.appendChild(entityForm);
     }
@@ -588,7 +595,7 @@ class VoiceSatellitePanel extends HTMLElement {
     form.computeLabel = (schema) => allLabels[schema.name] || '';
     form.computeHelper = (schema) => allHelpers[schema.name] || '';
     form.addEventListener('value-changed', (e) => {
-      this._onConfigChange(e.detail.value);
+      this._onSettingsChange(e.detail.value);
     });
 
     container.appendChild(form);

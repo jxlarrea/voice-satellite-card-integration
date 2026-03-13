@@ -106,6 +106,8 @@ export class VisibilityManager {
   async _resume() {
     if (!this._isPaused) return;
 
+    if (this._log._debug) this._log.log('visibility', `[DIAG] _resume() called, _wakeWordResuming=${!!this._wakeWordResuming}, currentState=${this._card.currentState}`);
+
     // If wake word detection is already handling the resume (AudioContext +
     // pipeline start), bail out — _onDetection owns the full resume flow
     // and will clear _isPaused itself.
@@ -151,5 +153,16 @@ export class VisibilityManager {
 
     this._log.log('visibility', 'Resuming - restarting pipeline');
     pipeline.restart(0);
+
+    // [DIAG] Check if animation survived the visibility change
+    if (this._log._debug) {
+      requestAnimationFrame(() => {
+        const bar = document.querySelector('#voice-satellite-ui .vs-rainbow-bar');
+        if (bar && bar.classList.contains('visible')) {
+          const cs = getComputedStyle(bar);
+          this._log.log('DIAG', `[resume] bar anim=${cs.animationName}/${cs.animationPlayState} cls="${Array.from(bar.classList).join(' ')}"`);
+        }
+      });
+    }
   }
 }
