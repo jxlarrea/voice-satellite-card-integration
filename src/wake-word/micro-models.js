@@ -114,9 +114,11 @@ export async function loadMicroModel(tfweb, modelName, onProgress) {
   const filename = TFLITE_KEYWORD_FILES[modelName] || modelName;
   if (onProgress) onProgress(modelName);
 
-  // Load model and companion JSON in parallel
+  // Load model and companion JSON in parallel.
+  // numThreads: 1 — wake word models are tiny (50–80KB), inference is <2ms.
+  // The default (hardwareConcurrency/2) spawns unnecessary Web Workers.
   const [runner] = await Promise.all([
-    tfweb.TFLiteWebModelRunner.create(`${MODELS_BASE}/${filename}.tflite`),
+    tfweb.TFLiteWebModelRunner.create(`${MODELS_BASE}/${filename}.tflite`, { numThreads: 1 }),
     _loadModelManifest(filename),
   ]);
   _modelCache[modelName] = runner;
