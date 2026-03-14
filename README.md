@@ -464,7 +464,7 @@ Voice Satellite includes a skin system that themes the entire overlay UI - activ
 | **Home Assistant** | Matches your HA theme natively in both light and dark mode. All colors derived from your theme's primary color and card background via CSS custom properties — automatically adapts to any HA theme. Monochromatic four-tone activity bar with flowing gradient animation |
 | **Retro Terminal** | Green phosphor CRT aesthetic with scanlines, bezel frame, monospace font, and screen-edge glow |
 | **Siri** | Full-screen gradient border glow (purple -> blue -> teal -> pink), dark frosted overlay, centered clean text, Apple-inspired design |
-| **Waveform** | Animated flowing neon waveform with 7 layered sine-wave strands that react to mic and TTS audio in real time. Dark/light theme adaptive. GPU-intensive — not recommended for low-end devices |
+| **Waveform** | Animated flowing neon waveform with strands that react to audio in real time. Automatically adapts to light and dark modes based on your Home Assistant theme settings. **GPU-intensive — not recommended for low-end devices** |
 
 ### Custom CSS
 
