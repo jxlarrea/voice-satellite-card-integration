@@ -15,6 +15,7 @@ const SKIN_META = [
   { value: 'home-assistant', label: 'Home Assistant' },
   { value: 'retro-terminal', label: 'Retro Terminal' },
   { value: 'siri', label: 'Siri' },
+  { value: 'waveform', label: 'Waveform' },
 ];
 
 /** Dynamic loaders for non-default skins. */
@@ -24,6 +25,7 @@ const SKIN_LOADERS = {
   'home-assistant': () => import(/* webpackChunkName: "skin-home-assistant" */ './home-assistant.js'),
   'retro-terminal': () => import(/* webpackChunkName: "skin-retro-terminal" */ './retro-terminal.js'),
   siri: () => import(/* webpackChunkName: "skin-siri" */ './siri.js'),
+  waveform: () => import(/* webpackChunkName: "skin-waveform" */ './waveform.js'),
 };
 
 /** Cache of loaded skins. */

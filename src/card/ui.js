@@ -42,12 +42,6 @@ export class UIManager {
     // Timer DOM state
     this._timerContainer = null;
     this._timerAlertEl = null;
-
-    // [DIAG] Animation health monitor state (only active when debug=true)
-    this._diagAnimInterval = null;
-    this._diagLastPos = null;
-    this._diagLastIterTime = 0;
-    this._diagAnimListenersAdded = false;
   }
 
   get element() {
@@ -63,7 +57,6 @@ export class UIManager {
       this._globalUI = existing;
       this.applyStyles();
       this._flushPendingStartButton();
-      this._startAnimationDiag();
       return;
     }
 
@@ -96,7 +89,6 @@ export class UIManager {
     btn.title = this._t('full.ui.start.title_default', 'Tap to start voice assistant');
 
     this._flushPendingStartButton();
-    this._startAnimationDiag();
   }
 
   // ─── Global Styles ────────────────────────────────────────────────
@@ -120,9 +112,6 @@ export class UIManager {
       || this._card.startConversation.playing;
     if (notifPlaying) return;
 
-    const dbg = this._log._debug;
-    const _t0 = dbg ? performance.now() : 0; // [DIAG]
-
     const states = {
       IDLE: { barVisible: false },
       CONNECTING: { barVisible: false },
@@ -143,7 +132,6 @@ export class UIManager {
     if (!config.barVisible && (this._card._imageLingerTimeout || this._card._videoPlaying || this.isLightboxVisible())) return;
 
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
-    if (dbg) this._log.log('DIAG', `[updateForState] state=${state} before="${Array.from(bar.classList).join(' ')}"`);
     if (bar.classList.contains('error-mode')) this.clearServiceError();
 
     const reactive = this._card.isReactiveBarEnabled;
@@ -160,10 +148,8 @@ export class UIManager {
       if (reactive && shouldReact) {
         bar.classList.add('reactive');
         this._globalUI.classList.add('reactive-mode');
-        const _tAnalyser = dbg ? performance.now() : 0; // [DIAG]
         this._card.analyser.reconnectMic();
         this._card.analyser.start(bar);
-        if (dbg) this._log.log('DIAG', `[updateForState] analyser reconnect+start: ${(performance.now() - _tAnalyser).toFixed(1)}ms`); // [DIAG]
       } else {
         bar.classList.remove('reactive');
         this._globalUI.classList.remove('reactive-mode');
@@ -174,7 +160,6 @@ export class UIManager {
       this._globalUI.classList.remove('reactive-mode');
       if (reactive) this._card.analyser.stop();
     }
-    if (dbg) this._log.log('DIAG', `[updateForState] ${state} total: ${(performance.now() - _t0).toFixed(1)}ms, reactive=${reactive}`); // [DIAG]
   }
 
   /**
@@ -968,75 +953,6 @@ export class UIManager {
   clearNotificationStatusOverride() {}
   getTtsLingerTimeoutMs() { return 0; }
   _scrollTranscriptToEnd() {}
-
-  // ─── [DIAG] Animation Health Monitor ─────────────────────────────
-
-  _startAnimationDiag() {
-    if (!this._log._debug) return;
-    if (this._diagAnimInterval) return;
-    const bar = this._globalUI?.querySelector('.vs-rainbow-bar');
-    if (!bar) return;
-
-    // Track animation cycle completions (listeners added once)
-    if (!this._diagAnimListenersAdded) {
-      this._diagAnimListenersAdded = true;
-      bar.addEventListener('animationiteration', () => {
-        this._diagLastIterTime = performance.now();
-      });
-      bar.addEventListener('animationcancel', (e) => {
-        this._log.log('DIAG', `[bar] animationcancel: ${e.animationName}`);
-      });
-      bar.addEventListener('animationend', (e) => {
-        this._log.log('DIAG', `[bar] animationend: ${e.animationName} (unexpected for infinite)`);
-      });
-
-      // Page lifecycle freeze/resume — Chrome's energy saver can freeze even visible tabs
-      document.addEventListener('freeze', () => {
-        this._log.log('DIAG', '[lifecycle] Page FROZEN by browser');
-      });
-      document.addEventListener('resume', () => {
-        this._log.log('DIAG', '[lifecycle] Page RESUMED by browser');
-        requestAnimationFrame(() => this._diagCheckBar());
-      });
-    }
-
-    // Periodic health check (every 60s)
-    this._diagAnimInterval = setInterval(() => this._diagCheckBar(), 60000);
-    this._log.log('DIAG', '[bar] Animation health monitor started');
-  }
-
-  _diagCheckBar() {
-    if (!this._globalUI) return;
-    const bar = this._globalUI.querySelector('.vs-rainbow-bar');
-    if (!bar) return;
-
-    const isVisible = bar.classList.contains('visible');
-    const hasAnim = bar.classList.contains('listening') || bar.classList.contains('processing')
-      || bar.classList.contains('speaking') || bar.classList.contains('connecting')
-      || bar.classList.contains('error-mode');
-
-    if (!isVisible || !hasAnim) return;
-
-    const cs = getComputedStyle(bar);
-    const animName = cs.animationName;
-    const animState = cs.animationPlayState;
-    const isReactive = bar.classList.contains('reactive');
-    const pos = isReactive ? cs.getPropertyValue('--vs-gp') : cs.backgroundPosition;
-    const posChanged = this._diagLastPos !== null && this._diagLastPos !== pos;
-    const sinceIter = this._diagLastIterTime
-      ? ((performance.now() - this._diagLastIterTime) / 1000).toFixed(1)
-      : 'never';
-
-    this._log.log('DIAG', `[bar] anim=${animName}/${animState} pos=${pos} posΔ=${posChanged} lastIter=${sinceIter}s`);
-
-    if (animName === 'none' || animState !== 'running') {
-      this._log.log('DIAG', '[bar] !! FROZEN: animation not running');
-    } else if (!posChanged && this._diagLastPos !== null) {
-      this._log.log('DIAG', '[bar] !! STALE: position unchanged since last check');
-    }
-
-    this._diagLastPos = pos;
-  }
 
   // ─── Private ──────────────────────────────────────────────────────
 

@@ -70,15 +70,6 @@ export class AudioManager {
       this._card.analyser.attachMic(this._sourceNode, this._audioContext);
     }
 
-    // [DIAG] Monitor AudioContext state changes
-    if (this._log._debug && !this._audioContext._diagHandler) {
-      this._audioContext._diagHandler = true;
-      this._audioContext.addEventListener('statechange', () => {
-        if (!this._audioContext) return; // already closed & nulled
-        this._log.log('DIAG', `[AudioContext] state → ${this._audioContext.state}`);
-      });
-    }
-
     await setupAudioWorklet(this, this._sourceNode);
     this._log.log('mic', 'Audio capture via AudioWorklet');
   }
@@ -136,8 +127,6 @@ export class AudioManager {
   }
 
   async resume() {
-    const dbg = this._log._debug;
-    const _t0 = dbg ? performance.now() : 0; // [DIAG]
     // Discard stale audio accumulated during the hidden period - the worklet
     // may have kept running (producing silence) while the tab was in the
     // background.  Sending this to the server would clog the wake word engine.
@@ -149,14 +138,8 @@ export class AudioManager {
     // Browser suspends AudioContext when tab is in background  -
     // worklet/processor stops producing audio until we resume it.
     if (this._audioContext?.state === 'suspended') {
-      if (dbg) this._log.log('mic', `[DIAG] AudioContext state before resume: ${this._audioContext.state}, sampleRate=${this._audioContext.sampleRate}`);
-      const _tResume = dbg ? performance.now() : 0; // [DIAG]
       await this._audioContext.resume();
-      if (dbg) this._log.log('mic', `[DIAG] AudioContext.resume() took ${(performance.now() - _tResume).toFixed(1)}ms, state now: ${this._audioContext.state}`);
-    } else if (dbg) {
-      this._log.log('mic', `[DIAG] AudioContext state: ${this._audioContext?.state || 'null'} (no resume needed)`);
     }
-    if (dbg) this._log.log('mic', `[DIAG] audio.resume() total: ${(performance.now() - _t0).toFixed(1)}ms`);
   }
 
   async ensureAudioContextForGesture() {

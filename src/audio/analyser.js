@@ -36,10 +36,6 @@ export class AnalyserManager {
     this._visibilityHandler = null;
     this._lastLevel = -1;
     this._lastTick = 0;
-
-    // [DIAG] rAF tick rate tracking
-    this._diagTickCount = 0;
-    this._diagTickStart = 0;
   }
 
   /**
@@ -160,10 +156,6 @@ export class AnalyserManager {
    */
   start(barEl, { deferred } = {}) {
     this._barEl = barEl;
-    if (this._log._debug) {
-      this._diagTickCount = 0;
-      this._log.log('analyser', `[DIAG] start() called, deferred=${!!deferred}, hasActiveAnalyser=${!!this._activeAnalyser}, rafId=${this._rafId}`);
-    }
     if (!this._visibilityHandler) {
       this._visibilityHandler = () => {
         if (document.hidden) {
@@ -246,28 +238,7 @@ export class AnalyserManager {
       return;
     }
 
-    const dbg = this._log._debug;
-
-    // [DIAG] Log frame gap for the first 20 ticks after start
-    if (dbg && this._diagTickCount < 20) {
-      const gap = now - this._lastTick;
-      this._log.log('analyser', `[DIAG] tick #${this._diagTickCount + 1} gap=${gap.toFixed(1)}ms`);
-    }
-
     this._lastTick = now;
-
-    // [DIAG] Track rAF delivery rate — log every ~30s at ~30fps
-    if (dbg) {
-      this._diagTickCount++;
-      if (!this._diagTickStart) this._diagTickStart = now;
-      if (this._diagTickCount >= 900) {
-        const elapsed = now - this._diagTickStart;
-        const avgMs = (elapsed / this._diagTickCount).toFixed(1);
-        this._log.log('DIAG', `[analyser] tick avg=${avgMs}ms over ${this._diagTickCount} frames (${(elapsed / 1000).toFixed(0)}s)`);
-        this._diagTickCount = 0;
-        this._diagTickStart = now;
-      }
-    }
 
     // Use time-domain waveform amplitude for a simple level meter. This is
     // cheaper than FFT/frequency analysis and visually sufficient here.
@@ -280,12 +251,10 @@ export class AnalyserManager {
       sum += Math.abs(this._dataArray[i] - 128);
     }
     const meanAbs = (sum / this._dataArray.length) / 128;
-    const level = Math.min(1, Math.round(Math.min(1, meanAbs * 3.5) * 20) / 20);
-
-    // [DIAG] Log actual audio level for first 20 ticks
-    if (dbg && this._diagTickCount <= 20) {
-      this._log.log('analyser', `[DIAG] tick #${this._diagTickCount} level=${level.toFixed(2)} meanAbs=${meanAbs.toFixed(4)}`);
-    }
+    // Mic input is much quieter than TTS output — boost mic gain so
+    // reactive bars respond similarly to both sources.
+    const gain = this._activeAnalyser === this._micAnalyser ? 7 : 5;
+    const level = Math.min(1, Math.round(Math.min(1, meanAbs * gain) * 20) / 20);
 
     if (level !== this._lastLevel) {
       this._lastLevel = level;

@@ -1,0 +1,574 @@
+/* Waveform Skin — dark/light adaptive, neon waveform visualizer */
+
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap');
+
+/* ─── Theme tokens (set by JS via .vs-dark / .vs-light) ─────────── */
+
+#voice-satellite-ui.vs-dark {
+  --wf-text: #e4e4ec;
+  --wf-text-dim: rgba(228, 228, 236, 0.5);
+  --wf-text-muted: #8888a0;
+  --wf-surface: #1a1a22;
+  --wf-surface-glass: rgba(26, 26, 34, 0.40);
+  --wf-overlay: rgba(8, 8, 14, 0.92);
+  --wf-shadow: rgba(0, 0, 0, 0.4);
+  --wf-shadow-lg: rgba(0, 0, 0, 0.5);
+  --wf-accent: #7070ff;
+  --wf-divider: rgba(255, 255, 255, 0.08);
+  --wf-scrollbar: rgba(255, 255, 255, 0.2);
+  --wf-scrollbar-hover: rgba(255, 255, 255, 0.35);
+  --wf-progress: rgba(112, 112, 255, 0.18);
+  --wf-badge-bg: rgba(255, 255, 255, 0.08);
+}
+
+#voice-satellite-ui.vs-light {
+  --wf-text: #1a1a2e;
+  --wf-text-dim: rgba(26, 26, 46, 0.45);
+  --wf-text-muted: #6e6e88;
+  --wf-surface: #ffffff;
+  --wf-surface-glass: rgba(255, 255, 255, 0.35);
+  --wf-overlay: rgba(240, 240, 248, 0.72);
+  --wf-shadow: rgba(0, 0, 0, 0.1);
+  --wf-shadow-lg: rgba(0, 0, 0, 0.12);
+  --wf-accent: #5050dd;
+  --wf-divider: rgba(0, 0, 0, 0.08);
+  --wf-scrollbar: rgba(0, 0, 0, 0.18);
+  --wf-scrollbar-hover: rgba(0, 0, 0, 0.3);
+  --wf-progress: rgba(80, 80, 221, 0.12);
+  --wf-badge-bg: rgba(0, 0, 0, 0.06);
+}
+
+/* Font */
+#voice-satellite-ui {
+  font-family: "Google Sans", Roboto, Noto, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ─── Blur Overlay ──────────────────────────────────────────────── */
+
+#voice-satellite-ui .vs-blur-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--wf-overlay) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 9999;
+  pointer-events: none;
+  will-change: opacity;
+}
+
+#voice-satellite-ui .vs-blur-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ─── Start Button ──────────────────────────────────────────────── */
+
+#voice-satellite-ui .vs-start-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--wf-accent, #7070ff);
+  border: none;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px var(--wf-shadow, rgba(0,0,0,0.4)), 0 4px 16px var(--wf-shadow-lg, rgba(0,0,0,0.5));
+  z-index: 10001;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+#voice-satellite-ui .vs-start-btn.visible {
+  display: flex;
+  animation: wf-btn-pulse 2.5s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-start-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px var(--wf-shadow-lg), 0 6px 20px var(--wf-shadow-lg);
+  animation: none;
+}
+
+#voice-satellite-ui .vs-start-btn svg {
+  width: 28px;
+  height: 28px;
+  fill: white;
+}
+
+@keyframes wf-btn-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+/* ─── Rainbow Bar — HIDDEN (replaced by canvas waveform) ────────── */
+
+#voice-satellite-ui .vs-rainbow-bar {
+  display: none !important;
+}
+
+/* ─── Waveform Canvas Container (centered background, visible only when overlay is up) */
+
+.vs-waveform {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 55vh;
+  z-index: 10000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+#voice-satellite-ui .vs-blur-overlay.visible ~ .vs-waveform {
+  opacity: 1 !important;
+}
+
+.vs-waveform canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ─── Chat Container ────────────────────────────────────────────── */
+
+#voice-satellite-ui .vs-chat-container {
+  position: fixed;
+  left: 7.5%;
+  right: 7.5%;
+  bottom: 72px;
+  display: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: auto;
+  contain: content;
+  z-index: 10001;
+  pointer-events: none;
+  overflow: visible;
+  transition: left 0.4s ease, right 0.4s ease, bottom 0.3s ease;
+}
+
+#voice-satellite-ui .vs-chat-container.visible {
+  display: flex;
+  pointer-events: auto;
+}
+
+#voice-satellite-ui .vs-chat-container.announcement-mode {
+  left: 50% !important;
+  right: auto !important;
+  width: 85%;
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%);
+}
+
+/* Chat Messages */
+#voice-satellite-ui .vs-chat-msg {
+  max-width: 85%;
+  opacity: 0;
+  animation: wf-fade-in 0.3s ease forwards;
+  word-wrap: break-word;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 4px 0;
+  border-radius: 0;
+}
+
+#voice-satellite-ui .vs-chat-msg.user {
+  font-size: calc(32px * var(--vs-text-scale, 1));
+  color: var(--wf-text-dim);
+  font-weight: normal;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+}
+
+#voice-satellite-ui .vs-chat-msg.assistant {
+  font-size: calc(36px * var(--vs-text-scale, 1));
+  color: var(--wf-text);
+  font-weight: 400;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+  max-height: 70vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wf-scrollbar) transparent;
+}
+
+#voice-satellite-ui .vs-chat-msg.announcement {
+  font-size: calc(36px * var(--vs-text-scale, 1));
+  color: var(--wf-text);
+  font-weight: 400;
+  font-style: normal;
+  align-self: flex-start;
+  text-align: left;
+}
+
+@keyframes wf-fade-in {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Timer Container ───────────────────────────────────────────── */
+
+.vs-timer-container {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10001;
+  pointer-events: none;
+  font-family: "Google Sans", Roboto, Noto, sans-serif;
+}
+
+.vs-timer-pill {
+  position: relative;
+  overflow: hidden;
+  contain: content;
+  font-size: calc(28px * var(--vs-text-scale, 1));
+  color: var(--wf-text, #e4e4ec);
+  font-weight: bold;
+  font-style: normal;
+  background: var(--wf-surface, #1a1a22);
+  border: none;
+  padding: 14px 18px;
+  border-radius: 18px;
+  box-shadow: 0 1px 3px var(--wf-shadow, rgba(0,0,0,0.4)), 0 4px 8px var(--wf-shadow-lg, rgba(0,0,0,0.5));
+  animation: wf-timer-fade-in 0.3s ease forwards;
+  pointer-events: auto;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.vs-timer-progress {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  background: var(--wf-progress, rgba(112, 112, 255, 0.18));
+  opacity: 1;
+  transition: width 1s linear;
+  pointer-events: none;
+}
+
+.vs-timer-content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vs-timer-icon { flex-shrink: 0; }
+.vs-timer-time { font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+.vs-timer-pill.vs-timer-expired {
+  animation: wf-timer-fade-out 0.4s ease forwards;
+}
+
+.vs-timer-alert {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: calc(28px * var(--vs-text-scale, 1));
+  font-family: "Google Sans", Roboto, Noto, sans-serif;
+  color: var(--wf-text, #e4e4ec);
+  font-weight: bold;
+  font-style: normal;
+  background: var(--wf-surface, #1a1a22);
+  border: none;
+  padding: 18px 24px;
+  border-radius: 18px;
+  box-shadow: 0 2px 6px var(--wf-shadow, rgba(0,0,0,0.4)), 0 8px 24px var(--wf-shadow-lg, rgba(0,0,0,0.5));
+  z-index: 10002;
+  animation: wf-alert-pulse 1.5s ease-in-out infinite;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.vs-timer-alert .vs-timer-icon { font-size: 1.5em; }
+.vs-timer-alert .vs-timer-time { font-size: 1.2em; }
+
+@keyframes wf-timer-fade-in {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes wf-timer-fade-out {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(8px); }
+}
+@keyframes wf-alert-pulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.04); }
+}
+
+/* ─── Image Panel ───────────────────────────────────────────────── */
+
+#voice-satellite-ui .vs-image-panel {
+  position: fixed;
+  top: 50%;
+  right: 7.5%;
+  transform: translateY(-50%);
+  width: 30%;
+  max-height: 70vh;
+  overflow: hidden;
+  z-index: 10001;
+  pointer-events: none;
+  display: none;
+  background: var(--wf-surface-glass, var(--wf-surface));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: none;
+}
+
+#voice-satellite-ui .vs-panel-scroll {
+  overflow-y: auto;
+  max-height: calc(70vh - 24px);
+  padding-right: 8px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wf-scrollbar) transparent;
+}
+
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar { width: 6px; }
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-track { background: transparent; }
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-thumb {
+  background: var(--wf-scrollbar);
+  border-radius: 3px;
+}
+#voice-satellite-ui .vs-panel-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--wf-scrollbar-hover);
+}
+
+#voice-satellite-ui .vs-image-panel.visible {
+  display: block;
+  pointer-events: auto;
+}
+
+#voice-satellite-ui .vs-image-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+}
+
+#voice-satellite-ui .vs-image-grid.single { grid-template-columns: 1fr; }
+#voice-satellite-ui .vs-image-grid.single .vs-panel-img {
+  aspect-ratio: auto;
+  max-height: calc(70vh - 24px);
+  object-fit: contain;
+}
+
+#voice-satellite-ui .vs-panel-img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 12px;
+  opacity: 0;
+  animation: wf-fade-in 0.3s ease forwards;
+}
+
+/* ─── Lightbox ──────────────────────────────────────────────────── */
+
+#voice-satellite-ui .vs-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.92);
+}
+
+#voice-satellite-ui .vs-lightbox.visible { display: flex; }
+
+#voice-satellite-ui .vs-lightbox-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+#voice-satellite-ui .vs-lightbox-iframe {
+  width: 90vw;
+  max-width: 1200px;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  display: none;
+}
+
+/* ─── Video Grid ────────────────────────────────────────────────── */
+
+#voice-satellite-ui .vs-video-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  width: 100%;
+}
+
+#voice-satellite-ui .vs-video-card { cursor: pointer; }
+#voice-satellite-ui .vs-video-thumb-wrap { position: relative; width: 100%; }
+
+#voice-satellite-ui .vs-video-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+#voice-satellite-ui .vs-video-duration {
+  position: absolute;
+  bottom: 8px; right: 8px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+#voice-satellite-ui .vs-video-info { padding: 8px 4px 0; }
+
+#voice-satellite-ui .vs-video-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--wf-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+#voice-satellite-ui .vs-video-channel {
+  font-size: 12px;
+  color: var(--wf-text-muted);
+  margin-top: 2px;
+}
+
+/* Chat narrows when image panel is open */
+#voice-satellite-ui.has-images .vs-chat-container { right: calc(37.5% + 40px); }
+#voice-satellite-ui.has-featured .vs-chat-container { right: calc(32.5% + 40px); }
+#voice-satellite-ui.has-images .vs-chat-msg,
+#voice-satellite-ui.has-featured .vs-chat-msg { max-width: 100%; }
+#voice-satellite-ui .vs-image-panel.featured { width: 25%; }
+
+/* ─── Weather ───────────────────────────────────────────────────── */
+
+#voice-satellite-ui .vs-image-panel.weather {
+  border: none;
+}
+
+#voice-satellite-ui .vs-weather-card { padding: 8px 0; }
+
+#voice-satellite-ui .vs-weather-header {
+  display: flex; align-items: center; gap: 20px; padding: 12px 4px;
+}
+
+#voice-satellite-ui .vs-weather-icon { width: 96px; height: 96px; flex-shrink: 0; }
+
+#voice-satellite-ui .vs-weather-temp {
+  font-size: calc(52px * var(--vs-text-scale, 1));
+  font-weight: 500; color: var(--wf-text); line-height: 1.1;
+}
+
+#voice-satellite-ui .vs-weather-condition {
+  font-size: calc(22px * var(--vs-text-scale, 1));
+  color: var(--wf-text-muted); margin-top: 4px;
+}
+
+#voice-satellite-ui .vs-weather-humidity {
+  font-size: calc(18px * var(--vs-text-scale, 1));
+  color: var(--wf-text-muted); margin-top: 4px;
+}
+
+#voice-satellite-ui .vs-weather-divider {
+  height: 1px; background: var(--wf-divider); margin: 12px 0;
+}
+
+#voice-satellite-ui .vs-weather-forecast { display: flex; flex-direction: column; }
+
+#voice-satellite-ui .vs-weather-row {
+  display: flex; align-items: center; padding: 6px 4px;
+}
+
+#voice-satellite-ui .vs-weather-row-time {
+  width: 30%; font-size: calc(18px * var(--vs-text-scale, 1));
+  color: var(--wf-text-muted); flex-shrink: 0;
+}
+
+#voice-satellite-ui .vs-weather-row-cond {
+  flex: 1; font-size: calc(18px * var(--vs-text-scale, 1));
+  color: var(--wf-text-muted);
+}
+
+#voice-satellite-ui .vs-weather-row-temp {
+  font-size: calc(22px * var(--vs-text-scale, 1));
+  font-weight: 500; color: var(--wf-text); text-align: right; min-width: 56px;
+}
+
+/* ─── Financial ─────────────────────────────────────────────────── */
+
+#voice-satellite-ui .vs-image-panel.financial {
+  border: none;
+}
+
+#voice-satellite-ui .vs-financial-card { padding: 8px 0; }
+
+#voice-satellite-ui .vs-financial-header {
+  display: flex; align-items: center; gap: 12px; padding: 8px 4px;
+}
+
+#voice-satellite-ui .vs-financial-logo {
+  width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+}
+
+#voice-satellite-ui .vs-financial-name {
+  font-size: calc(20px * var(--vs-text-scale, 1)); color: var(--wf-text); flex: 1; min-width: 0;
+}
+
+#voice-satellite-ui .vs-financial-badge {
+  font-size: calc(12px * var(--vs-text-scale, 1)); color: var(--wf-text-muted);
+  background: var(--wf-badge-bg); padding: 2px 8px; border-radius: 4px; flex-shrink: 0;
+}
+
+#voice-satellite-ui .vs-financial-price {
+  font-size: calc(48px * var(--vs-text-scale, 1)); font-weight: 500;
+  color: var(--wf-text); padding: 4px 4px 0; line-height: 1.1;
+}
+
+#voice-satellite-ui .vs-financial-change {
+  font-size: calc(22px * var(--vs-text-scale, 1)); padding: 4px 4px 8px;
+}
+
+#voice-satellite-ui .vs-financial-change.up { color: #0f9d58; }
+#voice-satellite-ui .vs-financial-change.down { color: #ea4335; }
+
+#voice-satellite-ui .vs-financial-details {
+  font-size: calc(16px * var(--vs-text-scale, 1)); color: var(--wf-text-muted); padding: 8px 4px;
+}
+
+#voice-satellite-ui .vs-financial-conversion {
+  font-size: calc(42px * var(--vs-text-scale, 1)); font-weight: 500;
+  color: var(--wf-text); padding: 16px 4px 8px; line-height: 1.2;
+}
+
+#voice-satellite-ui .vs-financial-rate {
+  font-size: calc(20px * var(--vs-text-scale, 1)); color: var(--wf-text-muted); padding: 4px 4px;
+}

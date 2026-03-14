@@ -343,8 +343,6 @@ export class WakeWordManager {
     this._active = false;
 
     const session = this._session;
-    const dbg = this._log._debug;
-    const _t0 = dbg ? performance.now() : 0; // [DIAG]
 
     // If the tab is paused (screen off / background), unpause so pipeline
     // events aren't dropped. The wake word worklet keeps running while
@@ -357,18 +355,14 @@ export class WakeWordManager {
       // resume AudioContext + restart pipeline concurrently).
       session.visibility._wakeWordResuming = true;
 
-      const _tResume0 = dbg ? performance.now() : 0; // [DIAG]
       await session.audio.resume();
-      if (dbg) this._log.log('wake-word', `[DIAG] AudioContext resume: ${(performance.now() - _tResume0).toFixed(1)}ms`);
       session.visibility._isPaused = false;
 
       // Yield to the browser so it can paint the first frame after the
       // screen wakes up. Without this, the AudioContext resume + TFLite
       // sleep-buffer replay + pipeline start all block the main thread
       // back-to-back and the UI appears frozen.
-      const _tRaf0 = dbg ? performance.now() : 0; // [DIAG]
       await new Promise((r) => requestAnimationFrame(r));
-      if (dbg) this._log.log('wake-word', `[DIAG] rAF yield: ${(performance.now() - _tRaf0).toFixed(1)}ms`);
     }
 
     // If muted, silently ignore the detection and resume listening
@@ -401,13 +395,8 @@ export class WakeWordManager {
     session.pipeline.shouldContinue = false;
     session.pipeline.continueConversationId = null;
 
-    const _tState0 = dbg ? performance.now() : 0; // [DIAG]
     session.setState(State.WAKE_WORD_DETECTED);
-    if (dbg) this._log.log('wake-word', `[DIAG] setState(WAKE_WORD_DETECTED): ${(performance.now() - _tState0).toFixed(1)}ms`);
-
-    const _tBlur0 = dbg ? performance.now() : 0; // [DIAG]
     session.ui.showBlurOverlay(BlurReason.PIPELINE);
-    if (dbg) this._log.log('wake-word', `[DIAG] showBlurOverlay: ${(performance.now() - _tBlur0).toFixed(1)}ms`);
 
     // Play wake chime if enabled
     const wakeSound = getSwitchState(
@@ -416,9 +405,7 @@ export class WakeWordManager {
 
     if (wakeSound) {
       session.audio.stopSending();
-      const _tChime0 = dbg ? performance.now() : 0; // [DIAG]
       session.tts.playChime('wake');
-      if (dbg) this._log.log('wake-word', `[DIAG] playChime: ${(performance.now() - _tChime0).toFixed(1)}ms`);
       const resumeDelay = (CHIME_WAKE.duration * 1000) + 50;
 
       await new Promise((resolve) => setTimeout(resolve, resumeDelay));
@@ -428,15 +415,12 @@ export class WakeWordManager {
 
     // Start pipeline with STT stage (skip server-side wake word)
     try {
-      const _tPipeline0 = dbg ? performance.now() : 0; // [DIAG]
       await session.pipeline.start({ start_stage: 'stt', wake_word_phrase: this.getWakeWordPhrase(modelName) });
-      if (dbg) this._log.log('wake-word', `[DIAG] pipeline.start: ${(performance.now() - _tPipeline0).toFixed(1)}ms`);
     } catch (e) {
       this._log.error('wake-word', `Pipeline start failed after detection: ${e.message || e}`);
       session.pipeline.restart(session.pipeline.calculateRetryDelay());
     }
 
-    if (dbg) this._log.log('wake-word', `[DIAG] _onDetection total: ${(performance.now() - _t0).toFixed(1)}ms`);
   }
 
   // ─── Stop model management ──────────────────────────────────────────

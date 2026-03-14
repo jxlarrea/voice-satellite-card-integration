@@ -1,0 +1,115 @@
+/* Waveform Skin - Editor Preview Overrides */
+
+.preview-container {
+  font-family: "Google Sans", Roboto, Noto, sans-serif;
+  background: #1a1a22;
+}
+
+.preview-blur {
+  background: rgba(8, 8, 14, 0.92);
+}
+
+/* Hide the activity bar — waveform skin has no rainbow bar */
+.preview-bar {
+  display: none !important;
+}
+
+/* Waveform SVG container */
+.preview-waveform {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 40%;
+  height: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.preview-waveform-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Default (dark): show dark strands, hide light */
+.preview-waveform-light { display: none; }
+.preview-waveform-dark  { display: inline; }
+
+.preview-chat {
+  align-items: flex-start;
+  margin-bottom: 12px;
+  margin-top: 40px;
+}
+.preview-msg {
+  box-shadow: none;
+}
+.preview-msg.user {
+  font-size: calc(28px * var(--vs-text-scale, 1));
+  color: rgba(228, 228, 236, 0.5);
+  background: none;
+  border: none;
+  padding: 4px 0;
+  border-radius: 0;
+  align-self: flex-start;
+  text-align: left;
+}
+.preview-msg.assistant {
+  font-size: calc(32px * var(--vs-text-scale, 1));
+  color: #e4e4ec;
+  font-weight: 400;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  border-radius: 0;
+  align-self: flex-start;
+  text-align: left;
+}
+.preview-timer {
+  color: #e4e4ec;
+  background: #1a1a22;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.preview-timer-progress {
+  background: rgba(112, 112, 255, 0.18);
+  opacity: 1;
+}
+
+.preview-label {
+  color: rgba(228, 228, 236, 0.35);
+}
+
+/* ─── Light mode ─────────────────────────────────────────────────── */
+
+.wf-light.preview-container { background: #ffffff; }
+.wf-light .preview-blur { background: rgba(240, 240, 248, 0.72); }
+.wf-light .preview-waveform-dark  { display: none; }
+.wf-light .preview-waveform-light { display: inline; }
+.wf-light .preview-msg.user { color: rgba(26, 26, 46, 0.45); }
+.wf-light .preview-msg.assistant { color: #1a1a2e; }
+.wf-light .preview-timer {
+  color: #1a1a2e;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+.wf-light .preview-timer-progress { background: rgba(80, 80, 221, 0.12); }
+.wf-light .preview-label { color: rgba(26, 26, 46, 0.35); }
+.wf-light .preview-notice { color: rgba(26, 26, 46, 0.4); }
+
+/* ─── Performance notice ────────────────────────────────────────── */
+
+.preview-notice {
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(228, 228, 236, 0.4);
+  z-index: 5;
+  pointer-events: none;
+}

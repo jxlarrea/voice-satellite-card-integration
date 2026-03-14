@@ -13,62 +13,6 @@ import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shar
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
 import { getSwitchState } from '../shared/satellite-state.js';
 
-// [DIAG] Interaction tick tracker — measures elapsed time through each phase.
-// All functions check logger._debug and no-op when debug logging is off,
-// so there is zero overhead (no performance.now() calls) in production.
-const _diag = {
-  phaseStart: 0,
-  phaseName: null,
-  interactionStart: 0,
-  idleStart: 0,
-};
-
-function diagTick(logger, label) {
-  if (!logger._debug) return;
-  const now = performance.now();
-  const parts = [`[tick] ${label}`];
-
-  if (_diag.phaseName && _diag.phaseStart) {
-    parts.push(`${_diag.phaseName}=${(now - _diag.phaseStart).toFixed(0)}ms`);
-  }
-  if (_diag.interactionStart) {
-    parts.push(`total=${(now - _diag.interactionStart).toFixed(0)}ms`);
-  }
-  if (_diag.idleStart && !_diag.interactionStart) {
-    parts.push(`idle=${((now - _diag.idleStart) / 1000).toFixed(1)}s`);
-  }
-
-  logger.log('DIAG', parts.join(' | '));
-
-  _diag.phaseName = label;
-  _diag.phaseStart = now;
-}
-
-function diagInteractionStart(logger, label) {
-  if (!logger._debug) return;
-  const now = performance.now();
-  const idleDuration = _diag.idleStart ? ((now - _diag.idleStart) / 1000).toFixed(1) : '?';
-  logger.log('DIAG', `[tick] === INTERACTION START (${label}) after ${idleDuration}s idle ===`);
-  _diag.interactionStart = now;
-  _diag.idleStart = 0;
-  _diag.phaseName = label;
-  _diag.phaseStart = now;
-}
-
-function diagInteractionEnd(logger) {
-  if (!logger._debug) return;
-  const now = performance.now();
-  if (_diag.interactionStart) {
-    const total = (now - _diag.interactionStart).toFixed(0);
-    const lastPhase = _diag.phaseName ? ` ${_diag.phaseName}=${(now - _diag.phaseStart).toFixed(0)}ms` : '';
-    logger.log('DIAG', `[tick] === INTERACTION END${lastPhase} | total=${total}ms ===`);
-  }
-  _diag.interactionStart = 0;
-  _diag.idleStart = now;
-  _diag.phaseName = null;
-  _diag.phaseStart = 0;
-}
-
 /**
  * Sync pipeline state to the integration entity.
  * @param {import('./index.js').VoiceSatelliteSession} session
@@ -97,16 +41,6 @@ export function setState(session, newState) {
   const oldState = session.currentState;
   session.currentState = newState;
   session.logger.log('state', `${oldState} -> ${newState}`);
-
-  // [DIAG] Track phase ticks
-  if (newState === State.WAKE_WORD_DETECTED || (newState === State.STT && oldState !== State.WAKE_WORD_DETECTED)) {
-    diagInteractionStart(session.logger, newState);
-  } else if (newState === State.IDLE || newState === State.LISTENING) {
-    if (_diag.interactionStart) diagInteractionEnd(session.logger);
-    if (!_diag.idleStart) _diag.idleStart = performance.now();
-  } else {
-    diagTick(session.logger, newState);
-  }
 
   session.ui.updateForState(newState, session.pipeline.serviceUnavailable, session.tts.isPlaying);
 
@@ -139,12 +73,10 @@ export async function startListening(session) {
   }
 
   session._starting = true;
-  diagTick(session.logger, 'startup-begin');
 
   try {
     setState(session, State.CONNECTING);
     await session.audio.startMicrophone();
-    diagTick(session.logger, 'startup-mic-ready');
 
     // On-device wake word: load module lazily, start local inference
     if (session._isWakeWordEnabled()) {
@@ -154,7 +86,6 @@ export async function startListening(session) {
       await session.pipeline.start();
     }
 
-    diagTick(session.logger, 'startup-pipeline-ready');
     session._hasStarted = true;
     session.ui.hideStartButton();
 
@@ -215,7 +146,6 @@ export async function startListening(session) {
  * @param {boolean} [playbackFailed]
  */
 export function onTTSComplete(session, playbackFailed) {
-  diagTick(session.logger, `tts-complete(failed=${!!playbackFailed})`);
   // If a NEW interaction started during TTS, don't clean up
   const newInteractionStates = [State.WAKE_WORD_DETECTED, State.STT, State.INTENT];
   if (newInteractionStates.includes(session.currentState)) {
@@ -303,7 +233,6 @@ export function handlePipelineMessage(session, message) {
 
   const eventType = message.type;
   const eventData = message.data || {};
-  diagTick(session.logger, eventType);
 
   if (session.config.debug) {
     const timestamp = message.timestamp ? message.timestamp.split('T')[1].split('.')[0] : '';
