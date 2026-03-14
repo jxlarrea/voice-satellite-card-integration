@@ -48,7 +48,7 @@ Voice Satellite runs as a **global engine** that loads on every page of Home Ass
 - **On-device wake word detection** - runs microWakeWord locally via TFLite WASM with dual wake word support, custom models, and voice-activated stop. Falls back to server-side detection when preferred
 - **Timers, announcements, conversations** - voice-activated timers with countdown pills, `assist_satellite.announce` / `start_conversation` / `ask_question` from automations
 - **Media player entity** - volume control, `tts.speak` targeting, and `media_player.play_media` from automations. TTS can route to browser or a remote speaker
-- **Skins** - 6 built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri) with CSS overrides. Reactive audio-level animation on the activity bar
+- **Skins** - 7 built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri, Waveform) with CSS overrides. Reactive audio-level animation on the activity bar
 - **Mini card** - optional `voice-satellite-mini-card` for in-dashboard text display without the fullscreen overlay
 - **LLM tools** *(experimental)* - image/video/web/Wikipedia search, weather, stocks/crypto with visual panels. Requires [Voice Satellite - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)
 - **Works on any device** - tablets, phones, computers, kiosks
@@ -464,6 +464,7 @@ Voice Satellite includes a skin system that themes the entire overlay UI - activ
 | **Home Assistant** | Matches your HA theme natively in both light and dark mode. All colors derived from your theme's primary color and card background via CSS custom properties — automatically adapts to any HA theme. Monochromatic four-tone activity bar with flowing gradient animation |
 | **Retro Terminal** | Green phosphor CRT aesthetic with scanlines, bezel frame, monospace font, and screen-edge glow |
 | **Siri** | Full-screen gradient border glow (purple -> blue -> teal -> pink), dark frosted overlay, centered clean text, Apple-inspired design |
+| **Waveform** | Animated flowing neon waveform with 7 layered sine-wave strands that react to mic and TTS audio in real time. Dark/light theme adaptive. GPU-intensive — not recommended for low-end devices |
 
 ### Custom CSS
 
