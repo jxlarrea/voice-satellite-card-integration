@@ -25,14 +25,15 @@ const NO_WAKE_WORD = 'No wake word';
 // microWakeWord models output confidence scores (0–1 via uint8/255).
 // Detection uses sliding window mean > cutoff. The base cutoff comes from
 // the model's companion JSON manifest (or hardcoded fallback in micro-models.js).
-// Sensitivity settings apply a multiplier to the base cutoff:
-//   Slightly sensitive = higher threshold (harder to trigger)
+// Sensitivity scales the detection margin (1 - baseCutoff):
+//   effective = 1 - (1 - baseCutoff) * factor
+//   Slightly sensitive = smaller margin (harder to trigger)
 //   Moderately sensitive = base cutoff as-is
-//   Very sensitive = lower threshold (easier to trigger)
-const SENSITIVITY_MULTIPLIERS = {
-  'Slightly sensitive': 1.3,
+//   Very sensitive = larger margin (easier to trigger)
+const SENSITIVITY_MARGIN_FACTORS = {
+  'Slightly sensitive': 0.5,
   'Moderately sensitive': 1.0,
-  'Very sensitive': 0.7,
+  'Very sensitive': 2.0,
 };
 const DEFAULT_CUTOFF = 0.90;
 
@@ -170,8 +171,9 @@ export class WakeWordManager {
     const label = this._getSensitivityLabel();
     const params = getMicroModelParams(modelName);
     const baseCutoff = params.cutoff ?? DEFAULT_CUTOFF;
-    const multiplier = SENSITIVITY_MULTIPLIERS[label] ?? 1.0;
-    return Math.min(baseCutoff * multiplier, 0.99);
+    const factor = SENSITIVITY_MARGIN_FACTORS[label] ?? 1.0;
+    const effective = 1 - (1 - baseCutoff) * factor;
+    return Math.max(0.1, Math.min(effective, 0.99));
   }
 
   /**
@@ -192,7 +194,7 @@ export class WakeWordManager {
       const params = getMicroModelParams(name);
       const effectiveCutoff = this.getThresholdForModel(name);
       this._log.log('wake-word',
-        `${name}: baseCutoff=${params.cutoff} effective=${effectiveCutoff.toFixed(3)} (${this._getSensitivityLabel()} ×${SENSITIVITY_MULTIPLIERS[this._getSensitivityLabel()]}) slidingWindow=${params.slidingWindow} stepSize=${params.stepSize} (${params._source || 'hardcoded'})`
+        `${name}: baseCutoff=${params.cutoff} effective=${effectiveCutoff.toFixed(3)} (${this._getSensitivityLabel()}, margin ×${SENSITIVITY_MARGIN_FACTORS[this._getSensitivityLabel()]}) slidingWindow=${params.slidingWindow} stepSize=${params.stepSize} (${params._source || 'hardcoded'})`
       );
       return {
         runner,
