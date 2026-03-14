@@ -298,21 +298,25 @@ class VoiceSatellitePanel extends HTMLElement {
       <style>
         voice-satellite-panel {
           display: block;
+          height: 100%;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
           font-family: var(--ha-font-family, Roboto, sans-serif);
           color: var(--primary-text-color, #fff);
         }
         .${P}-toolbar {
+          position: sticky;
+          top: 0;
+          height: var(--header-height, 56px);
           display: flex;
           align-items: center;
-          height: var(--header-height, 56px);
           padding: 0 12px;
           background: var(--app-header-background-color, var(--primary-background-color, #111));
           color: var(--app-header-text-color, var(--text-primary-color, #fff));
           font-size: 20px;
           border-bottom: 1px solid var(--divider-color, #333);
-          position: sticky;
-          top: 0;
           z-index: 10;
+          box-sizing: border-box;
         }
         .${P}-toolbar ha-menu-button {
           flex-shrink: 0;

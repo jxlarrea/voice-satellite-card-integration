@@ -136,17 +136,20 @@ function setup() {
 
   // ── GPU recovery ──────────────────────────────────────────────────
   // Android WebView (Fully Kiosk) sometimes starts with software-rendered
-  // canvas when the GPU isn't ready at cold boot. Detect sluggish FPS in
-  // the first few seconds and recreate the canvas to re-acquire a HW context.
+  // canvas when the GPU isn't ready at cold boot. Detect sluggish FPS
+  // and periodically recreate the canvas to re-acquire a HW context.
+  // Retries every RECOVERY_WINDOW_MS until FPS is acceptable or max attempts reached.
   let recoveryFrameCount = 0;
   let recoveryStart = 0;
-  let recoveryDone = false;
-  let recoveryNeeded = false;
+  let recoveryResolved = false;
+  let recoveryAttempts = 0;
   const RECOVERY_WINDOW_MS = 3000;
   const RECOVERY_FPS_THRESHOLD = 15;
+  const RECOVERY_MAX_ATTEMPTS = 30; // give up after ~90s
 
   function recreateCanvas() {
-    console.log('[waveform] Recreating canvas for GPU re-acquisition');
+    recoveryAttempts++;
+    console.log(`[waveform] Recreating canvas for GPU re-acquisition (attempt ${recoveryAttempts}/${RECOVERY_MAX_ATTEMPTS})`);
     const newCanvas = document.createElement('canvas');
     wrapper.replaceChild(newCanvas, canvas);
     canvas = newCanvas;
@@ -154,7 +157,9 @@ function setup() {
     glowCanvas = document.createElement('canvas');
     glowCtx = glowCanvas.getContext('2d');
     resize();
-    recoveryNeeded = false;
+    // Reset measurement for next window
+    recoveryFrameCount = 0;
+    recoveryStart = 0;
     console.log('[waveform] Canvas recreated');
   }
 
@@ -423,19 +428,26 @@ function setup() {
     const debug = !!document.querySelector('voice-satellite-card')?.config?.debug;
     draw();
 
-    // GPU recovery: measure FPS over the first few seconds of rendering.
-    // If below threshold, flag for canvas recreation on the next activation.
-    if (!recoveryDone) {
+    // GPU recovery: measure FPS in rolling windows and recreate the canvas
+    // each time it's sluggish, until GPU is ready or max attempts exhausted.
+    if (!recoveryResolved) {
       if (!recoveryStart) recoveryStart = t0;
       recoveryFrameCount++;
       const elapsed = t0 - recoveryStart;
       if (elapsed >= RECOVERY_WINDOW_MS) {
         const fps = recoveryFrameCount / elapsed * 1000;
         if (fps < RECOVERY_FPS_THRESHOLD) {
-          console.log(`[waveform] Sluggish FPS detected (${fps.toFixed(1)}) — will recreate canvas on next activation`);
-          recoveryNeeded = true;
+          if (recoveryAttempts >= RECOVERY_MAX_ATTEMPTS) {
+            console.log(`[waveform] GPU recovery failed after ${RECOVERY_MAX_ATTEMPTS} attempts — giving up`);
+            recoveryResolved = true;
+          } else {
+            console.log(`[waveform] Sluggish FPS detected (${fps.toFixed(1)}) — recreating canvas`);
+            recreateCanvas();
+          }
+        } else {
+          console.log(`[waveform] GPU recovery successful (${fps.toFixed(1)} fps) after ${recoveryAttempts} attempt(s)`);
+          recoveryResolved = true;
         }
-        recoveryDone = true;
       }
     }
 
@@ -474,14 +486,8 @@ function setup() {
 
   function startLoop() {
     if (!rafId && !document.hidden) {
-      // If previous run flagged sluggish GPU, recreate canvas before starting
-      if (recoveryNeeded) recreateCanvas();
       detectTheme();
       lastTime = 0;
-      // Reset GPU recovery check each time the loop starts
-      recoveryFrameCount = 0;
-      recoveryStart = 0;
-      recoveryDone = false;
       tick();
     }
   }
