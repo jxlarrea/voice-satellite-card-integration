@@ -85,9 +85,14 @@ const STRAND_DYNAMICS = [
 // Runs once at module load. The wrapper + canvas are added to the DOM
 // only while the waveform skin CSS is active. A MutationObserver on the
 // shared <style> element detects skin changes and mounts/unmounts.
+//
+// Because the waveform chunk may load before #voice-satellite-ui or
+// #voice-satellite-styles exist (race with ensureGlobalUI), setup()
+// retries via MutationObserver on document.body until the UI appears.
 
-const ui = document.getElementById('voice-satellite-ui');
-if (ui) {
+function setup() {
+  const ui = document.getElementById('voice-satellite-ui');
+  if (!ui) return false;
   const barEl = ui.querySelector('.vs-rainbow-bar');
 
   // Theme detection — re-evaluated each time the overlay opens so
@@ -193,11 +198,25 @@ if (ui) {
     else unmount();
   }
 
-  const styleEl = document.getElementById('voice-satellite-styles');
-  if (styleEl) {
-    new MutationObserver(checkSkinActive).observe(styleEl, { childList: true, characterData: true, subtree: true });
+  function observeStyleEl() {
+    const el = document.getElementById('voice-satellite-styles');
+    if (el) {
+      new MutationObserver(checkSkinActive).observe(el, { childList: true, characterData: true, subtree: true });
+      checkSkinActive();
+      return;
+    }
+    // Style element doesn't exist yet — watch <head> for its creation
+    const headObs = new MutationObserver(() => {
+      const created = document.getElementById('voice-satellite-styles');
+      if (created) {
+        headObs.disconnect();
+        new MutationObserver(checkSkinActive).observe(created, { childList: true, characterData: true, subtree: true });
+        checkSkinActive();
+      }
+    });
+    headObs.observe(document.head, { childList: true });
   }
-  checkSkinActive();
+  observeStyleEl();
 
   function draw() {
     if (!drawW || !drawH) return;
@@ -439,6 +458,20 @@ if (ui) {
       else stopLoop();
     }).observe(overlayEl, { attributes: true, attributeFilter: ['class'] });
   }
+
+  return true;
+}
+
+// Try setup immediately; if #voice-satellite-ui doesn't exist yet,
+// watch document.body for its creation.
+if (!setup()) {
+  const bodyObs = new MutationObserver(() => {
+    if (document.getElementById('voice-satellite-ui')) {
+      bodyObs.disconnect();
+      setup();
+    }
+  });
+  bodyObs.observe(document.body, { childList: true });
 }
 
 // ── Skin export ──────────────────────────────────────────────────────

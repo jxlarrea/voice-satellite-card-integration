@@ -160,8 +160,7 @@ export class TtsManager {
 
   stop() {
     this._playing = false;
-    this._preloadedAudio = null;
-    this._preloadedUrl = null;
+    this._destroyPreloadedAudio();
     this._remoteTarget = null;
     this._remoteSawPlaying = false;
     this._remoteInitialState = null;
@@ -193,8 +192,7 @@ export class TtsManager {
    */
   storeStreamingUrl(eventData) {
     this._streamingUrl = null;
-    this._preloadedAudio = null;
-    this._preloadedUrl = null;
+    this._destroyPreloadedAudio();
     if (eventData.tts_output?.url && eventData.tts_output?.stream_response) {
       const url = eventData.tts_output.url;
       this._streamingUrl = url.startsWith('http') ? url : window.location.origin + url;
@@ -303,6 +301,16 @@ export class TtsManager {
       this._onComplete();
     }
   }
+  _destroyPreloadedAudio() {
+    if (this._preloadedAudio) {
+      this._preloadedAudio.pause();
+      this._preloadedAudio.removeAttribute('src');
+      this._preloadedAudio.load();
+      this._preloadedAudio = null;
+    }
+    this._preloadedUrl = null;
+  }
+
   _clearWatchdog() {
     if (this._playbackWatchdog) {
       clearInterval(this._playbackWatchdog);

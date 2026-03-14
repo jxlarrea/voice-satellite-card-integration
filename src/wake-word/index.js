@@ -562,9 +562,7 @@ export class WakeWordManager {
       session._imageLingerTimeout = null;
     }
 
-    if (session.tts.isPlaying) {
-      session.tts.stop();
-    }
+    session.tts.stop();
 
     session.askQuestion.cancel();
     session.pipeline.clearContinueState();

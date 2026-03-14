@@ -236,6 +236,7 @@ export class PipelineManager {
     }
 
     this._card.audio.stopSending();
+    this._card.tts._destroyPreloadedAudio();
     this._binaryHandlerId = null;
     this._isStreaming = false;
 

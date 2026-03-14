@@ -140,9 +140,7 @@ export class DoubleTapHandler {
       this._card._imageLingerTimeout = null;
     }
 
-    if (this._card.tts.isPlaying) {
-      this._card.tts.stop();
-    }
+    this._card.tts.stop();
 
     // Clean up ask_question STT mode (timers, server release, ANNOUNCEMENT blur)
     this._card.askQuestion.cancel();
