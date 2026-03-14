@@ -81,8 +81,8 @@ export class TtsManager {
         this._onComplete();
       });
 
-      // Enable stop word for remote playback (1s delay)
-      this._enableStopWordDelayed();
+      // Stop word disabled — kept for future re-enablement
+      // this._enableStopWordDelayed();
 
       // Safety timeout - if state monitoring never fires, clean up after 2 minutes
       this._endTimer = setTimeout(() => {
@@ -152,8 +152,8 @@ export class TtsManager {
         if (this._card.isReactiveBarEnabled && this._currentAudio) {
           this._card.analyser.attachAudio(this._currentAudio, this._card.audio.audioContext);
         }
-        // Enable stop word after 1s (avoid false triggers from wake word echo)
-        this._enableStopWordDelayed();
+        // Stop word disabled — kept for future re-enablement
+        // this._enableStopWordDelayed();
       },
     });
   }

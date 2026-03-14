@@ -232,8 +232,8 @@ function _playMain(mgr, ann, onComplete, logPrefix) {
 
   if (mediaUrl) {
     mgr.log.log(logPrefix, `Playing media: ${mediaUrl}`);
-    // Enable stop word after 1s of notification audio (voice-based dismiss)
-    _enableStopWordDelayed(mgr);
+    // Stop word disabled — kept for future re-enablement
+    // _enableStopWordDelayed(mgr);
     playMediaFor(mgr, mediaUrl, logPrefix, () => onComplete(ann));
   } else {
     mgr.log.log(logPrefix, 'No media - completing after message display');

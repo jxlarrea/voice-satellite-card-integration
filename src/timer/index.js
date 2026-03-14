@@ -16,6 +16,7 @@
 import { subscribeToEntity, unsubscribeEntity } from '../shared/entity-subscription.js';
 import { processStateChange, resetTimerDedup } from './events.js';
 import { sendCancelTimer } from './comms.js';
+import { INTERACTING_STATES } from '../constants.js';
 import {
   removeContainer,
   removePill, syncDOM, tick, showAlert, clearAlert,
@@ -77,6 +78,11 @@ export class TimerManager {
       clearTimeout(this._removeContainerTimeout);
       this._removeContainerTimeout = null;
     }
+    if (this._deferredAlertTimeout) {
+      clearTimeout(this._deferredAlertTimeout);
+      this._deferredAlertTimeout = null;
+    }
+    this._deferredFinishIds = [];
     removeContainer(this);
     this.clearAlert();
     this._timers = [];
@@ -91,7 +97,13 @@ export class TimerManager {
    * @param {Array<object>} rawTimers - active_timers array from entity attributes
    */
   syncTimers(rawTimers) {
-    if (rawTimers.length === 0) {
+    // Keep deferred timers (finished server-side but still counting down visually)
+    const deferredIds = this._deferredFinishIds || [];
+    const deferredTimers = deferredIds.length > 0
+      ? this._timers.filter((t) => deferredIds.includes(t.id))
+      : [];
+
+    if (rawTimers.length === 0 && deferredTimers.length === 0) {
       this._timers = [];
       this.stopTick();
       removeContainer(this);
@@ -119,18 +131,34 @@ export class TimerManager {
         }
         newTimers.push(existing);
       } else {
-        const elapsed = Math.max(0, Math.floor((now - serverStartedAt) / 1000));
+        // If the timer was created while a pipeline is active (STT/TTS/etc),
+        // defer the visual countdown start to now so the pill doesn't appear
+        // already partially elapsed. Short timers would otherwise finish
+        // server-side before the user even sees the pill.
+        const pipelineActive = INTERACTING_STATES.includes(this._card.currentState);
+        const effectiveStart = pipelineActive ? now : serverStartedAt;
+        const elapsed = Math.max(0, Math.floor((now - effectiveStart) / 1000));
+        if (pipelineActive) {
+          this._log.log('timer', `Deferring timer start (pipeline active): ${raw.id}`);
+        }
         newTimers.push({
           id: raw.id,
           name: raw.name || '',
           totalSeconds: raw.total_seconds,
           secondsLeft: Math.max(0, raw.total_seconds - elapsed),
-          startedAt: serverStartedAt,
+          startedAt: effectiveStart,
           startHours: raw.start_hours || 0,
           startMinutes: raw.start_minutes || 0,
           startSeconds: raw.start_seconds || 0,
           el: null,
         });
+      }
+    }
+
+    // Merge in deferred timers that are still counting down
+    for (const dt of deferredTimers) {
+      if (!newTimers.find((t) => t.id === dt.id)) {
+        newTimers.push(dt);
       }
     }
 

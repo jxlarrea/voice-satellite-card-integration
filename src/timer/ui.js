@@ -53,11 +53,11 @@ export function showAlert(mgr) {
   mgr.alertActive = true;
   mgr.log.log('timer', 'Showing finished alert');
 
-  // Enable stop word detection during timer alert (voice-based dismiss)
-  const wakeWord = mgr.card.wakeWord;
-  if (wakeWord?.active && wakeWord._inference) {
-    wakeWord.enableStopModel(false);
-  }
+  // Stop word disabled — kept for future re-enablement
+  // const wakeWord = mgr.card.wakeWord;
+  // if (wakeWord?.active && wakeWord._inference) {
+  //   wakeWord.enableStopModel(false);
+  // }
 
   mgr.card.ui.showBlurOverlay(BlurReason.TIMER);
 

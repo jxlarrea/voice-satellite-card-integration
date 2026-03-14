@@ -2,11 +2,11 @@
 
 .preview-container {
   font-family: "Google Sans", Roboto, Noto, sans-serif;
-  background: #1a1a22;
+  background: #1a1a1a;
 }
 
 .preview-blur {
-  background: rgba(8, 8, 14, 0.92);
+  background: rgba(8, 8, 8, 0.96);
 }
 
 /* Hide the activity bar — waveform skin has no rainbow bar */
@@ -68,7 +68,7 @@
 }
 .preview-timer {
   color: #e4e4ec;
-  background: #1a1a22;
+  background: #1a1a1a;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
@@ -85,7 +85,7 @@
 /* ─── Light mode ─────────────────────────────────────────────────── */
 
 .wf-light.preview-container { background: #ffffff; }
-.wf-light .preview-blur { background: rgba(240, 240, 248, 0.72); }
+.wf-light .preview-blur { background: rgba(240, 240, 240, 0.72); }
 .wf-light .preview-waveform-dark  { display: none; }
 .wf-light .preview-waveform-light { display: inline; }
 .wf-light .preview-msg.user { color: rgba(26, 26, 46, 0.45); }

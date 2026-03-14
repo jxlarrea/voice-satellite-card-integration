@@ -38,15 +38,43 @@ export function processStateChange(mgr, attrs) {
 
   // If timers were removed and the last event was "finished", show alert
   if (removedIds.length > 0 && lastEvent === 'finished') {
-    mgr.log.log('timer', `Timer(s) finished: ${removedIds.join(', ')}`);
-    if (!mgr.alertActive) {
-      mgr.showAlert();
+    // Check if any removed timer still has visual time remaining (deferred start)
+    let maxRemainingMs = 0;
+    for (const id of removedIds) {
+      const timer = mgr.timers.find((t) => t.id === id);
+      if (timer && timer.secondsLeft > 0) {
+        const remaining = timer.secondsLeft * 1000;
+        if (remaining > maxRemainingMs) maxRemainingMs = remaining;
+      }
     }
-  }
 
-  // Remove pills for removed timers
-  for (const id of removedIds) {
-    mgr.removePill(id);
+    if (maxRemainingMs > 0) {
+      // Timer was deferred — keep the pill counting down, then fire alert
+      mgr.log.log('timer', `Timer(s) finished server-side, deferring alert by ${maxRemainingMs}ms: ${removedIds.join(', ')}`);
+      mgr._deferredFinishIds = removedIds;
+      mgr._deferredAlertTimeout = setTimeout(() => {
+        mgr._deferredAlertTimeout = null;
+        mgr.log.log('timer', `Deferred alert firing for: ${removedIds.join(', ')}`);
+        for (const id of removedIds) {
+          mgr.removePill(id);
+        }
+        mgr.timers = mgr.timers.filter((t) => !removedIds.includes(t.id));
+        if (!mgr.alertActive) mgr.showAlert();
+      }, maxRemainingMs);
+    } else {
+      mgr.log.log('timer', `Timer(s) finished: ${removedIds.join(', ')}`);
+      for (const id of removedIds) {
+        mgr.removePill(id);
+      }
+      if (!mgr.alertActive) {
+        mgr.showAlert();
+      }
+    }
+  } else {
+    // Remove pills for cancelled/removed timers
+    for (const id of removedIds) {
+      mgr.removePill(id);
+    }
   }
 
   mgr.knownTimerIds = newIds;

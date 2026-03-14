@@ -8,9 +8,9 @@
   --wf-text: #e4e4ec;
   --wf-text-dim: rgba(228, 228, 236, 0.5);
   --wf-text-muted: #8888a0;
-  --wf-surface: #1a1a22;
-  --wf-surface-glass: rgba(26, 26, 34, 0.40);
-  --wf-overlay: rgba(8, 8, 14, 0.92);
+  --wf-surface: #1a1a1a;
+  --wf-surface-glass: rgba(26, 26, 26, 0.40);
+  --wf-overlay: rgba(8, 8, 8, 0.96);
   --wf-shadow: rgba(0, 0, 0, 0.4);
   --wf-shadow-lg: rgba(0, 0, 0, 0.5);
   --wf-accent: #7070ff;
@@ -27,7 +27,7 @@
   --wf-text-muted: #6e6e88;
   --wf-surface: #ffffff;
   --wf-surface-glass: rgba(255, 255, 255, 0.35);
-  --wf-overlay: rgba(240, 240, 248, 0.72);
+  --wf-overlay: rgba(240, 240, 240, 0.72);
   --wf-shadow: rgba(0, 0, 0, 0.1);
   --wf-shadow-lg: rgba(0, 0, 0, 0.12);
   --wf-accent: #5050dd;
@@ -242,7 +242,7 @@
   color: var(--wf-text, #e4e4ec);
   font-weight: bold;
   font-style: normal;
-  background: var(--wf-surface, #1a1a22);
+  background: var(--wf-surface, #1a1a1a);
   border: none;
   padding: 14px 18px;
   border-radius: 18px;
@@ -290,7 +290,7 @@
   color: var(--wf-text, #e4e4ec);
   font-weight: bold;
   font-style: normal;
-  background: var(--wf-surface, #1a1a22);
+  background: var(--wf-surface, #1a1a1a);
   border: none;
   padding: 18px 24px;
   border-radius: 18px;
@@ -315,6 +315,27 @@
 @keyframes wf-alert-pulse {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }
   50% { transform: translate(-50%, -50%) scale(1.04); }
+}
+
+/* ─── Timer Light Mode ──────────────────────────────────────────── */
+/* Timer container lives outside #voice-satellite-ui on document.body,
+   so --wf-* variables don't cascade. Use sibling combinator for light. */
+
+#voice-satellite-ui.vs-light ~ .vs-timer-container .vs-timer-pill {
+  color: #1a1a1a;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 4px 8px rgba(0,0,0,0.12);
+}
+
+#voice-satellite-ui.vs-light ~ .vs-timer-container .vs-timer-progress {
+  background: rgba(80, 80, 221, 0.12);
+}
+
+#voice-satellite-ui.vs-light ~ .vs-timer-container .vs-timer-alert,
+#voice-satellite-ui.vs-light ~ .vs-timer-alert {
+  color: #1a1a1a;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1), 0 8px 24px rgba(0,0,0,0.12);
 }
 
 /* ─── Image Panel ───────────────────────────────────────────────── */
