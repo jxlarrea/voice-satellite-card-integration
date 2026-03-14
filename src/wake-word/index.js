@@ -23,17 +23,18 @@ const NO_WAKE_WORD = 'No wake word';
 
 // ─── Detection thresholds ────────────────────────────────────────────
 // microWakeWord models output confidence scores (0–1 via uint8/255).
-// Detection uses sliding window mean > cutoff. Browser audio (WebRTC
-// AGC/NS) produces different feature profiles than ESP32, so these
-// cutoffs are lower than the model manifests' native values.
-const MODEL_THRESHOLDS = {
-  ok_nabu:     { 'Slightly sensitive': 0.65, 'Moderately sensitive': 0.50, 'Very sensitive': 0.35 },
-  hey_jarvis:  { 'Slightly sensitive': 0.55, 'Moderately sensitive': 0.40, 'Very sensitive': 0.30 },
-  hey_mycroft: { 'Slightly sensitive': 0.55, 'Moderately sensitive': 0.40, 'Very sensitive': 0.30 },
-  alexa:       { 'Slightly sensitive': 0.55, 'Moderately sensitive': 0.40, 'Very sensitive': 0.30 },
-  stop:        { 'Slightly sensitive': 0.50, 'Moderately sensitive': 0.40, 'Very sensitive': 0.30 },
+// Detection uses sliding window mean > cutoff. The base cutoff comes from
+// the model's companion JSON manifest (or hardcoded fallback in micro-models.js).
+// Sensitivity settings apply a multiplier to the base cutoff:
+//   Slightly sensitive = higher threshold (harder to trigger)
+//   Moderately sensitive = base cutoff as-is
+//   Very sensitive = lower threshold (easier to trigger)
+const SENSITIVITY_MULTIPLIERS = {
+  'Slightly sensitive': 1.3,
+  'Moderately sensitive': 1.0,
+  'Very sensitive': 0.7,
 };
-const DEFAULT_THRESHOLDS = { 'Slightly sensitive': 0.60, 'Moderately sensitive': 0.45, 'Very sensitive': 0.30 };
+const DEFAULT_CUTOFF = 0.90;
 
 // Wake word phrases matching microWakeWord conventions.
 // DATA_LAST_WAKE_UP in HA core uses these exact strings for dedup.
@@ -160,13 +161,17 @@ export class WakeWordManager {
 
   /**
    * Get the detection threshold for a specific model based on sensitivity setting.
+   * Base cutoff comes from the model's JSON manifest (or hardcoded fallback).
+   * Sensitivity setting applies a multiplier to the base cutoff.
    * @param {string} modelName
    * @returns {number}
    */
   getThresholdForModel(modelName) {
     const label = this._getSensitivityLabel();
-    const modelMap = MODEL_THRESHOLDS[modelName] || DEFAULT_THRESHOLDS;
-    return modelMap[label] ?? DEFAULT_THRESHOLDS['Moderately sensitive'];
+    const params = getMicroModelParams(modelName);
+    const baseCutoff = params.cutoff ?? DEFAULT_CUTOFF;
+    const multiplier = SENSITIVITY_MULTIPLIERS[label] ?? 1.0;
+    return Math.min(baseCutoff * multiplier, 0.99);
   }
 
   /**
@@ -185,13 +190,14 @@ export class WakeWordManager {
   _buildKeywordConfigs(runners) {
     return Object.entries(runners).map(([name, runner]) => {
       const params = getMicroModelParams(name);
+      const effectiveCutoff = this.getThresholdForModel(name);
       this._log.log('wake-word',
-        `${name}: cutoff=${params.cutoff} slidingWindow=${params.slidingWindow} stepSize=${params.stepSize} (${params._source || 'hardcoded'})`
+        `${name}: baseCutoff=${params.cutoff} effective=${effectiveCutoff.toFixed(3)} (${this._getSensitivityLabel()} ×${SENSITIVITY_MULTIPLIERS[this._getSensitivityLabel()]}) slidingWindow=${params.slidingWindow} stepSize=${params.stepSize} (${params._source || 'hardcoded'})`
       );
       return {
         runner,
         name,
-        cutoff: this.getThresholdForModel(name),
+        cutoff: effectiveCutoff,
         slidingWindow: params.slidingWindow,
         stepSize: params.stepSize,
       };

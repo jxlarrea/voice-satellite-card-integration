@@ -25,16 +25,16 @@ const WARMUP_FRAMES = 100;
 // RMS thresholds are for float32 audio in [-1, 1] range.
 // Keyed by sensitivity label; higher thresholds = more noise filtered out.
 const ENERGY_THRESHOLDS = {
-  'Slightly sensitive':   { sleep: 0.12,  wake: 0.15  },
-  'Moderately sensitive': { sleep: 0.07,  wake: 0.09  },
-  'Very sensitive':       { sleep: 0.035, wake: 0.045 },
+  'Slightly sensitive':   { sleep: 0.10,  wake: 0.12  },
+  'Moderately sensitive': { sleep: 0.05,  wake: 0.06  },
+  'Very sensitive':       { sleep: 0.02,  wake: 0.025 },
 };
 const DEFAULT_ENERGY = ENERGY_THRESHOLDS['Moderately sensitive'];
 const SLEEP_CHUNKS = 30;            // ~2.4s of silence before sleeping
 // Buffer recent feature frames during sleep so we can replay them on wake.
-// Each 80ms chunk produces ~8 feature frames. 5 chunks = 400ms of lookback,
+// Each 80ms chunk produces ~8 feature frames. 8 chunks = ~640ms of lookback,
 // enough to capture the onset of a wake word that triggered the energy gate.
-const SLEEP_BUFFER_CHUNKS = 5;
+const SLEEP_BUFFER_CHUNKS = 8;
 
 export class MicroWakeWordInference {
   /**
