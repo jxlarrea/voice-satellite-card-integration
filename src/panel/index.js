@@ -153,7 +153,11 @@ class VoiceSatellitePanel extends HTMLElement {
     this._updateStatus();
   }
 
-  set narrow(narrow) { this._narrow = narrow; }
+  set narrow(narrow) {
+    this._narrow = narrow;
+    const menuBtn = this.querySelector(`.${P}-menu-btn`);
+    if (menuBtn) menuBtn.narrow = narrow;
+  }
   set route(route) { /* unused */ }
   set panel(panel) { /* unused */ }
 
@@ -177,6 +181,8 @@ class VoiceSatellitePanel extends HTMLElement {
 
   _updateForm() {
     if (!this._hass) return;
+    const menuBtn = this.querySelector(`.${P}-menu-btn`);
+    if (menuBtn) menuBtn.hass = this._hass;
     const entityForm = this.querySelector(`.${P}-entity-container ha-form`);
     if (entityForm) entityForm.hass = this._hass;
     const form = this.querySelector(`.${P}-form-container ha-form`);
@@ -304,6 +310,12 @@ class VoiceSatellitePanel extends HTMLElement {
           color: var(--app-header-text-color, var(--text-primary-color, #fff));
           font-size: 20px;
           border-bottom: 1px solid var(--divider-color, #333);
+          position: sticky;
+          top: 0;
+          z-index: 10;
+        }
+        .${P}-toolbar ha-menu-button {
+          flex-shrink: 0;
         }
         .${P}-toolbar-title {
           flex: 1;
@@ -454,6 +466,7 @@ class VoiceSatellitePanel extends HTMLElement {
       </style>
 
       <div class="${P}-toolbar">
+        <ha-menu-button class="${P}-menu-btn"></ha-menu-button>
         <div class="${P}-toolbar-title">
           <img class="${P}-toolbar-icon" src="/voice_satellite/brand/icon.png" alt="">
           Voice Satellite
@@ -510,6 +523,13 @@ class VoiceSatellitePanel extends HTMLElement {
       </div>
       </div>
     `;
+
+    // Set up menu button (HA built-in, handles sidebar toggle)
+    const menuBtn = this.querySelector(`.${P}-menu-btn`);
+    if (menuBtn) {
+      menuBtn.hass = this._hass;
+      menuBtn.narrow = this._narrow;
+    }
 
     // Set up preview (shadow DOM for style isolation)
     const previewHost = this.querySelector(`.${P}-preview-host`);
