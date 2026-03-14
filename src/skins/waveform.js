@@ -22,13 +22,13 @@ import previewCSS from './waveform-preview.css';
 
 // ── Dark theme strands (neon on dark overlay) ──
 const WAVE_STRANDS_DARK = [
-  { rgb: [30, 10, 140],  alpha: 0.06, blur: 55, lineW: 16, speed: 0.4, freqs: [1.2, 2.0, 5.0],  weights: [0.55, 0.30, 0.15], phase: 0,    ampScale: 1.3, feather: 8 },
-  { rgb: [70, 40, 200],  alpha: 0.10, blur: 40, lineW: 10, speed: 0.55, freqs: [1.5, 3.0, 6.0],  weights: [0.50, 0.30, 0.20], phase: 0.8,  ampScale: 1.2, feather: 6 },
-  { rgb: [120, 60, 255], alpha: 0.18, blur: 28, lineW: 5,  speed: 0.7, freqs: [2.0, 3.5, 7.0],  weights: [0.45, 0.35, 0.20], phase: 1.6,  ampScale: 1.1, feather: 3.5 },
-  { rgb: [30, 160, 255], alpha: 0.14, blur: 30, lineW: 6,  speed: 0.65, freqs: [1.8, 4.2, 8.0],  weights: [0.40, 0.35, 0.25], phase: 2.8,  ampScale: 1.15, feather: 4 },
-  { rgb: [160, 80, 255], alpha: 0.30, blur: 22, lineW: 3.5, speed: 0.85, freqs: [2.2, 4.0, 6.5],  weights: [0.45, 0.30, 0.25], phase: 0.4,  ampScale: 1.0, feather: 2 },
-  { rgb: [140, 170, 255], alpha: 0.50, blur: 16, lineW: 2,  speed: 0.75, freqs: [1.6, 3.2, 5.5],  weights: [0.40, 0.35, 0.25], phase: 2.0,  ampScale: 0.9, feather: 0.8 },
-  { rgb: [200, 210, 255], alpha: 0.80, blur: 10, lineW: 1.2, speed: 0.7, freqs: [2.0, 3.0, 5.0],  weights: [0.45, 0.30, 0.25], phase: 0.3,  ampScale: 0.8, feather: 0 },
+  { rgb: [30, 10, 140],  alpha: 0.08, blur: 55, lineW: 16, speed: 0.4, freqs: [1.2, 2.0, 5.0],  weights: [0.55, 0.30, 0.15], phase: 0,    ampScale: 1.3, feather: 8 },
+  { rgb: [70, 40, 200],  alpha: 0.13, blur: 40, lineW: 10, speed: 0.55, freqs: [1.5, 3.0, 6.0],  weights: [0.50, 0.30, 0.20], phase: 0.8,  ampScale: 1.2, feather: 6 },
+  { rgb: [120, 60, 255], alpha: 0.23, blur: 28, lineW: 5,  speed: 0.7, freqs: [2.0, 3.5, 7.0],  weights: [0.45, 0.35, 0.20], phase: 1.6,  ampScale: 1.1, feather: 3.5 },
+  { rgb: [30, 160, 255], alpha: 0.18, blur: 30, lineW: 6,  speed: 0.65, freqs: [1.8, 4.2, 8.0],  weights: [0.40, 0.35, 0.25], phase: 2.8,  ampScale: 1.15, feather: 4 },
+  { rgb: [160, 80, 255], alpha: 0.38, blur: 22, lineW: 3.5, speed: 0.85, freqs: [2.2, 4.0, 6.5],  weights: [0.45, 0.30, 0.25], phase: 0.4,  ampScale: 1.0, feather: 2 },
+  { rgb: [140, 170, 255], alpha: 0.62, blur: 16, lineW: 2,  speed: 0.75, freqs: [1.6, 3.2, 5.5],  weights: [0.40, 0.35, 0.25], phase: 2.0,  ampScale: 0.9, feather: 0.8 },
+  { rgb: [200, 210, 255], alpha: 0.90, blur: 10, lineW: 1.2, speed: 0.7, freqs: [2.0, 3.0, 5.0],  weights: [0.45, 0.30, 0.25], phase: 0.3,  ampScale: 0.8, feather: 0 },
 ];
 const WAVE_STRANDS_DARK_ERROR = [
   { rgb: [140, 10, 10],  alpha: 0.06, blur: 55, lineW: 16, speed: 0.4, freqs: [1.2, 2.0, 5.0],  weights: [0.55, 0.30, 0.15], phase: 0,    ampScale: 1.3, feather: 8 },
