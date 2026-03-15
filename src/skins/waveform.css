@@ -19,6 +19,21 @@
   --wf-scrollbar-hover: rgba(255, 255, 255, 0.35);
   --wf-progress: rgba(112, 112, 255, 0.18);
   --wf-badge-bg: rgba(255, 255, 255, 0.08);
+  /* Strand colors — override via custom CSS */
+  --wf-strand-1: #1e0a8c;
+  --wf-strand-2: #4628c8;
+  --wf-strand-3: #783cff;
+  --wf-strand-4: #1ea0ff;
+  --wf-strand-5: #a050ff;
+  --wf-strand-6: #8caaff;
+  --wf-strand-7: #c8d2ff;
+  --wf-strand-error-1: #8c0a0a;
+  --wf-strand-error-2: #c81e1e;
+  --wf-strand-error-3: #f03232;
+  --wf-strand-error-4: #ff503c;
+  --wf-strand-error-5: #ff7864;
+  --wf-strand-error-6: #ffa08c;
+  --wf-strand-error-7: #ffc8be;
 }
 
 #voice-satellite-ui.vs-light {
@@ -36,6 +51,21 @@
   --wf-scrollbar-hover: rgba(0, 0, 0, 0.3);
   --wf-progress: rgba(80, 80, 221, 0.12);
   --wf-badge-bg: rgba(0, 0, 0, 0.06);
+  /* Strand colors — override via custom CSS */
+  --wf-strand-1: #140064;
+  --wf-strand-2: #3214a0;
+  --wf-strand-3: #501ec8;
+  --wf-strand-4: #0064d2;
+  --wf-strand-5: #7828c8;
+  --wf-strand-6: #3c32b4;
+  --wf-strand-7: #281e8c;
+  --wf-strand-error-1: #640000;
+  --wf-strand-error-2: #a00a0a;
+  --wf-strand-error-3: #c81414;
+  --wf-strand-error-4: #dc281e;
+  --wf-strand-error-5: #c83c32;
+  --wf-strand-error-6: #b42828;
+  --wf-strand-error-7: #961414;
 }
 
 /* Font */

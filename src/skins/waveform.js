@@ -121,7 +121,48 @@ function setup() {
     isDark = dark;
     ui.classList.toggle('vs-dark', isDark);
     ui.classList.toggle('vs-light', !isDark);
+    readStrandOverrides();
   }
+
+  // ── CSS variable → strand color overrides ──────────────────────────
+  // Reads --wf-strand-N and --wf-strand-error-N from computed styles.
+  // Called after detectTheme() so the correct .vs-dark/.vs-light vars
+  // are active. Users override via the custom CSS field.
+  function parseHexToRGB(hex) {
+    hex = hex.trim().replace('#', '');
+    if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+    const n = parseInt(hex, 16);
+    return [n >> 16 & 255, n >> 8 & 255, n & 255];
+  }
+
+  function parseCSSColor(val) {
+    if (!val) return null;
+    val = val.trim();
+    if (val.startsWith('#')) return parseHexToRGB(val);
+    const m = val.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+    if (m) return [+m[1], +m[2], +m[3]];
+    return null;
+  }
+
+  function readStrandOverrides() {
+    const style = getComputedStyle(ui);
+    const strandSets = [
+      { normal: isDark ? WAVE_STRANDS_DARK : WAVE_STRANDS_LIGHT,
+        error:  isDark ? WAVE_STRANDS_DARK_ERROR : WAVE_STRANDS_LIGHT_ERROR },
+    ];
+    for (const { normal, error } of strandSets) {
+      for (let i = 0; i < normal.length; i++) {
+        const cv = style.getPropertyValue(`--wf-strand-${i + 1}`);
+        const parsed = parseCSSColor(cv);
+        if (parsed) normal[i].rgb = parsed;
+
+        const ev = style.getPropertyValue(`--wf-strand-error-${i + 1}`);
+        const eParsed = parseCSSColor(ev);
+        if (eParsed) error[i].rgb = eParsed;
+      }
+    }
+  }
+
   detectTheme();
 
   // Canvas setup — elements created once, contexts deferred to first startLoop().
@@ -478,7 +519,7 @@ function setup() {
         decay: 0.003 + Math.random() * 0.008,         // ~2–5s lifetime
         r: s.rgb[0], g: s.rgb[1], b: s.rgb[2],
         size: 1.5 + Math.random() * 2.5,
-        baseAlpha: 0.35 + Math.random() * 0.3,
+        baseAlpha: 0.35 + Math.random() * 0.5,
       });
     }
 

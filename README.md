@@ -476,6 +476,78 @@ Each skin defines CSS classes for all UI elements. Use the **Custom CSS** field 
 }
 ```
 
+### Waveform Skin CSS Variables
+
+The Waveform skin exposes CSS variables for full color customization of strands, background, and UI elements. Override them in the **Custom CSS** field. Dark and light themes have independent variables — set them separately to customize each mode.
+
+#### Available Variables
+
+| Variable | Description |
+|----------|-------------|
+| `--wf-overlay` | Full-screen background behind everything |
+| `--wf-surface` | Background of elevated UI elements (panels, timers) |
+| `--wf-surface-glass` | Transparent panel background over the waveform |
+| `--wf-text` | Primary text color |
+| `--wf-text-dim` | Secondary/dimmed text color |
+| `--wf-text-muted` | Muted text color |
+| `--wf-accent` | Accent color (progress bars, highlights) |
+| `--wf-strand-1` through `--wf-strand-7` | Strand colors (1 = outermost glow, 7 = innermost core) |
+| `--wf-strand-error-1` through `--wf-strand-error-7` | Strand colors during error state |
+
+#### Example: Monochrome Theme
+
+```css
+/* Monochrome dark */
+#voice-satellite-ui.vs-dark {
+  --wf-overlay: #000000;
+  --wf-surface: #1a1a1a;
+  --wf-surface-glass: rgba(26, 26, 26, 0.40);
+  --wf-text: #e0e0e0;
+  --wf-text-dim: rgba(224, 224, 224, 0.5);
+  --wf-text-muted: #888888;
+  --wf-accent: #aaaaaa;
+  --wf-strand-1: #1a1a1a;
+  --wf-strand-2: #333333;
+  --wf-strand-3: #555555;
+  --wf-strand-4: #666666;
+  --wf-strand-5: #888888;
+  --wf-strand-6: #aaaaaa;
+  --wf-strand-7: #cccccc;
+  --wf-strand-error-1: #1a1a1a;
+  --wf-strand-error-2: #333333;
+  --wf-strand-error-3: #555555;
+  --wf-strand-error-4: #666666;
+  --wf-strand-error-5: #888888;
+  --wf-strand-error-6: #aaaaaa;
+  --wf-strand-error-7: #cccccc;
+}
+
+/* Monochrome light */
+#voice-satellite-ui.vs-light {
+  --wf-overlay: #f0f0f0;
+  --wf-surface: #ffffff;
+  --wf-surface-glass: rgba(255, 255, 255, 0.35);
+  --wf-text: #1a1a1a;
+  --wf-text-dim: rgba(26, 26, 26, 0.45);
+  --wf-text-muted: #777777;
+  --wf-accent: #555555;
+  --wf-strand-1: #cccccc;
+  --wf-strand-2: #aaaaaa;
+  --wf-strand-3: #888888;
+  --wf-strand-4: #777777;
+  --wf-strand-5: #555555;
+  --wf-strand-6: #333333;
+  --wf-strand-7: #1a1a1a;
+  --wf-strand-error-1: #cccccc;
+  --wf-strand-error-2: #aaaaaa;
+  --wf-strand-error-3: #888888;
+  --wf-strand-error-4: #777777;
+  --wf-strand-error-5: #555555;
+  --wf-strand-error-6: #333333;
+  --wf-strand-error-7: #1a1a1a;
+}
+```
+
 ## Experimental: LLM Tools
 
 Voice Satellite supports displaying rich visual results from LLM tool calls inline during voice interactions. These features require the **[Voice Satellite - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)** integration, which provides the tools to your conversation agent.
