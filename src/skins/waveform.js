@@ -124,7 +124,11 @@ function setup() {
   }
   detectTheme();
 
-  // Canvas setup — elements created once, mounted/unmounted as needed
+  // Canvas setup — elements created once, contexts deferred to first startLoop().
+  // Deferring getContext('2d') avoids Android WebView's lazy GPU init race:
+  // if called too early (at page load), Skia silently falls back to software
+  // rendering. By waiting until the overlay opens, the GPU process has had
+  // time to initialize.
   const wrapper = document.createElement('div');
   wrapper.className = 'vs-waveform';
   wrapper.style.opacity = '0'; // prevent flash before skin CSS loads
@@ -132,12 +136,21 @@ function setup() {
   wrapper.appendChild(canvas);
 
   const CTX_OPTS = { willReadFrequently: false };
-  let ctx = canvas.getContext('2d', CTX_OPTS);
+  let ctx = null;
 
   // Offscreen canvas for glow pass — rendered at half res, composited
   // with a single blur instead of per-strand ctx.filter + shadowBlur.
   let glowCanvas = document.createElement('canvas');
-  let glowCtx = glowCanvas.getContext('2d', CTX_OPTS);
+  let glowCtx = null;
+  let contextsInitialized = false;
+
+  function initContexts() {
+    if (contextsInitialized) return;
+    console.log('[waveform] Initializing canvas contexts (deferred)');
+    ctx = canvas.getContext('2d', CTX_OPTS);
+    glowCtx = glowCanvas.getContext('2d', CTX_OPTS);
+    contextsInitialized = true;
+  }
 
   let drawW = 0, drawH = 0, rafId = null, lastTime = 0, lastTickTime = 0;
   let mounted = false;
@@ -152,7 +165,7 @@ function setup() {
   let recoveryStart = 0;
   let recoveryResolved = false;
   let recoveryAttempts = 0;
-  const RECOVERY_WINDOW_MS = 3000;
+  const RECOVERY_WINDOW_MS = 1000;
   const RECOVERY_FPS_THRESHOLD = 15;
   const RECOVERY_MAX_ATTEMPTS = 30; // give up after ~90s
 
@@ -220,7 +233,7 @@ function setup() {
 
   function resize() {
     const rect = wrapper.getBoundingClientRect();
-    if (!rect.width || !rect.height) { drawW = 0; drawH = 0; return; }
+    if (!rect.width || !rect.height || !ctx) { drawW = 0; drawH = 0; return; }
     // Cap DPR — background waveform doesn't need retina sharpness
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     drawW = rect.width;
@@ -577,6 +590,8 @@ function setup() {
 
   function startLoop() {
     if (!rafId && !document.hidden) {
+      initContexts();
+      resize();
       detectTheme();
       lastTime = 0;
       tick();
