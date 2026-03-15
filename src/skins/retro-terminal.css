@@ -259,6 +259,7 @@
   opacity: 0;
   animation: terminal-fade-in 0.25s ease forwards;
   word-wrap: break-word;
+  white-space: pre-line;
   background: none;
   border: none;
   box-shadow: none;
