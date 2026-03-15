@@ -77,6 +77,7 @@ export const DEFAULT_CONFIG = {
 
   // Skin
   skin: 'default',
+  theme_mode: 'auto',
   custom_css: '',
   text_scale: 100,
   reactive_bar: true,

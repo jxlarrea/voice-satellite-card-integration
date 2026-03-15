@@ -103,12 +103,20 @@ function setup() {
   document.body.appendChild(themeProbe);
 
   function detectTheme() {
-    const rgb = getComputedStyle(themeProbe).color;
-    const m = rgb.match(/(\d+)/g);
-    let dark = true;
-    if (m) {
-      const [r, g, b] = m.map(Number);
-      dark = (0.299 * r + 0.587 * g + 0.114 * b) < 128;
+    const mode = ui.dataset.themeMode || 'auto';
+    let dark;
+    if (mode === 'dark') {
+      dark = true;
+    } else if (mode === 'light') {
+      dark = false;
+    } else {
+      const rgb = getComputedStyle(themeProbe).color;
+      const m = rgb.match(/(\d+)/g);
+      dark = true;
+      if (m) {
+        const [r, g, b] = m.map(Number);
+        dark = (0.299 * r + 0.587 * g + 0.114 * b) < 128;
+      }
     }
     isDark = dark;
     ui.classList.toggle('vs-dark', isDark);
@@ -179,6 +187,15 @@ function setup() {
   const ribbonW = new Float64Array(PTS + 1);
   const strandPaths = new Array(STRAND_DYNAMICS.length);
   const strandCoreColors = new Array(STRAND_DYNAMICS.length);
+
+  // ── Particle system ──
+  const MAX_PARTICLES = 50;
+  const particlePool = [];
+  // Per-strand center Y cache so particles can follow their strand
+  const strandCenterY = new Array(STRAND_DYNAMICS.length);
+  for (let i = 0; i < STRAND_DYNAMICS.length; i++) {
+    strandCenterY[i] = new Float64Array(PTS + 1);
+  }
 
   function mount() {
     if (mounted) return;
@@ -354,6 +371,9 @@ function setup() {
         ribbonW[i] = Math.max(0.3, halfBase * (0.25 + 0.75 * displacement) * thickMod);
       }
 
+      // Cache center Y for particle tracking
+      strandCenterY[si].set(ribbonY);
+
       // Build ribbon path
       const path = new Path2D();
       for (let i = 0; i <= pts; i++) {
@@ -418,12 +438,82 @@ function setup() {
       ctx.fillStyle = strandCoreColors[si];
       ctx.fill(strandPaths[si]);
     }
+
+    // ── Particles: soft light specks drifting with the wave current ──
+    // Spawn — higher audio level = more particles
+    const spawnChance = 0.4 + rawLevel * 2;
+    const spawnCount = Math.floor(spawnChance) + (Math.random() < (spawnChance % 1) ? 1 : 0);
+    for (let sp = 0; sp < spawnCount && particlePool.length < MAX_PARTICLES; sp++) {
+      // Pick a color from a random strand but don't lock to its path
+      const si = Math.floor(Math.random() * strands.length);
+      const s = strands[si];
+      // Blend Y from 2 random strands for loose positioning
+      const sa = Math.floor(Math.random() * strands.length);
+      const sb = Math.floor(Math.random() * strands.length);
+      const blend = Math.random();
+      const startN = 0.08 + Math.random() * 0.84;
+      particlePool.push({
+        sa, sb, blend,
+        n: startN,
+        speed: -(0.01 + Math.random() * 0.04),       // flow left (same as strands), varied rates
+        yOff: (Math.random() - 0.5) * maxAmp * 0.6,  // wide vertical scatter
+        yDrift: (Math.random() - 0.5) * 6,            // vertical wander
+        age: 0,
+        fadeIn: 0.6 + Math.random() * 0.8,             // 0.6–1.4s to fully appear
+        life: 1.0,
+        decay: 0.003 + Math.random() * 0.008,         // ~2–5s lifetime
+        r: s.rgb[0], g: s.rgb[1], b: s.rgb[2],
+        size: 1.5 + Math.random() * 2.5,
+        baseAlpha: 0.35 + Math.random() * 0.3,
+      });
+    }
+
+    // Update & draw particles
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = particlePool.length - 1; i >= 0; i--) {
+      const p = particlePool[i];
+      p.n += p.speed * dt;
+      p.yOff += p.yDrift * dt;
+      p.age += dt;
+      p.life -= p.decay;
+      if (p.life <= 0 || p.n < 0.02 || p.n > 0.98) {
+        particlePool.splice(i, 1);
+        continue;
+      }
+      // Slow fade-in + fade-out at end of life
+      const fadeInT = Math.min(p.age / p.fadeIn, 1);
+      const fadeOutT = Math.min(p.life / 0.3, 1); // fade out over last 0.3 of life
+      const visibility = fadeInT * fadeInT * fadeOutT; // ease-in curve
+      // Blend Y from two strands for organic placement
+      const idx = p.n * pts;
+      const lo = Math.floor(idx);
+      const hi = Math.min(lo + 1, pts);
+      const frac = idx - lo;
+      const ya = strandCenterY[p.sa][lo] + (strandCenterY[p.sa][hi] - strandCenterY[p.sa][lo]) * frac;
+      const yb = strandCenterY[p.sb][lo] + (strandCenterY[p.sb][hi] - strandCenterY[p.sb][lo]) * frac;
+      const strandY = ya + (yb - ya) * p.blend;
+      const px = p.n * drawW;
+      const py = strandY + p.yOff;
+      const a = visibility * p.baseAlpha;
+      const sz = p.size * (0.4 + visibility * 0.6);
+      // Smooth radial gradient glow
+      const radius = sz * 5;
+      const grad = ctx.createRadialGradient(px, py, 0, px, py, radius);
+      grad.addColorStop(0, `rgba(${p.r},${p.g},${p.b},${a * 0.8})`);
+      grad.addColorStop(0.25, `rgba(${p.r},${p.g},${p.b},${a * 0.35})`);
+      grad.addColorStop(0.6, `rgba(${p.r},${p.g},${p.b},${a * 0.1})`);
+      grad.addColorStop(1, `rgba(${p.r},${p.g},${p.b},0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(px, py, radius, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
   }
 
   function tick() {
     const t0 = performance.now();
     const interval = Number(document.querySelector('voice-satellite-card')?.config?.reactive_bar_update_interval_ms) || 33;
-    if (t0 - lastTickTime < Math.max(17, interval)) { rafId = requestAnimationFrame(tick); return; }
+    if (t0 - lastTickTime < Math.max(8, interval)) { rafId = requestAnimationFrame(tick); return; }
     lastTickTime = t0;
     const debug = !!document.querySelector('voice-satellite-card')?.config?.debug;
     draw();

@@ -99,6 +99,26 @@ export class UIManager {
     this._applyCustomCSS();
     this._applyTextScale();
     this._applyBackgroundOpacity();
+    this._applyThemeMode();
+  }
+
+  _applyThemeMode() {
+    if (!this._globalUI) return;
+    const mode = this._card.config.theme_mode || 'auto';
+    this._globalUI.dataset.themeMode = mode;
+    // For skins that use HA CSS variables (Home Assistant skin), apply
+    // vs-dark/vs-light classes so CSS overrides can force theme colors.
+    if (mode === 'dark') {
+      this._globalUI.classList.add('vs-dark');
+      this._globalUI.classList.remove('vs-light');
+    } else if (mode === 'light') {
+      this._globalUI.classList.add('vs-light');
+      this._globalUI.classList.remove('vs-dark');
+    } else {
+      // Auto — remove forced classes; waveform.js manages its own,
+      // HA skin relies on native CSS variables.
+      this._globalUI.classList.remove('vs-dark', 'vs-light');
+    }
   }
 
   // ─── State-Driven Bar Updates ─────────────────────────────────────

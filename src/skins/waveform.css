@@ -10,7 +10,7 @@
   --wf-text-muted: #8888a0;
   --wf-surface: #1a1a1a;
   --wf-surface-glass: rgba(26, 26, 26, 0.40);
-  --wf-overlay: rgba(8, 8, 8, 0.96);
+  --wf-overlay: rgb(0, 0, 0);
   --wf-shadow: rgba(0, 0, 0, 0.4);
   --wf-shadow-lg: rgba(0, 0, 0, 0.5);
   --wf-accent: #7070ff;
@@ -27,7 +27,7 @@
   --wf-text-muted: #6e6e88;
   --wf-surface: #ffffff;
   --wf-surface-glass: rgba(255, 255, 255, 0.35);
-  --wf-overlay: rgba(240, 240, 240, 0.72);
+  --wf-overlay: rgb(240, 240, 240);
   --wf-shadow: rgba(0, 0, 0, 0.1);
   --wf-shadow-lg: rgba(0, 0, 0, 0.12);
   --wf-accent: #5050dd;
@@ -51,8 +51,6 @@
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background: var(--wf-overlay) !important;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   opacity: 0;
   transition: opacity 0.3s ease;
   z-index: 9999;

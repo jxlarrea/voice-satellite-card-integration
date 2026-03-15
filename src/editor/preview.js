@@ -96,9 +96,35 @@ function buildWaveformSVG() {
     return `<g class="${cls}">${filters}${paths}</g>`;
   }
 
+  // Generate scattered particles for both themes
+  function renderParticles(strands, cls, count) {
+    let circles = '';
+    let seed = 42;
+    function rand() { seed = (seed * 16807 + 0) % 2147483647; return seed / 2147483647; }
+    for (let i = 0; i < count; i++) {
+      const s = strands[Math.floor(rand() * strands.length)];
+      const n = 0.08 + rand() * 0.84;
+      const env = Math.pow(Math.sin(n * Math.PI), 2.4);
+      let val = 0;
+      for (let f = 0; f < s.freqs.length; f++) {
+        val += Math.sin(n * Math.PI * 2 * s.freqs[f] + s.phase) * s.weights[f];
+      }
+      const baseY = CY + val * env * AMP * s.amp;
+      const x = n * W + (rand() - 0.5) * 40;
+      const y = baseY + (rand() - 0.5) * AMP * 1.2;
+      const r = 2 + rand() * 4;
+      const alpha = 0.4 + rand() * 0.45;
+      circles += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="rgb(${s.rgb})" opacity="${alpha.toFixed(3)}" filter="url(#particle-blur)"/>`;
+    }
+    return `<g class="${cls}">${circles}</g>`;
+  }
+
   return `<svg class="preview-waveform-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+    <defs><filter id="particle-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2"/></filter></defs>
     ${renderGroup(darkStrands, 'preview-waveform-dark')}
+    ${renderParticles(darkStrands, 'preview-waveform-dark', 25)}
     ${renderGroup(lightStrands, 'preview-waveform-light')}
+    ${renderParticles(lightStrands, 'preview-waveform-light', 25)}
   </svg>`;
 }
 
@@ -136,7 +162,8 @@ export function renderPreview(shadowRoot, config) {
   const overlayStyle = skin.overlayColor
     ? `background:rgba(${skin.overlayColor[0]},${skin.overlayColor[1]},${skin.overlayColor[2]},${bgOpacity})`
     : '';
-  const isDark = hass?.themes?.darkMode !== false;
+  const themeMode = config.theme_mode || 'auto';
+  const isDark = themeMode === 'dark' ? true : themeMode === 'light' ? false : hass?.themes?.darkMode !== false;
   const themeClass = isDark ? 'wf-dark' : 'wf-light';
   shadowRoot.innerHTML = `
     <style>

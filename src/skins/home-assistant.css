@@ -14,6 +14,23 @@
   -webkit-user-select: none;
 }
 
+/* ─── Forced theme overrides ──────────────────────────────────────── */
+/* When theme_mode is forced to dark or light, override HA CSS variables */
+#voice-satellite-ui.vs-dark {
+  --primary-text-color: #e1e1e1;
+  --secondary-text-color: rgba(255, 255, 255, 0.54);
+  --primary-background-color: #111111;
+  --card-background-color: #1c1c1c;
+  --primary-color: #03a9f4;
+}
+#voice-satellite-ui.vs-light {
+  --primary-text-color: #212121;
+  --secondary-text-color: rgba(0, 0, 0, 0.54);
+  --primary-background-color: #fafafa;
+  --card-background-color: #ffffff;
+  --primary-color: #03a9f4;
+}
+
 /* Blur Overlay — uses card-background-color for theme-adaptive backdrop */
 #voice-satellite-ui .vs-blur-overlay {
   position: fixed;
