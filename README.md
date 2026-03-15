@@ -496,6 +496,11 @@ The Waveform skin exposes CSS variables for full color customization of strands,
 
 #### Example: Monochrome Theme
 
+<p align="center">
+ <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/waveform_mono_light.jpg" alt="Waveform Skin Light Monochrome" width="49%"/>
+ <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/waveform_mono_dark.jpg" alt="Waveform Skin Dark Monochrome" width="49%"/>
+</p>
+
 ```css
 /* Monochrome dark */
 #voice-satellite-ui.vs-dark {
