@@ -131,12 +131,13 @@ function setup() {
   let canvas = document.createElement('canvas');
   wrapper.appendChild(canvas);
 
-  let ctx = canvas.getContext('2d');
+  const CTX_OPTS = { willReadFrequently: false };
+  let ctx = canvas.getContext('2d', CTX_OPTS);
 
   // Offscreen canvas for glow pass — rendered at half res, composited
   // with a single blur instead of per-strand ctx.filter + shadowBlur.
   let glowCanvas = document.createElement('canvas');
-  let glowCtx = glowCanvas.getContext('2d');
+  let glowCtx = glowCanvas.getContext('2d', CTX_OPTS);
 
   let drawW = 0, drawH = 0, rafId = null, lastTime = 0, lastTickTime = 0;
   let mounted = false;
@@ -161,9 +162,9 @@ function setup() {
     const newCanvas = document.createElement('canvas');
     wrapper.replaceChild(newCanvas, canvas);
     canvas = newCanvas;
-    ctx = canvas.getContext('2d');
+    ctx = canvas.getContext('2d', CTX_OPTS);
     glowCanvas = document.createElement('canvas');
-    glowCtx = glowCanvas.getContext('2d');
+    glowCtx = glowCanvas.getContext('2d', CTX_OPTS);
     resize();
     // Reset measurement for next window
     recoveryFrameCount = 0;
