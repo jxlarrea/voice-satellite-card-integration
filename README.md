@@ -513,13 +513,6 @@ The Waveform skin exposes CSS variables for full color customization of strands,
   --wf-strand-5: #888888;
   --wf-strand-6: #aaaaaa;
   --wf-strand-7: #cccccc;
-  --wf-strand-error-1: #1a1a1a;
-  --wf-strand-error-2: #333333;
-  --wf-strand-error-3: #555555;
-  --wf-strand-error-4: #666666;
-  --wf-strand-error-5: #888888;
-  --wf-strand-error-6: #aaaaaa;
-  --wf-strand-error-7: #cccccc;
 }
 
 /* Monochrome light */
@@ -538,13 +531,6 @@ The Waveform skin exposes CSS variables for full color customization of strands,
   --wf-strand-5: #555555;
   --wf-strand-6: #333333;
   --wf-strand-7: #1a1a1a;
-  --wf-strand-error-1: #cccccc;
-  --wf-strand-error-2: #aaaaaa;
-  --wf-strand-error-3: #888888;
-  --wf-strand-error-4: #777777;
-  --wf-strand-error-5: #555555;
-  --wf-strand-error-6: #333333;
-  --wf-strand-error-7: #1a1a1a;
 }
 ```
 
