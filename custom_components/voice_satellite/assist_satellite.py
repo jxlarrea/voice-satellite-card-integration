@@ -1100,6 +1100,12 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                     base_url = "http://127.0.0.1:8123"
                 full_url = f"{base_url}{tts_url}"
 
+            _LOGGER.debug(
+                "Measuring TTS duration for '%s': %s",
+                self._satellite_name,
+                full_url,
+            )
+
             session = async_get_clientsession(self.hass)
             async with session.get(full_url) as resp:
                 if resp.status == 200:
@@ -1110,7 +1116,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                         import mutagen
 
                         audio_file = mutagen.File(io.BytesIO(audio_data))
-                        if audio_file and audio_file.info and audio_file.info.length:
+                        if audio_file is not None and audio_file.info and audio_file.info.length:
                             duration = round(audio_file.info.length, 2)
                     except Exception:
                         pass
@@ -1126,6 +1132,12 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                                 )
                         except Exception:
                             pass
+                    if duration:
+                        _LOGGER.debug(
+                            "TTS audio duration for '%s': %.2fs",
+                            self._satellite_name,
+                            duration,
+                        )
                 else:
                     _LOGGER.warning(
                         "TTS proxy returned %d for '%s'",
