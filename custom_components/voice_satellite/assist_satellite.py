@@ -1070,17 +1070,19 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                     )
 
     async def _send_tts_audio_duration(self, tts_url: str) -> None:
-        """Measure TTS audio duration via mutagen and send to card.
+        """Measure TTS audio duration and send to card.
 
         Fetches the audio from the TTS proxy URL (no auth needed — the
-        token in the URL is the secret) and measures duration with mutagen.
+        token in the URL is the secret) and measures duration with mutagen
+        or the stdlib wave module. The finally block guarantees the event
+        is always sent so the card never hangs.
+
         Sends the result via the satellite subscription (always alive),
         not the pipeline subscription (cleaned up after run-end).
         """
+        duration = 0
         try:
             import io
-
-            import mutagen
 
             from homeassistant.helpers.aiohttp_client import (
                 async_get_clientsession,
@@ -1097,45 +1099,49 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 except Exception:
                     base_url = "http://127.0.0.1:8123"
                 full_url = f"{base_url}{tts_url}"
-            _LOGGER.debug(
-                "Measuring TTS duration for '%s': %s",
-                self._satellite_name,
-                full_url,
-            )
 
             session = async_get_clientsession(self.hass)
             async with session.get(full_url) as resp:
-                if resp.status != 200:
+                if resp.status == 200:
+                    audio_data = await resp.read()
+
+                    # Try mutagen first (MP3, FLAC, OGG, etc.)
+                    try:
+                        import mutagen
+
+                        audio_file = mutagen.File(io.BytesIO(audio_data))
+                        if audio_file and audio_file.info and audio_file.info.length:
+                            duration = round(audio_file.info.length, 2)
+                    except Exception:
+                        pass
+
+                    # Fallback: stdlib wave module for WAV/PCM
+                    if not duration:
+                        try:
+                            import wave
+
+                            with wave.open(io.BytesIO(audio_data)) as w:
+                                duration = round(
+                                    w.getnframes() / w.getframerate(), 2
+                                )
+                        except Exception:
+                            pass
+                else:
                     _LOGGER.warning(
                         "TTS proxy returned %d for '%s'",
                         resp.status,
                         self._satellite_name,
                     )
-                    return
-                audio_data = await resp.read()
-
-            audio_file = mutagen.File(io.BytesIO(audio_data))
-            if audio_file and audio_file.info:
-                duration = round(audio_file.info.length, 2)
-                _LOGGER.debug(
-                    "TTS audio duration for '%s': %.2fs",
-                    self._satellite_name,
-                    duration,
-                )
-                self._push_satellite_event(
-                    "tts-audio-duration",
-                    {"duration": duration, "tts_url": tts_url},
-                )
-            else:
-                _LOGGER.warning(
-                    "mutagen could not parse TTS audio for '%s'",
-                    self._satellite_name,
-                )
         except Exception:
             _LOGGER.warning(
                 "Failed to measure TTS audio duration for '%s'",
                 self._satellite_name,
                 exc_info=True,
+            )
+        finally:
+            self._push_satellite_event(
+                "tts-audio-duration",
+                {"duration": duration, "tts_url": tts_url},
             )
 
     # --- Satellite event subscription ---
