@@ -1073,19 +1073,16 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         """Measure TTS audio duration and send to card.
 
         Fetches the audio from the TTS proxy URL (no auth needed — the
-        token in the URL is the secret) and measures duration with mutagen.
-        If mutagen fails to parse the audio, falls back to header-based
-        parsing for WAV files. Always sends a duration event to ensure
-        the card can complete playback properly.
+        token in the URL is the secret) and measures duration with mutagen
+        or the stdlib wave module. The finally block guarantees the event
+        is always sent so the card never hangs.
 
         Sends the result via the satellite subscription (always alive),
         not the pipeline subscription (cleaned up after run-end).
         """
-        duration = None
-
+        duration = 0
         try:
             import io
-            import struct
 
             from homeassistant.helpers.aiohttp_client import (
                 async_get_clientsession,
@@ -1102,129 +1099,50 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 except Exception:
                     base_url = "http://127.0.0.1:8123"
                 full_url = f"{base_url}{tts_url}"
-            _LOGGER.debug(
-                "Measuring TTS duration for '%s': %s",
-                self._satellite_name,
-                full_url,
-            )
 
             session = async_get_clientsession(self.hass)
             async with session.get(full_url) as resp:
-                if resp.status != 200:
+                if resp.status == 200:
+                    audio_data = await resp.read()
+
+                    # Try mutagen first (MP3, FLAC, OGG, etc.)
+                    try:
+                        import mutagen
+
+                        audio_file = mutagen.File(io.BytesIO(audio_data))
+                        if audio_file and audio_file.info and audio_file.info.length:
+                            duration = round(audio_file.info.length, 2)
+                    except Exception:
+                        pass
+
+                    # Fallback: stdlib wave module for WAV/PCM
+                    if not duration:
+                        try:
+                            import wave
+
+                            with wave.open(io.BytesIO(audio_data)) as w:
+                                duration = round(
+                                    w.getnframes() / w.getframerate(), 2
+                                )
+                        except Exception:
+                            pass
+                else:
                     _LOGGER.warning(
                         "TTS proxy returned %d for '%s'",
                         resp.status,
                         self._satellite_name,
                     )
-                    return
-                audio_data = await resp.read()
-
-            # Method 1: Try mutagen for common formats (MP3, FLAC, OGG, etc.)
-            try:
-                import mutagen
-
-                audio_file = mutagen.File(io.BytesIO(audio_data))
-                if audio_file and audio_file.info and audio_file.info.length:
-                    duration = round(audio_file.info.length, 2)
-            except Exception:
-                pass
-
-            # Method 2: If mutagen failed, try WAV header parsing for WAV files
-            if duration is None:
-                duration = self._parse_wav_duration(audio_data)
-
-            if duration is not None:
-                _LOGGER.debug(
-                    "TTS audio duration for '%s': %.2fs",
-                    self._satellite_name,
-                    duration,
-                )
-            else:
-                _LOGGER.debug(
-                    "Could not determine TTS audio duration for '%s' - sending 0",
-                    self._satellite_name,
-                )
-                duration = 0
-
-            # Always send the duration event so the card can complete properly
-            self._push_satellite_event(
-                "tts-audio-duration",
-                {"duration": duration, "tts_url": tts_url},
-            )
         except Exception:
             _LOGGER.warning(
                 "Failed to measure TTS audio duration for '%s'",
                 self._satellite_name,
                 exc_info=True,
             )
-            # Send a zero duration on error so the card doesn't hang
-            try:
-                self._push_satellite_event(
-                    "tts-audio-duration",
-                    {"duration": 0, "tts_url": tts_url},
-                )
-            except Exception:
-                pass
-
-    def _parse_wav_duration(self, audio_data: bytes) -> float | None:
-        """Parse WAV file duration from header.
-
-        WAV format:
-        - Offset 0-3: "RIFF"
-        - Offset 4-7: file size (little-endian, excluding RIFF header)
-        - Offset 8-11: "WAVE"
-        - fmt chunk contains sample rate, channels, bits per sample
-        - data chunk contains audio data
-        """
-        import struct
-
-        try:
-            # Parse RIFF header
-            if audio_data[:4] != b"RIFF":
-                return None
-
-            # Find chunks
-            pos = 12  # After RIFF header and WAVE id
-            data_size = None
-            fmt_parsed = False
-            sample_rate = None
-            channels = None
-            bits_per_sample = None
-
-            while pos < len(audio_data) - 8:
-                chunk_id = audio_data[pos:pos + 4]
-                chunk_size = struct.unpack("<I", audio_data[pos + 4:pos + 8])[0]
-
-                if chunk_id == b"fmt ":
-                    # Parse fmt chunk
-                    if chunk_size >= 16:
-                        audio_format = struct.unpack("<H", audio_data[pos + 8:pos + 10])[0]
-                        channels = struct.unpack("<H", audio_data[pos + 10:pos + 12])[0]
-                        sample_rate = struct.unpack("<I", audio_data[pos + 12:pos + 16])[0]
-                        if chunk_size >= 18:
-                            bits_per_sample = struct.unpack("<H", audio_data[pos + 22:pos + 24])[0]
-                        else:
-                            bits_per_sample = 16  # Default assumption
-                        fmt_parsed = True
-
-                elif chunk_id == b"data":
-                    data_size = chunk_size
-                    break
-
-                # Move to next chunk (pad to word boundary)
-                pos += 8 + chunk_size
-                if chunk_size % 2:
-                    pos += 1
-
-            if data_size and fmt_parsed and sample_rate and channels and bits_per_sample:
-                bytes_per_second = sample_rate * channels * (bits_per_sample // 8)
-                duration = data_size / bytes_per_second
-                return round(duration, 2)
-
-        except Exception:
-            pass
-
-        return None
+        finally:
+            self._push_satellite_event(
+                "tts-audio-duration",
+                {"duration": duration, "tts_url": tts_url},
+            )
 
     # --- Satellite event subscription ---
 
