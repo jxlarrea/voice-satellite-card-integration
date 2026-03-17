@@ -240,12 +240,47 @@ function setup() {
   const waveBuffer = new Float64Array(PTS + 1);
   const ribbonY = new Float64Array(PTS + 1);
   const ribbonW = new Float64Array(PTS + 1);
+  const xPos = new Float64Array(PTS + 1);
+  let xPosW = -1; // drawW used to compute xPos; -1 forces first rebuild
   const strandPaths = new Array(STRAND_DYNAMICS.length);
   const strandCoreColors = new Array(STRAND_DYNAMICS.length);
 
   // ── Particle system ──
   const MAX_PARTICLES = 50;
   const particlePool = [];
+
+  // Pre-rendered particle sprite (white soft circle, 64x64)
+  const SPRITE_SZ = 64;
+  const spriteCanvas = document.createElement('canvas');
+  spriteCanvas.width = SPRITE_SZ;
+  spriteCanvas.height = SPRITE_SZ;
+  const spriteCtx = spriteCanvas.getContext('2d');
+  const half = SPRITE_SZ / 2;
+  const spriteGrad = spriteCtx.createRadialGradient(half, half, 0, half, half, half);
+  spriteGrad.addColorStop(0, 'rgba(255,255,255,0.8)');
+  spriteGrad.addColorStop(0.25, 'rgba(255,255,255,0.35)');
+  spriteGrad.addColorStop(0.6, 'rgba(255,255,255,0.1)');
+  spriteGrad.addColorStop(1, 'rgba(255,255,255,0)');
+  spriteCtx.fillStyle = spriteGrad;
+  spriteCtx.fillRect(0, 0, SPRITE_SZ, SPRITE_SZ);
+
+  // Tinted sprite cache: "r,g,b" -> canvas
+  const tintCache = new Map();
+  function getTintedSprite(r, g, b) {
+    const key = `${r},${g},${b}`;
+    let c = tintCache.get(key);
+    if (c) return c;
+    c = document.createElement('canvas');
+    c.width = SPRITE_SZ;
+    c.height = SPRITE_SZ;
+    const tc = c.getContext('2d');
+    tc.drawImage(spriteCanvas, 0, 0);
+    tc.globalCompositeOperation = 'source-in';
+    tc.fillStyle = `rgb(${r},${g},${b})`;
+    tc.fillRect(0, 0, SPRITE_SZ, SPRITE_SZ);
+    tintCache.set(key, c);
+    return c;
+  }
   // Per-strand center Y cache so particles can follow their strand
   const strandCenterY = new Array(STRAND_DYNAMICS.length);
   for (let i = 0; i < STRAND_DYNAMICS.length; i++) {
@@ -353,6 +388,13 @@ function setup() {
     const maxAmp = drawH * 0.32;
     const idleBase = 0.42;
 
+    // Rebuild x-position LUT when canvas width changes
+    if (xPosW !== drawW) {
+      const step = drawW / pts;
+      for (let i = 0; i <= pts; i++) xPos[i] = i * step;
+      xPosW = drawW;
+    }
+
     // ── Phase 1: compute all strands, draw glows to offscreen canvas ──
     glowCtx.globalCompositeOperation = 'lighter';
 
@@ -386,42 +428,42 @@ function setup() {
       const glowA = Math.min(1, a * 4);
       const glowColor = `rgba(${r},${g},${b},${glowA})`;
 
-      // Compute raw wave shape
+      // Compute raw wave shape + ribbon in a single pass
+      const halfBase = s.lineW * 0.5;
+      const maxDisp = drawH * 0.42;
+      const invMaxDisp = 1 / maxDisp;
+      const energyActive = energy > 0.01;
       for (let i = 0; i <= pts; i++) {
-        const n = i / pts;
+        const nPi = (i / pts) * Math.PI;
         let wave = 0;
         for (let f = 0; f < s.freqs.length; f++) {
-          wave += Math.sin(n * Math.PI * s.freqs[f] * 2
+          wave += Math.sin(nPi * s.freqs[f] * 2
             + phase * (1 + f * 0.6)
             + s.phase + f * 1.1) * s.weights[f];
         }
-        wave += Math.sin(n * Math.PI * 14 + phase * 2.8 + s.phase * 1.7) * 0.06;
+        wave += Math.sin(nPi * 14 + phase * 2.8 + s.phase * 1.7) * 0.06;
         if (hGain > 0.001) {
-          wave += Math.sin(n * Math.PI * 22 + phase * 3.5 + s.phase * 2.3) * hGain;
-          wave += Math.sin(n * Math.PI * 34 + phase * 4.2 + s.phase * 0.7) * hGain * 0.5;
+          wave += Math.sin(nPi * 22 + phase * 3.5 + s.phase * 2.3) * hGain;
+          wave += Math.sin(nPi * 34 + phase * 4.2 + s.phase * 0.7) * hGain * 0.5;
         }
         waveBuffer[i] = wave;
-      }
 
-      // Compute center line and varying ribbon width
-      const halfBase = s.lineW * 0.5;
-      for (let i = 0; i <= pts; i++) {
-        const n = i / pts;
-        let env = Math.pow(Math.sin(n * Math.PI), 2.4);
-        if (energy > 0.01) {
+        // Ribbon envelope + width (fused from separate loop)
+        const sinNPi = Math.sin(nPi);
+        let env = Math.pow(sinNPi, 2.4);
+        if (energyActive) {
           env *= Math.max(0, 1 + energy * (
-            Math.sin(n * Math.PI * 1.5 + phase * 1.1 + si * 0.7) * 0.7 +
-            Math.sin(n * Math.PI * 2.8 + phase * 0.65 + si * 1.3) * 0.5
+            Math.sin(nPi * 1.5 + phase * 1.1 + si * 0.7) * 0.7 +
+            Math.sin(nPi * 2.8 + phase * 0.65 + si * 1.3) * 0.5
           ));
         }
-        const waveVal = waveBuffer[i] * env;
-        const maxDisp = drawH * 0.42;
+        const waveVal = wave * env;
         const raw = waveVal * waveAmp;
-        ribbonY[i] = centerY + maxDisp * Math.tanh(raw / maxDisp);
+        ribbonY[i] = centerY + maxDisp * Math.tanh(raw * invMaxDisp);
 
         const displacement = Math.abs(waveVal);
-        const thickMod = energy > 0.01
-          ? Math.max(0.4, 1 + energy * Math.sin(n * Math.PI * 2.3 + phase * 0.8 + si * 1.5) * 0.6)
+        const thickMod = energyActive
+          ? Math.max(0.4, 1 + energy * Math.sin(nPi * 2.3 + phase * 0.8 + si * 1.5) * 0.6)
           : 1;
         ribbonW[i] = Math.max(0.3, halfBase * (0.25 + 0.75 * displacement) * thickMod);
       }
@@ -432,13 +474,11 @@ function setup() {
       // Build ribbon path
       const path = new Path2D();
       for (let i = 0; i <= pts; i++) {
-        const x = (i / pts) * drawW;
         const y = ribbonY[i] - ribbonW[i];
-        if (i === 0) path.moveTo(x, y); else path.lineTo(x, y);
+        if (i === 0) path.moveTo(xPos[i], y); else path.lineTo(xPos[i], y);
       }
       for (let i = pts; i >= 0; i--) {
-        const x = (i / pts) * drawW;
-        path.lineTo(x, ribbonY[i] + ribbonW[i]);
+        path.lineTo(xPos[i], ribbonY[i] + ribbonW[i]);
       }
       path.closePath();
       strandPaths[si] = path;
@@ -552,15 +592,11 @@ function setup() {
       const py = strandY + p.yOff;
       const a = visibility * p.baseAlpha;
       const sz = p.size * (0.4 + visibility * 0.6);
-      // Smooth radial gradient glow
-      const radius = sz * 5;
-      const grad = ctx.createRadialGradient(px, py, 0, px, py, radius);
-      grad.addColorStop(0, `rgba(${p.r},${p.g},${p.b},${a * 0.8})`);
-      grad.addColorStop(0.25, `rgba(${p.r},${p.g},${p.b},${a * 0.35})`);
-      grad.addColorStop(0.6, `rgba(${p.r},${p.g},${p.b},${a * 0.1})`);
-      grad.addColorStop(1, `rgba(${p.r},${p.g},${p.b},0)`);
-      ctx.fillStyle = grad;
-      ctx.beginPath(); ctx.arc(px, py, radius, 0, Math.PI * 2); ctx.fill();
+      // Draw pre-rendered tinted sprite instead of creating gradient per frame
+      const diameter = sz * 10;
+      const sprite = getTintedSprite(p.r, p.g, p.b);
+      ctx.globalAlpha = a;
+      ctx.drawImage(sprite, px - diameter * 0.5, py - diameter * 0.5, diameter, diameter);
     }
     ctx.restore();
   }
@@ -634,6 +670,7 @@ function setup() {
       initContexts();
       resize();
       detectTheme();
+      tintCache.clear();
       lastTime = 0;
       tick();
     }

@@ -193,7 +193,7 @@ update to the card.
 | `assist_satellite.py` | ~1309 | `VoiceSatelliteEntity` — main satellite entity, pipeline bridging, announcements, ask_question, timers, screensaver |
 | `media_player.py` | ~262 | `VoiceSatelliteMediaPlayer` — media player entity with command push |
 | `select.py` | ~582 | 8 select entities: Pipeline, VAD, Screensaver, TTS Output, Wake Word Detection, Wake Word Model, Wake Word Model 2, Wake Word Sensitivity |
-| `switch.py` | ~111 | 2 switch entities: Wake Sound, Mute |
+| `switch.py` | ~158 | 3 switch entities: Wake Sound, Mute, Noise Gate |
 | `number.py` | ~75 | 1 number entity: Announcement Display Duration |
 | `frontend.py` | ~177 | Frontend registration — static paths, Lovelace resource, sidebar panel |
 | `config_flow.py` | ~40 | Name-based config flow with duplicate detection |
@@ -632,7 +632,8 @@ def device_info(self):
 | 10 | `select` | `VoiceSatelliteWakeWordSensitivitySelect` | `wake_word_sensitivity` | `{entry_id}_wake_word_sensitivity` | CONFIG | Yes |
 | 11 | `switch` | `VoiceSatelliteWakeSoundSwitch` | `wake_sound` | `{entry_id}_wake_sound` | CONFIG | Yes |
 | 12 | `switch` | `VoiceSatelliteMuteSwitch` | `mute` | `{entry_id}_mute` | CONFIG | Yes |
-| 13 | `number` | `VoiceSatelliteAnnouncementDurationNumber` | `announcement_display_duration` | `{entry_id}_announcement_display_duration` | CONFIG | Yes |
+| 13 | `switch` | `VoiceSatelliteNoiseGateSwitch` | `noise_gate` | `{entry_id}_noise_gate` | CONFIG | Yes |
+| 14 | `number` | `VoiceSatelliteAnnouncementDurationNumber` | `announcement_display_duration` | `{entry_id}_announcement_display_duration` | CONFIG | Yes |
 
 ### 8.3 Unique ID Patterns
 
@@ -2214,9 +2215,33 @@ class VoiceSatelliteMuteSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = False  # Default: not muted
 ```
 
-### 20.3 State Persistence
+### 20.3 Wake Word Noise Gate Switch
 
-Both switches use `RestoreEntity` to persist state across reboots:
+Controls whether energy-based sleep mode is active for wake word inference.
+When enabled, TFLite inference is paused during silence (based on RMS energy
+thresholds) and resumes when audio exceeds the wake level. This reduces CPU
+usage in quiet environments but may occasionally miss soft-spoken wake words.
+Disabled by default to match the always-listening behavior of physical ESPHome
+satellites.
+
+The card reads this switch directly via `getSwitchState(hass, entityId, 'noise_gate')`
+rather than through `extra_state_attributes`, since only the wake word module
+needs the value.
+
+```python
+class VoiceSatelliteNoiseGateSwitch(SwitchEntity, RestoreEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "noise_gate"
+    _attr_icon = "mdi:volume-off"
+
+    def __init__(self, entry):
+        self._attr_unique_id = f"{entry.entry_id}_noise_gate"
+        self._attr_is_on = False  # Default: disabled
+```
+
+### 20.4 State Persistence
+
+All three switches use `RestoreEntity` to persist state across reboots:
 
 ```python
 async def async_added_to_hass(self):
@@ -2226,7 +2251,7 @@ async def async_added_to_hass(self):
         self._attr_is_on = last_state.state == "on"
 ```
 
-### 20.4 How the Card Reads Switch State
+### 20.5 How the Card Reads Switch State
 
 The switches don't push directly to the card. Instead:
 
@@ -2683,6 +2708,7 @@ def unregister_satellite_subscription(self, connection, msg_id):
 | `wake_word_sensitivity` (select) | "Wake word sensitivity" | `select.kitchen_tablet_wake_word_sensitivity` |
 | `wake_sound` (switch) | "Wake sound" | `switch.kitchen_tablet_wake_sound` |
 | `mute` (switch) | "Mute" | `switch.kitchen_tablet_mute` |
+| `noise_gate` (switch) | "Wake word noise gate" | `switch.kitchen_tablet_wake_word_noise_gate` |
 | `announcement_display_duration` (number) | "Announcement display duration" | `number.kitchen_tablet_announcement_display_duration` |
 | `media_player` (media_player) | "Media Player" | `media_player.kitchen_tablet_media_player` |
 
@@ -2813,10 +2839,11 @@ Step-by-step guide to recreate the integration from scratch.
   - [ ] `VoiceSatelliteWakeWordModel2Select` — same as Model, plus "No wake word" default
   - [ ] `VoiceSatelliteWakeWordSensitivitySelect` — 3-level sensitivity
   - [ ] Stale entity cleanup for older versions
-- [ ] Create `switch.py` — 2 switch entities
+- [ ] Create `switch.py` — 3 switch entities
   - [ ] `VoiceSatelliteWakeSoundSwitch` — default on
   - [ ] `VoiceSatelliteMuteSwitch` — default off
-  - [ ] Both use `RestoreEntity` for persistence
+  - [ ] `VoiceSatelliteNoiseGateSwitch` — default off, energy-based wake word sleep mode
+  - [ ] All three use `RestoreEntity` for persistence
 - [ ] Create `number.py` — 1 number entity
   - [ ] `VoiceSatelliteAnnouncementDurationNumber` — range 1-60, default 5, slider mode
   - [ ] `RestoreEntity` for persistence

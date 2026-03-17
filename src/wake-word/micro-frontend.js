@@ -150,6 +150,25 @@ function pcanShrink(value) {
 
 // ─── In-place radix-2 FFT ───────────────────────────────────────────────
 
+// Precompute twiddle factors for FFT_SIZE (cos/sin per butterfly stage + k)
+const _twiddleReal = [];
+const _twiddleImag = [];
+{
+  for (let size = 2; size <= FFT_SIZE; size *= 2) {
+    const halfSize = size / 2;
+    const step = -2.0 * Math.PI / size;
+    const wr = new Float64Array(halfSize);
+    const wi = new Float64Array(halfSize);
+    for (let k = 0; k < halfSize; k++) {
+      const angle = step * k;
+      wr[k] = Math.cos(angle);
+      wi[k] = Math.sin(angle);
+    }
+    _twiddleReal.push(wr);
+    _twiddleImag.push(wi);
+  }
+}
+
 /**
  * In-place radix-2 Cooley-Tukey FFT.
  * Operates on separate real/imag arrays of length N (must be power of 2).
@@ -170,15 +189,16 @@ function fft(real, imag, n) {
     j += m;
   }
 
-  // Butterfly stages
+  // Butterfly stages with precomputed twiddle factors
+  let stage = 0;
   for (let size = 2; size <= n; size *= 2) {
     const halfSize = size / 2;
-    const step = -2.0 * Math.PI / size;
+    const twR = _twiddleReal[stage];
+    const twI = _twiddleImag[stage];
     for (let i = 0; i < n; i += size) {
       for (let k = 0; k < halfSize; k++) {
-        const angle = step * k;
-        const wr = Math.cos(angle);
-        const wi = Math.sin(angle);
+        const wr = twR[k];
+        const wi = twI[k];
         const idx1 = i + k;
         const idx2 = i + k + halfSize;
         const tr = wr * real[idx2] - wi * imag[idx2];
@@ -189,6 +209,7 @@ function fft(real, imag, n) {
         imag[idx1] += ti;
       }
     }
+    stage++;
   }
 }
 

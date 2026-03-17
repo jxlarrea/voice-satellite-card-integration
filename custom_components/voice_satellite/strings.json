@@ -62,6 +62,9 @@
       },
       "mute": {
         "name": "Mute"
+      },
+      "noise_gate": {
+        "name": "Wake word noise gate"
       }
     },
     "media_player": {

@@ -429,8 +429,9 @@ Each integration config entry creates one device with 12 entities:
 | Wake Word Model | `select` | `{entry_id}_wake_word_model` | Card reads via `getSelectState('wake_word_model')` — primary keyword model name |
 | Wake Word Model 2 | `select` | `{entry_id}_wake_word_model_2` | Card reads via `getSelectState('wake_word_model_2')` — second keyword model, or "No wake word" |
 | Wake Word Sensitivity | `select` | `{entry_id}_wake_word_sensitivity` | Card reads via `getSelectState('wake_word_sensitivity')` — threshold label |
-| Mute | `switch` | `{entry_id}_mute` | — (integration reads, exposes via satellite `muted`) |
-| Wake Sound | `switch` | `{entry_id}_wake_sound` | — (integration reads, exposes via satellite `wake_sound`) |
+| Mute | `switch` | `{entry_id}_mute` | -- (integration reads, exposes via satellite `muted`) |
+| Wake Sound | `switch` | `{entry_id}_wake_sound` | -- (integration reads, exposes via satellite `wake_sound`) |
+| Noise Gate | `switch` | `{entry_id}_noise_gate` | Card reads via `getSwitchState('noise_gate')` -- energy-based wake word sleep mode |
 | Display Duration | `number` | `{entry_id}_announcement_display_duration` | — (integration reads, exposes via satellite attribute) |
 
 **Note:** The card reads switch/select/number values from the satellite
@@ -2703,7 +2704,7 @@ timer alerts via voice command.
 |------|----------------|
 | `wake-word/index.js` | `WakeWordManager` — orchestrator, dual-model lifecycle, stop model, settings, detection/stop handlers |
 | `wake-word/micro-models.js` | TFLite WASM runtime loading, per-name model caching, companion JSON manifest loading, unused model cleanup |
-| `wake-word/micro-inference.js` | `MicroWakeWordInference` — stateful TFLite pipeline, multi-keyword support, energy-based sleep with feature buffering |
+| `wake-word/micro-inference.js` | `MicroWakeWordInference` -- stateful TFLite pipeline, multi-keyword support, opt-in energy-based sleep with ring buffer feature replay |
 | `wake-word/micro-frontend.js` | `MicroFrontend` — audio feature extraction (Hann, FFT, mel, sqrt, noise floor, NR, PCAN, log₂, int8) |
 
 ### 29.3 Audio Feature Extraction
@@ -2776,10 +2777,19 @@ Keywords can be added (`addKeyword(config)`) or removed
 (`removeKeyword(name)`) at runtime without recreating the inference engine.
 This is used by the stop model system (§29.10).
 
-**Energy-based sleep mode:**
+**Energy-based sleep mode (opt-in via "Wake word noise gate" switch):**
 
-During silence, TFLite inference is skipped entirely. Feature extraction
-continues to keep the noise estimate warm for immediate wake-up.
+Disabled by default. When enabled via the integration's noise gate switch
+(`switch.*_wake_word_noise_gate`), TFLite inference is paused during silence
+and resumes when audio exceeds the wake level. Feature extraction continues
+to keep the noise estimate warm for immediate wake-up. This matches the
+behavior of physical ESPHome satellites, which run inference continuously
+without energy gating.
+
+The card reads the switch state directly via
+`getSwitchState(hass, entityId, 'noise_gate')` and passes it to
+`MicroWakeWordInference` at construction. Changes are applied live via
+`setEnergyGateEnabled(boolean)` without restarting the wake word pipeline.
 
 RMS thresholds are tied to the **Wake Word Sensitivity** setting:
 
@@ -2791,7 +2801,7 @@ RMS thresholds are tied to the **Wake Word Sensitivity** setting:
 
 ```
 processChunk(samples)
-├── 1. Compute RMS energy of 1280-sample chunk
+├── 1. If energy gate enabled: compute RMS energy of 1280-sample chunk
 ├── 2. Sleep/wake state machine (thresholds from ENERGY_THRESHOLDS):
 │     ├── rms < sleepRms → increment _silentChunks
 │     │   └── _silentChunks >= 30 (~2.4s) → _sleeping = true
@@ -2806,15 +2816,17 @@ processChunk(samples)
       └── Run keyword classifiers on each feature frame
 ```
 
-**Sleep buffer replay:** During sleep, features are buffered in a rolling
-window of `SLEEP_BUFFER_CHUNKS = 5` chunks (~400ms). When the energy gate
-wakes up, these buffered features are prepended to the current chunk's
-features before running inference. This captures the onset of the wake
+**Sleep buffer replay:** During sleep, features are buffered in a ring buffer
+of `SLEEP_BUFFER_CHUNKS = 8` chunks (~640ms). When the energy gate wakes up,
+these buffered features are drained oldest-first and prepended to the current
+chunk's features before running inference. This captures the onset of the wake
 word utterance that triggered the energy gate wake-up.
 
 Hysteresis (sleep < wake) prevents flapping near the threshold.
 Energy thresholds update live via `updateEnergyThresholds()` when
-the sensitivity setting changes — no restart needed.
+the sensitivity setting changes. The energy gate itself can be toggled
+at runtime via `setEnergyGateEnabled(boolean)` -- disabling it immediately
+clears any active sleep state. Neither operation requires a restart.
 
 ### 29.5 Model Loading
 
@@ -3192,7 +3204,7 @@ A step-by-step guide to recreate the frontend from scratch:
 - [ ] `micro-inference.js`: `MicroWakeWordInference` — feature extraction + keyword classifier pipeline
 - [ ] `micro-inference.js`: Auto-detect input tensor shape for framesPerInfer
 - [ ] `micro-inference.js`: Sliding window detection (circular probability buffer)
-- [ ] `micro-inference.js`: Energy-based sleep mode with feature buffering (SLEEP_BUFFER_CHUNKS=5, onset replay)
+- [ ] `micro-inference.js`: Energy-based sleep mode (opt-in via noise gate switch) with ring buffer (SLEEP_BUFFER_CHUNKS=8, onset replay)
 - [ ] `micro-inference.js`: Warmup period (WARMUP_FRAMES=100) + cooldown (COOLDOWN_MS=2000)
 - [ ] `micro-inference.js`: Dynamic keyword add/remove (`addKeyword()`, `removeKeyword()`)
 - [ ] `micro-inference.js`: `updateThresholds()` for live per-model threshold changes
@@ -3201,8 +3213,8 @@ A step-by-step guide to recreate the frontend from scratch:
 - [ ] `index.js`: `getActiveModels()` deduplication, `getModelName2()`, `getThresholdForModel()`
 - [ ] `index.js`: `_onDetection(modelName)` — mute check, tab unpause, media interrupt, chime, pipeline start
 - [ ] `index.js`: `WAKE_WORD_PHRASES` for cross-satellite dedup + custom model fallback (underscore→space+titleCase)
-- [ ] `index.js`: Settings change tracking (mode, model, model2, threshold) with deferred cache update
-- [ ] `index.js`: Live threshold updates without restart
+- [ ] `index.js`: Settings change tracking (mode, model, model2, threshold, noiseGate) with deferred cache update
+- [ ] `index.js`: Live threshold and noise gate toggle updates without restart
 - [ ] `index.js`: PAUSED state handling — accept changes, reload models on resume via `restart()`
 - [ ] `index.js`: Stop model — `_preloadStopModel()` background loading on start
 - [ ] `index.js`: Stop model — `enableStopModel(stopOnly)` with keyword suspend/restore

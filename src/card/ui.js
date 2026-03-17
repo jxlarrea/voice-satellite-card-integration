@@ -42,6 +42,7 @@ export class UIManager {
     // Timer DOM state
     this._timerContainer = null;
     this._timerAlertEl = null;
+    this._timerPills = new Map(); // timerId -> element
   }
 
   get element() {
@@ -844,6 +845,7 @@ export class UIManager {
   removeTimerContainer() {
     this._timerContainer?.parentNode?.removeChild(this._timerContainer);
     this._timerContainer = null;
+    this._timerPills.clear();
   }
 
   /**
@@ -889,10 +891,10 @@ export class UIManager {
 
     // Remove pills for timers that no longer exist
     const activeIds = new Set(timers.map((t) => t.id));
-    const existing = this._timerContainer.querySelectorAll('.vs-timer-pill');
-    for (const pill of existing) {
-      if (!activeIds.has(pill.getAttribute('data-timer-id'))) {
-        pill.parentNode.removeChild(pill);
+    for (const [id, pill] of this._timerPills) {
+      if (!activeIds.has(id)) {
+        pill.parentNode?.removeChild(pill);
+        this._timerPills.delete(id);
       }
     }
 
@@ -901,6 +903,7 @@ export class UIManager {
       if (!t.el || !this._timerContainer.contains(t.el)) {
         t.el = this.createTimerPill(t, onDoubleTap(t.id));
         this._timerContainer.appendChild(t.el);
+        this._timerPills.set(t.id, t.el);
       }
     }
   }
@@ -930,9 +933,10 @@ export class UIManager {
    */
   expireTimerPill(timerId, animationMs) {
     if (!this._timerContainer) return;
-    const pill = this._timerContainer.querySelector(`.vs-timer-pill[data-timer-id="${timerId}"]`);
+    const pill = this._timerPills.get(timerId);
     if (pill) {
       pill.classList.add('vs-timer-expired');
+      this._timerPills.delete(timerId);
       setTimeout(() => pill.parentNode?.removeChild(pill), animationMs);
     }
   }

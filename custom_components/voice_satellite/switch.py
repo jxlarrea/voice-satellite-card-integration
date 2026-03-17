@@ -30,6 +30,7 @@ async def async_setup_entry(
     async_add_entities([
         VoiceSatelliteWakeSoundSwitch(entry),
         VoiceSatelliteMuteSwitch(entry),
+        VoiceSatelliteNoiseGateSwitch(entry),
     ])
 
 
@@ -107,5 +108,50 @@ class VoiceSatelliteMuteSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Unmute the satellite."""
+        self._attr_is_on = False
+        self.async_write_ha_state()
+
+
+class VoiceSatelliteNoiseGateSwitch(SwitchEntity, RestoreEntity):
+    """Switch entity for the wake word noise gate.
+
+    When enabled, wake word inference is paused during silence (based on
+    RMS energy thresholds) and resumes when audio exceeds the wake level.
+    This reduces false positives in quiet environments but may occasionally
+    miss soft-spoken wake words.  Disabled by default.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "noise_gate"
+    _attr_icon = "mdi:volume-off"
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        """Initialize the noise gate switch."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_noise_gate"
+        self._attr_is_on = False  # Default: noise gate disabled
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous state on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            self._attr_is_on = last_state.state == "on"
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable the noise gate."""
+        self._attr_is_on = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable the noise gate."""
         self._attr_is_on = False
         self.async_write_ha_state()

@@ -47,20 +47,26 @@ export class MicroWakeWordInference {
    *   - stepSize: feature frames per inference (10 for V2 models)
    * @param {object} log - logger with .log(category, message) method
    * @param {string} [sensitivityLabel] - sensitivity level for energy gate
+   * @param {boolean} [energyGateEnabled=false] - enable energy-based sleep mode
    */
-  constructor(keywordConfigs, log, sensitivityLabel) {
+  constructor(keywordConfigs, log, sensitivityLabel, energyGateEnabled = false) {
     this._frontend = new MicroFrontend();
     this._log = log;
     this._keywords = [];
     this._lastDetectionTime = 0;
 
     // Energy-based sleep mode state
+    this._energyGateEnabled = energyGateEnabled;
     const energy = ENERGY_THRESHOLDS[sensitivityLabel] || DEFAULT_ENERGY;
     this._sleepRms = energy.sleep;
     this._wakeRms = energy.wake;
     this._sleeping = false;
     this._silentChunks = 0;
-    this._sleepFeatureBuffer = [];  // rolling buffer of feature frames during sleep
+    // Ring buffer for feature frames during sleep (avoids splice/shift)
+    this._sleepBufCap = SLEEP_BUFFER_CHUNKS * 8; // max ~64 frames
+    this._sleepBuf = new Array(this._sleepBufCap);
+    this._sleepBufHead = 0; // next write index
+    this._sleepBufLen = 0;  // current frame count
 
     // Initialize per-keyword state
     for (const cfg of keywordConfigs) {
@@ -94,10 +100,11 @@ export class MicroWakeWordInference {
       cutoff: cfg.cutoff,
       slidingWindow: cfg.slidingWindow,
       framesPerInfer,
-      // Probability ring buffer
+      // Probability ring buffer + running sum
       probBuffer: new Float32Array(cfg.slidingWindow),
       probIndex: 0,
       probCount: 0,
+      probSum: 0,
       // Feature frame accumulator (fills to framesPerInfer before inference)
       featureAccum: [],
       // Warmup counter (ignore first N frames)
@@ -114,22 +121,25 @@ export class MicroWakeWordInference {
    */
   async processChunk(samples) {
     // Energy-based sleep: compute RMS to decide whether to run inference
-    let sumSq = 0;
-    for (let i = 0; i < samples.length; i++) sumSq += samples[i] * samples[i];
-    const rms = Math.sqrt(sumSq / samples.length);
+    if (this._energyGateEnabled) {
+      let sumSq = 0;
+      for (let i = 0; i < samples.length; i++) sumSq += samples[i] * samples[i];
+      const rms = Math.sqrt(sumSq / samples.length);
 
-    if (rms < this._sleepRms) {
-      this._silentChunks++;
-      if (!this._sleeping && this._silentChunks >= SLEEP_CHUNKS) {
-        this._sleeping = true;
-        this._sleepFeatureBuffer = [];
-        this._log.log('wake-word', `Sleep — inference paused (rms=${rms.toFixed(4)})`);
-      }
-    } else if (rms >= this._wakeRms) {
-      this._silentChunks = 0;
-      if (this._sleeping) {
-        this._sleeping = false;
-        this._log.log('wake-word', `Wake — inference resumed (rms=${rms.toFixed(4)}, buffered=${this._sleepFeatureBuffer.length} frames)`);
+      if (rms < this._sleepRms) {
+        this._silentChunks++;
+        if (!this._sleeping && this._silentChunks >= SLEEP_CHUNKS) {
+          this._sleeping = true;
+          this._sleepBufLen = 0;
+          this._sleepBufHead = 0;
+          this._log.log('wake-word', `Sleep — inference paused (rms=${rms.toFixed(4)})`);
+        }
+      } else if (rms >= this._wakeRms) {
+        this._silentChunks = 0;
+        if (this._sleeping) {
+          this._sleeping = false;
+          this._log.log('wake-word', `Wake — inference resumed (rms=${rms.toFixed(4)}, buffered=${this._sleepBufLen} frames)`);
+        }
       }
     }
 
@@ -137,24 +147,29 @@ export class MicroWakeWordInference {
     const features = this._frontend.feed(samples);
 
     if (this._sleeping) {
-      // Buffer features during sleep — keep a rolling window so we can
-      // replay the onset of speech when the energy gate wakes us up.
-      for (const f of features) this._sleepFeatureBuffer.push(f);
-      const maxFrames = SLEEP_BUFFER_CHUNKS * 8; // ~8 frames per 80ms chunk
-      if (this._sleepFeatureBuffer.length > maxFrames) {
-        this._sleepFeatureBuffer.splice(0, this._sleepFeatureBuffer.length - maxFrames);
+      // Buffer features during sleep in ring buffer (no splice/copy)
+      for (const f of features) {
+        this._sleepBuf[this._sleepBufHead] = f;
+        this._sleepBufHead = (this._sleepBufHead + 1) % this._sleepBufCap;
+        if (this._sleepBufLen < this._sleepBufCap) this._sleepBufLen++;
       }
       return { detected: false, score: 0, vadScore: 0, model: null };
     }
 
-    // Prepend any buffered frames from sleep — these contain the onset
-    // of the audio that triggered the energy gate wake-up.
+    // Drain ring buffer on wake — oldest-first order for correct replay
     let allFeatures = features;
     let replayCount = 0;
-    if (this._sleepFeatureBuffer.length > 0) {
-      replayCount = this._sleepFeatureBuffer.length;
-      allFeatures = this._sleepFeatureBuffer.concat(features);
-      this._sleepFeatureBuffer = [];
+    if (this._sleepBufLen > 0) {
+      replayCount = this._sleepBufLen;
+      const drained = new Array(replayCount);
+      let readIdx = (this._sleepBufHead - this._sleepBufLen + this._sleepBufCap) % this._sleepBufCap;
+      for (let i = 0; i < replayCount; i++) {
+        drained[i] = this._sleepBuf[readIdx];
+        readIdx = (readIdx + 1) % this._sleepBufCap;
+      }
+      allFeatures = drained.concat(features);
+      this._sleepBufLen = 0;
+      this._sleepBufHead = 0;
     }
 
     if (allFeatures.length === 0) {
@@ -190,16 +205,18 @@ export class MicroWakeWordInference {
         // be warm, so don't store probs until state has flushed with silence.
         if (kw.framesProcessed < WARMUP_FRAMES) continue;
 
-        // Store probability in ring buffer (only after warmup)
+        // Store probability in ring buffer with running sum (only after warmup)
+        if (kw.probCount >= kw.slidingWindow) {
+          kw.probSum -= kw.probBuffer[kw.probIndex]; // subtract value being overwritten
+        }
         kw.probBuffer[kw.probIndex] = probability;
+        kw.probSum += probability;
         kw.probIndex = (kw.probIndex + 1) % kw.slidingWindow;
         if (kw.probCount < kw.slidingWindow) kw.probCount++;
 
         // Check detection: mean of sliding window > cutoff
         if (kw.probCount >= kw.slidingWindow && cooldownOk) {
-          let sum = 0;
-          for (let i = 0; i < kw.slidingWindow; i++) sum += kw.probBuffer[i];
-          const mean = sum / kw.slidingWindow;
+          const mean = kw.probSum / kw.slidingWindow;
 
           if (mean > kw.cutoff) {
             this._lastDetectionTime = now;
@@ -280,6 +297,22 @@ export class MicroWakeWordInference {
   }
 
   /**
+   * Enable or disable the energy gate at runtime.
+   * When disabled, any active sleep state is immediately cleared.
+   * @param {boolean} enabled
+   */
+  setEnergyGateEnabled(enabled) {
+    this._energyGateEnabled = enabled;
+    if (!enabled && this._sleeping) {
+      this._sleeping = false;
+      this._silentChunks = 0;
+      this._sleepBufLen = 0;
+      this._sleepBufHead = 0;
+      this._log.log('wake-word', 'Energy gate disabled — inference always active');
+    }
+  }
+
+  /**
    * Dynamically add a keyword model (e.g. stop model).
    * @param {{runner, name, cutoff, slidingWindow, stepSize}} config
    */
@@ -304,13 +337,15 @@ export class MicroWakeWordInference {
     this._frontend.reset();
     this._sleeping = false;
     this._silentChunks = 0;
-    this._sleepFeatureBuffer = [];
+    this._sleepBufLen = 0;
+    this._sleepBufHead = 0;
     // Preserve _lastDetectionTime — the 2s cooldown prevents false
     // re-detection from stale model state (VarHandle ring buffers persist).
     for (const kw of this._keywords) {
       kw.probBuffer.fill(0);
       kw.probIndex = 0;
       kw.probCount = 0;
+      kw.probSum = 0;
       kw.featureAccum = [];
       kw.framesProcessed = 0;
     }

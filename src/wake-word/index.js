@@ -58,6 +58,7 @@ export class WakeWordManager {
     this._active = false;
     this._sampleBuf = new Float32Array(CHUNK_SIZE * 2);
     this._sampleBufLen = 0;
+    this._framePool = []; // recycled Float32Array buffers to avoid allocation
     this._loadedModelsKey = null; // sorted model names string for change detection
     this._processing = false;
     this._frameQueue = [];
@@ -161,6 +162,18 @@ export class WakeWordManager {
   }
 
   /**
+   * Check if the noise gate switch is enabled.
+   * @returns {boolean}
+   */
+  _isNoiseGateEnabled() {
+    return getSwitchState(
+      this._session.hass,
+      this._session.config.satellite_entity,
+      'noise_gate',
+    ) === true;
+  }
+
+  /**
    * Get the detection threshold for a specific model based on sensitivity setting.
    * Base cutoff comes from the model's JSON manifest (or hardcoded fallback).
    * Sensitivity setting applies a multiplier to the base cutoff.
@@ -235,7 +248,9 @@ export class WakeWordManager {
         });
 
         const keywordConfigs = this._buildKeywordConfigs(runners);
-        this._inference = new MicroWakeWordInference(keywordConfigs, this._log, this._getSensitivityLabel());
+        this._inference = new MicroWakeWordInference(
+          keywordConfigs, this._log, this._getSensitivityLabel(), this._isNoiseGateEnabled(),
+        );
         this._loadedModelsKey = modelsKey;
 
         const configSummary = keywordConfigs.map((k) => `${k.name}(c=${k.cutoff},sw=${k.slidingWindow})`).join(', ');
@@ -302,9 +317,11 @@ export class WakeWordManager {
     const MAX_QUEUE = 50;
     while (this._sampleBufLen >= CHUNK_SIZE) {
       if (this._frameQueue.length >= MAX_QUEUE) {
-        this._frameQueue.shift(); // drop oldest
+        this._framePool.push(this._frameQueue.shift()); // recycle dropped
       }
-      this._frameQueue.push(this._sampleBuf.slice(0, CHUNK_SIZE));
+      const buf = this._framePool.pop() || new Float32Array(CHUNK_SIZE);
+      buf.set(this._sampleBuf.subarray(0, CHUNK_SIZE));
+      this._frameQueue.push(buf);
       this._sampleBuf.copyWithin(0, CHUNK_SIZE, this._sampleBufLen);
       this._sampleBufLen -= CHUNK_SIZE;
     }
@@ -324,6 +341,7 @@ export class WakeWordManager {
       while (this._frameQueue.length > 0 && (this._active || this._stopOnlyMode)) {
         const frame = this._frameQueue.shift();
         const result = await this._inference.processChunk(frame);
+        this._framePool.push(frame); // recycle buffer
         if (result.detected) {
           this._log.log('wake-word', `Detected: ${result.model} (score: ${result.score.toFixed(3)})`);
           this._frameQueue.length = 0;
@@ -624,6 +642,7 @@ export class WakeWordManager {
     const model = this.getModelName();
     const model2 = this.getModelName2();
     const threshold = this.getThreshold();
+    const noiseGate = this._isNoiseGateEnabled();
 
     // Initialize cache on first call
     if (this._cachedEnabled === undefined) {
@@ -631,26 +650,34 @@ export class WakeWordManager {
       this._cachedModel = model;
       this._cachedModel2 = model2;
       this._cachedThreshold = threshold;
+      this._cachedNoiseGate = noiseGate;
       return;
     }
 
     const enabledChanged = enabled !== this._cachedEnabled;
     const modelChanged = model !== this._cachedModel || model2 !== this._cachedModel2;
     const thresholdChanged = threshold !== this._cachedThreshold;
+    const noiseGateChanged = noiseGate !== this._cachedNoiseGate;
 
-    if (!enabledChanged && !modelChanged && !thresholdChanged) return;
+    if (!enabledChanged && !modelChanged && !thresholdChanged && !noiseGateChanged) return;
 
-    // Always update threshold cache
+    // Always update caches
     this._cachedThreshold = threshold;
+    this._cachedNoiseGate = noiseGate;
 
-    // Live threshold update (no restart needed)
-    if (thresholdChanged && !modelChanged && this._active && this._inference) {
-      const activeModels = this.getActiveModels();
-      this._inference.updateThresholds(
-        activeModels.map((name) => ({ name, threshold: this.getThresholdForModel(name) })),
-      );
-      this._inference.updateEnergyThresholds(this._getSensitivityLabel());
-      this._log.log('wake-word', 'Thresholds updated');
+    // Live threshold / noise gate update (no restart needed)
+    if ((thresholdChanged || noiseGateChanged) && !modelChanged && this._active && this._inference) {
+      if (thresholdChanged) {
+        const activeModels = this.getActiveModels();
+        this._inference.updateThresholds(
+          activeModels.map((name) => ({ name, threshold: this.getThresholdForModel(name) })),
+        );
+        this._inference.updateEnergyThresholds(this._getSensitivityLabel());
+      }
+      if (noiseGateChanged) {
+        this._inference.setEnergyGateEnabled(noiseGate);
+      }
+      this._log.log('wake-word', `Settings updated${noiseGateChanged ? ` (noise gate: ${noiseGate ? 'on' : 'off'})` : ''}`);
     }
 
     // Mode or model change requires switching
