@@ -170,6 +170,7 @@ Each satellite device exposes configuration entities on its device page (**Setti
 | **Announcement display duration** | Number | How long (1-60 seconds) to show the announcement text on screen after playback completes |
 | **Mute** | Switch | Mute/unmute the satellite - when muted, wake word detection is paused |
 | **Wake sound** | Switch | Enable/disable chime sounds (wake, done, error) |
+| **Wake word noise gate** | Switch | When enabled, wake word inference is paused during silence and resumes when sound is detected. Reduces CPU usage but may miss soft-spoken wake words. Disabled by default |
 
 All settings persist across restarts.
 
@@ -408,7 +409,7 @@ On-device detection uses [microWakeWord](https://github.com/kahrendt/microWakeWo
 - **Lower latency** - detection happens instantly on the device, no network round-trip
 - **Reduced server load** - audio is only sent to HA for STT after the wake word is detected
 - **No wake word add-on required** - works without openWakeWord or microWakeWord installed on HA
-- **Energy-efficient** - inference is automatically paused during silence and resumes instantly when sound is detected
+- **Energy-efficient** - optional noise gate pauses inference during silence and resumes instantly when sound is detected (enable via the "Wake word noise gate" switch)
 
 ### Built-in Wake Words
 
