@@ -564,7 +564,7 @@ src/
 │   ├── index.js              AudioManager (mic acquisition, AudioContext)
 │   ├── analyser.js           AnalyserManager (dual-analyser for reactive bar)
 │   ├── processing.js         AudioWorklet setup and sample rate conversion
-│   ├── chime.js              Web Audio API chime synthesis (wake, done, error, alert)
+│   ├── chime.js              Pre-rendered MP3 chime playback (wake, done, error, alert)
 │   ├── media-playback.js     HTML5 Audio playback helper (buildMediaUrl, playMediaUrl)
 │   └── comms.js              Binary audio frame encoding
 │
@@ -1873,7 +1873,7 @@ play(url)
     └── session/events.js → onTTSComplete()
         ├── If new interaction started → skip cleanup
         ├── If continue_conversation → restartContinue()
-        ├── Play done chime (if not failed, not remote)
+        ├── Play done chime (if not failed)
         ├── Image linger (30s) or TTS-failed linger (5s)
         └── cleanup: chat.clear(), hideBlurOverlay, playQueued
 ```
@@ -1891,19 +1891,25 @@ play(url)
 
 **File:** `src/audio/chime.js`
 
-Chimes are synthesized via Web Audio API (OscillatorNode + GainNode).
-No audio files needed. Each chime is defined as an array of
-`{freq, duration, delay}` notes.
+Chimes are pre-rendered MP3 files served from `/voice_satellite/sounds/`.
+Each chime is defined as an object with `url` and `duration` properties.
+The MP3 files are preloaded (wake + done) at engine bootstrap via
+`preloadChimes()` and cached in a `Map` for instant cloned playback.
 
-| Chime | Pattern | Used When |
-|-------|---------|-----------|
-| `CHIME_WAKE` | Two ascending tones | Wake word detected |
-| `CHIME_DONE` | Single tone | Interaction complete |
-| `CHIME_ERROR` | Two descending tones | Pipeline error |
-| `CHIME_ALERT` | Multi-note sequence | Timer finished (looped) |
-| `CHIME_ANNOUNCE` | Pre-announcement jingle | Before notification media |
+| Chime | File | Used When |
+|-------|------|-----------|
+| `CHIME_WAKE` | `wake.mp3` | Wake word detected |
+| `CHIME_DONE` | `done.mp3` | Interaction complete |
+| `CHIME_ERROR` | `error.mp3` | Pipeline error |
+| `CHIME_ALERT` | `alert.mp3` | Timer finished (looped) |
+| `CHIME_ANNOUNCE_URL` | `announce.mp3` | Before notification media |
 
 All chimes use the MediaPlayer's volume (perceptual curve).
+
+**Remote routing:** When `card.ttsTarget` is set, `playChime()` routes
+audio to the remote media player via `media_player.play_media` with
+`announce: true` instead of playing locally. This ensures chimes are
+heard on the configured external device (e.g. Sonos).
 
 ---
 
@@ -1953,9 +1959,8 @@ playNotification(mgr, ann, onComplete, logPrefix)
 ├── UI: showBlurOverlay(ANNOUNCEMENT), onNotificationStart()
 ├── Passive? → setAnnouncementMode(true)
 ├── Pre-announce:
-│   ├── Remote TTS target (no custom media) → skip chime, go to _playMain
 │   ├── Custom preannounce_media_id → playMediaFor() (routes to remote if configured)
-│   └── Default (browser) → CHIME_ANNOUNCE playback
+│   └── Default → CHIME_ANNOUNCE_URL via playMediaFor() (routes to local or remote)
 └── _playMain(mgr, ann, onComplete, logPrefix)
     ├── Show message bubble (announcement or assistant type)
     ├── Media URL? → playMediaFor() → onComplete
@@ -1973,9 +1978,9 @@ external media player (e.g. Sonos). Remote playback uses:
 - `checkRemoteNotificationPlayback(mgr, hass)` — called from
   `session.updateHass()` to monitor entity state transitions
 
-**Pre-announce chime skipped when remote:** Consistent with pipeline
-chimes (wake/done/error already skip when `isRemote`). Custom
-pre-announce media still plays on the remote device via `playMediaFor()`.
+**Pre-announce chime always plays:** Both the default announce chime and
+custom pre-announce media are routed through `playMediaFor()`, which
+handles local or remote playback automatically based on `card.ttsTarget`.
 
 ### 15.4 AnnouncementManager
 
@@ -1985,7 +1990,7 @@ After media playback completes (`_onComplete`):
 1. ACK the event via WS
 2. Start linger timeout (`announcementDisplayDuration` seconds)
 3. During linger: `playing` stays `true` (blocks `updateForState`)
-4. Play done chime (unless remote)
+4. Play done chime
 5. When linger expires:
    - `playing = false`
    - Re-sync `updateForState` (catches up with state changes that were
@@ -2666,7 +2671,7 @@ timer alerts via voice command.
 │  On stop word detection:                                  │
 │    → Priority chain: timer alert > notification > TTS     │
 │    → Dismiss/cancel the active interruptible state        │
-│    → Play done chime (if enabled + not remote TTS)        │
+│    → Play done chime (if enabled)                         │
 └──────────────────────────────────────────────────────────┘
         │
         │  TFLite models loaded from /voice_satellite/models/
@@ -3025,13 +3030,13 @@ _onStopDetection()
 │     ├── Send ACK for each active notification
 │     ├── Pause audio, clear state, cancel askQuestion
 │     ├── Clear notification status override
-│     ├── Play done chime (if wake_sound enabled + not remote TTS)
+│     ├── Play done chime (if wake_sound enabled)
 │     └── pipeline.restart(0)
 └── 3. TTS / active interaction (lowest priority)
       ├── Stop TTS, clear image linger timeout
       ├── Cancel askQuestion, clear continue state
       ├── setState(IDLE), clear chat, hide blur overlay
-      ├── Play done chime (if wake_sound enabled + not remote TTS)
+      ├── Play done chime (if wake_sound enabled)
       └── pipeline.restart(0)
 ```
 
@@ -3091,7 +3096,7 @@ A step-by-step guide to recreate the frontend from scratch:
 
 ### Phase 6: TTS & Audio Output
 
-- [ ] `audio/chime.js`: Web Audio API chime synthesis
+- [ ] `audio/chime.js`: Pre-rendered MP3 chime playback + remote routing
 - [ ] `audio/media-playback.js`: HTML5 Audio helper
 - [ ] `TtsManager`: Browser + remote playback, streaming, watchdog
 - [ ] `tts/comms.js`: Remote media player service calls

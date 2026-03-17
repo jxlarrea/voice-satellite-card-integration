@@ -425,13 +425,14 @@ and registers a sidebar panel. All functions are called directly from
 
 ### 7.1 Static Paths
 
-Registers up to four HTTP static paths depending on which directories exist:
+Registers up to five HTTP static paths depending on which directories exist:
 
 ```python
 FRONTEND_DIR = str(Path(__file__).parent / "frontend")
 MODELS_DIR   = str(Path(__file__).parent / "models")
 TFLITE_DIR   = str(Path(__file__).parent / "tflite")
 BRAND_DIR    = str(Path(__file__).parent / "brand")
+SOUNDS_DIR   = str(Path(__file__).parent / "sounds")
 
 async def async_register_static_paths(hass):
     paths = [StaticPathConfig(URL_BASE, FRONTEND_DIR, False)]
@@ -441,6 +442,8 @@ async def async_register_static_paths(hass):
         paths.append(StaticPathConfig(f"{URL_BASE}/tflite", TFLITE_DIR, True))
     if Path(BRAND_DIR).is_dir():
         paths.append(StaticPathConfig(f"{URL_BASE}/brand", BRAND_DIR, True))
+    if Path(SOUNDS_DIR).is_dir():
+        paths.append(StaticPathConfig(f"{URL_BASE}/sounds", SOUNDS_DIR, True))
     for cfg in paths:
         try:
             await hass.http.async_register_static_paths([cfg])
@@ -454,6 +457,7 @@ async def async_register_static_paths(hass):
 | `/voice_satellite/models` | `models/` | Yes | `.tflite` wake word models |
 | `/voice_satellite/tflite` | `tflite/` | Yes | TFLite WASM binaries |
 | `/voice_satellite/brand` | `brand/` | Yes | Brand icon (sidebar toolbar) |
+| `/voice_satellite/sounds` | `sounds/` | Yes | Pre-rendered MP3 chime files |
 
 ### 7.2 Lovelace Resource Registration
 
@@ -2702,7 +2706,7 @@ Step-by-step guide to recreate the integration from scratch.
 ### Phase 2: Frontend Registration
 
 - [ ] Create `frontend.py` with standalone async functions (no class)
-- [ ] Implement `async_register_static_paths()` — register `/voice_satellite` + models/tflite/brand static paths
+- [ ] Implement `async_register_static_paths()` — register `/voice_satellite` + models/tflite/brand/sounds static paths
 - [ ] Implement `_get_resources()` helper — robust resource collection access for both new/old HA
 - [ ] Implement `async_register_resource()` — force-load via `resources.async_get_info()`, versioned URL, create or update; fallback to `add_extra_js_url` for YAML mode
 - [ ] Implement `async_register_sidebar_panel()` — `add_extra_js_url` for engine JS + `async_register_built_in_panel` for sidebar
