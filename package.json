@@ -1,6 +1,6 @@
 {
   "name": "voice-satellite-card-integration",
-  "version": "6.2.2",
+  "version": "6.2.3",
   "description": "Voice Satellite for Home Assistant — turns browsers into Assist satellites.",
   "private": true,
   "scripts": {
@@ -12,6 +12,7 @@
   "devDependencies": {
     "@babel/core": "^7.24.0",
     "@babel/preset-env": "^7.24.0",
+    "@breezystack/lamejs": "^1.2.7",
     "@tensorflow/tfjs-core": "^4.9.0",
     "@tensorflow/tfjs-tflite": "^0.0.1-alpha.10",
     "babel-loader": "^9.1.3",

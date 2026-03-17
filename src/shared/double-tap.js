@@ -123,8 +123,7 @@ export class DoubleTapHandler {
       this._card.chat.clear();
       this._card.ui.clearNotificationStatusOverride();
 
-      const isRemote = !!this._card.ttsTarget;
-      if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+      if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false) {
         this._card.tts.playChime('done');
       }
 
@@ -151,8 +150,7 @@ export class DoubleTapHandler {
     this._card.ui.hideBlurOverlay(BlurReason.PIPELINE);
     this._card.ui.updateForState(State.IDLE, this._card.pipeline.serviceUnavailable, false);
 
-    const isRemote = !!this._card.ttsTarget;
-    if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+    if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false) {
       this._card.tts.playChime('done');
     }
 

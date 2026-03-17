@@ -1,8 +1,8 @@
 /**
  * TtsManager
  *
- * Handles TTS playback (browser + remote media player), chimes via Web Audio API,
- * and streaming TTS early-start support.
+ * Handles TTS playback (browser + remote media player), chimes via pre-rendered
+ * sound files, and streaming TTS early-start support.
  */
 
 import { playChime as playChimeSound, CHIME_WAKE, CHIME_ERROR, CHIME_DONE } from '../audio/chime.js';

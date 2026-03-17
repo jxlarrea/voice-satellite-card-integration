@@ -166,8 +166,7 @@ export function onTTSComplete(session, playbackFailed) {
   }
 
   // Normal completion - skip done chime on error (error chime already played)
-  const isRemote = !!session.ttsTarget;
-  if (!playbackFailed && getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+  if (!playbackFailed && getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false) {
     session.tts.playChime('done');
   }
 

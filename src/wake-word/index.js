@@ -554,8 +554,7 @@ export class WakeWordManager {
       session.chat.clear();
       session.ui.clearNotificationStatusOverride();
 
-      const isRemote = !!session.ttsTarget;
-      if (getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+      if (getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false) {
         session.tts.playChime('done');
       }
       session.pipeline.restart(0);
@@ -579,8 +578,7 @@ export class WakeWordManager {
     session.ui.hideBlurOverlay(BlurReason.PIPELINE);
     session.ui.updateForState(State.IDLE, session.pipeline.serviceUnavailable, false);
 
-    const isRemote = !!session.ttsTarget;
-    if (getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+    if (getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false) {
       session.tts.playChime('done');
     }
     session.pipeline.restart(0);

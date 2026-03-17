@@ -12,6 +12,7 @@
 import { VERSION, DEFAULT_CONFIG } from '../constants.js';
 import { VoiceSatelliteSession } from '../session';
 import { resolveEntity } from '../shared/entity-picker.js';
+import { preloadChimes } from '../audio/chime.js';
 
 const ENGINE_KEY = '__vsEngine';
 const CONFIG_KEY = 'vs-panel-config';
@@ -46,6 +47,9 @@ export function initEngine() {
 async function bootstrapEngine() {
   const ha = await waitForHass();
   const session = VoiceSatelliteSession.getInstance();
+
+  // Preload chime sound files so the first play has zero fetch latency
+  preloadChimes();
 
   // Start continuous hass feed (survives page navigations)
   startHassObserver(ha, session);

@@ -29,6 +29,8 @@ TFLITE_DIR = str(Path(__file__).parent / "tflite")
 TFLITE_URL = f"{URL_BASE}/tflite"
 BRAND_DIR = str(Path(__file__).parent / "brand")
 BRAND_URL = f"{URL_BASE}/brand"
+SOUNDS_DIR = str(Path(__file__).parent / "sounds")
+SOUNDS_URL = f"{URL_BASE}/sounds"
 
 
 def _get_resources(hass: HomeAssistant) -> ResourceStorageCollection | None:
@@ -61,6 +63,9 @@ async def async_register_static_paths(hass: HomeAssistant) -> None:
 
     if Path(BRAND_DIR).is_dir():
         paths.append(StaticPathConfig(BRAND_URL, BRAND_DIR, True))
+
+    if Path(SOUNDS_DIR).is_dir():
+        paths.append(StaticPathConfig(SOUNDS_URL, SOUNDS_DIR, True))
 
     for cfg in paths:
         try:

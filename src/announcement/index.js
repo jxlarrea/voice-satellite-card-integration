@@ -60,8 +60,7 @@ export class AnnouncementManager {
         return;
       }
 
-      const isRemote = !!this._card.ttsTarget;
-      if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+      if (getSwitchState(this._card.hass, this._card.config.satellite_entity, 'wake_sound') !== false) {
         this._card.tts.playChime('done');
       }
 

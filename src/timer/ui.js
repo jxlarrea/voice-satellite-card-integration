@@ -1,6 +1,6 @@
 /** Timer UI bridge: pills, ticking, and finished-alert lifecycle. */
 
-import { playMultiNoteChime, CHIME_ALERT } from '../audio/chime.js';
+import { playChime, CHIME_ALERT } from '../audio/chime.js';
 
 let _chimeInterval = null;
 let _dismissTimeout = null;
@@ -113,6 +113,6 @@ export function clearAlert(mgr) {
 
 /** @param {import('./index.js').TimerManager} mgr */
 function playAlertChime(mgr) {
-  playMultiNoteChime(mgr.card, CHIME_ALERT, { log: mgr.log });
+  playChime(mgr.card, CHIME_ALERT, mgr.log);
   mgr.log.log('timer', 'Alert chime played');
 }

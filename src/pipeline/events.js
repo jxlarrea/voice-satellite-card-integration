@@ -354,8 +354,7 @@ export function handleError(mgr, errorData) {
       mgr.card.chat.clear();
       mgr.shouldContinue = false;
       mgr.continueConversationId = null;
-      const isRemote = !!mgr.card.ttsTarget;
-      if (getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false && !isRemote) {
+      if (getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false) {
         mgr.card.tts.playChime('done');
       }
     }

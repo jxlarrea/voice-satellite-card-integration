@@ -95,7 +95,6 @@ export class AskQuestionManager {
     if (!pipeline) return;
 
     const announceId = ann.id;
-    const isRemote = !!this._card.ttsTarget;
 
     // Play wake chime to signal the user should speak.
     // Delay STT pipeline start so the mic doesn't pick up the chime
@@ -104,11 +103,8 @@ export class AskQuestionManager {
     // run while playing is true, so we bypass it via startReactive().
     this._card.ui.startReactive();
 
-    let chimeDelay = 0;
-    if (!isRemote) {
-      this._card.tts.playChime('wake');
-      chimeDelay = Timing.CHIME_SETTLE;
-    }
+    this._card.tts.playChime('wake');
+    const chimeDelay = Timing.CHIME_SETTLE;
 
     // Track whether an answer was submitted so the cleanup timeout
     // can release the server if STT never produced a result.
@@ -120,7 +116,7 @@ export class AskQuestionManager {
         onSttEnd: (text) => {
           this._log.log(LOG, `STT result: "${text}"`);
           this._answerSent = true;
-          this._processAnswer(announceId, text, isRemote);
+          this._processAnswer(announceId, text);
         },
       });
 
@@ -131,7 +127,7 @@ export class AskQuestionManager {
         if (!this._answerSent) {
           this._log.log(LOG, `No STT result for #${announceId} - sending empty answer to release server`);
           this._answerSent = true;
-          this._processAnswer(announceId, '', isRemote);
+          this._processAnswer(announceId, '');
         }
       }, Timing.ASK_QUESTION_STT_SAFETY);
     }, chimeDelay);
@@ -143,7 +139,7 @@ export class AskQuestionManager {
    * runs in parallel with the sendAnswer promise. Whichever completes first
    * triggers cleanup; the other is a no-op via the `cleaned` guard.
    */
-  _processAnswer(announceId, text, isRemote) {
+  _processAnswer(announceId, text) {
     // Clear pending timers - we have a result (or explicit empty)
     if (this._chimeSettleTimeout) {
       clearTimeout(this._chimeSettleTimeout);
@@ -183,9 +179,7 @@ export class AskQuestionManager {
       const matched = result?.matched;
       matchedResult = matched;
 
-      if (!isRemote) {
-        this._card.tts.playChime(matched ? 'done' : 'error');
-      }
+      this._card.tts.playChime(matched ? 'done' : 'error');
 
       if (!matched) {
         this._card.ui.showServiceError();

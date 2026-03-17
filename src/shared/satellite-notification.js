@@ -1,6 +1,6 @@
 /** Shared notification dispatch, queueing, and playback flow. */
 
-import { CHIME_ANNOUNCE_URI } from '../audio/chime.js';
+import { CHIME_ANNOUNCE_URL } from '../audio/chime.js';
 import { buildMediaUrl, playMediaUrl } from '../audio/media-playback.js';
 import { playRemote } from '../tts/comms.js';
 import { BlurReason, Timing } from '../constants.js';
@@ -183,39 +183,20 @@ export function playNotification(mgr, ann, onComplete, logPrefix) {
   }
 
   // Pre-announcement
-  const isRemote = !!mgr.card.ttsTarget;
   if (ann.preannounce === false) {
     mgr.log.log(logPrefix, 'Preannounce disabled - skipping chime');
     _playMain(mgr, ann, onComplete, logPrefix);
   } else {
     const hasPreAnnounce = ann.preannounce_media_id && ann.preannounce_media_id !== '';
-
-    if (hasPreAnnounce) {
-      mgr.log.log(logPrefix, `Playing pre-announcement media: ${ann.preannounce_media_id}`);
-      playMediaFor(mgr, ann.preannounce_media_id, logPrefix, () => {
-        _playMain(mgr, ann, onComplete, logPrefix);
-      });
-    } else if (isRemote) {
-      // Skip browser chime when remote — consistent with pipeline chime behavior
-      mgr.log.log(logPrefix, 'Skipping chime - remote TTS output');
+    // Use custom pre-announce media if provided, otherwise use default chime.
+    // playMediaFor handles both local and remote routing automatically.
+    const chimeUrl = hasPreAnnounce ? ann.preannounce_media_id : CHIME_ANNOUNCE_URL;
+    mgr.log.log(logPrefix, hasPreAnnounce
+      ? `Playing pre-announcement media: ${chimeUrl}`
+      : 'Playing announcement chime');
+    playMediaFor(mgr, chimeUrl, logPrefix, () => {
       _playMain(mgr, ann, onComplete, logPrefix);
-    } else {
-      const vol = mgr.card.mediaPlayer.volume;
-      playMediaUrl(CHIME_ANNOUNCE_URI, vol, {
-        onEnd: () => {
-          mgr.card.mediaPlayer.notifyAudioEnd('announce-chime');
-          _playMain(mgr, ann, onComplete, logPrefix);
-        },
-        onError: () => {
-          mgr.card.mediaPlayer.notifyAudioEnd('announce-chime');
-          _playMain(mgr, ann, onComplete, logPrefix);
-        },
-        onStart: () => {
-          mgr.log.log(logPrefix, 'Announcement chime playing');
-          mgr.card.mediaPlayer.notifyAudioStart('announce-chime');
-        },
-      });
-    }
+    });
   }
 }
 
