@@ -80,6 +80,7 @@ export class UIManager {
     this._applyCustomCSS();
     this._applyTextScale();
     this._applyBackgroundOpacity();
+    this._applyThemeMode();
 
     ui.querySelector('.vs-start-btn').addEventListener('click', () => {
       this._card.onStartClick();
