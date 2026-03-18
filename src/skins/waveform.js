@@ -219,11 +219,19 @@ function freeFBO(gl, fbo) {
 
 // ── Self-mounting visualizer ─────────────────────────────────────────
 
+let _instanceSeq = 0;
+
 function setup() {
   const ui = document.getElementById('voice-satellite-ui');
   if (!ui) return false;
-  if (ui._waveformGL) return true;
+  if (ui._waveformGL) {
+    console.log('[waveform] setup() skipped -- already initialized');
+    return true;
+  }
   ui._waveformGL = true;
+  const ID = ++_instanceSeq;
+  const L = (...args) => console.log(`[waveform #${ID}]`, ...args);
+  L('setup()');
   const barEl = ui.querySelector('.vs-rainbow-bar');
 
   // ── Theme detection ──
@@ -319,6 +327,7 @@ function setup() {
   let particleVAO, particleQuadVBO, particleInstVBO;
   let bloomA = null, bloomB = null;
   let glReady = false;
+  let loseCtxExt = null;
 
   // ── Pre-allocated buffers ──
   const STRAND_COUNT = STRAND_DYNAMICS.length;
@@ -379,9 +388,10 @@ function setup() {
       powerPreference: 'high-performance',
     });
     if (!gl) {
-      console.warn('[waveform] WebGL2 not available');
+      L('WebGL2 not available');
       return false;
     }
+    loseCtxExt = gl.getExtension('WEBGL_lose_context');
 
     // Compile programs
     strandProg    = makeProgram(gl, STRAND_VS, STRAND_FS, ['a_pos', 'a_edge']);
@@ -446,7 +456,7 @@ function setup() {
     gl.vertexAttribDivisor(3, 1);
     gl.bindVertexArray(null);
 
-    console.log('[waveform] WebGL2 initialized');
+    L('initGL() -- WebGL2 ready');
     glReady = true;
     return true;
   }
@@ -454,14 +464,14 @@ function setup() {
   // Context loss handling
   canvas.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
-    console.warn('[waveform] WebGL context lost');
+    L('contextlost');
     glReady = false;
     bloomA = null;
     bloomB = null;
     stopLoop();
   });
   canvas.addEventListener('webglcontextrestored', () => {
-    console.log('[waveform] WebGL context restored');
+    L('contextrestored');
     if (initGL()) {
       resizeFBOs();
       if (overlayEl?.classList.contains('visible')) startLoop();
@@ -499,6 +509,7 @@ function setup() {
   // ── Mount / Unmount ──
   function mount() {
     if (mounted) return;
+    L('mount()');
     ui.appendChild(wrapper);
     mounted = true;
     if (!resizeObs) resizeObs = new ResizeObserver(resize);
@@ -508,6 +519,7 @@ function setup() {
 
   function unmount() {
     if (!mounted) return;
+    L('unmount()');
     stopLoop();
     if (resizeObs) resizeObs.disconnect();
     drawW = 0; drawH = 0;
@@ -556,7 +568,7 @@ function setup() {
 
     const centerY = drawH / 2;
     const t = performance.now() / 1000;
-    const dt = lastTime ? t - lastTime : 0;
+    const dt = lastTime ? Math.min(t - lastTime, 0.1) : 0;
     lastTime = t;
 
     // Derive mode from the bar's CSS classes
@@ -928,6 +940,12 @@ function setup() {
 
   // ── Animation loop ────────────────────────────────────────────────
   function tick() {
+    // Safety: stop if overlay is no longer visible (observer may have missed)
+    if (!overlayEl || !overlayEl.classList.contains('visible')) {
+      L('tick() safety bail -- overlay not visible');
+      stopLoop();
+      return;
+    }
     const t0 = performance.now();
     if (!cachedCardEl || !cachedCardEl.isConnected) {
       cachedCardEl = document.querySelector('voice-satellite-card');
@@ -952,7 +970,7 @@ function setup() {
         const fps = (fpsFrameCount / elapsed * 1000).toFixed(1);
         const avg = (fpsAccum / fpsFrameCount).toFixed(1);
         fpsDisplay = `${fps} fps | draw: ${avg}ms avg, ${fpsDrawMin.toFixed(1)}-${fpsDrawMax.toFixed(1)}ms | ${drawW}x${drawH} | WebGL2`;
-        console.log(`[waveform] ${fpsDisplay}`);
+        L(fpsDisplay);
         fpsFrameCount = 0; fpsAccum = 0;
         fpsDrawMin = Infinity; fpsDrawMax = 0; fpsLast = t0;
       }
@@ -973,32 +991,53 @@ function setup() {
   }
 
   function startLoop() {
-    if (!rafId && !document.hidden) {
-      if (!glReady) {
-        if (!initGL()) return;
+    if (rafId || document.hidden) return;
+    if (!glReady) {
+      // Context was intentionally lost by stopLoop -- restore it.
+      // webglcontextrestored will reinitialize and re-call startLoop.
+      if (gl && gl.isContextLost() && loseCtxExt) {
+        L('startLoop() -- restoring lost context');
+        loseCtxExt.restoreContext();
+        return;
       }
-      resize();
-      detectTheme();
-      lastTime = 0;
-      tick();
+      if (!initGL()) return;
     }
+    L('startLoop()');
+    resize();
+    detectTheme();
+    lastTime = 0;
+    tick();
   }
 
   function stopLoop() {
+    const wasRunning = !!rafId;
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    // Release GPU resources to prevent mobile browser freeze during idle.
+    // The context will be restored on next startLoop() via WEBGL_lose_context.
+    const willRelease = glReady && !!loseCtxExt;
+    if (wasRunning || willRelease) L('stopLoop()', wasRunning ? 'raf=cancelled' : 'raf=none', willRelease ? 'gpu=releasing' : 'gpu=already-released');
+    if (willRelease) {
+      freeFBO(gl, bloomA); bloomA = null;
+      freeFBO(gl, bloomB); bloomB = null;
+      glReady = false;
+      loseCtxExt.loseContext();
+    }
   }
 
   // The blur overlay controls waveform CSS visibility (opacity 0 -> 1)
   const overlayEl = ui.querySelector('.vs-blur-overlay');
 
   document.addEventListener('visibilitychange', () => {
+    L('visibilitychange', document.hidden ? 'hidden' : 'visible');
     if (document.hidden) stopLoop();
     else if (overlayEl?.classList.contains('visible')) startLoop();
   });
 
   if (overlayEl) {
     new MutationObserver(() => {
-      if (overlayEl.classList.contains('visible')) startLoop();
+      const vis = overlayEl.classList.contains('visible');
+      L('overlay class changed', vis ? 'visible' : 'hidden');
+      if (vis) startLoop();
       else stopLoop();
     }).observe(overlayEl, { attributes: true, attributeFilter: ['class'] });
   }
