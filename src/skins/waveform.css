@@ -80,12 +80,11 @@
 #voice-satellite-ui .vs-blur-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: var(--wf-overlay) !important;
+  background: transparent !important;
   opacity: 0;
   transition: opacity 0.3s ease;
   z-index: 9999;
   pointer-events: none;
-  will-change: opacity;
 }
 
 #voice-satellite-ui .vs-blur-overlay.visible {
@@ -145,19 +144,18 @@
 
 .vs-waveform {
   position: fixed;
+  top: 0;
   left: 0;
   right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  height: 55vh;
+  bottom: 0;
   z-index: 10000;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.4s ease;
+  transition: opacity 0.3s ease;
 }
 
 #voice-satellite-ui .vs-blur-overlay.visible ~ .vs-waveform {
-  opacity: 1 !important;
+  opacity: 1;
 }
 
 .vs-waveform canvas {

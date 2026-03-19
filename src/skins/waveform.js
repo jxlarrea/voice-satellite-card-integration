@@ -315,7 +315,6 @@ function setup() {
   // ── DOM elements ──
   const wrapper = document.createElement('div');
   wrapper.className = 'vs-waveform';
-  wrapper.style.opacity = '0'; // prevent flash before skin CSS loads
   const canvas = document.createElement('canvas');
   wrapper.appendChild(canvas);
 
@@ -386,6 +385,7 @@ function setup() {
       alpha: false,
       antialias: true,
       powerPreference: 'high-performance',
+      preserveDrawingBuffer: true,
     });
     if (!gl) {
       L('WebGL2 not available');
@@ -992,6 +992,8 @@ function setup() {
 
   function startLoop() {
     if (rafId || document.hidden) return;
+    // Cancel any pending GPU release from a previous stopLoop
+    if (gpuReleaseTimer) { clearTimeout(gpuReleaseTimer); gpuReleaseTimer = null; }
     if (!glReady) {
       // Context was intentionally lost by stopLoop -- restore it.
       // webglcontextrestored will reinitialize and re-call startLoop.
@@ -1009,18 +1011,29 @@ function setup() {
     tick();
   }
 
+  let gpuReleaseTimer = null;
+
+  function releaseGPU() {
+    gpuReleaseTimer = null;
+    if (!glReady || !loseCtxExt) return;
+    L('releaseGPU()');
+    // Clear to background color before losing context to avoid a flash
+    gl.clearColor(bgR, bgG, bgB, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    freeFBO(gl, bloomA); bloomA = null;
+    freeFBO(gl, bloomB); bloomB = null;
+    glReady = false;
+    loseCtxExt.loseContext();
+  }
+
   function stopLoop() {
     const wasRunning = !!rafId;
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    // Release GPU resources to prevent mobile browser freeze during idle.
-    // The context will be restored on next startLoop() via WEBGL_lose_context.
-    const willRelease = glReady && !!loseCtxExt;
-    if (wasRunning || willRelease) L('stopLoop()', wasRunning ? 'raf=cancelled' : 'raf=none', willRelease ? 'gpu=releasing' : 'gpu=already-released');
-    if (willRelease) {
-      freeFBO(gl, bloomA); bloomA = null;
-      freeFBO(gl, bloomB); bloomB = null;
-      glReady = false;
-      loseCtxExt.loseContext();
+    if (wasRunning) L('stopLoop()');
+    // Delay GPU release so the last rendered frame stays visible
+    // during the CSS fade-out transition (0.4s).
+    if (!gpuReleaseTimer && glReady && loseCtxExt) {
+      gpuReleaseTimer = setTimeout(releaseGPU, 600);
     }
   }
 
