@@ -381,17 +381,19 @@ function setup() {
   let cachedCardEl = null;
 
   function initGL() {
-    gl = canvas.getContext('webgl2', {
-      alpha: false,
-      antialias: true,
-      powerPreference: 'high-performance',
-      preserveDrawingBuffer: true,
-    });
     if (!gl) {
-      L('WebGL2 not available');
-      return false;
+      gl = canvas.getContext('webgl2', {
+        alpha: false,
+        antialias: true,
+        powerPreference: 'high-performance',
+        preserveDrawingBuffer: true,
+      });
+      if (!gl) {
+        L('WebGL2 not available');
+        return false;
+      }
+      loseCtxExt = gl.getExtension('WEBGL_lose_context');
     }
-    loseCtxExt = gl.getExtension('WEBGL_lose_context');
 
     // Compile programs
     strandProg    = makeProgram(gl, STRAND_VS, STRAND_FS, ['a_pos', 'a_edge']);
@@ -461,19 +463,25 @@ function setup() {
     return true;
   }
 
-  // Context loss handling
+  // Context loss handling — browser-initiated (GPU crash, driver update)
   canvas.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
     L('contextlost');
     glReady = false;
-    bloomA = null;
-    bloomB = null;
+    // All GL objects are now invalid — null references so initGL recreates them
+    bloomA = null; bloomB = null;
+    strandProg = kawaseProg = compositeProg = particleProg = null;
+    strandU = kawaseU = compositeU = particleU = null;
+    strandVAO = strandVBO = quadVAO = quadVBO = null;
+    particleVAO = particleQuadVBO = particleInstVBO = null;
+    gl = null;
     stopLoop();
   });
   canvas.addEventListener('webglcontextrestored', () => {
     L('contextrestored');
     if (initGL()) {
       resizeFBOs();
+      detectTheme();
       if (overlayEl?.classList.contains('visible')) startLoop();
     }
   });
@@ -995,14 +1003,14 @@ function setup() {
     // Cancel any pending GPU release from a previous stopLoop
     if (gpuReleaseTimer) { clearTimeout(gpuReleaseTimer); gpuReleaseTimer = null; }
     if (!glReady) {
-      // Context was intentionally lost by stopLoop -- restore it.
-      // webglcontextrestored will reinitialize and re-call startLoop.
+      // Context lost by the browser (GPU crash, driver update) — try restore
       if (gl && gl.isContextLost() && loseCtxExt) {
         L('startLoop() -- restoring lost context');
         loseCtxExt.restoreContext();
         return;
       }
       if (!initGL()) return;
+      resizeFBOs();
     }
     L('startLoop()');
     resize();
@@ -1015,15 +1023,29 @@ function setup() {
 
   function releaseGPU() {
     gpuReleaseTimer = null;
-    if (!glReady || !loseCtxExt) return;
+    if (!glReady || !gl) return;
     L('releaseGPU()');
-    // Clear to background color before losing context to avoid a flash
+    // Clear to background color so the last frame stays visible during fade-out
     gl.clearColor(bgR, bgG, bgB, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    // Delete all GL resources — keeps the context alive but releases GPU memory.
+    // Avoids programmatic loseContext/restoreContext which causes stale-object
+    // errors ("object does not belong to this context") in some browsers.
     freeFBO(gl, bloomA); bloomA = null;
     freeFBO(gl, bloomB); bloomB = null;
+    if (strandProg)    { gl.deleteProgram(strandProg);    strandProg = null; }
+    if (kawaseProg)    { gl.deleteProgram(kawaseProg);    kawaseProg = null; }
+    if (compositeProg) { gl.deleteProgram(compositeProg); compositeProg = null; }
+    if (particleProg)  { gl.deleteProgram(particleProg);  particleProg = null; }
+    if (strandVAO)     { gl.deleteVertexArray(strandVAO); strandVAO = null; }
+    if (strandVBO)     { gl.deleteBuffer(strandVBO);      strandVBO = null; }
+    if (quadVAO)       { gl.deleteVertexArray(quadVAO);    quadVAO = null; }
+    if (quadVBO)       { gl.deleteBuffer(quadVBO);         quadVBO = null; }
+    if (particleVAO)      { gl.deleteVertexArray(particleVAO);  particleVAO = null; }
+    if (particleQuadVBO)  { gl.deleteBuffer(particleQuadVBO);   particleQuadVBO = null; }
+    if (particleInstVBO)  { gl.deleteBuffer(particleInstVBO);   particleInstVBO = null; }
+    strandU = kawaseU = compositeU = particleU = null;
     glReady = false;
-    loseCtxExt.loseContext();
   }
 
   function stopLoop() {
@@ -1032,7 +1054,7 @@ function setup() {
     if (wasRunning) L('stopLoop()');
     // Delay GPU release so the last rendered frame stays visible
     // during the CSS fade-out transition (0.4s).
-    if (!gpuReleaseTimer && glReady && loseCtxExt) {
+    if (!gpuReleaseTimer && glReady) {
       gpuReleaseTimer = setTimeout(releaseGPU, 600);
     }
   }

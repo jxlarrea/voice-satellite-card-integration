@@ -248,6 +248,12 @@ export class PipelineManager {
       try { await this._unsubscribe(); } catch (_) { /* cleanup */ }
       this._unsubscribe = null;
     }
+
+    // Remove reconnect listener to prevent leaked references on teardown
+    if (this._reconnectRef.listener && this._card.connection) {
+      this._card.connection.removeEventListener('ready', this._reconnectRef.listener);
+      this._reconnectRef.listener = null;
+    }
   }
 
   restart(delay) {

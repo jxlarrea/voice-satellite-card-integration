@@ -32,6 +32,7 @@ export function subscribeToEntity(manager, connection, entityId, onAttrs, logTag
       }
     };
     connection.addEventListener('ready', manager._reconnectListener);
+    manager._reconnectConnection = connection;
   }
 }
 
@@ -67,9 +68,11 @@ export function unsubscribeEntity(manager) {
     try { manager._unsubscribe().catch(() => {}); } catch (_) { /* cleanup */ }
     manager._unsubscribe = null;
   }
-  if (manager._reconnectListener && manager.card.connection) {
-    manager.card.connection.removeEventListener('ready', manager._reconnectListener);
+  const conn = manager._reconnectConnection || manager.card.connection;
+  if (manager._reconnectListener && conn) {
+    conn.removeEventListener('ready', manager._reconnectListener);
     manager._reconnectListener = null;
+    manager._reconnectConnection = null;
   }
   manager._subscribed = false;
 }

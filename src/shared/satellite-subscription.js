@@ -14,6 +14,7 @@ import { teardownVisibilityListener } from './satellite-notification.js';
 let _unsubscribe = null;
 let _subscribed = false;
 let _reconnectListener = null;
+let _reconnectConnection = null;
 let _card = null;
 let _onEvent = null;
 let _retryTimer = null;
@@ -50,6 +51,7 @@ export function subscribeSatelliteEvents(card, onEvent) {
       }
     };
     connection.addEventListener('ready', _reconnectListener);
+    _reconnectConnection = connection;
   }
 }
 
@@ -129,9 +131,10 @@ export function refreshSatelliteSubscription() {
  */
 export function teardownSatelliteSubscription() {
   _cleanup();
-  if (_reconnectListener && _card?.connection) {
-    _card.connection.removeEventListener('ready', _reconnectListener);
+  if (_reconnectListener && _reconnectConnection) {
+    _reconnectConnection.removeEventListener('ready', _reconnectListener);
     _reconnectListener = null;
+    _reconnectConnection = null;
   }
   _card = null;
   _onEvent = null;

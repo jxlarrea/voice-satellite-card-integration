@@ -406,6 +406,7 @@ export class VoiceSatelliteSession {
     try { this._tts.stop(); } catch (e) { this._logger.log('session', `tts.stop: ${e.message || e}`); }
     try { this._timer.destroy(); } catch (e) { this._logger.log('session', `timer.destroy: ${e.message || e}`); }
     try { teardownSatelliteSubscription(); } catch (e) { this._logger.log('session', `teardownSub: ${e.message || e}`); }
+    try { this._doubleTap.teardown(); } catch (e) { this._logger.log('session', `doubleTap.teardown: ${e.message || e}`); }
     try { this._visibility.teardown(); } catch (e) { this._logger.log('session', `visibility.teardown: ${e.message || e}`); }
     this._hasStarted = false;
     this._starting = false;
