@@ -72,6 +72,9 @@ function playChimeRemote(card, url, log) {
  * Play a chime sound file. Routes to the remote media player when
  * TTS output is configured.
  *
+ * Reuses the cached Audio element directly (no cloneNode) to avoid
+ * orphaned HTTP connections that exhaust the browser's connection pool.
+ *
  * @param {object} card - Card/session instance
  * @param {object} chime - Chime definition with `url` and `duration`
  * @param {object} [log] - Logger instance
@@ -82,8 +85,8 @@ export function playChime(card, chime, log) {
       playChimeRemote(card, chime.url, log);
       return;
     }
-    const cached = getCachedAudio(chime.url);
-    const audio = cached.cloneNode();
+    const audio = getCachedAudio(chime.url);
+    audio.currentTime = 0;
     audio.volume = card.mediaPlayer.volume;
     audio.play().catch((e) => {
       log?.error('chime', `Chime play error: ${e}`);

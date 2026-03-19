@@ -25,6 +25,7 @@ export class AnalyserManager {
     // Audio path: mediaElementSource -> _audioAnalyser -> destination
     this._audioAnalyser = null;
     this._mediaSourceNode = null;
+    this._mediaSourceEl = null;
 
     // Which analyser _tick() reads from
     this._activeAnalyser = null;
@@ -95,7 +96,13 @@ export class AnalyserManager {
       if (!this._audioAnalyser) {
         this._audioAnalyser = this._createAnalyser(audioContext);
       }
-      this._mediaSourceNode = audioContext.createMediaElementSource(audioEl);
+      // createMediaElementSource can only be called once per element.
+      // Reuse the cached source node when the same element is reattached
+      // (e.g. TtsManager's persistent Audio element across plays).
+      if (this._mediaSourceEl !== audioEl) {
+        this._mediaSourceNode = audioContext.createMediaElementSource(audioEl);
+        this._mediaSourceEl = audioEl;
+      }
       this._mediaSourceNode.connect(this._audioAnalyser);
       this._audioAnalyser.connect(audioContext.destination);
 
@@ -134,7 +141,7 @@ export class AnalyserManager {
    * the bar show mic levels instead of TTS levels.
    */
   reconnectMic() {
-    if (this._mediaSourceNode) {
+    if (this._activeAnalyser === this._audioAnalyser) {
       this._log.log('analyser', 'reconnectMic skipped - audio still attached');
       return;
     }
@@ -203,7 +210,7 @@ export class AnalyserManager {
   _detachAudio() {
     if (this._mediaSourceNode) {
       try { this._mediaSourceNode.disconnect(); } catch {}
-      this._mediaSourceNode = null;
+      // Don't null _mediaSourceNode - it's reusable for the same element
       this._log.log('analyser', 'Audio -> audioAnalyser disconnected');
     }
     if (this._audioAnalyser) {

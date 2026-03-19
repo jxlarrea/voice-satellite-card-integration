@@ -259,6 +259,12 @@ export function playMediaFor(mgr, urlPath, logPrefix, onDone) {
   mgr.currentAudio = playMediaUrl(url, volume, {
     onEnd: () => {
       mgr.log.log(logPrefix, 'Media playback complete');
+      if (mgr.currentAudio) {
+        mgr.currentAudio.onended = null;
+        mgr.currentAudio.onerror = null;
+        mgr.currentAudio.pause();
+        mgr.currentAudio.src = '';
+      }
       mgr.currentAudio = null;
       mgr.card.analyser.detachAudio();
       mgr.card.mediaPlayer.notifyAudioEnd('notification');
@@ -266,6 +272,12 @@ export function playMediaFor(mgr, urlPath, logPrefix, onDone) {
     },
     onError: (e) => {
       mgr.log.error(logPrefix, `Media playback error: ${e}`);
+      if (mgr.currentAudio) {
+        mgr.currentAudio.onended = null;
+        mgr.currentAudio.onerror = null;
+        mgr.currentAudio.pause();
+        mgr.currentAudio.src = '';
+      }
       mgr.currentAudio = null;
       mgr.card.analyser.detachAudio();
       mgr.card.mediaPlayer.notifyAudioEnd('notification');

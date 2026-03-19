@@ -560,7 +560,10 @@ export class WakeWordManager {
           sendAck(session, mgr.currentAnnounceId, 'stop-word');
         }
         if (mgr.currentAudio) {
+          mgr.currentAudio.onended = null;
+          mgr.currentAudio.onerror = null;
           mgr.currentAudio.pause();
+          mgr.currentAudio.src = '';
           mgr.currentAudio = null;
         }
         mgr.playing = false;

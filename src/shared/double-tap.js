@@ -110,7 +110,10 @@ export class DoubleTapHandler {
           sendAck(this._card, mgr.currentAnnounceId, 'double-tap');
         }
         if (mgr.currentAudio) {
+          mgr.currentAudio.onended = null;
+          mgr.currentAudio.onerror = null;
           mgr.currentAudio.pause();
+          mgr.currentAudio.src = '';
           mgr.currentAudio = null;
         }
         mgr.playing = false;

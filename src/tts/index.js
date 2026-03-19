@@ -6,7 +6,7 @@
  */
 
 import { playChime as playChimeSound, CHIME_WAKE, CHIME_ERROR, CHIME_DONE } from '../audio/chime.js';
-import { buildMediaUrl, playMediaUrl } from '../audio/media-playback.js';
+import { buildMediaUrl } from '../audio/media-playback.js';
 import { playRemote, stopRemote } from './comms.js';
 import { Timing } from '../constants.js';
 
@@ -24,7 +24,10 @@ export class TtsManager {
     this._card = card;
     this._log = card.logger;
 
-    this._currentAudio = null;
+    // Single persistent Audio element - reused across all TTS plays.
+    // Setting src on an existing element auto-cancels the previous fetch,
+    // preventing orphaned HTTP connections from exhausting the browser pool.
+    this._audioEl = new Audio();
     this._playing = false;
     this._endTimer = null;
     this._streamingUrl = null;
@@ -46,15 +49,10 @@ export class TtsManager {
     // Stop word activation delay timer
     this._stopWordTimer = null;
 
-    // Preload fetch for streaming TTS early-start
-    this._preloadAbort = null;
-    this._preloadedBlob = null;
-    this._preloadedUrl = null;
-    this._blobUrl = null;
   }
 
   get isPlaying() { return this._playing; }
-  get currentAudio() { return this._currentAudio; }
+  get currentAudio() { return this._playing ? this._audioEl : null; }
 
   get ttsUrl() { return this._ttsUrl; }
   set ttsUrl(url) { this._ttsUrl = url; }
@@ -98,11 +96,11 @@ export class TtsManager {
     // Browser playback - watchdog checks audio is progressing
     this._lastWatchdogTime = 0;
     this._playbackWatchdog = setInterval(() => {
-      if (!this._playing || !this._currentAudio) {
+      if (!this._playing) {
         this._clearWatchdog();
         return;
       }
-      const now = this._currentAudio.currentTime;
+      const now = this._audioEl.currentTime;
       if (now > this._lastWatchdogTime) {
         this._lastWatchdogTime = now;
         return; // Audio is progressing - all good
@@ -113,58 +111,60 @@ export class TtsManager {
       this._onComplete();
     }, Timing.PLAYBACK_WATCHDOG);
 
-    // Use prefetched blob if available (avoids opening a new connection)
-    const blob = (this._preloadedUrl === url) ? this._preloadedBlob : null;
-    this._revokeBlobUrl();
-    const playUrl = blob ? URL.createObjectURL(blob) : url;
-    if (blob) this._blobUrl = playUrl;
-    this._abortPreload();
+    // Reuse the persistent Audio element. Setting src auto-cancels any
+    // previous in-flight fetch, so orphaned connections are impossible.
+    const audio = this._audioEl;
+    audio.volume = this._card.mediaPlayer.volume;
 
-    this._currentAudio = playMediaUrl(playUrl, this._card.mediaPlayer.volume, {
-      onEnd: () => {
-        this._log.log('tts', 'Playback complete');
-        this._clearWatchdog();
-        this._onComplete();
-      },
-      onError: (e) => {
-        this._log.error('tts', `Playback error: ${e}`);
-        this._log.error('tts', `URL: ${url}`);
-        this._clearWatchdog();
+    // Guard against double error/completion callbacks
+    let handled = false;
 
-        // Retry once - the TTS proxy token may not have been ready yet
-        if (!isRetry && this._pendingTtsEndUrl) {
-          const retryUrl = this._pendingTtsEndUrl;
-          this._pendingTtsEndUrl = null;
-          // Clear listeners on the failed audio element before losing reference
-          if (this._currentAudio) {
-            this._currentAudio.onended = null;
-            this._currentAudio.onerror = null;
-          }
-          this._currentAudio = null;
-          this._log.log('tts', `Retrying with tts-end URL: ${retryUrl}`);
-          this.play(retryUrl, true);
-          return;
-        }
+    audio.onended = () => {
+      if (handled) return;
+      handled = true;
+      this._log.log('tts', 'Playback complete');
+      this._clearWatchdog();
+      this._onComplete();
+    };
 
-        this._onComplete(true);
-      },
-      onStart: () => {
-        this._log.log('tts', 'Playback started successfully');
+    audio.onerror = (e) => {
+      if (handled) return;
+      handled = true;
+      this._log.error('tts', `Playback error: ${e}`);
+      this._log.error('tts', `URL: ${url}`);
+      this._clearWatchdog();
+
+      // Retry once - the TTS proxy token may not have been ready yet
+      if (!isRetry && this._pendingTtsEndUrl) {
+        const retryUrl = this._pendingTtsEndUrl;
         this._pendingTtsEndUrl = null;
-        this._card.mediaPlayer.notifyAudioStart('tts');
-        if (this._card.isReactiveBarEnabled && this._currentAudio) {
-          this._card.analyser.attachAudio(this._currentAudio, this._card.audio.audioContext);
-        }
-        // Stop word disabled — kept for future re-enablement
-        // this._enableStopWordDelayed();
-      },
+        this._log.log('tts', `Retrying with tts-end URL: ${retryUrl}`);
+        this.play(retryUrl, true);
+        return;
+      }
+
+      this._onComplete(true);
+    };
+
+    audio.src = url;
+    audio.play().then(() => {
+      if (handled) return;
+      this._log.log('tts', 'Playback started successfully');
+      this._pendingTtsEndUrl = null;
+      this._card.mediaPlayer.notifyAudioStart('tts');
+      if (this._card.isReactiveBarEnabled) {
+        this._card.analyser.attachAudio(audio, this._card.audio.audioContext);
+      }
+      // Stop word disabled — kept for future re-enablement
+      // this._enableStopWordDelayed();
+    }).catch((e) => {
+      // play() promise rejection (autoplay blocked, etc.)
+      audio.onerror?.(e);
     });
   }
 
   stop() {
     this._playing = false;
-    this._abortPreload();
-    this._revokeBlobUrl();
     this._remoteTarget = null;
     this._remoteSawPlaying = false;
     this._remoteInitialState = null;
@@ -179,13 +179,7 @@ export class TtsManager {
     }
 
     this._card.analyser.detachAudio();
-    if (this._currentAudio) {
-      this._currentAudio.onended = null;
-      this._currentAudio.onerror = null;
-      this._currentAudio.pause();
-      this._currentAudio.src = '';
-      this._currentAudio = null;
-    }
+    this._releaseAudio();
 
     stopRemote(this._card);
     this._card.mediaPlayer.notifyAudioEnd('tts');
@@ -196,26 +190,14 @@ export class TtsManager {
    */
   storeStreamingUrl(eventData) {
     this._streamingUrl = null;
-    this._abortPreload();
     if (eventData.tts_output?.url && eventData.tts_output?.stream_response) {
       const url = eventData.tts_output.url;
       this._streamingUrl = url.startsWith('http') ? url : window.location.origin + url;
-      this._log.log('tts', `Streaming TTS URL available: ${this._streamingUrl}`);
-
-      // Prefetch via fetch() + AbortController so we can reliably kill the
-      // HTTP connection if the interaction is cancelled before TTS plays.
-      const ctrl = new AbortController();
-      this._preloadAbort = ctrl;
-      this._preloadedUrl = this._streamingUrl;
-      fetch(this._streamingUrl, { signal: ctrl.signal })
-        .then(r => r.blob())
-        .then(blob => {
-          // Only store if this preload wasn't aborted / superseded
-          if (this._preloadAbort === ctrl) {
-            this._preloadedBlob = blob;
-          }
-        })
-        .catch(() => {}); // AbortError or network error - ignore
+      this._log.log('tts', `Streaming TTS URL stored: ${this._streamingUrl}`);
+      // No eager fetch - the persistent Audio element fetches on play().
+      // Eager preloading caused connection exhaustion: HA's streaming TTS
+      // proxy holds connections open until audio is generated, and cancelled
+      // interactions pile up faster than HTTP/1.1 connections can be freed.
     }
   }
 
@@ -312,20 +294,14 @@ export class TtsManager {
       this._onComplete();
     }
   }
-  _revokeBlobUrl() {
-    if (this._blobUrl) {
-      URL.revokeObjectURL(this._blobUrl);
-      this._blobUrl = null;
-    }
-  }
-
-  _abortPreload() {
-    if (this._preloadAbort) {
-      this._preloadAbort.abort();
-      this._preloadAbort = null;
-    }
-    this._preloadedBlob = null;
-    this._preloadedUrl = null;
+  /** Reset the persistent Audio element, closing any open HTTP connection. */
+  _releaseAudio() {
+    const a = this._audioEl;
+    a.onended = null;
+    a.onerror = null;
+    a.pause();
+    a.removeAttribute('src');
+    a.load();
   }
 
   _clearWatchdog() {
@@ -360,9 +336,8 @@ export class TtsManager {
   _onComplete(playbackFailed) {
     this._log.log('tts', `Complete - cleaning up UI${playbackFailed ? ' (playback failed)' : ''}`);
     this._disableStopWord();
-    this._revokeBlobUrl();
     this._card.analyser.detachAudio();
-    this._currentAudio = null;
+    this._releaseAudio();
     this._playing = false;
     this._remoteTarget = null;
     this._remoteSawPlaying = false;
