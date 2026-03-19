@@ -238,6 +238,10 @@ export class MicroFrontend {
     this._noiseEstimate = new Float64Array(NUM_CHANNELS);
     this._noiseInitialized = false;
 
+    // Pool of reusable Int8Array feature buffers to avoid ~100 allocs/sec
+    // during continuous wake word detection (reduces GC pressure on tablets)
+    this._featurePool = [];
+    this._featurePoolMax = 32;
   }
 
   /**
@@ -326,8 +330,8 @@ export class MicroFrontend {
       logFeatures[i] = Math.max(0, Math.log2(1.0 + melEnergies[i]) * (1 << LOG_SCALE_SHIFT));
     }
 
-    // 9. Quantize to int8
-    const int8Features = new Int8Array(NUM_CHANNELS);
+    // 9. Quantize to int8 (reuse pooled buffer to avoid ~100 allocs/sec)
+    const int8Features = this._featurePool.pop() || new Int8Array(NUM_CHANNELS);
     for (let i = 0; i < NUM_CHANNELS; i++) {
       const val = Math.round(logFeatures[i] * 256.0 / QUANT_DIVISOR) - 128;
       int8Features[i] = Math.max(-128, Math.min(127, val));
@@ -376,6 +380,16 @@ export class MicroFrontend {
       const noise = Math.max(this._noiseEstimate[i], 1.0);
       const gain = Math.pow(PCAN_OFFSET / noise, PCAN_STRENGTH);
       energies[i] = pcanShrink(energies[i] * gain);
+    }
+  }
+
+  /**
+   * Return a feature buffer to the pool for reuse.
+   * @param {Int8Array} buf
+   */
+  recycleFeature(buf) {
+    if (this._featurePool.length < this._featurePoolMax) {
+      this._featurePool.push(buf);
     }
   }
 

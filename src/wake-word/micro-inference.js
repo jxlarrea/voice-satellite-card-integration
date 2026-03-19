@@ -199,6 +199,8 @@ export class MicroWakeWordInference {
 
         // Run model inference with exactly framesPerInfer frames
         const probability = this._runModel(kw);
+        // Recycle feature buffers back to the pool
+        for (const f of kw.featureAccum) this._frontend.recycleFeature(f);
         kw.featureAccum.length = 0;
 
         // Skip warmup period — model state from previous detection may still

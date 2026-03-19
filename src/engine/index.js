@@ -144,7 +144,7 @@ function waitForHass() {
 function startHassObserver(ha, session) {
   let lastHass = ha.hass;
 
-  setInterval(() => {
+  session._hassObserverInterval = setInterval(() => {
     if (!ha.hass || ha.hass === lastHass) return;
     lastHass = ha.hass;
 

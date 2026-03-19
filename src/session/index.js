@@ -408,6 +408,10 @@ export class VoiceSatelliteSession {
     try { teardownSatelliteSubscription(); } catch (e) { this._logger.log('session', `teardownSub: ${e.message || e}`); }
     try { this._doubleTap.teardown(); } catch (e) { this._logger.log('session', `doubleTap.teardown: ${e.message || e}`); }
     try { this._visibility.teardown(); } catch (e) { this._logger.log('session', `visibility.teardown: ${e.message || e}`); }
+    if (this._hassObserverInterval) {
+      clearInterval(this._hassObserverInterval);
+      this._hassObserverInterval = null;
+    }
     this._hasStarted = false;
     this._starting = false;
     this._startAttempted = false;

@@ -14,12 +14,14 @@ import { sendBinaryAudio } from './comms.js';
 export async function setupAudioWorklet(mgr, sourceNode) {
   const workletCode =
     'class VoiceSatelliteProcessor extends AudioWorkletProcessor {' +
-    'constructor() { super(); this.buffer = []; }' +
+    'constructor() { super(); this._buf = null; }' +
     'process(inputs, outputs, parameters) {' +
     'var input = inputs[0];' +
     'if (input && input[0]) {' +
-    'var channelData = new Float32Array(input[0]);' +
-    'this.port.postMessage(channelData);' +
+    'var ch = input[0];' +
+    'if (!this._buf || this._buf.length !== ch.length) this._buf = new Float32Array(ch.length);' +
+    'this._buf.set(ch);' +
+    'this.port.postMessage(this._buf);' +
     '}' +
     'return true;' +
     '}' +

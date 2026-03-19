@@ -37,6 +37,9 @@ export class AnalyserManager {
     this._visibilityHandler = null;
     this._lastLevel = -1;
     this._lastTick = 0;
+
+    // Bound tick for RAF to avoid creating a new closure per frame
+    this._boundTick = () => this._tick();
   }
 
   /**
@@ -241,7 +244,7 @@ export class AnalyserManager {
     const now = performance.now();
     const targetIntervalMs = this._getUpdateIntervalMs();
     if (now - this._lastTick < targetIntervalMs) {
-      this._rafId = requestAnimationFrame(() => this._tick());
+      this._rafId = requestAnimationFrame(this._boundTick);
       return;
     }
 
@@ -268,7 +271,7 @@ export class AnalyserManager {
       this._barEl.style.setProperty('--vs-audio-level', level.toFixed(2));
     }
 
-    this._rafId = requestAnimationFrame(() => this._tick());
+    this._rafId = requestAnimationFrame(this._boundTick);
   }
 
   _setActiveAnalyser(analyser) {

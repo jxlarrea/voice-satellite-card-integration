@@ -386,7 +386,6 @@ function setup() {
         alpha: false,
         antialias: true,
         powerPreference: 'high-performance',
-        preserveDrawingBuffer: true,
       });
       if (!gl) {
         L('WebGL2 not available');
@@ -458,6 +457,8 @@ function setup() {
     gl.vertexAttribDivisor(3, 1);
     gl.bindVertexArray(null);
 
+    // Clear CSS fallback background now that GL is drawing
+    canvas.style.backgroundColor = '';
     L('initGL() -- WebGL2 ready');
     glReady = true;
     return true;
@@ -1025,9 +1026,10 @@ function setup() {
     gpuReleaseTimer = null;
     if (!glReady || !gl) return;
     L('releaseGPU()');
-    // Clear to background color so the last frame stays visible during fade-out
-    gl.clearColor(bgR, bgG, bgB, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    // Set CSS background so the canvas shows the correct color during fade-out
+    // instead of using GL clear (avoids needing preserveDrawingBuffer which
+    // forces ~33MB framebuffer copy on high-DPR tablets).
+    canvas.style.backgroundColor = `rgb(${Math.round(bgR*255)},${Math.round(bgG*255)},${Math.round(bgB*255)})`;
     // Delete all GL resources — keeps the context alive but releases GPU memory.
     // Avoids programmatic loseContext/restoreContext which causes stale-object
     // errors ("object does not belong to this context") in some browsers.
