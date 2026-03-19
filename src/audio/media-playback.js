@@ -31,8 +31,8 @@ export function buildMediaUrl(urlPath) {
  * @param {Function} [callbacks.onStart] - Called when playback starts
  * @returns {HTMLAudioElement} The audio element (for external stop/cleanup)
  */
-export function playMediaUrl(url, volume, { onEnd, onError, onStart, preloadedAudio }) {
-  const audio = preloadedAudio || new Audio();
+export function playMediaUrl(url, volume, { onEnd, onError, onStart }) {
+  const audio = new Audio();
   audio.volume = volume;
 
   audio.onended = () => {
@@ -43,9 +43,7 @@ export function playMediaUrl(url, volume, { onEnd, onError, onStart, preloadedAu
     onError(e);
   };
 
-  if (!preloadedAudio) {
-    audio.src = url;
-  }
+  audio.src = url;
   audio.play().then(() => {
     onStart?.();
   }).catch((e) => {

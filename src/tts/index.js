@@ -46,9 +46,11 @@ export class TtsManager {
     // Stop word activation delay timer
     this._stopWordTimer = null;
 
-    // Preloaded audio element for streaming TTS early-start
-    this._preloadedAudio = null;
+    // Preload fetch for streaming TTS early-start
+    this._preloadAbort = null;
+    this._preloadedBlob = null;
     this._preloadedUrl = null;
+    this._blobUrl = null;
   }
 
   get isPlaying() { return this._playing; }
@@ -111,13 +113,14 @@ export class TtsManager {
       this._onComplete();
     }, Timing.PLAYBACK_WATCHDOG);
 
-    // Reuse preloaded audio element if URL matches (connection already warm)
-    const preloadedAudio = (this._preloadedUrl === url) ? this._preloadedAudio : null;
-    this._preloadedAudio = null;
-    this._preloadedUrl = null;
+    // Use prefetched blob if available (avoids opening a new connection)
+    const blob = (this._preloadedUrl === url) ? this._preloadedBlob : null;
+    this._revokeBlobUrl();
+    const playUrl = blob ? URL.createObjectURL(blob) : url;
+    if (blob) this._blobUrl = playUrl;
+    this._abortPreload();
 
-    this._currentAudio = playMediaUrl(url, this._card.mediaPlayer.volume, {
-      preloadedAudio,
+    this._currentAudio = playMediaUrl(playUrl, this._card.mediaPlayer.volume, {
       onEnd: () => {
         this._log.log('tts', 'Playback complete');
         this._clearWatchdog();
@@ -160,7 +163,8 @@ export class TtsManager {
 
   stop() {
     this._playing = false;
-    this._destroyPreloadedAudio();
+    this._abortPreload();
+    this._revokeBlobUrl();
     this._remoteTarget = null;
     this._remoteSawPlaying = false;
     this._remoteInitialState = null;
@@ -192,19 +196,26 @@ export class TtsManager {
    */
   storeStreamingUrl(eventData) {
     this._streamingUrl = null;
-    this._destroyPreloadedAudio();
+    this._abortPreload();
     if (eventData.tts_output?.url && eventData.tts_output?.stream_response) {
       const url = eventData.tts_output.url;
       this._streamingUrl = url.startsWith('http') ? url : window.location.origin + url;
       this._log.log('tts', `Streaming TTS URL available: ${this._streamingUrl}`);
 
-      // Preload audio element so the browser connection is warm when play() fires
-      const audio = new Audio();
-      audio.preload = 'auto';
-      audio.src = this._streamingUrl;
-      audio.load();
-      this._preloadedAudio = audio;
+      // Prefetch via fetch() + AbortController so we can reliably kill the
+      // HTTP connection if the interaction is cancelled before TTS plays.
+      const ctrl = new AbortController();
+      this._preloadAbort = ctrl;
       this._preloadedUrl = this._streamingUrl;
+      fetch(this._streamingUrl, { signal: ctrl.signal })
+        .then(r => r.blob())
+        .then(blob => {
+          // Only store if this preload wasn't aborted / superseded
+          if (this._preloadAbort === ctrl) {
+            this._preloadedBlob = blob;
+          }
+        })
+        .catch(() => {}); // AbortError or network error - ignore
     }
   }
 
@@ -301,13 +312,19 @@ export class TtsManager {
       this._onComplete();
     }
   }
-  _destroyPreloadedAudio() {
-    if (this._preloadedAudio) {
-      this._preloadedAudio.pause();
-      this._preloadedAudio.removeAttribute('src');
-      this._preloadedAudio.load();
-      this._preloadedAudio = null;
+  _revokeBlobUrl() {
+    if (this._blobUrl) {
+      URL.revokeObjectURL(this._blobUrl);
+      this._blobUrl = null;
     }
+  }
+
+  _abortPreload() {
+    if (this._preloadAbort) {
+      this._preloadAbort.abort();
+      this._preloadAbort = null;
+    }
+    this._preloadedBlob = null;
     this._preloadedUrl = null;
   }
 
@@ -343,6 +360,7 @@ export class TtsManager {
   _onComplete(playbackFailed) {
     this._log.log('tts', `Complete - cleaning up UI${playbackFailed ? ' (playback failed)' : ''}`);
     this._disableStopWord();
+    this._revokeBlobUrl();
     this._card.analyser.detachAudio();
     this._currentAudio = null;
     this._playing = false;
