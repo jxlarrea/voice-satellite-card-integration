@@ -13,6 +13,7 @@ import { VERSION, DEFAULT_CONFIG } from '../constants.js';
 import { VoiceSatelliteSession } from '../session';
 import { resolveEntity } from '../shared/entity-picker.js';
 import { preloadChimes } from '../audio/chime.js';
+import { startDiagnostics } from '../diagnostics.js';
 
 const ENGINE_KEY = '__vsEngine';
 const CONFIG_KEY = 'vs-panel-config';
@@ -50,6 +51,9 @@ async function bootstrapEngine() {
 
   // Preload chime sound files so the first play has zero fetch latency
   preloadChimes();
+
+  // Start memory diagnostics if enabled (?vs_diag=true)
+  startDiagnostics(session);
 
   // Start continuous hass feed (survives page navigations)
   startHassObserver(ha, session);

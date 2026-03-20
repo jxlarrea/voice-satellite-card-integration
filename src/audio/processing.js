@@ -12,21 +12,32 @@ import { sendBinaryAudio } from './comms.js';
  * @param {MediaStreamAudioSourceNode} sourceNode
  */
 export async function setupAudioWorklet(mgr, sourceNode) {
+  // Batch 10 render quanta (10 * 128 = 1280 samples) before posting.
+  // This reduces postMessage structured-clone overhead from 125/s to 12.5/s
+  // at 16 kHz, and produces 5120-byte ArrayBuffers that V8 tracks as external
+  // memory — preventing native backing-store buildup on low-RAM devices.
+  const BATCH_QUANTA = 10;
   const workletCode =
+    'var B=' + BATCH_QUANTA + ';' +
     'class VoiceSatelliteProcessor extends AudioWorkletProcessor {' +
-    'constructor() { super(); this._buf = null; }' +
-    'process(inputs, outputs, parameters) {' +
-    'var input = inputs[0];' +
-    'if (input && input[0]) {' +
-    'var ch = input[0];' +
-    'if (!this._buf || this._buf.length !== ch.length) this._buf = new Float32Array(ch.length);' +
-    'this._buf.set(ch);' +
+    'constructor(){super();this._buf=null;this._pos=0;}' +
+    'process(inputs){' +
+    'var input=inputs[0];' +
+    'if(input&&input[0]){' +
+    'var ch=input[0];' +
+    'var len=ch.length;' +
+    'if(!this._buf)this._buf=new Float32Array(len*B);' +
+    'this._buf.set(ch,this._pos);' +
+    'this._pos+=len;' +
+    'if(this._pos>=this._buf.length){' +
     'this.port.postMessage(this._buf);' +
+    'this._pos=0;' +
+    '}' +
     '}' +
     'return true;' +
     '}' +
     '}' +
-    'registerProcessor("voice-satellite-processor", VoiceSatelliteProcessor);';
+    'registerProcessor("voice-satellite-processor",VoiceSatelliteProcessor);';
 
   const blob = new Blob([workletCode], { type: 'application/javascript' });
   const workletUrl = URL.createObjectURL(blob);

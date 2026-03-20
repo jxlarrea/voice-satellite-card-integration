@@ -80,13 +80,17 @@ export class MicroWakeWordInference {
    * number of feature frames per inference call (framesPerInfer).
    */
   _initKeyword(cfg) {
-    // Determine actual frames per inference from the model's input tensor
+    // Determine actual frames per inference from the model's input tensor.
+    // Cache the input/output typed-array views — getInputs()/getOutputs()
+    // allocate ~100 bytes of WASM memory per call that never gets freed,
+    // which at ~4 inferences/s/model causes ~46 MB/hour of WASM heap growth.
     let framesPerInfer = cfg.stepSize || 1;
+    let inputView = null;
     try {
       const inputs = cfg.runner.getInputs();
       if (inputs && inputs.length > 0) {
-        const inputBuf = inputs[0].data();
-        const bufLen = inputBuf.length;
+        inputView = inputs[0].data();
+        const bufLen = inputView.length;
         const detected = Math.floor(bufLen / 40);
         if (detected > 0) {
           framesPerInfer = detected;
@@ -100,6 +104,11 @@ export class MicroWakeWordInference {
       cutoff: cfg.cutoff,
       slidingWindow: cfg.slidingWindow,
       framesPerInfer,
+      // Cached WASM tensor views (avoids per-inference WASM allocations).
+      // outputView is set lazily after the first successful inference because
+      // calling getOutputs() before infer() corrupts VarHandle state.
+      inputView,
+      outputView: null,
       // Probability ring buffer + running sum
       probBuffer: new Float32Array(cfg.slidingWindow),
       probIndex: 0,
@@ -247,6 +256,8 @@ export class MicroWakeWordInference {
    * @returns {number} probability [0, 1]
    */
   _runModel(kw) {
+    // getInputs() must be called before each infer() -- the TFLite Web runtime
+    // uses it to prepare internal tensor state (not just return handles).
     const inputs = kw.runner.getInputs();
     if (!inputs || inputs.length === 0) return 0;
 
@@ -262,19 +273,14 @@ export class MicroWakeWordInference {
 
     const success = kw.runner.infer();
     if (!success) return 0;
-    return this._readOutput(kw);
-  }
 
-  /**
-   * Read the output probability from the model.
-   * @returns {number} probability [0, 1]
-   */
-  _readOutput(kw) {
-    const outputs = kw.runner.getOutputs();
-    if (!outputs || outputs.length === 0) return 0;
-    const rawValue = outputs[0].data()[0];
-    // Output is uint8 [0-255], normalize to [0, 1]
-    return rawValue / 255.0;
+    // Cache output view after first successful inference to avoid
+    // repeated getOutputs() WASM allocations (~100 bytes each).
+    if (!kw.outputView || kw.outputView.buffer.byteLength === 0) {
+      try { kw.outputView = kw.runner.getOutputs()[0].data(); }
+      catch (_) { return 0; }
+    }
+    return kw.outputView[0] / 255.0;
   }
 
   /**

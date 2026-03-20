@@ -224,14 +224,13 @@ let _instanceSeq = 0;
 function setup() {
   const ui = document.getElementById('voice-satellite-ui');
   if (!ui) return false;
-  if (ui._waveformGL) {
-    console.log('[waveform] setup() skipped -- already initialized');
-    return true;
-  }
+  if (ui._waveformGL) return true;
   ui._waveformGL = true;
   const ID = ++_instanceSeq;
-  const L = (...args) => console.log(`[waveform #${ID}]`, ...args);
-  L('setup()');
+  const L = (...args) => {
+    const cfg = document.querySelector('voice-satellite-card')?.config;
+    if (cfg?.debug) console.log(`[waveform #${ID}]`, ...args);
+  };
   const barEl = ui.querySelector('.vs-rainbow-bar');
 
   // ── Theme detection ──
