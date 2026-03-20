@@ -49,6 +49,9 @@ export class AnalyserManager {
    */
   attachMic(sourceNode, audioContext) {
     this._micSourceNode = sourceNode;
+    if (this._micAnalyser && this._micAnalyser.context !== audioContext) {
+      this._micAnalyser = null;
+    }
     if (!this._micAnalyser) {
       this._micAnalyser = this._createAnalyser(audioContext);
     }
@@ -96,6 +99,11 @@ export class AnalyserManager {
     this._detachAudio();
 
     try {
+      if (this._audioAnalyser && this._audioAnalyser.context !== audioContext) {
+        this._audioAnalyser = null;
+        this._mediaSourceNode = null;
+        this._mediaSourceEl = null;
+      }
       if (!this._audioAnalyser) {
         this._audioAnalyser = this._createAnalyser(audioContext);
       }
