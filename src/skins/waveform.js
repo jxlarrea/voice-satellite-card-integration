@@ -1013,6 +1013,8 @@ function setup() {
       resizeFBOs();
     }
     L('startLoop()');
+    canvas.style.willChange = 'contents';
+    canvas.style.transform = 'translateZ(0)';
     resize();
     detectTheme();
     lastTime = 0;
@@ -1053,6 +1055,8 @@ function setup() {
     const wasRunning = !!rafId;
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     if (wasRunning) L('stopLoop()');
+    canvas.style.willChange = 'auto';
+    canvas.style.transform = '';
     // Delay GPU release so the last rendered frame stays visible
     // during the CSS fade-out transition (0.4s).
     if (!gpuReleaseTimer && glReady) {

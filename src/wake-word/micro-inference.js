@@ -81,20 +81,17 @@ export class MicroWakeWordInference {
    */
   _initKeyword(cfg) {
     // Determine actual frames per inference from the model's input tensor.
-    // Cache the input/output typed-array views — getInputs()/getOutputs()
-    // allocate ~100 bytes of WASM memory per call that never gets freed,
-    // which at ~4 inferences/s/model causes ~46 MB/hour of WASM heap growth.
     let framesPerInfer = cfg.stepSize || 1;
-    let inputView = null;
     try {
       const inputs = cfg.runner.getInputs();
       if (inputs && inputs.length > 0) {
-        inputView = inputs[0].data();
-        const bufLen = inputView.length;
+        const bufLen = inputs[0].data().length;
         const detected = Math.floor(bufLen / 40);
         if (detected > 0) {
           framesPerInfer = detected;
         }
+        // Delete Embind tensor wrappers to prevent WASM heap leak
+        for (const t of inputs) t.delete();
       }
     } catch (_) { /* use fallback */ }
 
@@ -104,10 +101,9 @@ export class MicroWakeWordInference {
       cutoff: cfg.cutoff,
       slidingWindow: cfg.slidingWindow,
       framesPerInfer,
-      // Cached WASM tensor views (avoids per-inference WASM allocations).
-      // outputView is set lazily after the first successful inference because
-      // calling getOutputs() before infer() corrupts VarHandle state.
-      inputView,
+      // Cached output TypedArray view (set lazily after first successful
+      // inference because calling getOutputs() before infer() corrupts
+      // VarHandle state).
       outputView: null,
       // Probability ring buffer + running sum
       probBuffer: new Float32Array(cfg.slidingWindow),
@@ -261,7 +257,8 @@ export class MicroWakeWordInference {
     const inputs = kw.runner.getInputs();
     if (!inputs || inputs.length === 0) return 0;
 
-    const inputBuffer = inputs[0].data();
+    const inputTensor = inputs[0];
+    const inputBuffer = inputTensor.data();
 
     // Copy framesPerInfer feature frames into the input tensor
     // Input shape: [1, framesPerInfer, 40] e.g. [1, 3, 40] = 120 bytes
@@ -271,13 +268,25 @@ export class MicroWakeWordInference {
       offset += frame.length;
     }
 
+    // Delete the Embind tensor wrapper to free its backing C++ object.
+    // The TypedArray view (inputBuffer) remains valid -- it points directly
+    // at WASM linear memory, independent of the wrapper.
+    // Without this, each wrapper leaks WASM heap that FinalizationRegistry
+    // may not reclaim in time, causing unbounded memory growth.
+    inputTensor.delete();
+
     const success = kw.runner.infer();
     if (!success) return 0;
 
     // Cache output view after first successful inference to avoid
-    // repeated getOutputs() WASM allocations (~100 bytes each).
+    // repeated getOutputs() WASM allocations.
     if (!kw.outputView || kw.outputView.buffer.byteLength === 0) {
-      try { kw.outputView = kw.runner.getOutputs()[0].data(); }
+      try {
+        const outputs = kw.runner.getOutputs();
+        kw.outputView = outputs[0].data();
+        // Delete output tensor wrappers too
+        for (const t of outputs) t.delete();
+      }
       catch (_) { return 0; }
     }
     return kw.outputView[0] / 255.0;

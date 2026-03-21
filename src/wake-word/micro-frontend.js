@@ -388,7 +388,7 @@ export class MicroFrontend {
    * @param {Int8Array} buf
    */
   recycleFeature(buf) {
-    if (this._featurePool.length < this._featurePoolMax) {
+    if (this._featurePool.length < this._featurePoolMax && !this._featurePool.includes(buf)) {
       this._featurePool.push(buf);
     }
   }

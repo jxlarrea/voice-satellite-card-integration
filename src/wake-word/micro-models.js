@@ -29,17 +29,18 @@ const TFLITE_KEYWORD_FILES = {
 // feature_step_size controls how many feature frames per model inference.
 // V2 models use feature_step_size=10 → input shape [1, 10, 40].
 export const MICRO_MODEL_PARAMS = {
-  ok_nabu:              { cutoff: 0.97, slidingWindow: 3, stepSize: 10 },
-  hey_jarvis:           { cutoff: 0.97, slidingWindow: 3, stepSize: 10 },
-  hey_mycroft:          { cutoff: 0.95, slidingWindow: 3, stepSize: 10 },
-  alexa:                { cutoff: 0.90, slidingWindow: 3, stepSize: 10 },
+  ok_nabu:              { cutoff: 0.85, slidingWindow: 5, stepSize: 10 },
+  hey_jarvis:           { cutoff: 0.97, slidingWindow: 5, stepSize: 10 },
+  hey_mycroft:          { cutoff: 0.95, slidingWindow: 5, stepSize: 10 },
+  alexa:                { cutoff: 0.90, slidingWindow: 5, stepSize: 10 },
   hey_home_assistant:   { cutoff: 0.97, slidingWindow: 5, stepSize: 10 },
   hey_luna:             { cutoff: 0.97, slidingWindow: 5, stepSize: 10 },
   okay_computer:        { cutoff: 0.97, slidingWindow: 5, stepSize: 10 },
-  stop:                 { cutoff: 0.50, slidingWindow: 3, stepSize: 10 },
+  stop:                 { cutoff: 0.50, slidingWindow: 5, stepSize: 10 },
 };
 
 let _tfweb = null;
+let _scriptElement = null;
 /** @type {Record<string, object>} name → TFLiteWebModelRunner */
 let _modelCache = {};
 /** @type {Record<string, object>} name → params from companion JSON */
@@ -62,6 +63,7 @@ export async function loadTFLite() {
     script.src = TFLITE_CLIENT_URL;
     script.onload = resolve;
     script.onerror = () => reject(new Error('Failed to load TFLite WASM client'));
+    _scriptElement = script;
     document.head.appendChild(script);
   });
 
@@ -177,4 +179,43 @@ export async function releaseMicroModels() {
     try { runner.cleanUp(); } catch (_) { /* ignore */ }
   }
   _modelCache = {};
+}
+
+/**
+ * Get WASM heap byte length from any cached runner's module.
+ * @returns {number} heap size in bytes, or 0 if unavailable
+ */
+export function getWasmHeapSize() {
+  for (const runner of Object.values(_modelCache)) {
+    try {
+      if (runner.module?.HEAPU8) return runner.module.HEAPU8.byteLength;
+    } catch (_) {}
+  }
+  return 0;
+}
+
+/**
+ * Force-reset the TFLite WASM runtime.
+ * Destroys all runners, removes the TFLite script, and clears globals
+ * so the next loadTFLite() call instantiates a fresh WASM module with
+ * clean linear memory. This is the only way to reclaim leaked WASM memory
+ * (WebAssembly linear memory can only grow, never shrink).
+ */
+export async function forceResetWasm() {
+  for (const runner of Object.values(_modelCache)) {
+    try { runner.cleanUp(); } catch (_) {}
+  }
+  _modelCache = {};
+
+  if (_scriptElement) {
+    _scriptElement.remove();
+    _scriptElement = null;
+  } else {
+    const el = document.querySelector('script[src*="tflite_web_api_client"]');
+    if (el) el.remove();
+  }
+
+  try { delete window.tfweb; } catch (_) { window.tfweb = undefined; }
+  try { delete window.exports; } catch (_) { window.exports = undefined; }
+  _tfweb = null;
 }

@@ -13,7 +13,7 @@
 import { State, BlurReason } from '../constants.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 import { CHIME_WAKE } from '../audio/chime.js';
-import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, releaseMicroModels } from './micro-models.js';
+import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, releaseMicroModels, getWasmHeapSize, forceResetWasm } from './micro-models.js';
 import { MicroWakeWordInference } from './micro-inference.js';
 import { clearNotificationUI } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
@@ -36,6 +36,13 @@ const SENSITIVITY_MARGIN_FACTORS = {
   'Very sensitive': 2.0,
 };
 const DEFAULT_CUTOFF = 0.90;
+
+// ─── WASM heap monitoring ────────────────────────────────────────────
+// TFLite's infer() leaks ~31 bytes/call inside compiled WASM. Since WASM
+// linear memory can only grow (never shrink), the only recourse is to
+// periodically destroy the entire WASM module and recreate it.
+const WASM_HEAP_THRESHOLD = 64 * 1024 * 1024; // reset when heap exceeds 64 MB (~2x initial 32 MB)
+const WASM_CHECK_MS = 30_000;                  // check heap every 30 seconds
 
 // Wake word phrases matching microWakeWord conventions.
 // DATA_LAST_WAKE_UP in HA core uses these exact strings for dedup.
@@ -77,6 +84,10 @@ export class WakeWordManager {
     this._cachedModel2 = undefined;
     this._cachedThreshold = undefined;
     this._switching = false;
+
+    // WASM heap reset tracking
+    this._lastWasmCheck = 0;
+    this._resetting = false;
   }
 
   /** True when actively listening for wake words. */
@@ -225,7 +236,7 @@ export class WakeWordManager {
    * Start wake word detection. Loads the TFLite runtime on first call.
    */
   async start() {
-    if (this._active) return;
+    if (this._active || this._resetting) return;
 
     const activeModels = this.getActiveModels();
     const modelsKey = activeModels.slice().sort().join(',');
@@ -351,6 +362,20 @@ export class WakeWordManager {
             await this._onDetection(result.model);
           }
           return;
+        }
+      }
+
+      // Periodic WASM heap check -- reset runtime if leak exceeds threshold
+      if (this._active && !this._resetting) {
+        const now = Date.now();
+        if (now - this._lastWasmCheck > WASM_CHECK_MS) {
+          this._lastWasmCheck = now;
+          const heapSize = getWasmHeapSize();
+          if (heapSize > WASM_HEAP_THRESHOLD) {
+            this._log.log('wake-word',
+              `WASM heap ${(heapSize / (1024 * 1024)).toFixed(1)} MB exceeds ${WASM_HEAP_THRESHOLD / (1024 * 1024)} MB -- resetting runtime`);
+            await this._resetWasmRuntime();
+          }
         }
       }
     } catch (e) {
@@ -611,7 +636,7 @@ export class WakeWordManager {
    * Restart wake word detection (e.g. after pipeline completes).
    */
   async restart() {
-    if (!this.isEnabled()) return;
+    if (!this.isEnabled() || this._resetting) return;
 
     // If models changed while paused, do a full start
     const activeModels = this.getActiveModels();
@@ -632,6 +657,54 @@ export class WakeWordManager {
     this._inference.updateEnergyThresholds(this._getSensitivityLabel());
     this._inference.reset();
     this._active = true;
+  }
+
+  /**
+   * Reset the TFLite WASM runtime to reclaim leaked memory.
+   * Destroys all runners, reloads the WASM binary, and recreates the
+   * inference engine. Takes ~1-2s during which detection pauses.
+   */
+  async _resetWasmRuntime() {
+    this._resetting = true;
+    this._active = false;
+
+    try {
+      const heapBefore = getWasmHeapSize();
+
+      this._inference = null;
+      this._loadedModelsKey = null;
+      this._stopMicroConfig = null;
+
+      await forceResetWasm();
+
+      // Reload TFLite runtime (fresh WASM module)
+      this._tfweb = await loadTFLite();
+
+      const activeModels = this.getActiveModels();
+      const runners = await loadMicroModels(this._tfweb, activeModels);
+
+      const keywordConfigs = this._buildKeywordConfigs(runners);
+      this._inference = new MicroWakeWordInference(
+        keywordConfigs, this._log, this._getSensitivityLabel(), this._isNoiseGateEnabled(),
+      );
+      this._loadedModelsKey = activeModels.slice().sort().join(',');
+
+      this._sampleBufLen = 0;
+      this._frameQueue.length = 0;
+      this._active = true;
+
+      const heapAfter = getWasmHeapSize();
+      this._log.log('wake-word',
+        `WASM reset complete: ${(heapBefore / (1024 * 1024)).toFixed(1)} MB -> ${(heapAfter / (1024 * 1024)).toFixed(1)} MB`);
+    } catch (e) {
+      this._log.error('wake-word', `WASM reset failed: ${e.message || e}`);
+    } finally {
+      this._resetting = false;
+      if (!this._active && !this._inference) {
+        this._log.log('wake-word', 'Attempting recovery after failed WASM reset');
+        try { await this.start(); } catch (_) {}
+      }
+    }
   }
 
   /**
