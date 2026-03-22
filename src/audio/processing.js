@@ -20,17 +20,18 @@ export async function setupAudioWorklet(mgr, sourceNode) {
   const workletCode =
     'var B=' + BATCH_QUANTA + ';' +
     'class VoiceSatelliteProcessor extends AudioWorkletProcessor {' +
-    'constructor(){super();this._buf=null;this._pos=0;}' +
+    'constructor(){super();this._buf=null;this._sz=0;this._pos=0;}' +
     'process(inputs){' +
     'var input=inputs[0];' +
     'if(input&&input[0]){' +
     'var ch=input[0];' +
     'var len=ch.length;' +
-    'if(!this._buf)this._buf=new Float32Array(len*B);' +
+    'if(!this._buf){this._sz=len*B;this._buf=new Float32Array(this._sz);}' +
     'this._buf.set(ch,this._pos);' +
     'this._pos+=len;' +
-    'if(this._pos>=this._buf.length){' +
-    'this.port.postMessage(this._buf);' +
+    'if(this._pos>=this._sz){' +
+    'this.port.postMessage(this._buf,[this._buf.buffer]);' +
+    'this._buf=new Float32Array(this._sz);' +
     'this._pos=0;' +
     '}' +
     '}' +

@@ -16,6 +16,7 @@
  */
 
 import { MicroFrontend } from './micro-frontend.js';
+import { DirectModelRunner } from './direct-runner.js';
 
 const COOLDOWN_MS = 2000;
 // Ignore the first N feature frames after init/reset (~2s warmup)
@@ -48,12 +49,14 @@ export class MicroWakeWordInference {
    * @param {object} log - logger with .log(category, message) method
    * @param {string} [sensitivityLabel] - sensitivity level for energy gate
    * @param {boolean} [energyGateEnabled=false] - enable energy-based sleep mode
+   * @param {boolean} [useDirect=false] - use DirectModelRunner (zero-leak WASM access)
    */
-  constructor(keywordConfigs, log, sensitivityLabel, energyGateEnabled = false) {
+  constructor(keywordConfigs, log, sensitivityLabel, energyGateEnabled = false, useDirect = false) {
     this._frontend = new MicroFrontend();
     this._log = log;
     this._keywords = [];
     this._lastDetectionTime = 0;
+    this._useDirect = useDirect;
 
     // Energy-based sleep mode state
     this._energyGateEnabled = energyGateEnabled;
@@ -80,38 +83,46 @@ export class MicroWakeWordInference {
    * number of feature frames per inference call (framesPerInfer).
    */
   _initKeyword(cfg) {
-    // Determine actual frames per inference from the model's input tensor.
+    // Always run Embind init to detect framesPerInfer from the input tensor.
     let framesPerInfer = cfg.stepSize || 1;
     try {
       const inputs = cfg.runner.getInputs();
       if (inputs && inputs.length > 0) {
         const bufLen = inputs[0].data().length;
         const detected = Math.floor(bufLen / 40);
-        if (detected > 0) {
-          framesPerInfer = detected;
-        }
-        // Delete Embind tensor wrappers to prevent WASM heap leak
+        if (detected > 0) framesPerInfer = detected;
         for (const t of inputs) t.delete();
       }
     } catch (_) { /* use fallback */ }
 
+    // Create DirectRunner if enabled (lazy -- probes on first inference)
+    let direct = null;
+    if (this._useDirect) {
+      try {
+        direct = new DirectModelRunner(cfg.runner);
+        this._log.log('wake-word', `Direct runner created for ${cfg.name} (will probe on first inference)`);
+      } catch (e) {
+        this._log.error('wake-word', `Direct runner failed for ${cfg.name}: ${e.message}`);
+      }
+    }
+
     return {
       runner: cfg.runner,
+      direct,
       name: cfg.name,
       cutoff: cfg.cutoff,
       slidingWindow: cfg.slidingWindow,
       framesPerInfer,
-      // Cached output TypedArray view (set lazily after first successful
-      // inference because calling getOutputs() before infer() corrupts
-      // VarHandle state).
+      // Cached output TypedArray view (Embind path only; direct path uses direct.outputView)
       outputView: null,
       // Probability ring buffer + running sum
       probBuffer: new Float32Array(cfg.slidingWindow),
       probIndex: 0,
       probCount: 0,
       probSum: 0,
-      // Feature frame accumulator (fills to framesPerInfer before inference)
-      featureAccum: [],
+      // Pre-allocated feature frame accumulator (fixed capacity = framesPerInfer)
+      featureAccum: new Array(framesPerInfer),
+      featureAccumLen: 0,
       // Warmup counter (ignore first N frames)
       framesProcessed: 0,
     };
@@ -198,15 +209,18 @@ export class MicroWakeWordInference {
         kw.framesProcessed++;
 
         // Accumulate frames until we have enough for one inference call
-        kw.featureAccum.push(frame);
+        kw.featureAccum[kw.featureAccumLen++] = frame;
 
-        if (kw.featureAccum.length < kw.framesPerInfer) continue;
+        if (kw.featureAccumLen < kw.framesPerInfer) continue;
 
         // Run model inference with exactly framesPerInfer frames
         const probability = this._runModel(kw);
         // Recycle feature buffers back to the pool
-        for (const f of kw.featureAccum) this._frontend.recycleFeature(f);
-        kw.featureAccum.length = 0;
+        for (let j = 0; j < kw.featureAccumLen; j++) {
+          this._frontend.recycleFeature(kw.featureAccum[j]);
+          kw.featureAccum[j] = null; // release reference
+        }
+        kw.featureAccumLen = 0;
 
         // Skip warmup period — model state from previous detection may still
         // be warm, so don't store probs until state has flushed with silence.
@@ -252,43 +266,66 @@ export class MicroWakeWordInference {
    * @returns {number} probability [0, 1]
    */
   _runModel(kw) {
-    // getInputs() must be called before each infer() -- the TFLite Web runtime
-    // uses it to prepare internal tensor state (not just return handles).
+    if (kw.direct?.ready) return this._runModelDirect(kw);
+    return this._runModelEmbind(kw);
+  }
+
+  /**
+   * Direct path: write to cached WASM views, call cpp.Infer() directly.
+   * Zero Embind wrapper allocation per inference.
+   */
+  _runModelDirect(kw) {
+    const d = kw.direct;
+
+    let offset = 0;
+    for (let i = 0; i < kw.featureAccumLen; i++) {
+      d.inputView.set(kw.featureAccum[i], offset);
+      offset += kw.featureAccum[i].length;
+    }
+
+    if (!d.infer()) return 0;
+    return d.outputView[0] / 255.0;
+  }
+
+  /**
+   * Embind path: uses getInputs()/getOutputs() wrappers (original behavior).
+   * Leaks ~31 bytes/call in WASM linear memory from Embind wrapper allocation.
+   */
+  _runModelEmbind(kw) {
     const inputs = kw.runner.getInputs();
     if (!inputs || inputs.length === 0) return 0;
 
     const inputTensor = inputs[0];
     const inputBuffer = inputTensor.data();
 
-    // Copy framesPerInfer feature frames into the input tensor
-    // Input shape: [1, framesPerInfer, 40] e.g. [1, 3, 40] = 120 bytes
     let offset = 0;
-    for (const frame of kw.featureAccum) {
-      inputBuffer.set(frame, offset);
-      offset += frame.length;
+    for (let i = 0; i < kw.featureAccumLen; i++) {
+      inputBuffer.set(kw.featureAccum[i], offset);
+      offset += kw.featureAccum[i].length;
     }
 
-    // Delete the Embind tensor wrapper to free its backing C++ object.
-    // The TypedArray view (inputBuffer) remains valid -- it points directly
-    // at WASM linear memory, independent of the wrapper.
-    // Without this, each wrapper leaks WASM heap that FinalizationRegistry
-    // may not reclaim in time, causing unbounded memory growth.
     inputTensor.delete();
 
     const success = kw.runner.infer();
     if (!success) return 0;
 
-    // Cache output view after first successful inference to avoid
-    // repeated getOutputs() WASM allocations.
     if (!kw.outputView || kw.outputView.buffer.byteLength === 0) {
       try {
         const outputs = kw.runner.getOutputs();
         kw.outputView = outputs[0].data();
-        // Delete output tensor wrappers too
         for (const t of outputs) t.delete();
       }
       catch (_) { return 0; }
     }
+
+    // Capture pointers for DirectRunner after warmup completes.
+    // VarHandle stateful models need many Embind inferences to fully
+    // initialize internal ring buffer state before we can bypass Embind.
+    if (kw.direct && !kw.direct.ready && kw.outputView && kw.framesProcessed >= WARMUP_FRAMES) {
+      kw.direct.capturePointers(inputBuffer, kw.outputView);
+      this._log.log('wake-word', `Direct runner ready for ${kw.name} (after ${kw.framesProcessed} frames)`);
+    }
+
     return kw.outputView[0] / 255.0;
   }
 
@@ -363,7 +400,8 @@ export class MicroWakeWordInference {
       kw.probIndex = 0;
       kw.probCount = 0;
       kw.probSum = 0;
-      kw.featureAccum = [];
+      kw.featureAccum.fill(null);
+      kw.featureAccumLen = 0;
       kw.framesProcessed = 0;
     }
   }

@@ -231,6 +231,14 @@ function setup() {
     const cfg = document.querySelector('voice-satellite-card')?.config;
     if (cfg?.debug) console.log(`[waveform #${ID}]`, ...args);
   };
+  // Diagnostic logger — always prints (not gated by debug).
+  // Prefixed so it's easy to grep in logcat / web console.
+  const D = (...args) => {}; // console.log(`[wf-diag #${ID}]`, ...args);
+  const memStats = () => {
+    const m = performance.memory; // Chrome/WebView only
+    if (!m) return 'N/A';
+    return `heap ${(m.usedJSHeapSize / 1048576).toFixed(1)}/${(m.totalJSHeapSize / 1048576).toFixed(1)}MB, limit ${(m.jsHeapSizeLimit / 1048576).toFixed(0)}MB`;
+  };
   const barEl = ui.querySelector('.vs-rainbow-bar');
 
   // ── Theme detection ──
@@ -1000,25 +1008,30 @@ function setup() {
 
   function startLoop() {
     if (rafId || document.hidden) return;
+    const t0 = performance.now();
+    D('startLoop BEGIN', memStats());
     // Cancel any pending GPU release from a previous stopLoop
     if (gpuReleaseTimer) { clearTimeout(gpuReleaseTimer); gpuReleaseTimer = null; }
     if (!glReady) {
       // Context lost by the browser (GPU crash, driver update) — try restore
       if (gl && gl.isContextLost() && loseCtxExt) {
-        L('startLoop() -- restoring lost context');
+        D('startLoop -- restoring lost context');
         loseCtxExt.restoreContext();
         return;
       }
-      if (!initGL()) return;
+      D('startLoop -- initGL...', memStats());
+      if (!initGL()) { D('startLoop -- initGL FAILED'); return; }
+      D('startLoop -- initGL OK, resizeFBOs...', memStats());
       resizeFBOs();
+      D('startLoop -- FBOs ready', memStats());
     }
     L('startLoop()');
-    canvas.style.willChange = 'contents';
-    canvas.style.transform = 'translateZ(0)';
     resize();
+    D(`startLoop -- resize done (${drawW}x${drawH}, canvas ${canvas.width}x${canvas.height})`, memStats());
     detectTheme();
     lastTime = 0;
     tick();
+    D(`startLoop END in ${(performance.now() - t0).toFixed(1)}ms`, memStats());
   }
 
   let gpuReleaseTimer = null;
@@ -1054,9 +1067,7 @@ function setup() {
   function stopLoop() {
     const wasRunning = !!rafId;
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    if (wasRunning) L('stopLoop()');
-    canvas.style.willChange = 'auto';
-    canvas.style.transform = '';
+    if (wasRunning) D('stopLoop', memStats());
     // Delay GPU release so the last rendered frame stays visible
     // during the CSS fade-out transition (0.4s).
     if (!gpuReleaseTimer && glReady) {
@@ -1081,6 +1092,15 @@ function setup() {
       else stopLoop();
     }).observe(overlayEl, { attributes: true, attributeFilter: ['class'] });
   }
+
+  // Memory heartbeat — logs every 60s so we can see the trend leading up to a freeze.
+  // The last heartbeat timestamp tells us exactly when the WebView stopped.
+  let _hbCount = 0;
+  setInterval(() => {
+    _hbCount++;
+    D(`heartbeat #${_hbCount} | gl=${glReady} loop=${!!rafId} | ${memStats()}`);
+  }, 60000);
+  D('init complete', memStats());
 
   return true;
 }

@@ -19,6 +19,7 @@ import { clearNotificationUI } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
 
 const CHUNK_SIZE = 1280; // 80ms @ 16kHz
+const MAX_POOL = 20;    // cap recycled frame pool (20 * 5KB = 100KB max)
 const NO_WAKE_WORD = 'No wake word';
 
 // ─── Detection thresholds ────────────────────────────────────────────
@@ -41,8 +42,8 @@ const DEFAULT_CUTOFF = 0.90;
 // TFLite's infer() leaks ~31 bytes/call inside compiled WASM. Since WASM
 // linear memory can only grow (never shrink), the only recourse is to
 // periodically destroy the entire WASM module and recreate it.
-const WASM_HEAP_THRESHOLD = 64 * 1024 * 1024; // reset when heap exceeds 64 MB (~2x initial 32 MB)
-const WASM_CHECK_MS = 30_000;                  // check heap every 30 seconds
+const WASM_HEAP_THRESHOLD = 48 * 1024 * 1024; // reset when heap exceeds 48 MB (~1.5x initial 32 MB)
+const WASM_CHECK_MS = 15_000;                  // check heap every 15 seconds
 
 // Wake word phrases matching microWakeWord conventions.
 // DATA_LAST_WAKE_UP in HA core uses these exact strings for dedup.
@@ -88,6 +89,10 @@ export class WakeWordManager {
     // WASM heap reset tracking
     this._lastWasmCheck = 0;
     this._resetting = false;
+
+    // TFLite runtime mode: 'direct' bypasses Embind (zero-leak),
+    // 'embind' uses the original wrapper-based path.
+    this._useDirect = true;
   }
 
   /** True when actively listening for wake words. */
@@ -260,7 +265,7 @@ export class WakeWordManager {
 
         const keywordConfigs = this._buildKeywordConfigs(runners);
         this._inference = new MicroWakeWordInference(
-          keywordConfigs, this._log, this._getSensitivityLabel(), this._isNoiseGateEnabled(),
+          keywordConfigs, this._log, this._getSensitivityLabel(), this._isNoiseGateEnabled(), this._useDirect,
         );
         this._loadedModelsKey = modelsKey;
 
@@ -297,6 +302,7 @@ export class WakeWordManager {
     this._suspendedKeywords = null;
     this._sampleBufLen = 0;
     this._frameQueue.length = 0;
+    this._framePool.length = 0;
     this._log.log('wake-word', 'Stopped');
   }
 
@@ -328,7 +334,8 @@ export class WakeWordManager {
     const MAX_QUEUE = 50;
     while (this._sampleBufLen >= CHUNK_SIZE) {
       if (this._frameQueue.length >= MAX_QUEUE) {
-        this._framePool.push(this._frameQueue.shift()); // recycle dropped
+        const dropped = this._frameQueue.shift();
+        if (this._framePool.length < MAX_POOL) this._framePool.push(dropped);
       }
       const buf = this._framePool.pop() || new Float32Array(CHUNK_SIZE);
       buf.set(this._sampleBuf.subarray(0, CHUNK_SIZE));
@@ -352,7 +359,7 @@ export class WakeWordManager {
       while (this._frameQueue.length > 0 && (this._active || this._stopOnlyMode)) {
         const frame = this._frameQueue.shift();
         const result = await this._inference.processChunk(frame);
-        this._framePool.push(frame); // recycle buffer
+        if (this._framePool.length < MAX_POOL) this._framePool.push(frame);
         if (result.detected) {
           this._log.log('wake-word', `Detected: ${result.model} (score: ${result.score.toFixed(3)})`);
           this._frameQueue.length = 0;
@@ -394,6 +401,9 @@ export class WakeWordManager {
     this._active = false;
 
     const session = this._session;
+    const _m = performance.memory;
+    const _ms = _m ? `heap ${(_m.usedJSHeapSize/1048576).toFixed(1)}/${(_m.totalJSHeapSize/1048576).toFixed(1)}MB` : '';
+    // console.log(`[wf-diag] _onDetection(${modelName}) ${_ms}`);
 
     // If the tab is paused (screen off / background), unpause so pipeline
     // events aren't dropped. The wake word worklet keeps running while
@@ -446,8 +456,10 @@ export class WakeWordManager {
     session.pipeline.shouldContinue = false;
     session.pipeline.continueConversationId = null;
 
+    // console.log('[wf-diag] _onDetection -- setState + showBlurOverlay');
     session.setState(State.WAKE_WORD_DETECTED);
     session.ui.showBlurOverlay(BlurReason.PIPELINE);
+    // console.log('[wf-diag] _onDetection -- overlay shown, playing chime...');
 
     // Play wake chime if enabled
     const wakeSound = getSwitchState(
@@ -685,7 +697,7 @@ export class WakeWordManager {
 
       const keywordConfigs = this._buildKeywordConfigs(runners);
       this._inference = new MicroWakeWordInference(
-        keywordConfigs, this._log, this._getSensitivityLabel(), this._isNoiseGateEnabled(),
+        keywordConfigs, this._log, this._getSensitivityLabel(), this._isNoiseGateEnabled(), this._useDirect,
       );
       this._loadedModelsKey = activeModels.slice().sort().join(',');
 
