@@ -9,6 +9,17 @@
 import { getSkin, loadSkin } from '../skins/index.js';
 import baseCSS from './preview.css';
 import { t } from '../i18n/index.js';
+import waveformPreviewCSS from '../skins/waveform-preview.css';
+
+const PREVIEW_ONLY_SKINS = {
+  waveform: {
+    id: 'waveform',
+    previewCSS: waveformPreviewCSS,
+    overlayColor: null,
+    defaultOpacity: 0.90,
+    fontURL: 'https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap',
+  },
+};
 
 /**
  * Detect whether this card element is inside the HA card editor preview.
@@ -138,11 +149,16 @@ export function renderPreview(shadowRoot, config) {
   const hass = shadowRoot.host?._hass;
   const tt = (key, fallback) => t(hass, key, fallback);
   const skinId = config.skin || 'default';
-  const skin = getSkin(skinId);
-  // Lazy-load non-default skins; re-render once loaded
-  loadSkin(skinId).then((loaded) => {
-    if (loaded !== skin) renderPreview(shadowRoot, config);
-  });
+  const previewOnlySkin = PREVIEW_ONLY_SKINS[skinId] || null;
+  const skin = previewOnlySkin || getSkin(skinId);
+  // Lazy-load non-default skins; re-render once loaded.
+  // Waveform is special: importing the live skin module has runtime
+  // side effects, so the preview uses a static preview-only definition.
+  if (!previewOnlySkin) {
+    loadSkin(skinId).then((loaded) => {
+      if (loaded !== skin) renderPreview(shadowRoot, config);
+    });
+  }
   if (skin.fontURL && !document.querySelector(`link[href="${skin.fontURL}"]`)) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
