@@ -3,10 +3,10 @@
 </h1>
 
 <p align="center">
-<a href="https://www.hacs.xyz/docs/faq/custom_repositories/"><img src="https://img.shields.io/badge/HACS-Custom-blue.svg?style=for-the-badge" alt="hacs_badge"></a>
+<a href="https://www.hacs.xyz/docs/faq/custom_repositories/"><img src="https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge" alt="hacs_badge"></a>
 <img src="https://img.shields.io/github/stars/jxlarrea/voice-satellite-card-integration?style=for-the-badge&label=Stars&color=yellow" alt="Stars">
-<a href="https://github.com/jxlarrea/voice-satellite-card-integration/releases"><img src="https://img.shields.io/github/downloads/jxlarrea/voice-satellite-card-integration/total?style=for-the-badge&label=Downloads&color=red" alt="Downloads"></a>
-<a href="https://github.com/jxlarrea/voice-satellite-card-integration/releases"><img src="https://shields.io/github/v/release/jxlarrea/voice-satellite-card-integration?style=for-the-badge&color=orange" alt="version"></a>
+<a href="https://github.com/jxlarrea/voice-satellite-card-integration/releases"><img src="https://img.shields.io/github/downloads/jxlarrea/voice-satellite-card-integration/total?style=for-the-badge&label=Downloads&color=blue" alt="Downloads"></a>
+<a href="https://github.com/jxlarrea/voice-satellite-card-integration/releases"><img src="https://shields.io/github/v/release/jxlarrea/voice-satellite-card-integration?style=for-the-badge&color=purple" alt="version"></a>
 <a href="https://github.com/jxlarrea/voice-satellite-card-integration/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/jxlarrea/voice-satellite-card-integration/release.yml?style=for-the-badge&label=Build" alt="Build"></a>
 </p>
 
@@ -77,17 +77,19 @@ For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings
 
 - **Home Assistant 2025.2.1** or later
 - An [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/) with:
-   - Speech-to-Text ([Whisper](https://www.home-assistant.io/integrations/whisper/), OpenAI, etc.)
-   - Conversation agent ([Home Assistant](https://www.home-assistant.io/integrations/conversation/), OpenAI, Qwen, etc.)
-   - Text-to-Speech ([Piper](https://www.home-assistant.io/integrations/piper/), Kokoro, etc.)
+- Speech-to-Text ([Whisper](https://www.home-assistant.io/integrations/whisper/), OpenAI, etc.)
+- Conversation agent ([Home Assistant](https://www.home-assistant.io/integrations/conversation/), OpenAI, Qwen, etc.)
+- Text-to-Speech ([Piper](https://www.home-assistant.io/integrations/piper/), Kokoro, etc.)
 
 ## Installation
 
 ### HACS (Recommended)
 
-1. Add this repository as a custom repository in HACS (type: Integration)
-2. Search for `Voice Satellite` and install
-3. Restart Home Assistant
+Voice Satellite is available in [HACS](https://hacs.xyz/). Use the link below to open the HACS repository in Home Assistant.
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jxlarrea&repository=voice-satellite-card-integration)
+
+Or search for `Voice Satellite` in the HACS default repository.
 
 ### Manual
 
@@ -159,18 +161,19 @@ Each satellite device exposes configuration entities on its device page (**Setti
 
 | Entity | Type | Description |
 |--------|------|-------------|
+| **Announcement display duration** | Number | How long (1-60 seconds) to show the announcement text on screen after playback completes |
 | **Assist pipeline** | Select | Choose which Assist pipeline to use for this satellite |
 | **Finished speaking detection** | Select | VAD sensitivity - how aggressively to detect end of speech |
+| **Isolated sessions** | Switch | When enabled, each wake word activation starts a fresh conversation with no memory of previous sessions. When disabled (default), the assistant retains conversation context across sessions, matching the behavior of physical Voice PE satellites |
+| **Mute** | Switch | Mute/unmute the satellite - when muted, wake word detection is paused |
+| **Screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
 | **TTS Output** | Select | Where to play TTS audio: "Browser" (default) plays audio locally, or select any `media_player` entity to route TTS to an external speaker |
-| **Wake word detection** | Select | "On Device" (default) runs wake word inference locally in the browser. "Home Assistant" uses server-side detection via the pipeline's configured wake word engine |
+| **Wake sound** | Switch | Enable/disable chime sounds (wake, done, error) |
 | **Wake word** | Select | Primary wake word to listen for when using on-device detection. Built-in models: ok_nabu, hey_jarvis, alexa, hey_mycroft, hey_home_assistant, hey_luna, okay_computer. Custom `.tflite` models are auto-discovered from the `models/` directory |
 | **Wake word 2** | Select | Optional second wake word for dual wake word detection. Set to "No wake word" (default) to disable. When both slots use the same model, the TFLite model is only loaded once |
-| **Wake word sensitivity** | Select | Detection sensitivity for on-device wake word: "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive" |
-| **Screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
-| **Announcement display duration** | Number | How long (1-60 seconds) to show the announcement text on screen after playback completes |
-| **Mute** | Switch | Mute/unmute the satellite - when muted, wake word detection is paused |
-| **Wake sound** | Switch | Enable/disable chime sounds (wake, done, error) |
+| **Wake word detection** | Select | "On Device" (default) runs wake word inference locally in the browser. "Home Assistant" uses server-side detection via the pipeline's configured wake word engine |
 | **Wake word noise gate** | Switch | When enabled, wake word inference is paused during silence and resumes when sound is detected. Reduces CPU usage but may miss soft-spoken wake words. Disabled by default |
+| **Wake word sensitivity** | Select | Detection sensitivity for on-device wake word: "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive" |
 
 All settings persist across restarts.
 

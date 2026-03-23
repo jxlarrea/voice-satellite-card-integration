@@ -175,6 +175,12 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         )
         return self.hass.states.get(eid) if eid else None
 
+    def _is_fresh_conversation_enabled(self) -> bool:
+        """Check if the 'Fresh conversation on wake' switch is on."""
+        registry = er.async_get(self.hass)
+        s = self._get_child_state(registry, "switch", "_fresh_conversation")
+        return s is not None and s.state == "on"
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose timer and config state for the card to read."""
@@ -973,9 +979,14 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._pipeline_audio_queue = audio_queue
         self._pipeline_run_started = False
 
-        # Set conversation_id for continue conversation support
+        # Set conversation_id for continue conversation support.
+        # When "Isolated sessions" is enabled and no conversation_id
+        # is provided (i.e. a new wake word activation, not a continue turn),
+        # clear the stored ID so HA core starts a fresh chat session.
         if conversation_id:
             self._conversation_id = conversation_id
+        elif self._is_fresh_conversation_enabled():
+            self._conversation_id = None
 
         # Set extra_system_prompt right before the pipeline call so the
         # base class's async_accept_pipeline_from_satellite picks it up.

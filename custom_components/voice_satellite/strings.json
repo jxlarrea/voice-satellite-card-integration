@@ -65,6 +65,9 @@
       },
       "noise_gate": {
         "name": "Wake word noise gate"
+      },
+      "fresh_conversation": {
+        "name": "Isolated sessions"
       }
     },
     "media_player": {

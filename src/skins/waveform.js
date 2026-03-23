@@ -234,6 +234,9 @@ function setup() {
   // Diagnostic logger — always prints (not gated by debug).
   // Prefixed so it's easy to grep in logcat / web console.
   const D = (...args) => {}; // console.log(`[wf-diag #${ID}]`, ...args);
+  // Freeze-investigation logger — always prints to console/logcat.
+  // Only called on anomalies (slow frames, rAF gaps) and periodic heartbeats.
+  const F = (...args) => console.log(`[wf-freeze #${ID}]`, ...args);
   const memStats = () => {
     const m = performance.memory; // Chrome/WebView only
     if (!m) return 'N/A';
@@ -401,72 +404,76 @@ function setup() {
       loseCtxExt = gl.getExtension('WEBGL_lose_context');
     }
 
-    // Compile programs
-    strandProg    = makeProgram(gl, STRAND_VS, STRAND_FS, ['a_pos', 'a_edge']);
-    kawaseProg    = makeProgram(gl, QUAD_VS, KAWASE_FS, ['a_pos']);
-    compositeProg = makeProgram(gl, QUAD_VS, COMPOSITE_FS, ['a_pos']);
-    particleProg  = makeProgram(gl, PARTICLE_VS, PARTICLE_FS, ['a_quad', 'a_center', 'a_size', 'a_color']);
+    // Skip shader compilation + VAO/VBO setup if programs survived from
+    // a previous cycle (releaseGPU only frees FBOs to avoid renderer hangs
+    // from recompiling shaders on Android WebView after extended runtime).
+    if (!strandProg) {
+      strandProg    = makeProgram(gl, STRAND_VS, STRAND_FS, ['a_pos', 'a_edge']);
+      kawaseProg    = makeProgram(gl, QUAD_VS, KAWASE_FS, ['a_pos']);
+      compositeProg = makeProgram(gl, QUAD_VS, COMPOSITE_FS, ['a_pos']);
+      particleProg  = makeProgram(gl, PARTICLE_VS, PARTICLE_FS, ['a_quad', 'a_center', 'a_size', 'a_color']);
 
-    // Cache uniform locations
-    strandU    = getUniforms(gl, strandProg, ['res', 'color', 'feather']);
-    kawaseU    = getUniforms(gl, kawaseProg, ['tex', 'texel', 'offset']);
-    compositeU = getUniforms(gl, compositeProg, ['tex', 'alpha']);
-    particleU  = getUniforms(gl, particleProg, ['res']);
+      strandU    = getUniforms(gl, strandProg, ['res', 'color', 'feather']);
+      kawaseU    = getUniforms(gl, kawaseProg, ['tex', 'texel', 'offset']);
+      compositeU = getUniforms(gl, compositeProg, ['tex', 'alpha']);
+      particleU  = getUniforms(gl, particleProg, ['res']);
 
-    // ── Strand VAO ──
-    strandVBO = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, strandVBO);
-    gl.bufferData(gl.ARRAY_BUFFER, strandVerts.byteLength, gl.DYNAMIC_DRAW);
-    strandVAO = gl.createVertexArray();
-    gl.bindVertexArray(strandVAO);
-    gl.bindBuffer(gl.ARRAY_BUFFER, strandVBO);
-    gl.enableVertexAttribArray(0); // a_pos (vec2)
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 12, 0);
-    gl.enableVertexAttribArray(1); // a_edge (float)
-    gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 12, 8);
-    gl.bindVertexArray(null);
+      // ── Strand VAO ──
+      strandVBO = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, strandVBO);
+      gl.bufferData(gl.ARRAY_BUFFER, strandVerts.byteLength, gl.DYNAMIC_DRAW);
+      strandVAO = gl.createVertexArray();
+      gl.bindVertexArray(strandVAO);
+      gl.bindBuffer(gl.ARRAY_BUFFER, strandVBO);
+      gl.enableVertexAttribArray(0); // a_pos (vec2)
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 12, 0);
+      gl.enableVertexAttribArray(1); // a_edge (float)
+      gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 12, 8);
+      gl.bindVertexArray(null);
 
-    // ── Fullscreen quad VAO (shared by kawase + composite) ──
-    quadVBO = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
-    quadVAO = gl.createVertexArray();
-    gl.bindVertexArray(quadVAO);
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    gl.bindVertexArray(null);
+      // ── Fullscreen quad VAO (shared by kawase + composite) ──
+      quadVBO = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+      quadVAO = gl.createVertexArray();
+      gl.bindVertexArray(quadVAO);
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl.bindVertexArray(null);
 
-    // ── Particle VAO (instanced quads) ──
-    particleQuadVBO = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, particleQuadVBO);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-0.5,-0.5, 0.5,-0.5, -0.5,0.5, 0.5,0.5]), gl.STATIC_DRAW);
-    particleInstVBO = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, particleInstVBO);
-    gl.bufferData(gl.ARRAY_BUFFER, particleInstData.byteLength, gl.DYNAMIC_DRAW);
+      // ── Particle VAO (instanced quads) ──
+      particleQuadVBO = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, particleQuadVBO);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-0.5,-0.5, 0.5,-0.5, -0.5,0.5, 0.5,0.5]), gl.STATIC_DRAW);
+      particleInstVBO = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, particleInstVBO);
+      gl.bufferData(gl.ARRAY_BUFFER, particleInstData.byteLength, gl.DYNAMIC_DRAW);
 
-    particleVAO = gl.createVertexArray();
-    gl.bindVertexArray(particleVAO);
-    // Per-vertex: quad corners
-    gl.bindBuffer(gl.ARRAY_BUFFER, particleQuadVBO);
-    gl.enableVertexAttribArray(0); // a_quad
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    // Per-instance: center(2) + size(1) + color(4) = 7 floats = 28 bytes
-    gl.bindBuffer(gl.ARRAY_BUFFER, particleInstVBO);
-    gl.enableVertexAttribArray(1); // a_center
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 28, 0);
-    gl.vertexAttribDivisor(1, 1);
-    gl.enableVertexAttribArray(2); // a_size
-    gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 28, 8);
-    gl.vertexAttribDivisor(2, 1);
-    gl.enableVertexAttribArray(3); // a_color
-    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, 28, 12);
-    gl.vertexAttribDivisor(3, 1);
-    gl.bindVertexArray(null);
+      particleVAO = gl.createVertexArray();
+      gl.bindVertexArray(particleVAO);
+      gl.bindBuffer(gl.ARRAY_BUFFER, particleQuadVBO);
+      gl.enableVertexAttribArray(0); // a_quad
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, particleInstVBO);
+      gl.enableVertexAttribArray(1); // a_center
+      gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 28, 0);
+      gl.vertexAttribDivisor(1, 1);
+      gl.enableVertexAttribArray(2); // a_size
+      gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 28, 8);
+      gl.vertexAttribDivisor(2, 1);
+      gl.enableVertexAttribArray(3); // a_color
+      gl.vertexAttribPointer(3, 4, gl.FLOAT, false, 28, 12);
+      gl.vertexAttribDivisor(3, 1);
+      gl.bindVertexArray(null);
+
+      L('initGL() -- WebGL2 ready (full init)');
+    } else {
+      L('initGL() -- WebGL2 ready (programs warm)');
+    }
 
     // Clear CSS fallback background now that GL is drawing
     canvas.style.backgroundColor = '';
-    L('initGL() -- WebGL2 ready');
     glReady = true;
     return true;
   }
@@ -496,6 +503,15 @@ function setup() {
 
   // ── Layout ──
   let drawW = 0, drawH = 0, rafId = null, lastTime = 0, lastTickTime = 0;
+  let bloomWarmup = 0; // frames remaining before enabling bloom after restart
+  // Adaptive bloom: drop FBO bloom passes when GPU can't keep up.
+  // On thermally throttled Android tablets, hours of continuous rendering
+  // from other animated dashboard cards raises thermal_pwrlevel, capping the
+  // GPU clock well below max. Our 6-pass bloom pipeline can then overwhelm
+  // the GPU at startup, causing 5-second frame stalls. When rAF gaps exceed
+  // the frame budget, we fall back to direct strand rendering (no FBO/bloom).
+  let bloomEnabled = true;
+  let bloomStressCount = 0; // consecutive over-budget frames
   let mounted = false, resizeObs = null;
 
   function resizeFBOs() {
@@ -515,10 +531,17 @@ function setup() {
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     drawW = rect.width;
     drawH = rect.height;
-    canvas.width = Math.round(rect.width * dpr);
-    canvas.height = Math.round(rect.height * dpr);
-    canvas.style.width = rect.width + 'px';
-    canvas.style.height = rect.height + 'px';
+    const newW = Math.round(rect.width * dpr);
+    const newH = Math.round(rect.height * dpr);
+    // Only reassign canvas dimensions when they actually changed.
+    // Setting canvas.width/height (even to the same value) destroys the
+    // drawing buffer and forces a new GPU surface allocation on Android WebView.
+    if (canvas.width !== newW || canvas.height !== newH) {
+      canvas.width = newW;
+      canvas.height = newH;
+      canvas.style.width = rect.width + 'px';
+      canvas.style.height = rect.height + 'px';
+    }
     resizeFBOs();
   }
 
@@ -786,103 +809,127 @@ function setup() {
     gl.bindBuffer(gl.ARRAY_BUFFER, strandVBO);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, strandVerts, 0, vi);
 
-    // ── Pass 1: Render strands to bloom FBO (additive, glow colors) ──
-    gl.bindFramebuffer(gl.FRAMEBUFFER, bloomA.fb);
-    gl.viewport(0, 0, bloomA.w, bloomA.h);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE);
+    if (bloomWarmup > 0 || !bloomEnabled) {
+      // Simplified path: draw strands directly to screen, no FBO bloom passes.
+      // Active during:
+      //   1. Warm-up (first 3 frames) -- lets GPU pipeline ramp up gradually.
+      //   2. Adaptive bloom-off -- GPU can't keep up (thermal throttling or
+      //      overload from other animated cards on the dashboard).
+      if (bloomWarmup > 0) bloomWarmup--;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(bgR, bgG, bgB, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.useProgram(strandProg);
+      gl.uniform2f(strandU.res, drawW, drawH);
+      gl.bindVertexArray(strandVAO);
+      for (let si = 0; si < strands.length; si++) {
+        const ci = si * 4;
+        gl.uniform4f(strandU.color, coreColorData[ci], coreColorData[ci+1], coreColorData[ci+2], coreColorData[ci+3]);
+        gl.uniform1f(strandU.feather, FEATHER[si]);
+        gl.drawArrays(gl.TRIANGLE_STRIP, si * VERTS_PER_STRAND, VERTS_PER_STRAND);
+      }
+    } else {
+      // ── Pass 1: Render strands to bloom FBO (additive, glow colors) ──
+      gl.bindFramebuffer(gl.FRAMEBUFFER, bloomA.fb);
+      gl.viewport(0, 0, bloomA.w, bloomA.h);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
 
-    gl.useProgram(strandProg);
-    gl.uniform2f(strandU.res, drawW, drawH);
-    gl.uniform1f(strandU.feather, 0.001); // no feather for glow
-    gl.bindVertexArray(strandVAO);
-    for (let si = 0; si < strands.length; si++) {
-      const ci = si * 4;
-      gl.uniform4f(strandU.color, glowColorData[ci], glowColorData[ci+1], glowColorData[ci+2], glowColorData[ci+3]);
-      gl.drawArrays(gl.TRIANGLE_STRIP, si * VERTS_PER_STRAND, VERTS_PER_STRAND);
-    }
+      gl.useProgram(strandProg);
+      gl.uniform2f(strandU.res, drawW, drawH);
+      gl.uniform1f(strandU.feather, 0.001); // no feather for glow
+      gl.bindVertexArray(strandVAO);
+      for (let si = 0; si < strands.length; si++) {
+        const ci = si * 4;
+        gl.uniform4f(strandU.color, glowColorData[ci], glowColorData[ci+1], glowColorData[ci+2], glowColorData[ci+3]);
+        gl.drawArrays(gl.TRIANGLE_STRIP, si * VERTS_PER_STRAND, VERTS_PER_STRAND);
+      }
 
-    // ── Pass 2: Kawase blur - tight bloom ──
-    gl.disable(gl.BLEND);
-    gl.useProgram(kawaseProg);
-    gl.bindVertexArray(quadVAO);
-    gl.uniform1i(kawaseU.tex, 0);
-    const texelX = 1 / bloomA.w, texelY = 1 / bloomA.h;
-    gl.uniform2f(kawaseU.texel, texelX, texelY);
+      // ── Pass 2: Kawase blur - tight bloom ──
+      gl.disable(gl.BLEND);
+      gl.useProgram(kawaseProg);
+      gl.bindVertexArray(quadVAO);
+      gl.uniform1i(kawaseU.tex, 0);
+      const texelX = 1 / bloomA.w, texelY = 1 / bloomA.h;
+      gl.uniform2f(kawaseU.texel, texelX, texelY);
 
-    let src = bloomA, dst = bloomB;
-    for (let i = 0; i < KAWASE_TIGHT.length; i++) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
-      gl.viewport(0, 0, dst.w, dst.h);
+      let src = bloomA, dst = bloomB;
+      for (let i = 0; i < KAWASE_TIGHT.length; i++) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
+        gl.viewport(0, 0, dst.w, dst.h);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, src.tex);
+        gl.uniform1f(kawaseU.offset, KAWASE_TIGHT[i]);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        const tmp = src; src = dst; dst = tmp;
+      }
+      // Tight bloom now in `src`
+
+      // ── Pass 3: Composite tight bloom to screen ──
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(bgR, bgG, bgB, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.enable(gl.BLEND);
+      if (isDark) gl.blendFunc(gl.ONE, gl.ONE);
+      else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+      gl.useProgram(compositeProg);
+      gl.bindVertexArray(quadVAO);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, src.tex);
-      gl.uniform1f(kawaseU.offset, KAWASE_TIGHT[i]);
+      gl.uniform1i(compositeU.tex, 0);
+      gl.uniform1f(compositeU.alpha, 1.0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      const tmp = src; src = dst; dst = tmp;
-    }
-    // Tight bloom now in `src`
 
-    // ── Pass 3: Composite tight bloom to screen ──
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(bgR, bgG, bgB, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.enable(gl.BLEND);
-    if (isDark) gl.blendFunc(gl.ONE, gl.ONE);
-    else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      // ── Pass 4: Continue blurring for wide bloom ──
+      gl.disable(gl.BLEND);
+      gl.useProgram(kawaseProg);
+      gl.bindVertexArray(quadVAO);
+      gl.uniform1i(kawaseU.tex, 0);
+      gl.uniform2f(kawaseU.texel, texelX, texelY);
+      for (let i = 0; i < KAWASE_WIDE.length; i++) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
+        gl.viewport(0, 0, dst.w, dst.h);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, src.tex);
+        gl.uniform1f(kawaseU.offset, KAWASE_WIDE[i]);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        const tmp = src; src = dst; dst = tmp;
+      }
+      // Wide bloom now in `src`
 
-    gl.useProgram(compositeProg);
-    gl.bindVertexArray(quadVAO);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, src.tex);
-    gl.uniform1i(compositeU.tex, 0);
-    gl.uniform1f(compositeU.alpha, 1.0);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      // ── Pass 5: Composite wide bloom to screen ──
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.enable(gl.BLEND);
+      if (isDark) gl.blendFunc(gl.ONE, gl.ONE);
+      else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
-    // ── Pass 4: Continue blurring for wide bloom ──
-    gl.disable(gl.BLEND);
-    gl.useProgram(kawaseProg);
-    gl.bindVertexArray(quadVAO);
-    gl.uniform1i(kawaseU.tex, 0);
-    gl.uniform2f(kawaseU.texel, texelX, texelY);
-    for (let i = 0; i < KAWASE_WIDE.length; i++) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
-      gl.viewport(0, 0, dst.w, dst.h);
+      gl.useProgram(compositeProg);
+      gl.bindVertexArray(quadVAO);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, src.tex);
-      gl.uniform1f(kawaseU.offset, KAWASE_WIDE[i]);
+      gl.uniform1i(compositeU.tex, 0);
+      gl.uniform1f(compositeU.alpha, 0.6);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      const tmp = src; src = dst; dst = tmp;
-    }
-    // Wide bloom now in `src`
 
-    // ── Pass 5: Composite wide bloom to screen ──
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.enable(gl.BLEND);
-    if (isDark) gl.blendFunc(gl.ONE, gl.ONE);
-    else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-
-    gl.useProgram(compositeProg);
-    gl.bindVertexArray(quadVAO);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, src.tex);
-    gl.uniform1i(compositeU.tex, 0);
-    gl.uniform1f(compositeU.alpha, 0.6);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-    // ── Pass 6: Draw strand cores (premultiplied alpha blend) ──
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.useProgram(strandProg);
-    gl.uniform2f(strandU.res, drawW, drawH);
-    gl.bindVertexArray(strandVAO);
-    for (let si = 0; si < strands.length; si++) {
-      const ci = si * 4;
-      gl.uniform4f(strandU.color, coreColorData[ci], coreColorData[ci+1], coreColorData[ci+2], coreColorData[ci+3]);
-      gl.uniform1f(strandU.feather, FEATHER[si]);
-      gl.drawArrays(gl.TRIANGLE_STRIP, si * VERTS_PER_STRAND, VERTS_PER_STRAND);
+      // ── Pass 6: Draw strand cores (premultiplied alpha blend) ──
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.useProgram(strandProg);
+      gl.uniform2f(strandU.res, drawW, drawH);
+      gl.bindVertexArray(strandVAO);
+      for (let si = 0; si < strands.length; si++) {
+        const ci = si * 4;
+        gl.uniform4f(strandU.color, coreColorData[ci], coreColorData[ci+1], coreColorData[ci+2], coreColorData[ci+3]);
+        gl.uniform1f(strandU.feather, FEATHER[si]);
+        gl.drawArrays(gl.TRIANGLE_STRIP, si * VERTS_PER_STRAND, VERTS_PER_STRAND);
+      }
     }
 
     // ── Particles ──
@@ -969,8 +1016,34 @@ function setup() {
     const cfg = cachedCardEl?.config;
     const interval = Number(cfg?.reactive_bar_update_interval_ms) || 33;
     if (t0 - lastTickTime < Math.max(8, interval)) { rafId = requestAnimationFrame(tick); return; }
+    const tickGap = lastTickTime ? (t0 - lastTickTime) : 0;
     lastTickTime = t0;
     const debug = !!cfg?.debug;
+
+    // Adaptive bloom: monitor rAF gap to detect GPU overload.
+    // If 3+ consecutive frames exceed 2x the budget, disable bloom.
+    // Re-enable after 10+ consecutive healthy frames.
+    if (bloomWarmup <= 0) {
+      const budget = Math.max(16, interval) * 2;
+      if (tickGap > budget) {
+        bloomStressCount++;
+        if (bloomStressCount >= 3 && bloomEnabled) {
+          bloomEnabled = false;
+          L(`Bloom disabled -- GPU overload (gap=${tickGap.toFixed(0)}ms, budget=${budget}ms)`);
+        }
+      } else {
+        if (!bloomEnabled) {
+          bloomStressCount--;
+          if (bloomStressCount <= -10) {
+            bloomEnabled = true;
+            bloomStressCount = 0;
+            L('Bloom re-enabled -- GPU recovered');
+          }
+        } else {
+          bloomStressCount = 0;
+        }
+      }
+    }
 
     draw();
 
@@ -1030,6 +1103,11 @@ function setup() {
     D(`startLoop -- resize done (${drawW}x${drawH}, canvas ${canvas.width}x${canvas.height})`, memStats());
     detectTheme();
     lastTime = 0;
+    // Skip bloom (FBO multi-pass) for the first 3 frames to let the GPU
+    // pipeline warm up before taking on the full 6-pass workload.
+    bloomWarmup = 3;
+    bloomEnabled = true;
+    bloomStressCount = 0;
     tick();
     D(`startLoop END in ${(performance.now() - t0).toFixed(1)}ms`, memStats());
   }
@@ -1040,27 +1118,22 @@ function setup() {
     gpuReleaseTimer = null;
     if (!glReady || !gl) return;
     L('releaseGPU()');
-    // Set CSS background so the canvas shows the correct color during fade-out
-    // instead of using GL clear (avoids needing preserveDrawingBuffer which
-    // forces ~33MB framebuffer copy on high-DPR tablets).
-    canvas.style.backgroundColor = `rgb(${Math.round(bgR*255)},${Math.round(bgG*255)},${Math.round(bgB*255)})`;
-    // Delete all GL resources — keeps the context alive but releases GPU memory.
-    // Avoids programmatic loseContext/restoreContext which causes stale-object
-    // errors ("object does not belong to this context") in some browsers.
+    // Release FBOs (large textures) to free GPU memory, but keep shader programs,
+    // VAOs/VBOs, and the canvas at full size. Shrinking to 1x1 forces the
+    // compositor to reallocate a full-resolution GPU surface on restart, which
+    // can deadlock the renderer when the GPU thread is loaded (other animated
+    // cards keep Chrome_InProcGp at 35-44%). Keeping the canvas surface alive
+    // costs ~37MB but avoids the reallocation freeze after hours of idle.
     freeFBO(gl, bloomA); bloomA = null;
     freeFBO(gl, bloomB); bloomB = null;
-    if (strandProg)    { gl.deleteProgram(strandProg);    strandProg = null; }
-    if (kawaseProg)    { gl.deleteProgram(kawaseProg);    kawaseProg = null; }
-    if (compositeProg) { gl.deleteProgram(compositeProg); compositeProg = null; }
-    if (particleProg)  { gl.deleteProgram(particleProg);  particleProg = null; }
-    if (strandVAO)     { gl.deleteVertexArray(strandVAO); strandVAO = null; }
-    if (strandVBO)     { gl.deleteBuffer(strandVBO);      strandVBO = null; }
-    if (quadVAO)       { gl.deleteVertexArray(quadVAO);    quadVAO = null; }
-    if (quadVBO)       { gl.deleteBuffer(quadVBO);         quadVBO = null; }
-    if (particleVAO)      { gl.deleteVertexArray(particleVAO);  particleVAO = null; }
-    if (particleQuadVBO)  { gl.deleteBuffer(particleQuadVBO);   particleQuadVBO = null; }
-    if (particleInstVBO)  { gl.deleteBuffer(particleInstVBO);   particleInstVBO = null; }
-    strandU = kawaseU = compositeU = particleU = null;
+    // Clear canvas to bg color so it doesn't flash stale frame content
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(bgR, bgG, bgB, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.flush();
+    // CSS fallback for when browser discards the unpreserved drawing buffer
+    canvas.style.backgroundColor = `rgb(${Math.round(bgR*255)},${Math.round(bgG*255)},${Math.round(bgB*255)})`;
     glReady = false;
   }
 
@@ -1095,10 +1168,20 @@ function setup() {
 
   // Memory heartbeat — logs every 60s so we can see the trend leading up to a freeze.
   // The last heartbeat timestamp tells us exactly when the WebView stopped.
+  // Also flushes the compositor to prevent stale EGL surface accumulation
+  // that causes memory pressure and renderer hangs after hours of idle.
   let _hbCount = 0;
   setInterval(() => {
     _hbCount++;
     D(`heartbeat #${_hbCount} | gl=${glReady} loop=${!!rafId} | ${memStats()}`);
+    // Flush compositor: when idle (no animation loop), issue a gl.clear
+    // to force the compositor to process the surface and reclaim stale
+    // EGL buffers. Canvas stays at full size during idle (no 1x1 shrink)
+    // to avoid surface reallocation stalls on restart.
+    if (gl && !rafId && !gl.isContextLost()) {
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      D(`heartbeat #${_hbCount} | compositor flush (gl.clear)`);
+    }
   }, 60000);
   D('init complete', memStats());
 

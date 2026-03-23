@@ -31,6 +31,7 @@ async def async_setup_entry(
         VoiceSatelliteWakeSoundSwitch(entry),
         VoiceSatelliteMuteSwitch(entry),
         VoiceSatelliteNoiseGateSwitch(entry),
+        VoiceSatelliteFreshConversationSwitch(entry),
     ])
 
 
@@ -153,5 +154,50 @@ class VoiceSatelliteNoiseGateSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable the noise gate."""
+        self._attr_is_on = False
+        self.async_write_ha_state()
+
+
+class VoiceSatelliteFreshConversationSwitch(SwitchEntity, RestoreEntity):
+    """Switch entity for fresh conversation on wake word.
+
+    When enabled, each new wake word activation starts a fresh conversation
+    with no prior history. Multi-turn exchanges within the same session
+    (while the overlay is open) still share context. The conversation ID
+    is discarded when the overlay is dismissed.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "fresh_conversation"
+    _attr_icon = "mdi:chat-remove"
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        """Initialize the fresh conversation switch."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_fresh_conversation"
+        self._attr_is_on = False  # Default: off (preserve conversation history)
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous state on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            self._attr_is_on = last_state.state == "on"
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable fresh conversation on wake word."""
+        self._attr_is_on = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable fresh conversation on wake word."""
         self._attr_is_on = False
         self.async_write_ha_state()

@@ -193,15 +193,15 @@ update to the card.
 | `assist_satellite.py` | ~1309 | `VoiceSatelliteEntity` — main satellite entity, pipeline bridging, announcements, ask_question, timers, screensaver |
 | `media_player.py` | ~262 | `VoiceSatelliteMediaPlayer` — media player entity with command push |
 | `select.py` | ~582 | 8 select entities: Pipeline, VAD, Screensaver, TTS Output, Wake Word Detection, Wake Word Model, Wake Word Model 2, Wake Word Sensitivity |
-| `switch.py` | ~158 | 3 switch entities: Wake Sound, Mute, Noise Gate |
+| `switch.py` | ~200 | 4 switch entities: Wake Sound, Mute, Noise Gate, Isolated Sessions |
 | `number.py` | ~75 | 1 number entity: Announcement Display Duration |
 | `frontend.py` | ~177 | Frontend registration — static paths, Lovelace resource, sidebar panel |
 | `config_flow.py` | ~40 | Name-based config flow with duplicate detection |
 | `const.py` | 13 | Constants: `DOMAIN`, `SCREENSAVER_INTERVAL`, `INTEGRATION_VERSION`, `URL_BASE`, `JS_FILENAME` |
 | `manifest.json` | 23 | Integration metadata, dependencies, version |
-| `strings.json` | 73 | Entity translations and config flow strings |
+| `strings.json` | 79 | Entity translations and config flow strings |
 
-**Total: ~3148 lines** across 11 files (9 Python + 1 JSON manifest + 1 JSON strings).
+**Total: ~3196 lines** across 11 files (9 Python + 1 JSON manifest + 1 JSON strings).
 
 ### 4.2 Directory Structure
 
@@ -634,6 +634,7 @@ def device_info(self):
 | 12 | `switch` | `VoiceSatelliteMuteSwitch` | `mute` | `{entry_id}_mute` | CONFIG | Yes |
 | 13 | `switch` | `VoiceSatelliteNoiseGateSwitch` | `noise_gate` | `{entry_id}_noise_gate` | CONFIG | Yes |
 | 14 | `number` | `VoiceSatelliteAnnouncementDurationNumber` | `announcement_display_duration` | `{entry_id}_announcement_display_duration` | CONFIG | Yes |
+| 15 | `switch` | `VoiceSatelliteFreshConversationSwitch` | `fresh_conversation` | `{entry_id}_fresh_conversation` | CONFIG | Yes |
 
 ### 8.3 Unique ID Patterns
 
@@ -1034,8 +1035,14 @@ async def async_run_pipeline(self, audio_queue, connection, msg_id,
     # The base class uses self._conversation_id when constructing
     # the pipeline context, allowing multi-turn conversations to
     # share the same conversation thread.
+    #
+    # When "Isolated sessions" is enabled and no conversation_id is
+    # provided (i.e. a new wake word activation, not a continue turn),
+    # clear the stored ID so HA core starts a fresh chat session.
     if conversation_id:
         self._conversation_id = conversation_id
+    elif self._is_fresh_conversation_enabled():
+        self._conversation_id = None
 
     # Set extra_system_prompt RIGHT BEFORE the pipeline call.
     # Setting it too early would cause a race condition: an intermediate
@@ -2239,9 +2246,34 @@ class VoiceSatelliteNoiseGateSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = False  # Default: disabled
 ```
 
-### 20.4 State Persistence
+### 20.4 Isolated Sessions Switch
 
-All three switches use `RestoreEntity` to persist state across reboots:
+Controls whether each wake word activation starts a fresh conversation. When
+enabled, `self._conversation_id` is cleared at the start of each new pipeline
+run (but preserved during continue-conversation turns). This causes HA core to
+generate a new conversation ID, so the LLM has no memory of previous sessions.
+
+Disabled by default to match the behavior of physical Voice PE satellites, which
+retain conversation context across activations.
+
+The satellite entity reads this switch on-demand via `_is_fresh_conversation_enabled()`
+during `async_run_pipeline()`, using the same `_get_child_state()` helper as
+other switch lookups.
+
+```python
+class VoiceSatelliteFreshConversationSwitch(SwitchEntity, RestoreEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "fresh_conversation"
+    _attr_icon = "mdi:chat-remove"
+
+    def __init__(self, entry):
+        self._attr_unique_id = f"{entry.entry_id}_fresh_conversation"
+        self._attr_is_on = False  # Default: disabled (preserve conversation context)
+```
+
+### 20.5 State Persistence
+
+All four switches use `RestoreEntity` to persist state across reboots:
 
 ```python
 async def async_added_to_hass(self):
@@ -2251,7 +2283,7 @@ async def async_added_to_hass(self):
         self._attr_is_on = last_state.state == "on"
 ```
 
-### 20.5 How the Card Reads Switch State
+### 20.6 How the Card Reads Switch State
 
 The switches don't push directly to the card. Instead:
 
