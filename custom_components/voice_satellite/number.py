@@ -28,6 +28,7 @@ async def async_setup_entry(
     """Set up number entities from a config entry."""
     async_add_entities([
         VoiceSatelliteAnnouncementDurationNumber(entry),
+        VoiceSatelliteScreensaverTimerNumber(entry),
     ])
 
 
@@ -71,5 +72,49 @@ class VoiceSatelliteAnnouncementDurationNumber(NumberEntity, RestoreEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the announcement duration."""
+        self._attr_native_value = int(value)
+        self.async_write_ha_state()
+
+
+class VoiceSatelliteScreensaverTimerNumber(NumberEntity, RestoreEntity):
+    """Number entity for screensaver idle timeout in seconds."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "screensaver_timer"
+    _attr_icon = "mdi:timer-outline"
+    _attr_native_min_value = 30
+    _attr_native_max_value = 600
+    _attr_native_step = 30
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        """Initialize the screensaver timer number."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_screensaver_timer"
+        self._attr_native_value = 60  # Default: 60 seconds
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous value on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            "unknown", "unavailable",
+        ):
+            try:
+                self._attr_native_value = int(float(last_state.state))
+            except (ValueError, TypeError):
+                pass
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set the screensaver timer."""
         self._attr_native_value = int(value)
         self.async_write_ha_state()

@@ -42,6 +42,11 @@ export function setState(session, newState) {
   session.currentState = newState;
   session.logger.log('state', `${oldState} -> ${newState}`);
 
+  // Dismiss screensaver when a voice interaction begins
+  if (INTERACTING_STATES.includes(newState)) {
+    session.screensaver.dismiss();
+  }
+
   session.ui.updateForState(newState, session.pipeline.serviceUnavailable, session.tts.isPlaying);
 
   // Don't sync back to idle/listening while TTS is still playing (barge-in restart)
@@ -178,6 +183,9 @@ export function onTTSComplete(session, playbackFailed) {
     session.ui.hideBlurOverlay(BlurReason.PIPELINE);
     session.ui.updateForState(session.currentState, session.pipeline.serviceUnavailable, false);
     syncSatelliteState(session, 'IDLE');
+
+    // Reset screensaver idle timer after interaction completes
+    session.screensaver.notifyActivity();
 
     // Play any queued notifications
     session.announcement.playQueued();

@@ -33,7 +33,7 @@
         }
       },
       "screensaver": {
-        "name": "Screensaver entity"
+        "name": "External screensaver"
       },
       "tts_output": {
         "name": "TTS output"
@@ -54,6 +54,9 @@
     "number": {
       "announcement_display_duration": {
         "name": "Announcement display duration"
+      },
+      "screensaver_timer": {
+        "name": "Screensaver timer"
       }
     },
     "switch": {
@@ -68,6 +71,14 @@
       },
       "fresh_conversation": {
         "name": "Isolated sessions"
+      },
+      "builtin_screensaver": {
+        "name": "Screensaver"
+      }
+    },
+    "binary_sensor": {
+      "screensaver_active": {
+        "name": "Screensaver active"
       }
     },
     "media_player": {

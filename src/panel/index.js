@@ -29,6 +29,7 @@ import { skinSchema, skinLabels, skinHelpers } from '../editor/skin.js';
 const P = 'vsp';
 const CONFIG_KEY = 'vs-panel-config';
 
+
 /* ── Combined schema & labels (mirrors full card editor) ── */
 
 const panelSchema = [
@@ -525,6 +526,7 @@ class VoiceSatellitePanel extends HTMLElement {
           Settings are stored per-browser and persist across sessions.
         </div>
       </div>
+
       </div>
     `;
 

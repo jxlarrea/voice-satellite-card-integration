@@ -228,6 +228,20 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             if s and s.state not in ("unknown", "unavailable"):
                 attrs[attr_key] = s.state
 
+        # Expose built-in screensaver settings for the card
+        s = self._get_child_state(registry, "switch", "_builtin_screensaver")
+        if s is not None:
+            attrs["screensaver_enabled"] = s.state == "on"
+
+        s = self._get_child_state(
+            registry, "number", "_screensaver_timer"
+        )
+        if s and s.state not in ("unknown", "unavailable"):
+            try:
+                attrs["screensaver_timer"] = int(float(s.state))
+            except (ValueError, TypeError):
+                pass
+
         return attrs
 
     # --- Public accessors for __init__.py WebSocket handlers ---
@@ -294,7 +308,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         # extra_state_attributes are re-evaluated and the card sees updates.
         registry = er.async_get(self.hass)
         tracked_eids = []
-        for suffix in ("_mute", "_wake_sound"):
+        for suffix in ("_mute", "_wake_sound", "_builtin_screensaver"):
             eid = registry.async_get_entity_id(
                 "switch", DOMAIN, f"{self._entry.entry_id}{suffix}"
             )
@@ -311,6 +325,12 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         )
         if ann_dur_eid:
             tracked_eids.append(ann_dur_eid)
+        ss_timer_eid = registry.async_get_entity_id(
+            "number", DOMAIN,
+            f"{self._entry.entry_id}_screensaver_timer"
+        )
+        if ss_timer_eid:
+            tracked_eids.append(ss_timer_eid)
         for suffix in ("_wake_word_detection", "_wake_word_model", "_wake_word_model_2", "_wake_word_sensitivity"):
             eid = registry.async_get_entity_id(
                 "select", DOMAIN, f"{self._entry.entry_id}{suffix}"

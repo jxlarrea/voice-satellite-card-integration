@@ -90,6 +90,9 @@ export function dispatchSatelliteEvent(card, event) {
     return;
   }
 
+  // Dismiss screensaver on any incoming notification
+  card.screensaver?.dismiss();
+
   const ann = { ...data };
 
   // Route to the correct manager based on event type / flags

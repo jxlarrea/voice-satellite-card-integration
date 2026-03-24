@@ -24,6 +24,7 @@ import { AskQuestionManager } from '../ask-question';
 import { StartConversationManager } from '../start-conversation';
 import { MediaPlayerManager } from '../media-player';
 import { getSelectEntityId, getNumberState, getSelectState } from '../shared/satellite-state.js';
+import { ScreensaverManager } from '../screensaver';
 import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
 import { dispatchSatelliteEvent, checkRemoteNotificationPlayback } from '../shared/satellite-notification.js';
 import { isEditorPreview } from '../editor/preview.js';
@@ -105,6 +106,7 @@ export class VoiceSatelliteSession {
     this._mediaPlayer = new MediaPlayerManager(this);
     this._wakeWord = null;
     this._wakeWordLoading = false;
+    this._screensaver = new ScreensaverManager(this);
 
     // Broadcast proxies
     this._uiProxy = new UIBroadcastProxy(this);
@@ -135,6 +137,7 @@ export class VoiceSatelliteSession {
   get startConversation() { return this._startConversation; }
   get mediaPlayer() { return this._mediaPlayer; }
   get wakeWord() { return this._wakeWord; }
+  get screensaver() { return this._screensaver; }
 
   get currentState() { return this._state; }
   set currentState(val) { this._state = val; }
@@ -295,6 +298,7 @@ export class VoiceSatelliteSession {
       } else {
         this._checkWakeWordActivation();
       }
+      this._screensaver.checkSettings();
       subscribeSatelliteEvents(this, (event) => dispatchSatelliteEvent(this, event));
     }
   }
@@ -408,6 +412,7 @@ export class VoiceSatelliteSession {
     try { teardownSatelliteSubscription(); } catch (e) { this._logger.log('session', `teardownSub: ${e.message || e}`); }
     try { this._doubleTap.teardown(); } catch (e) { this._logger.log('session', `doubleTap.teardown: ${e.message || e}`); }
     try { this._visibility.teardown(); } catch (e) { this._logger.log('session', `visibility.teardown: ${e.message || e}`); }
+    try { this._screensaver.teardown(); } catch (e) { this._logger.log('session', `screensaver.teardown: ${e.message || e}`); }
     if (this._hassObserverInterval) {
       clearInterval(this._hassObserverInterval);
       this._hassObserverInterval = null;

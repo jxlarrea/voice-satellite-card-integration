@@ -163,10 +163,13 @@ Each satellite device exposes configuration entities on its device page (**Setti
 |--------|------|-------------|
 | **Announcement display duration** | Number | How long (1-60 seconds) to show the announcement text on screen after playback completes |
 | **Assist pipeline** | Select | Choose which Assist pipeline to use for this satellite |
+| **External screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
 | **Finished speaking detection** | Select | VAD sensitivity - how aggressively to detect end of speech |
 | **Isolated sessions** | Switch | When enabled, each wake word activation starts a fresh conversation with no memory of previous sessions. When disabled (default), the assistant retains conversation context across sessions, matching the behavior of physical Voice PE satellites |
 | **Mute** | Switch | Mute/unmute the satellite - when muted, wake word detection is paused |
-| **Screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
+| **Screensaver** | Switch | Enable/disable the built-in screensaver. When enabled, a black overlay covers the screen after the idle timeout. Dismissed on voice interaction, tap, or motion detection. On Fully Kiosk Browser with the JavaScript Interface enabled (**Advanced Web Settings -> Enable JavaScript Interface**): the backlight is dimmed to 0 on activation and restored on dismiss, and FK's camera-based motion detection automatically wakes the screen when someone approaches the device |
+| **Screensaver active** | Binary sensor | Sensor showing whether the screensaver overlay is currently displayed.|
+| **Screensaver timer** | Number | Idle timeout (30-600 seconds, default 60) before the screensaver activates |
 | **TTS Output** | Select | Where to play TTS audio: "Browser" (default) plays audio locally, or select any `media_player` entity to route TTS to an external speaker |
 | **Wake sound** | Switch | Enable/disable chime sounds (wake, done, error) |
 | **Wake word** | Select | Primary wake word to listen for when using on-device detection. Built-in models: ok_nabu, hey_jarvis, alexa, hey_mycroft, hey_home_assistant, hey_luna, okay_computer. Custom `.tflite` models are auto-discovered from the `models/` directory |
@@ -218,6 +221,8 @@ The satellite entity exposes the following attributes for use in templates and a
 | `wake_word_detection` | string | Current wake word detection mode: "On Device" or "Home Assistant" |
 | `wake_word_model` | string | Selected primary on-device wake word model name (e.g., "ok_nabu") |
 | `wake_word_model_2` | string | Selected second on-device wake word model name, or "No wake word" if disabled |
+| `screensaver_enabled` | boolean | Whether the built-in screensaver is enabled |
+| `screensaver_timer` | integer | Screensaver idle timeout in seconds |
 
 Example template to check for active timers:
 

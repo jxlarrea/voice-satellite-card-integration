@@ -33,7 +33,7 @@ _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SELECT, Platform.SWITCH]
+PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.BINARY_SENSOR, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SELECT, Platform.SWITCH]
 
 
 def _find_entity(hass: HomeAssistant, entity_id: str, predicate=None):
@@ -104,6 +104,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     websocket_api.async_register_command(hass, ws_subscribe_satellite_events)
     websocket_api.async_register_command(hass, ws_cancel_timer)
     websocket_api.async_register_command(hass, ws_media_player_event)
+    websocket_api.async_register_command(hass, ws_screensaver_state)
 
     # Register frontend static paths, Lovelace resource, and sidebar panel
     try:
@@ -138,6 +139,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if result:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         hass.data[DOMAIN].pop(f"{entry.entry_id}_media_player", None)
+        hass.data[DOMAIN].pop(f"{entry.entry_id}_screensaver_sensor", None)
         # Remove Lovelace resource when last entry is unloaded
         if not hass.data[DOMAIN]:
             await async_unregister_resource(hass)
@@ -481,4 +483,37 @@ async def ws_media_player_event(
         return
 
     entity.update_playback_state(state, volume=volume, media_id=media_id)
+    connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "voice_satellite/screensaver_state",
+        vol.Required("entity_id"): str,
+        vol.Required("active"): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_screensaver_state(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Handle screensaver active state updates from the card."""
+    entity_id = msg["entity_id"]
+    active = msg["active"]
+
+    # Find the screensaver binary sensor via the satellite entity's config entry
+    entity = _find_entity(hass, entity_id)
+    if entity is None:
+        connection.send_error(
+            msg["id"], "not_found", f"Entity {entity_id} not found"
+        )
+        return
+
+    entry_id = entity._entry.entry_id
+    sensor = hass.data.get(DOMAIN, {}).get(f"{entry_id}_screensaver_sensor")
+    if sensor is not None:
+        sensor.set_active(active)
+
     connection.send_result(msg["id"], {"success": True})

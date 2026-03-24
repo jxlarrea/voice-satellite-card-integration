@@ -37,6 +37,7 @@ TTS_OUTPUT_BROWSER = "Browser"
 NO_WAKE_WORD = "No wake word"
 
 
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -609,3 +610,5 @@ class VoiceSatelliteWakeWordSensitivitySelect(SelectEntity, RestoreEntity):
         if option in WAKE_WORD_SENSITIVITY_OPTIONS:
             self._selected_option = option
             self.async_write_ha_state()
+
+
