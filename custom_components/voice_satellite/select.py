@@ -349,30 +349,30 @@ class VoiceSatelliteTTSOutputSelect(SelectEntity, RestoreEntity):
         self.async_write_ha_state()
 
 
-SESSION_DURATION_DEFAULT = "Persistent"
+SESSION_DURATION_DEFAULT = "persistent"
 
 SESSION_DURATION_OPTIONS = [
-    "Persistent",
-    "5 minutes",
-    "10 minutes",
-    "15 minutes",
-    "30 minutes",
-    "1 hour",
-    "3 hours",
-    "6 hours",
-    "Isolated",
+    "persistent",
+    "5_minutes",
+    "10_minutes",
+    "15_minutes",
+    "30_minutes",
+    "1_hour",
+    "3_hours",
+    "6_hours",
+    "isolated",
 ]
 
 SESSION_DURATION_SECONDS: dict[str, int | None] = {
-    "Persistent": None,
-    "5 minutes": 300,
-    "10 minutes": 600,
-    "15 minutes": 900,
-    "30 minutes": 1800,
-    "1 hour": 3600,
-    "3 hours": 10800,
-    "6 hours": 21600,
-    "Isolated": 0,
+    "persistent": None,
+    "5_minutes": 300,
+    "10_minutes": 600,
+    "15_minutes": 900,
+    "30_minutes": 1800,
+    "1_hour": 3600,
+    "3_hours": 10800,
+    "6_hours": 21600,
+    "isolated": 0,
 }
 
 

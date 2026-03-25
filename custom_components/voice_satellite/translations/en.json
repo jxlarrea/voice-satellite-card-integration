@@ -53,15 +53,15 @@
       "session_duration": {
         "name": "Session duration",
         "state": {
-          "5 minutes": "5 minutes",
-          "10 minutes": "10 minutes",
-          "15 minutes": "15 minutes",
-          "30 minutes": "30 minutes",
-          "1 hour": "1 hour",
-          "3 hours": "3 hours",
-          "6 hours": "6 hours",
-          "Persistent": "Persistent",
-          "Isolated": "Isolated"
+          "persistent": "Persistent",
+          "5_minutes": "5 minutes",
+          "10_minutes": "10 minutes",
+          "15_minutes": "15 minutes",
+          "30_minutes": "30 minutes",
+          "1_hour": "1 hour",
+          "3_hours": "3 hours",
+          "6_hours": "6 hours",
+          "isolated": "Isolated"
         }
       }
     },
