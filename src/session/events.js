@@ -11,7 +11,7 @@
 import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
 import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
-import { getSwitchState } from '../shared/satellite-state.js';
+import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 
 /**
  * Sync pipeline state to the integration entity.
@@ -93,6 +93,12 @@ export async function startListening(session) {
 
     session._hasStarted = true;
     session.ui.hideStartButton();
+
+    // Log session duration setting
+    const sessionDuration = getSelectState(
+      session.hass, session.config.satellite_entity, 'session_duration', 'Persistent',
+    );
+    session.logger.log('session', `Session duration: ${sessionDuration}`);
 
     // Setup visibility handler for tab pause/resume
     session.visibility.setup();

@@ -49,6 +49,20 @@
       },
       "wake_word_sensitivity": {
         "name": "Wake word sensitivity"
+      },
+      "session_duration": {
+        "name": "Session duration",
+        "state": {
+          "5 minutes": "5 minutes",
+          "10 minutes": "10 minutes",
+          "15 minutes": "15 minutes",
+          "30 minutes": "30 minutes",
+          "1 hour": "1 hour",
+          "3 hours": "3 hours",
+          "6 hours": "6 hours",
+          "Persistent": "Persistent",
+          "Isolated": "Isolated"
+        }
       }
     },
     "number": {
@@ -68,9 +82,6 @@
       },
       "noise_gate": {
         "name": "Wake word noise gate"
-      },
-      "fresh_conversation": {
-        "name": "Isolated sessions"
       },
       "builtin_screensaver": {
         "name": "Screensaver"

@@ -51,6 +51,7 @@ async def async_setup_entry(
         VoiceSatelliteVadSensitivitySelect(hass, entry),
         VoiceSatelliteScreensaverSelect(hass, entry),
         VoiceSatelliteTTSOutputSelect(hass, entry),
+        VoiceSatelliteSessionDurationSelect(hass, entry),
         detection_select,
         VoiceSatelliteWakeWordModelSelect(hass, entry, wake_word_models, detection_select),
         VoiceSatelliteWakeWordModel2Select(hass, entry, wake_word_models, detection_select),
@@ -346,6 +347,85 @@ class VoiceSatelliteTTSOutputSelect(SelectEntity, RestoreEntity):
             _, name_to_eid = self._build_mapping()
             self._selected_entity_id = name_to_eid.get(option)
         self.async_write_ha_state()
+
+
+SESSION_DURATION_DEFAULT = "Persistent"
+
+SESSION_DURATION_OPTIONS = [
+    "Persistent",
+    "5 minutes",
+    "10 minutes",
+    "15 minutes",
+    "30 minutes",
+    "1 hour",
+    "3 hours",
+    "6 hours",
+    "Isolated",
+]
+
+SESSION_DURATION_SECONDS: dict[str, int | None] = {
+    "Persistent": None,
+    "5 minutes": 300,
+    "10 minutes": 600,
+    "15 minutes": 900,
+    "30 minutes": 1800,
+    "1 hour": 3600,
+    "3 hours": 10800,
+    "6 hours": 21600,
+    "Isolated": 0,
+}
+
+
+class VoiceSatelliteSessionDurationSelect(SelectEntity, RestoreEntity):
+    """Select entity for configuring session duration.
+
+    Controls how long conversation context is retained between wake word
+    activations. After the selected duration elapses without interaction,
+    the next wake word activation starts a fresh conversation. Multi-turn
+    exchanges within a single session always share context regardless of
+    this setting. Default is "Persistent" (never expire).
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "session_duration"
+    _attr_icon = "mdi:timer-sand"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialize the session duration select entity."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_session_duration"
+        self._selected_option: str = SESSION_DURATION_DEFAULT
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    @property
+    def options(self) -> list[str]:
+        """Return available options."""
+        return list(SESSION_DURATION_OPTIONS)
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the currently selected option."""
+        return self._selected_option
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous selection on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state in SESSION_DURATION_OPTIONS:
+            self._selected_option = last_state.state
+
+    async def async_select_option(self, option: str) -> None:
+        """Handle option selection."""
+        if option in SESSION_DURATION_OPTIONS:
+            self._selected_option = option
+            self.async_write_ha_state()
 
 
 WAKE_WORD_DETECTION_HA = "Home Assistant"

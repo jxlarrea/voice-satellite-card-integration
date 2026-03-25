@@ -142,6 +142,9 @@ export class PipelineManager {
 
     if (opts.conversation_id) {
       runConfig.conversation_id = opts.conversation_id;
+      this._log.log('pipeline', `Continuing conversation: ${opts.conversation_id}`);
+    } else {
+      this._log.log('pipeline', 'New conversation (no conversation_id) — server will apply session duration policy');
     }
 
     if (opts.extra_system_prompt) {

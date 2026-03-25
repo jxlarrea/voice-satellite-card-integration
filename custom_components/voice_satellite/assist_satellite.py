@@ -120,6 +120,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._pipeline_gen: int = 0  # Generation counter - filters orphaned events
         self._pipeline_run_started: bool = False  # Gate: block events until run-start
         self._conversation_id: str | None = None
+        self._conversation_last_activity: float = 0.0  # monotonic timestamp
 
         # Satellite event subscription (Phase 2 - direct push to card)
         self._satellite_subscribers: list[tuple[Any, int]] = []
@@ -175,11 +176,15 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         )
         return self.hass.states.get(eid) if eid else None
 
-    def _is_fresh_conversation_enabled(self) -> bool:
-        """Check if the 'Fresh conversation on wake' switch is on."""
+    def _get_session_duration_seconds(self) -> int | None:
+        """Return the configured session duration in seconds, or None for persistent."""
+        from .select import SESSION_DURATION_SECONDS
+
         registry = er.async_get(self.hass)
-        s = self._get_child_state(registry, "switch", "_fresh_conversation")
-        return s is not None and s.state == "on"
+        s = self._get_child_state(registry, "select", "_session_duration")
+        if s is not None and s.state in SESSION_DURATION_SECONDS:
+            return SESSION_DURATION_SECONDS[s.state]
+        return None  # Default: persistent (never expire)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1000,13 +1005,36 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._pipeline_run_started = False
 
         # Set conversation_id for continue conversation support.
-        # When "Isolated sessions" is enabled and no conversation_id
-        # is provided (i.e. a new wake word activation, not a continue turn),
-        # clear the stored ID so HA core starts a fresh chat session.
+        # When a session duration is configured and the elapsed time exceeds
+        # it, clear the stored ID so HA core starts a fresh chat session.
+        # Multi-turn exchanges within a single session (conversation_id
+        # provided by the card) always continue regardless of duration.
         if conversation_id:
             self._conversation_id = conversation_id
-        elif self._is_fresh_conversation_enabled():
-            self._conversation_id = None
+        else:
+            duration = self._get_session_duration_seconds()
+            if duration is not None:
+                elapsed = time.monotonic() - self._conversation_last_activity
+                if self._conversation_last_activity == 0.0 or elapsed > duration:
+                    _LOGGER.debug(
+                        "Session expired for '%s' (duration=%ss, elapsed=%.0fs) "
+                        "— starting fresh conversation",
+                        self.name, duration, elapsed,
+                    )
+                    self._conversation_id = None
+                else:
+                    _LOGGER.debug(
+                        "Session still active for '%s' (duration=%ss, elapsed=%.0fs) "
+                        "— continuing conversation %s",
+                        self.name, duration, elapsed, self._conversation_id,
+                    )
+            else:
+                _LOGGER.debug(
+                    "Session duration is Persistent for '%s' "
+                    "— continuing conversation %s",
+                    self.name, self._conversation_id,
+                )
+        self._conversation_last_activity = time.monotonic()
 
         # Set extra_system_prompt right before the pipeline call so the
         # base class's async_accept_pipeline_from_satellite picks it up.
