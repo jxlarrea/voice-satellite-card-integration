@@ -122,7 +122,7 @@ The top of the panel shows the current engine state (running/dormant) and pipeli
 
 ### Satellite Entity
 
-Select which satellite device this browser should use. Each browser needs its own satellite entity - create one per device in **Settings -> Devices & Services -> Voice Satellite**.
+Select which satellite device this browser should use. Each browser must explicitly select a satellite entity before the engine will start. Create one entity per device in **Settings -> Devices & Services -> Voice Satellite**.
 
 ### Settings
 

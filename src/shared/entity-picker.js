@@ -2,7 +2,6 @@
 
 const STORAGE_KEY = 'vs-satellite-entity';
 const CONFIG_KEY = 'vs-panel-config';
-const CLEARED_KEY = 'vs-entity-cleared';
 
 export function getStoredEntity() {
   try {
@@ -15,23 +14,13 @@ export function getStoredEntity() {
 export function setStoredEntity(entityId) {
   try {
     localStorage.setItem(STORAGE_KEY, entityId);
-    localStorage.removeItem(CLEARED_KEY);
   } catch (_) { /* private browsing */ }
 }
 
 export function clearStoredEntity() {
   try {
     localStorage.removeItem(STORAGE_KEY);
-    localStorage.setItem(CLEARED_KEY, '1');
   } catch (_) { /* private browsing */ }
-}
-
-function wasExplicitlyCleared() {
-  try {
-    return localStorage.getItem(CLEARED_KEY) === '1';
-  } catch (_) {
-    return false;
-  }
 }
 
 export function discoverSatelliteEntities(hass) {
@@ -50,7 +39,6 @@ export function discoverSatelliteEntities(hass) {
 
 /**
  * Resolve entity from localStorage. Validates it still exists in HA.
- * Auto-selects if only one satellite entity is available.
  * Returns entity_id string or null.
  */
 export function resolveEntity(hass) {
@@ -78,16 +66,6 @@ export function resolveEntity(hass) {
     }
     // Entity no longer exists in HA — clear stale storage
     clearStoredEntity();
-  }
-
-  // Don't auto-select if the user explicitly cleared the entity
-  if (wasExplicitlyCleared()) return null;
-
-  // Auto-select if only one satellite entity
-  const entities = discoverSatelliteEntities(hass);
-  if (entities.length === 1) {
-    setStoredEntity(entities[0].entity_id);
-    return entities[0].entity_id;
   }
 
   return null;

@@ -606,7 +606,7 @@ src/
 │   ├── satellite-subscription.js  WS subscription to satellite events
 │   ├── satellite-state.js    Read entity attributes/switch states from HA cache
 │   ├── entity-subscription.js     Generic HA entity state subscription
-│   ├── entity-picker.js      Browser-specific entity picker + localStorage
+│   ├── entity-picker.js      Entity persistence + validation via localStorage (no auto-select)
 │   ├── notification-comms.js ACK WS command for notifications
 │   └── format.js             Time/price/number formatting helpers
 │
@@ -681,7 +681,7 @@ initEngine()
     └── attemptStart(hass, session)
         ├── Guard: isStarted, _starting, _userStopped → return
         ├── Guard: auto_start === false (from localStorage) → return
-        ├── resolveEntity(hass) → find satellite entity
+        ├── resolveEntity(hass) → look up satellite entity from localStorage (no auto-select)
         ├── Merge config: DEFAULT_CONFIG + localStorage + entity
         ├── ensureEngineCard(hass, session, config)
         │   └── If no cards registered: create hidden voice-satellite-card
@@ -2180,23 +2180,21 @@ Document-level listeners for `touchstart`, `click`, and `keydown`
 
 **File:** `src/shared/entity-picker.js`
 
-### 20.1 Normal Mode
+### 20.1 Resolution Logic
 
-Card config specifies `satellite_entity` directly.
+`resolveEntity(hass)` looks up the satellite entity from browser-local
+storage. No auto-selection is performed -- the user must explicitly pick
+a satellite entity in the sidebar panel before the engine will start.
 
-### 20.2 Browser Override Mode
+1. **Check `vs-satellite-entity`** in localStorage.
+2. **Fall back** to `satellite_entity` inside the `vs-panel-config`
+   localStorage object (legacy migration path).
+3. **Validate** the stored entity still exists in `hass.entities`.
+   If it was deleted from HA, clear stale storage and return `null`.
+4. **Return `null`** if nothing is stored -- the panel shows the entity
+   picker and the engine remains dormant until the user selects one.
 
-When `browser_satellite_override: true`:
-
-1. **Check localStorage** for a saved `{entityId, browserKey}` pair.
-2. **If found:** use that entity. Value `'__disabled__'` means this
-   browser opted out.
-3. **If not found:** show a picker dialog listing all
-   `assist_satellite.voice_satellite_*` entities.
-4. **Picker** uses a `MutationObserver` to detect when HA's dialog
-   container appears, then injects the picker UI.
-
-### 20.3 Entity Subscription
+### 20.2 Entity Subscription
 
 **File:** `src/shared/entity-subscription.js`
 
@@ -3173,7 +3171,7 @@ A step-by-step guide to recreate the frontend from scratch:
 - [ ] `MediaPlayerManager`: Play/pause/stop, volume, state reporting
 - [ ] `VisibilityManager`: Pause/resume with debounce
 - [ ] `DoubleTapHandler`: Document-level cancel with priority system
-- [ ] `entity-picker.js`: Browser override + localStorage + HA dialog
+- [ ] `entity-picker.js`: localStorage persistence + validation (no auto-select)
 - [ ] `satellite-state.js`: Read switch/select/number entity states
 - [ ] `ChatManager`: Streaming text with 24-char fade + RAF coalescing
 
