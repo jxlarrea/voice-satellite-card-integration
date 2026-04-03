@@ -205,6 +205,10 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         if s is not None:
             attrs["wake_sound"] = s.state == "on"
 
+        s = self._get_child_state(registry, "switch", "_stop_word")
+        if s is not None:
+            attrs["stop_word"] = s.state == "on"
+
         # Expose TTS output select entity_id for the card
         s = self._get_child_state(registry, "select", "_tts_output")
         if s and s.state not in ("Browser", "unknown", "unavailable"):
@@ -313,7 +317,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         # extra_state_attributes are re-evaluated and the card sees updates.
         registry = er.async_get(self.hass)
         tracked_eids = []
-        for suffix in ("_mute", "_wake_sound", "_builtin_screensaver"):
+        for suffix in ("_mute", "_wake_sound", "_stop_word", "_builtin_screensaver"):
             eid = registry.async_get_entity_id(
                 "switch", DOMAIN, f"{self._entry.entry_id}{suffix}"
             )

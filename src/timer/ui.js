@@ -53,11 +53,10 @@ export function showAlert(mgr) {
   mgr.alertActive = true;
   mgr.log.log('timer', 'Showing finished alert');
 
-  // Stop word disabled — kept for future re-enablement
-  // const wakeWord = mgr.card.wakeWord;
-  // if (wakeWord?.active && wakeWord._inference) {
-  //   wakeWord.enableStopModel(false);
-  // }
+  const wakeWord = mgr.card.wakeWord;
+  if (wakeWord?.active && wakeWord._inference) {
+    wakeWord.enableStopModel(false);
+  }
 
   mgr.card.ui.showBlurOverlay(BlurReason.TIMER);
 
@@ -81,11 +80,7 @@ export function clearAlert(mgr) {
   if (!mgr.alertActive) return;
   mgr.alertActive = false;
 
-  // Disable stop word detection
-  const wakeWord = mgr.card.wakeWord;
-  if (wakeWord?._stopKeywordConfig) {
-    wakeWord.disableStopModel();
-  }
+  mgr.card.wakeWord?.disableStopModel();
 
   // Stop chime loop
   if (_chimeInterval) {

@@ -83,6 +83,9 @@
       "noise_gate": {
         "name": "Wake word noise gate"
       },
+      "stop_word": {
+        "name": "Stop word interruption"
+      },
       "builtin_screensaver": {
         "name": "Screensaver"
       }

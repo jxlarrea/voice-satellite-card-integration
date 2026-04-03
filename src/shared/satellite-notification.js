@@ -216,8 +216,7 @@ function _playMain(mgr, ann, onComplete, logPrefix) {
 
   if (mediaUrl) {
     mgr.log.log(logPrefix, `Playing media: ${mediaUrl}`);
-    // Stop word disabled — kept for future re-enablement
-    // _enableStopWordDelayed(mgr);
+    _enableStopWordDelayed(mgr);
     playMediaFor(mgr, mediaUrl, logPrefix, () => onComplete(ann));
   } else {
     mgr.log.log(logPrefix, 'No media - completing after message display');

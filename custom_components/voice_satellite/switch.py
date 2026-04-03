@@ -36,6 +36,7 @@ async def async_setup_entry(
         VoiceSatelliteWakeSoundSwitch(entry),
         VoiceSatelliteMuteSwitch(entry),
         VoiceSatelliteNoiseGateSwitch(entry),
+        VoiceSatelliteStopWordSwitch(entry),
         VoiceSatelliteScreensaverSwitch(entry),
     ]
     async_add_entities(entities)
@@ -170,6 +171,45 @@ class VoiceSatelliteNoiseGateSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable the noise gate."""
+        self._attr_is_on = False
+        self.async_write_ha_state()
+
+
+class VoiceSatelliteStopWordSwitch(SwitchEntity, RestoreEntity):
+    """Switch entity for opt-in stop word interruption."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "stop_word"
+    _attr_icon = "mdi:stop-circle-outline"
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        """Initialize the stop word switch."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_stop_word"
+        self._attr_is_on = False  # Default: disabled to avoid extra CPU/memory use
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous state on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            self._attr_is_on = last_state.state == "on"
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable the stop word model for interruptible playback."""
+        self._attr_is_on = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable the stop word model for interruptible playback."""
         self._attr_is_on = False
         self.async_write_ha_state()
 

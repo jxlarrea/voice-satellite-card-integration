@@ -84,6 +84,7 @@ export class WakeWordManager {
     this._cachedModel = undefined;
     this._cachedModel2 = undefined;
     this._cachedThreshold = undefined;
+    this._cachedStopWord = undefined;
     this._switching = false;
 
     // WASM heap reset tracking
@@ -186,6 +187,18 @@ export class WakeWordManager {
       this._session.hass,
       this._session.config.satellite_entity,
       'noise_gate',
+    ) === true;
+  }
+
+  /**
+   * Check if stop word interruption is enabled.
+   * @returns {boolean}
+   */
+  isStopWordEnabled() {
+    return getSwitchState(
+      this._session.hass,
+      this._session.config.satellite_entity,
+      'stop_word',
     ) === true;
   }
 
@@ -494,6 +507,11 @@ export class WakeWordManager {
    *   false to add stop alongside regular wake words (timer alerts)
    */
   async enableStopModel(stopOnly = false) {
+    if (!this.isStopWordEnabled()) {
+      this._log.log('stop-word', 'Not enabled in satellite settings');
+      return;
+    }
+
     if (!this._inference) {
       this._log.log('stop-word', 'Cannot enable — inference not initialized');
       return;
@@ -506,14 +524,22 @@ export class WakeWordManager {
         this._log.log('stop-word', 'Loading stop model...');
         const runner = await loadMicroModel(this._tfweb, 'stop');
         const params = getMicroModelParams('stop');
+        const effectiveCutoff = this.getThresholdForModel('stop');
+        this._log.log(
+          'stop-word',
+          `stop: baseCutoff=${params.cutoff} effective=${effectiveCutoff.toFixed(3)} (${this._getSensitivityLabel()}, margin ×${SENSITIVITY_MARGIN_FACTORS[this._getSensitivityLabel()]}) slidingWindow=${params.slidingWindow} stepSize=${params.stepSize} (${params._source || 'hardcoded'})`,
+        );
         this._stopMicroConfig = {
           runner,
           name: 'stop',
-          cutoff: this.getThresholdForModel('stop'),
+          cutoff: effectiveCutoff,
           slidingWindow: params.slidingWindow,
           stepSize: params.stepSize,
         };
-        this._log.log('stop-word', `Stop model loaded (c=${this._stopMicroConfig.cutoff})`);
+        this._log.log(
+          'stop-word',
+          `TFLite models loaded: stop(c=${this._stopMicroConfig.cutoff},sw=${this._stopMicroConfig.slidingWindow})`,
+        );
       } else {
         this._log.log('stop-word', 'Stop model already loaded (cached)');
       }
@@ -534,6 +560,8 @@ export class WakeWordManager {
       } else {
         this._log.log('stop-word', 'Enabled (alongside wake words)');
       }
+
+      this._log.log('stop-word', `Inference active${stopOnly ? ' (stop-only)' : ' (shared)'}`);
     } catch (e) {
       this._log.error('stop-word', `Failed to enable: ${e.message || e}`);
     }
@@ -542,7 +570,7 @@ export class WakeWordManager {
   /**
    * Disable the stop keyword model and restore regular keywords if suspended.
    */
-  disableStopModel() {
+  disableStopModel({ log = true } = {}) {
     if (!this._inference) return;
 
     this._inference.removeKeyword('stop');
@@ -558,8 +586,8 @@ export class WakeWordManager {
       this._sampleBufLen = 0;
       this._frameQueue.length = 0;
       this._processing = false;
-      this._log.log('stop-word', 'Disabled (stop-only mode off)');
-    } else {
+      if (log) this._log.log('stop-word', 'Disabled (stop-only mode off)');
+    } else if (log) {
       this._log.log('stop-word', 'Disabled');
     }
   }
@@ -731,6 +759,7 @@ export class WakeWordManager {
     const model2 = this.getModelName2();
     const threshold = this.getThreshold();
     const noiseGate = this._isNoiseGateEnabled();
+    const stopWord = this.isStopWordEnabled();
 
     // Initialize cache on first call
     if (this._cachedEnabled === undefined) {
@@ -739,6 +768,7 @@ export class WakeWordManager {
       this._cachedModel2 = model2;
       this._cachedThreshold = threshold;
       this._cachedNoiseGate = noiseGate;
+      this._cachedStopWord = stopWord;
       return;
     }
 
@@ -746,12 +776,14 @@ export class WakeWordManager {
     const modelChanged = model !== this._cachedModel || model2 !== this._cachedModel2;
     const thresholdChanged = threshold !== this._cachedThreshold;
     const noiseGateChanged = noiseGate !== this._cachedNoiseGate;
+    const stopWordChanged = stopWord !== this._cachedStopWord;
 
-    if (!enabledChanged && !modelChanged && !thresholdChanged && !noiseGateChanged) return;
+    if (!enabledChanged && !modelChanged && !thresholdChanged && !noiseGateChanged && !stopWordChanged) return;
 
     // Always update caches
     this._cachedThreshold = threshold;
     this._cachedNoiseGate = noiseGate;
+    this._cachedStopWord = stopWord;
 
     // Live threshold / noise gate update (no restart needed)
     if ((thresholdChanged || noiseGateChanged) && !modelChanged && this._active && this._inference) {
@@ -766,6 +798,15 @@ export class WakeWordManager {
         this._inference.setEnergyGateEnabled(noiseGate);
       }
       this._log.log('wake-word', `Settings updated${noiseGateChanged ? ` (noise gate: ${noiseGate ? 'on' : 'off'})` : ''}`);
+    }
+
+    if (stopWordChanged) {
+      this._log.log('stop-word', `Setting changed: ${stopWord ? 'enabled' : 'disabled'}`);
+    }
+
+    if (stopWordChanged && !stopWord) {
+      this.disableStopModel({ log: false });
+      this._log.log('stop-word', 'Disabled in satellite settings');
     }
 
     // Mode or model change requires switching

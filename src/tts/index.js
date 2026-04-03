@@ -81,8 +81,7 @@ export class TtsManager {
         this._onComplete();
       });
 
-      // Stop word disabled — kept for future re-enablement
-      // this._enableStopWordDelayed();
+      this._enableStopWordDelayed();
 
       // Safety timeout - if state monitoring never fires, clean up after 2 minutes
       this._endTimer = setTimeout(() => {
@@ -155,8 +154,7 @@ export class TtsManager {
       if (this._card.isReactiveBarEnabled) {
         this._card.analyser.attachAudio(audio, this._card.audio.audioContext);
       }
-      // Stop word disabled — kept for future re-enablement
-      // this._enableStopWordDelayed();
+      this._enableStopWordDelayed();
     }).catch((e) => {
       // play() promise rejection (autoplay blocked, etc.)
       audio.onerror?.(e);
