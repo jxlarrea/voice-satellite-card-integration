@@ -45,6 +45,7 @@ def _find_entity(hass: HomeAssistant, entity_id: str, predicate=None):
 
 
 _BUILTIN_MODELS = {"ok_nabu", "hey_jarvis", "alexa", "hey_mycroft", "hey_home_assistant", "hey_luna", "okay_computer", "stop"}
+_BUILTIN_SOUNDS = {"announce", "alert", "done", "error", "wake"}
 
 
 def _sync_custom_models(config_dir: str) -> None:
@@ -91,10 +92,55 @@ def _sync_custom_models(config_dir: str) -> None:
             _LOGGER.info("Restored custom model from persistent storage: %s", src.name)
 
 
+def _sync_custom_sounds(config_dir: str) -> None:
+    """Sync custom .mp3 sounds between persistent storage and integration dir.
+
+    HACS replaces the entire integration directory on update, wiping any
+    user-added sound files. We use a persistent directory outside
+    custom_components/ to survive updates:
+
+      /config/voice_satellite/sounds/
+
+    On each startup this function:
+      1. Creates the persistent dir if it doesn't exist.
+      2. Saves any custom sounds found in the integration dir to persistent dir
+         (catches sounds placed directly in the integration dir).
+      3. Restores sounds from the persistent dir to the integration dir.
+         Files in the persistent folder are authoritative and can replace
+         built-in sound filenames after a HACS update.
+
+    Built-in sound names are excluded from the backup step so the persistent
+    folder only stores user-managed overrides.
+    """
+    persistent = Path(config_dir, "voice_satellite", "sounds")
+    persistent.mkdir(parents=True, exist_ok=True)
+
+    integration_sounds = Path(__file__).parent / "sounds"
+    if not integration_sounds.is_dir():
+        return
+
+    # Save: integration -> persistent (backup custom sounds the user placed directly)
+    for src in integration_sounds.glob("*.mp3"):
+        if src.stem in _BUILTIN_SOUNDS:
+            continue
+        dest = persistent / src.name
+        if not dest.exists():
+            shutil.copy2(src, dest)
+            _LOGGER.info("Saved custom sound to persistent storage: %s", src.name)
+
+    # Restore: persistent -> integration (recover after HACS update)
+    for src in persistent.glob("*.mp3"):
+        dest = integration_sounds / src.name
+        if not dest.exists() or src.read_bytes() != dest.read_bytes():
+            shutil.copy2(src, dest)
+            _LOGGER.info("Restored sound from persistent storage: %s", src.name)
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up integration-wide resources: frontend JS + WebSocket commands."""
-    # Sync custom wake word models with persistent storage
+    # Sync custom wake word models and custom sounds with persistent storage
     await hass.async_add_executor_job(_sync_custom_models, hass.config.config_dir)
+    await hass.async_add_executor_job(_sync_custom_sounds, hass.config.config_dir)
 
     # Register WebSocket commands (once, not per-entry)
     websocket_api.async_register_command(hass, ws_announce_finished)
