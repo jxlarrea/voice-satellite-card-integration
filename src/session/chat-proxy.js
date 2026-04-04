@@ -64,6 +64,18 @@ export class ChatBroadcastProxy {
     for (const c of this._cards) c.chat.addAssistant(text);
   }
 
+  showThinking() {
+    for (const c of this._cards) c.chat.showThinking();
+  }
+
+  showToolCall(name) {
+    for (const c of this._cards) c.chat.showToolCall(name);
+  }
+
+  removeThinking() {
+    for (const c of this._cards) c.chat.removeThinking();
+  }
+
   addImages(results, autoDisplay, featured) {
     for (const c of this._cards) c.chat.addImages(results, autoDisplay, featured);
   }

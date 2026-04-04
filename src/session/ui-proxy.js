@@ -102,6 +102,28 @@ export class UIBroadcastProxy {
     return el;
   }
 
+  addThinkingIndicator() {
+    let el = null;
+    for (const c of this._cards) {
+      const result = c.ui.addThinkingIndicator();
+      if (!el) el = result;
+    }
+    return el;
+  }
+
+  freezeThinkingWithText(el, name) {
+    for (const c of this._cards) c.ui.freezeThinkingWithText(el, name);
+  }
+
+  addToolCallMessage(name) {
+    let el = null;
+    for (const c of this._cards) {
+      const result = c.ui.addToolCallMessage(name);
+      if (!el) el = result;
+    }
+    return el;
+  }
+
   updateChatText(el, text) {
     // el is from ONE card's UI. Broadcast — each UI's updateChatText
     // will no-op gracefully if the element isn't in its DOM.

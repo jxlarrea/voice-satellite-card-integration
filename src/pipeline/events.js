@@ -8,6 +8,7 @@ import { State, INTERACTING_STATES, EXPECTED_ERRORS, BlurReason, Timing } from '
 import { getSwitchState } from '../shared/satellite-state.js';
 import { CHIME_WAKE } from '../audio/chime.js';
 import { onTTSComplete } from '../session/events.js';
+import { humanizeToolName } from '../shared/tool-name.js';
 
 /**
  * Run-start: binaryHandlerId is already set from the init event.
@@ -158,6 +159,18 @@ export function handleIntentProgress(mgr, eventData) {
 
   if (!eventData.chat_log_delta) return;
 
+  // Handle tool calls - show which tool the LLM is invoking
+  const toolCalls = eventData.chat_log_delta.tool_calls;
+  if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+    const firstTool = toolCalls[0];
+    const rawName = firstTool.tool_name || firstTool.name || '';
+    const displayName = humanizeToolName(rawName);
+    if (displayName) {
+      mgr.log.log('pipeline', `Tool call: ${rawName}`);
+      mgr.card.chat.showToolCall(displayName);
+    }
+  }
+
   // Handle tool results (e.g., image search, video search, weather, financial)
   if (eventData.chat_log_delta.role === 'tool_result') {
     const toolResult = eventData.chat_log_delta.tool_result;
@@ -226,6 +239,7 @@ export function handleIntentEnd(mgr, eventData) {
       mgr.card.ui.hideBar();
     }, Timing.INTENT_ERROR_DISPLAY);
 
+    mgr.card.chat.removeThinking();
     mgr.card.chat.streamedResponse = '';
     return;
   }

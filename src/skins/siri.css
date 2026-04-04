@@ -275,6 +275,89 @@
   text-align: center;
 }
 
+/* Thinking Indicator — animated dots in Siri gradient colors */
+#voice-satellite-ui .vs-chat-msg.thinking {
+  font-size: calc(38px * var(--vs-text-scale, 1));
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 300;
+  padding: 4px 0;
+  align-self: center;
+  text-align: center;
+}
+
+#voice-satellite-ui .vs-thinking-dots {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#voice-satellite-ui .vs-thinking-dots span {
+  display: inline-block;
+  font-size: calc(38px * var(--vs-text-scale, 1));
+  line-height: 1;
+  animation: siri-dot-bounce 1.4s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-thinking-dots span:nth-child(1) {
+  color: #8B5CF6;
+  animation-delay: 0s;
+}
+
+#voice-satellite-ui .vs-thinking-dots span:nth-child(2) {
+  color: #3B82F6;
+  animation-delay: 0.2s;
+}
+
+#voice-satellite-ui .vs-thinking-dots span:nth-child(3) {
+  color: #EC4899;
+  animation-delay: 0.4s;
+}
+
+@keyframes siri-dot-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+
+/* Idle dots — static */
+#voice-satellite-ui .vs-chat-msg.thinking.idle .vs-thinking-dots span,
+#voice-satellite-ui .vs-chat-msg.tool-call .vs-thinking-dots span {
+  animation: none;
+  opacity: 0.45;
+  transform: none;
+  font-size: calc(24px * var(--vs-text-scale, 1));
+}
+
+/* Tool name text beside dots */
+#voice-satellite-ui .vs-thinking-text {
+  margin-left: 8px;
+  font-size: calc(24px * var(--vs-text-scale, 1));
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 300;
+  font-style: italic;
+}
+
+/* Tool call line */
+#voice-satellite-ui .vs-chat-msg.tool-call {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  padding: 2px 0;
+}
+
+/* Frozen thinking line */
+#voice-satellite-ui .vs-chat-msg.thinking.idle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Timer Container - top-right */
 .vs-timer-container {
   position: fixed;

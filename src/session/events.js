@@ -260,7 +260,10 @@ export function handlePipelineMessage(session, message) {
     case 'stt-vad-start': session.logger.log('event', 'VAD: speech started'); break;
     case 'stt-vad-end': session.logger.log('event', 'VAD: speech ended'); break;
     case 'stt-end': session.pipeline.handleSttEnd(eventData); break;
-    case 'intent-start': setState(session, State.INTENT); break;
+    case 'intent-start':
+      setState(session, State.INTENT);
+      session.chat.showThinking();
+      break;
     case 'intent-progress':
       session.pipeline.handleIntentProgress(eventData);
       break;

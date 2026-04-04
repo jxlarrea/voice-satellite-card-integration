@@ -328,6 +328,78 @@ export class UIManager {
   }
 
   /**
+   * Add a thinking indicator to the chat container.
+   * Shows animated dots that signal the LLM is processing.
+   * @returns {HTMLElement|null} The created element
+   */
+  addThinkingIndicator() {
+    if (!this._globalUI) return null;
+    const container = this._globalUI.querySelector('.vs-chat-container');
+    container.classList.add('visible');
+
+    const msg = document.createElement('div');
+    msg.className = 'vs-chat-msg assistant thinking';
+
+    const dots = document.createElement('span');
+    dots.className = 'vs-thinking-dots';
+    for (let i = 0; i < 3; i++) {
+      const dot = document.createElement('span');
+      dot.textContent = '\u2022';
+      dots.appendChild(dot);
+    }
+    msg.appendChild(dots);
+
+    container.appendChild(msg);
+    return msg;
+  }
+
+  /**
+   * Freeze an animated thinking indicator and append a tool name beside the dots.
+   * @param {HTMLElement} el - The thinking indicator element
+   * @param {string} name - Humanized tool name
+   */
+  freezeThinkingWithText(el, name) {
+    if (!el) return;
+    el.classList.add('idle');
+    const text = document.createElement('span');
+    text.className = 'vs-thinking-text';
+    text.textContent = name;
+    el.appendChild(text);
+  }
+
+  /**
+   * Add a tool call status line with static dots to the chat flow.
+   * Used for second+ tool calls (first one reuses the thinking indicator).
+   * @param {string} name - Humanized tool name
+   * @returns {HTMLElement|null}
+   */
+  addToolCallMessage(name) {
+    if (!this._globalUI) return null;
+    const container = this._globalUI.querySelector('.vs-chat-container');
+    container.classList.add('visible');
+
+    const msg = document.createElement('div');
+    msg.className = 'vs-chat-msg tool-call';
+
+    const dots = document.createElement('span');
+    dots.className = 'vs-thinking-dots';
+    for (let i = 0; i < 3; i++) {
+      const dot = document.createElement('span');
+      dot.textContent = '\u2022';
+      dots.appendChild(dot);
+    }
+    msg.appendChild(dots);
+
+    const text = document.createElement('span');
+    text.className = 'vs-thinking-text';
+    text.textContent = name;
+    msg.appendChild(text);
+
+    container.appendChild(msg);
+    return msg;
+  }
+
+  /**
    * Update text content of an existing chat element.
    * @param {HTMLElement} el
    * @param {string} text

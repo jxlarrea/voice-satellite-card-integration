@@ -251,6 +251,85 @@
   100% { opacity: 1; transform: translateY(0); }
 }
 
+/* ─── Thinking Indicator — animated dots in strand colors ──────── */
+
+#voice-satellite-ui .vs-chat-msg.thinking {
+  font-size: calc(36px * var(--vs-text-scale, 1));
+  color: var(--wf-text-muted);
+  font-weight: 400;
+  padding: 4px 0;
+}
+
+#voice-satellite-ui .vs-thinking-dots {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+#voice-satellite-ui .vs-thinking-dots span {
+  display: inline-block;
+  font-size: calc(36px * var(--vs-text-scale, 1));
+  line-height: 1;
+  animation: wf-dot-bounce 1.4s ease-in-out infinite;
+}
+
+#voice-satellite-ui .vs-thinking-dots span:nth-child(1) {
+  color: var(--wf-strand-3, #783cff);
+  animation-delay: 0s;
+}
+
+#voice-satellite-ui .vs-thinking-dots span:nth-child(2) {
+  color: var(--wf-strand-4, #1ea0ff);
+  animation-delay: 0.2s;
+}
+
+#voice-satellite-ui .vs-thinking-dots span:nth-child(3) {
+  color: var(--wf-strand-5, #a050ff);
+  animation-delay: 0.4s;
+}
+
+@keyframes wf-dot-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+
+/* Idle dots — static */
+#voice-satellite-ui .vs-chat-msg.thinking.idle .vs-thinking-dots span,
+#voice-satellite-ui .vs-chat-msg.tool-call .vs-thinking-dots span {
+  animation: none;
+  opacity: 0.45;
+  transform: none;
+  font-size: calc(22px * var(--vs-text-scale, 1));
+}
+
+/* Tool name text beside dots */
+#voice-satellite-ui .vs-thinking-text {
+  margin-left: 8px;
+  font-size: calc(22px * var(--vs-text-scale, 1));
+  color: var(--wf-text-muted, #8888a0);
+  font-style: italic;
+}
+
+/* Tool call line */
+#voice-satellite-ui .vs-chat-msg.tool-call {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 2px 0;
+}
+
+/* Frozen thinking line */
+#voice-satellite-ui .vs-chat-msg.thinking.idle {
+  display: flex;
+  align-items: center;
+}
+
 /* ─── Timer Container ───────────────────────────────────────────── */
 
 .vs-timer-container {

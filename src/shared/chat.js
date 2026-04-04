@@ -11,6 +11,7 @@ export class ChatManager {
 
     this._streamEl = null;
     this._streamedResponse = '';
+    this._thinkingEl = null;
 
     // Reusable fade span pool - grouped spans for efficient DOM updates
     this._fadeSpans = null;
@@ -69,13 +70,46 @@ export class ChatManager {
   }
 
   addAssistant(text) {
+    // Remove animated dots if no tool call claimed them.
+    // Frozen dots (from tool calls) are safe - showToolCall already nulled _thinkingEl.
+    this.removeThinking();
     this._streamEl = this._card.ui.addChatMessage(text, 'assistant');
     this._fadeSpans = null;
     this._solidNode = null;
     this._fadeContainer = null;
   }
 
+  /** Show an animated thinking indicator in the chat area. */
+  showThinking() {
+    this.removeThinking();
+    this._thinkingEl = this._card.ui.addThinkingIndicator();
+  }
+
+  /**
+   * Show a tool call as a permanent line in the chat flow.
+   * If animated dots are showing, freeze them and append the tool name.
+   * Subsequent tool calls get their own line with static dots.
+   * @param {string} name - Humanized tool name
+   */
+  showToolCall(name) {
+    if (this._thinkingEl) {
+      this._card.ui.freezeThinkingWithText(this._thinkingEl, name);
+      this._thinkingEl = null;
+    } else {
+      this._card.ui.addToolCallMessage(name);
+    }
+  }
+
+  /** Remove the thinking dots indicator if present. */
+  removeThinking() {
+    if (this._thinkingEl) {
+      this._thinkingEl.remove();
+      this._thinkingEl = null;
+    }
+  }
+
   clear() {
+    this.removeThinking();
     this._card.ui.clearChat();
     this._streamEl = null;
     this._streamedResponse = '';
