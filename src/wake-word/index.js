@@ -36,6 +36,15 @@ const SENSITIVITY_MARGIN_FACTORS = {
   'Moderately sensitive': 1.0,
   'Very sensitive': 2.0,
 };
+// The stop model has a much lower base cutoff (~0.5) than wake words (~0.95),
+// so the wake-word factors produce extreme swings (clamps to 0.1 on Very, jumps
+// to 0.75 on Slightly). Use gentler factors for stop to keep variation symmetric
+// and meaningful around its base cutoff.
+const STOP_SENSITIVITY_FACTORS = {
+  'Slightly sensitive': 0.8,
+  'Moderately sensitive': 1.0,
+  'Very sensitive': 1.2,
+};
 const DEFAULT_CUTOFF = 0.90;
 
 // ─── WASM heap monitoring ────────────────────────────────────────────
@@ -213,7 +222,8 @@ export class WakeWordManager {
     const label = this._getSensitivityLabel();
     const params = getMicroModelParams(modelName);
     const baseCutoff = params.cutoff ?? DEFAULT_CUTOFF;
-    const factor = SENSITIVITY_MARGIN_FACTORS[label] ?? 1.0;
+    const table = modelName === 'stop' ? STOP_SENSITIVITY_FACTORS : SENSITIVITY_MARGIN_FACTORS;
+    const factor = table[label] ?? 1.0;
     const effective = 1 - (1 - baseCutoff) * factor;
     return Math.max(0.1, Math.min(effective, 0.99));
   }
@@ -527,7 +537,7 @@ export class WakeWordManager {
         const effectiveCutoff = this.getThresholdForModel('stop');
         this._log.log(
           'stop-word',
-          `stop: baseCutoff=${params.cutoff} effective=${effectiveCutoff.toFixed(3)} (${this._getSensitivityLabel()}, margin ×${SENSITIVITY_MARGIN_FACTORS[this._getSensitivityLabel()]}) slidingWindow=${params.slidingWindow} stepSize=${params.stepSize} (${params._source || 'hardcoded'})`,
+          `stop: baseCutoff=${params.cutoff} effective=${effectiveCutoff.toFixed(3)} (${this._getSensitivityLabel()}, margin ×${STOP_SENSITIVITY_FACTORS[this._getSensitivityLabel()]}) slidingWindow=${params.slidingWindow} stepSize=${params.stepSize} (${params._source || 'hardcoded'})`,
         );
         this._stopMicroConfig = {
           runner,
