@@ -232,6 +232,87 @@ Example template to check for active timers:
 {{ state_attr('assist_satellite.kitchen_tablet', 'active_timers') | length > 0 }}
 ```
 
+### Voice Interaction Events
+
+After every voice interaction the integration fires a `voice_satellite_chat` event on the Home Assistant bus, exposing the full turn payload. This lets automations react to *what* was said by the user and the assistant, not just *that* something was said.
+
+**Event payload:**
+
+```yaml
+event_type: voice_satellite_chat
+data:
+  entity_id: assist_satellite.kitchen_tablet
+  stt_text: "what's the weather and turn on the kitchen lights"
+  tts_text: "It's 75 and sunny. The kitchen lights are on."
+  tool_calls:
+    - name: "voice-satellite-card-weather-forecast__get_weather_forecast"
+      display_name: "Get weather forecast"
+    - name: "HassTurnOn"
+      display_name: "Turn on"
+  conversation_id: "01HV..."
+  is_continuation: false
+  continue_conversation: false
+  language: "en"
+```
+
+**Field reference:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entity_id` | string | The satellite entity that handled the interaction |
+| `stt_text` | string | What the user said (speech-to-text result) |
+| `tts_text` | string | What the assistant said back (full response, no truncation) |
+| `tool_calls` | list | Tools the LLM invoked during this turn. Each item has `name` (raw tool identifier, stable for matching) and `display_name` (humanized for display) |
+| `conversation_id` | string | Shared across turns of the same multi-turn conversation - use to correlate related events |
+| `is_continuation` | boolean | `true` if this turn followed a previous turn in the same conversation |
+| `continue_conversation` | boolean | `true` if the assistant requested another turn after this one |
+| `language` | string | Pipeline language for this interaction (e.g. `en`, `es`) |
+
+
+**Example: react to every voice response**
+
+```yaml
+- alias: Notify on assistant response
+  trigger:
+    - platform: event
+      event_type: voice_satellite_chat
+  condition:
+    - "{{ trigger.event.data.tts_text | length > 0 }}"
+  action:
+    - service: notify.phone
+      data:
+        message: "Assist replied: {{ trigger.event.data.tts_text }}"
+```
+
+**Example: only react to the final turn of multi-turn conversations**
+
+```yaml
+trigger:
+  - platform: event
+    event_type: voice_satellite_chat
+condition:
+  - "{{ trigger.event.data.continue_conversation == false }}"
+```
+
+**Example: only fire when a specific tool was used**
+
+```yaml
+trigger:
+  - platform: event
+    event_type: voice_satellite_chat
+condition:
+  - "{{ trigger.event.data.tool_calls | selectattr('name', 'search', 'weather') | list | length > 0 }}"
+```
+
+**How to test:**
+
+1. Open Developer Tools → Events
+2. Type `voice_satellite_chat` in the **Listen to events** field at the bottom (it will not appear in the "Available Events" list at the top - that section only shows events with active subscribers)
+3. Click START LISTENING
+4. Trigger a voice interaction on your tablet
+
+The event should fire immediately with the full payload.
+
 ## Usage
 
 ### Starting the Satellite
