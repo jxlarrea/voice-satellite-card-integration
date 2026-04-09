@@ -20,6 +20,12 @@ export function handleRunStart(mgr, eventData) {
   // Store streaming TTS URL (tts_output is at the top level)
   mgr.card.tts.storeStreamingUrl(eventData);
 
+  // Reset per-turn state for the chat event payload
+  mgr.currentSttText = '';
+  mgr.currentToolCalls.length = 0;
+  mgr.wasContinuation = mgr.continueMode;
+  mgr.currentLanguage = eventData?.language || null;
+
   if (mgr.continueMode) {
     mgr.continueMode = false;
     mgr.card.setState(State.STT);
@@ -133,6 +139,7 @@ export function handleWakeWordEnd(mgr, eventData) {
 export function handleSttEnd(mgr, eventData) {
   const text = eventData.stt_output?.text || '';
   if (text) {
+    mgr.currentSttText = text;
     mgr.card.chat.showTranscription(text);
   }
 
@@ -159,14 +166,15 @@ export function handleIntentProgress(mgr, eventData) {
 
   if (!eventData.chat_log_delta) return;
 
-  // Handle tool calls - show which tool the LLM is invoking
+  // Handle tool calls - show which tool the LLM is invoking and record for the chat event
   const toolCalls = eventData.chat_log_delta.tool_calls;
   if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-    const firstTool = toolCalls[0];
-    const rawName = firstTool.tool_name || firstTool.name || '';
-    const displayName = humanizeToolName(rawName);
-    if (displayName) {
+    for (const tool of toolCalls) {
+      const rawName = tool.tool_name || tool.name || '';
+      if (!rawName) continue;
+      const displayName = humanizeToolName(rawName);
       mgr.log.log('pipeline', `Tool call: ${rawName}`);
+      mgr.currentToolCalls.push({ name: rawName, display_name: displayName });
       mgr.card.chat.showToolCall(displayName);
     }
   }
@@ -262,8 +270,45 @@ export function handleIntentEnd(mgr, eventData) {
     mgr.log.log('pipeline', `Continue conversation requested - id: ${mgr.continueConversationId}`);
   }
 
+  // Fire chat event with the full turn payload, then clear per-turn state
+  fireChatEvent(mgr, eventData, responseText);
+
   mgr.card.chat.streamedResponse = '';
   mgr.card.chat.streamEl = null;
+}
+
+/**
+ * Send the voice_satellite/fire_chat_event WebSocket command to the integration,
+ * which fires a `voice_satellite_chat` event on the HA bus. Fire-and-forget.
+ * @param {import('./index.js').PipelineManager} mgr
+ * @param {object} eventData - the intent-end event data
+ * @param {string|null} responseText - extracted TTS response text
+ */
+function fireChatEvent(mgr, eventData, responseText) {
+  const { hass, config } = mgr.card;
+  if (!hass?.connection || !config?.satellite_entity) return;
+
+  const payload = {
+    type: 'voice_satellite/fire_chat_event',
+    entity_id: config.satellite_entity,
+    stt_text: mgr.currentSttText || '',
+    tts_text: responseText || mgr.card.chat.streamedResponse || '',
+    tool_calls: mgr.currentToolCalls.slice(),
+    conversation_id: eventData?.intent_output?.conversation_id || null,
+    is_continuation: !!mgr.wasContinuation,
+    continue_conversation: eventData?.intent_output?.continue_conversation === true,
+    language: mgr.currentLanguage || null,
+  };
+
+  hass.connection.sendMessagePromise(payload).catch((e) => {
+    mgr.log.error('pipeline', `fire_chat_event failed: ${e?.message || e}`);
+  });
+
+  // Clear per-turn buffers now that the event has been dispatched
+  mgr.currentSttText = '';
+  mgr.currentToolCalls.length = 0;
+  mgr.wasContinuation = false;
+  mgr.currentLanguage = null;
 }
 
 /** @param {import('./index.js').PipelineManager} mgr */

@@ -54,6 +54,13 @@ export class PipelineManager {
     this._wakeWordPhase = false;
     this._errorReceived = false;
 
+    // Per-turn state for the voice_satellite_chat event:
+    // accumulated during a single pipeline run, fired and cleared at intent-end.
+    this._currentSttText = '';
+    this._currentToolCalls = [];
+    this._wasContinuation = false;
+    this._currentLanguage = null;
+
     // Periodic pipeline restart to keep the streaming TTS token fresh.
     // HA's TTS proxy evicts pre-allocated tokens after a server-side TTL,
     // making them unplayable.  Restarting allocates a fresh token.
@@ -92,6 +99,13 @@ export class PipelineManager {
   set askQuestionCallback(val) { this._askQuestionCallback = val; }
   get askQuestionHandled() { return this._askQuestionHandled; }
   set askQuestionHandled(val) { this._askQuestionHandled = val; }
+  get currentSttText() { return this._currentSttText; }
+  set currentSttText(val) { this._currentSttText = val; }
+  get currentToolCalls() { return this._currentToolCalls; }
+  get wasContinuation() { return this._wasContinuation; }
+  set wasContinuation(val) { this._wasContinuation = val; }
+  get currentLanguage() { return this._currentLanguage; }
+  set currentLanguage(val) { this._currentLanguage = val; }
   async start(options) {
     const opts = options || {};
     const { connection, config } = this._card;

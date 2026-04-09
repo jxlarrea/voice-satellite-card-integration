@@ -18,7 +18,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
@@ -145,6 +145,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     # Register WebSocket commands (once, not per-entry)
     websocket_api.async_register_command(hass, ws_announce_finished)
     websocket_api.async_register_command(hass, ws_update_state)
+    websocket_api.async_register_command(hass, ws_fire_chat_event)
     websocket_api.async_register_command(hass, ws_question_answered)
     websocket_api.async_register_command(hass, ws_run_pipeline)
     websocket_api.async_register_command(hass, ws_subscribe_satellite_events)
@@ -245,6 +246,63 @@ async def ws_update_state(
         return
 
     entity.set_pipeline_state(state)
+    connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "voice_satellite/fire_chat_event",
+        vol.Required("entity_id"): str,
+        vol.Optional("stt_text", default=""): str,
+        vol.Optional("tts_text", default=""): str,
+        vol.Optional("tool_calls", default=list): [
+            {
+                vol.Required("name"): str,
+                vol.Optional("display_name"): vol.Any(str, None),
+            }
+        ],
+        vol.Optional("conversation_id"): vol.Any(str, None),
+        vol.Optional("is_continuation", default=False): bool,
+        vol.Optional("continue_conversation", default=False): bool,
+        vol.Optional("language"): vol.Any(str, None),
+    }
+)
+@websocket_api.async_response
+async def ws_fire_chat_event(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Fire a voice_satellite_chat event on the HA bus.
+
+    Called by the card after each pipeline turn (intent-end). Exposes the
+    full turn payload (STT text, TTS text, tool calls, conversation context)
+    as a bus event so user automations can react to what was said.
+    """
+    entity_id = msg["entity_id"]
+
+    entity = _find_entity(hass, entity_id)
+    if entity is None:
+        connection.send_error(
+            msg["id"], "not_found", f"Entity {entity_id} not found"
+        )
+        return
+
+    user_id = connection.user.id if connection.user else None
+    hass.bus.async_fire(
+        "voice_satellite_chat",
+        {
+            "entity_id": entity_id,
+            "stt_text": msg.get("stt_text", ""),
+            "tts_text": msg.get("tts_text", ""),
+            "tool_calls": msg.get("tool_calls", []),
+            "conversation_id": msg.get("conversation_id"),
+            "is_continuation": msg.get("is_continuation", False),
+            "continue_conversation": msg.get("continue_conversation", False),
+            "language": msg.get("language"),
+        },
+        context=Context(user_id=user_id),
+    )
     connection.send_result(msg["id"], {"success": True})
 
 
