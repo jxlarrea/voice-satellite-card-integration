@@ -228,12 +228,13 @@ class WasmMicroFrontend {
   }
 
   /**
-   * Free WASM memory and the C++ MicroFrontend instance. Call when an
-   * isolated calibration session is torn down so we don't leak. The
-   * inference engine's persistent frontend is never destroyed (lives
-   * for the lifetime of the page).
+   * Free WASM memory and the C++ MicroFrontend instance. Called
+   * during teardown (page unload or calibration session stop) so we
+   * release the WASM linear memory buffers and the C++ frontend
+   * object promptly rather than waiting for GC.
    */
   destroy() {
+    const heapBefore = this._module?.HEAPU8?.byteLength || 0;
     if (this._fe) {
       this._fe.delete();
       this._fe = null;
@@ -247,5 +248,8 @@ class WasmMicroFrontend {
       this._outputPtr = 0;
     }
     this._featurePool.length = 0;
+    console.info(
+      `[VS][wake-word] micro-frontend WASM destroyed (heap ${(heapBefore / 1024).toFixed(0)} KB)`,
+    );
   }
 }

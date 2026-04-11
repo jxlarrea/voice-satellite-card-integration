@@ -460,4 +460,23 @@ export class MicroWakeWordInference {
       kw.framesProcessed = 0;
     }
   }
+
+  /**
+   * Free the micro-frontend WASM instance and drop all keyword
+   * references. Call when the engine is being torn down (e.g. on page
+   * unload) so V8 can reclaim the WASM linear memory and compiled
+   * native code before the next page starts allocating. TFLite
+   * runners are freed separately via forceResetWasm().
+   */
+  destroy() {
+    const kwCount = this._keywords.length;
+    try {
+      this._frontend?.destroy();
+      this._log.log('wake-word', `inference.destroy: frontend freed, ${kwCount} keywords released`);
+    } catch (e) {
+      this._log.log('wake-word', `inference.destroy: frontend destroy failed: ${e.message || e}`);
+    }
+    this._frontend = null;
+    this._keywords.length = 0;
+  }
 }

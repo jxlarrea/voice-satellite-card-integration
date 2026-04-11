@@ -75,6 +75,9 @@ export class AudioManager {
   }
 
   stopMicrophone() {
+    const hadWorklet = !!this._workletNode;
+    const hadStream = !!this._mediaStream;
+    const hadContext = !!this._audioContext;
     this.stopSending();
     if (this._workletNode) {
       this._workletNode.disconnect();
@@ -94,6 +97,9 @@ export class AudioManager {
       this._audioContext = null;
     }
     this._audioBuffer = [];
+    if (hadWorklet || hadStream || hadContext) {
+      this._log.log('mic', `stopMicrophone: worklet=${hadWorklet} stream=${hadStream} ctx=${hadContext}`);
+    }
   }
 
   /**

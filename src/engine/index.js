@@ -60,6 +60,29 @@ async function bootstrapEngine() {
 
   // Attempt entity resolution and start
   attemptStart(ha.hass, session);
+
+  // Explicit WASM teardown on page unload. The browser is supposed
+  // to tear everything down for us, but on memory-constrained
+  // Android WebViews (Fully Kiosk on wall-mounted tablets) there's
+  // a window where the outgoing page's compiled WASM code still
+  // occupies V8's code-space pool while the incoming page is
+  // already allocating, and the process loses that race and the
+  // WebView crashes. Calling session.teardown() from `pagehide`
+  // gives V8 a head start on reclaiming TFLite + micro-frontend
+  // linear memory, destroys the AudioWorklet, and stops the mic
+  // MediaStream before navigation completes.
+  //
+  // `pagehide` fires on both reload and bfcache navigation on
+  // mobile, unlike `beforeunload`. Synchronous — the release path
+  // and audio teardown both run to completion in the handler.
+  window.addEventListener('pagehide', () => {
+    try {
+      console.info('[VS] pagehide — tearing down session for WASM reclaim');
+      session.teardown();
+    } catch (e) {
+      console.warn('[VS] pagehide teardown failed:', e);
+    }
+  });
 }
 
 /**

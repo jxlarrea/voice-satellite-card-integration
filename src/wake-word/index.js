@@ -334,6 +334,35 @@ export class WakeWordManager {
     this._log.log('wake-word', 'Stopped');
   }
 
+  /**
+   * Full teardown: stop detection and free every WASM tenant this
+   * manager owns — TFLite model runners, the TFLite runtime module,
+   * and the micro-frontend WASM instance. Called from
+   * `session.teardown()` on page unload so V8 can reclaim linear
+   * memory and compiled native code before the next page mounts.
+   * Synchronous so it runs to completion inside a `pagehide` handler.
+   */
+  release() {
+    this._log.log('wake-word', 'release() — freeing WASM tenants');
+    const heapBefore = getWasmHeapSize();
+    try { this.stop(); } catch (e) { this._log.log('wake-word', `release: stop failed: ${e.message || e}`); }
+    try {
+      this._inference?.destroy();
+      this._log.log('wake-word', 'release: micro-frontend destroyed');
+    } catch (e) {
+      this._log.log('wake-word', `release: inference.destroy failed: ${e.message || e}`);
+    }
+    this._inference = null;
+    this._loadedModelsKey = null;
+    this._stopMicroConfig = null;
+    try {
+      forceResetWasm();
+      this._log.log('wake-word', `release: TFLite WASM reset (heap was ${(heapBefore / (1024 * 1024)).toFixed(1)} MB)`);
+    } catch (e) {
+      this._log.log('wake-word', `release: forceResetWasm failed: ${e.message || e}`);
+    }
+  }
+
   // ─── Audio feed + detection ─────────────────────────────────────────
 
   /**

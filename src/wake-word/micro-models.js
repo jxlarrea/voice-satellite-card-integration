@@ -397,6 +397,7 @@ export function getWasmHeapSize() {
  * (WebAssembly linear memory can only grow, never shrink).
  */
 export async function forceResetWasm() {
+  const modelCount = Object.keys(_modelCache).length;
   for (const runner of Object.values(_modelCache)) {
     try { runner.cleanUp(); } catch (_) {}
   }
@@ -413,4 +414,5 @@ export async function forceResetWasm() {
   try { delete window.tfweb; } catch (_) { window.tfweb = undefined; }
   try { delete window.exports; } catch (_) { window.exports = undefined; }
   _tfweb = null;
+  console.info(`[VS][wake-word] forceResetWasm: cleaned ${modelCount} runner(s) + TFLite runtime`);
 }
