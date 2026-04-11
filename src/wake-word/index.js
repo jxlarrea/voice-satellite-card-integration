@@ -3,11 +3,8 @@
  *
  * Orchestrates on-device wake word detection using microWakeWord
  * (TFLite via WASM). Processes 16kHz audio through a micro_frontend
- * feature extractor and runs TFLite keyword models with sliding
+ * feature extractor and runs a TFLite keyword model with sliding
  * window detection.
- *
- * Supports dual wake words — two keyword models can run
- * concurrently on the shared pipeline.
  */
 
 import { State, BlurReason } from '../constants.js';
@@ -20,7 +17,16 @@ import { sendAck } from '../shared/notification-comms.js';
 
 const CHUNK_SIZE = 1280; // 80ms @ 16kHz
 const MAX_POOL = 20;    // cap recycled frame pool (20 * 5KB = 100KB max)
-const NO_WAKE_WORD = 'No wake word';
+
+// Window between local wake word detection and the wake chime firing.
+// We keep the chime pending for this long so HA has a chance to send
+// duplicate_wake_up_detected first — if it does, we cancel the chime
+// and the losing tablet stays silent. Local HA round trip is typically
+// 25-100ms; 250ms gives a comfortable margin without making the chime
+// feel laggy on the winning tablet (the user was waiting for the chime
+// to finish anyway, so 250ms of "silence then chime" feels equivalent
+// to "chime then silence").
+const WAKE_DEDUPE_WINDOW_MS = 250;
 
 // ─── Detection thresholds ────────────────────────────────────────────
 // microWakeWord models output confidence scores (0–1 via uint8/255).
@@ -91,10 +97,17 @@ export class WakeWordManager {
     // Settings change tracking
     this._cachedEnabled = undefined;
     this._cachedModel = undefined;
-    this._cachedModel2 = undefined;
     this._cachedThreshold = undefined;
     this._cachedStopWord = undefined;
     this._switching = false;
+
+    // Cross-tablet wake word dedupe state. When the local micro_frontend
+    // detects a wake word, we mute the mic and schedule the wake chime
+    // for WAKE_DEDUPE_WINDOW_MS later instead of playing it immediately,
+    // so the pipeline error handler has time to cancel it on a
+    // duplicate_wake_up_detected from HA.
+    this._pendingChimeHandle = null;
+    this._pendingUnmuteHandle = null;
 
     // WASM heap reset tracking
     this._lastWasmCheck = 0;
@@ -139,29 +152,14 @@ export class WakeWordManager {
   }
 
   /**
-   * Get the second wake word model name (or NO_WAKE_WORD if disabled).
-   * @returns {string}
-   */
-  getModelName2() {
-    return getSelectState(
-      this._session.hass,
-      this._session.config.satellite_entity,
-      'wake_word_model_2',
-      NO_WAKE_WORD,
-    );
-  }
-
-  /**
-   * Get deduplicated list of active model names.
+   * Get the active model names. Always a single-element array now —
+   * the dual wake word feature was removed because the second model
+   * never reliably detected (the shared micro_frontend produces one
+   * stream of features that can only be quantized for one model).
    * @returns {string[]}
    */
   getActiveModels() {
-    const models = [this.getModelName()];
-    const model2 = this.getModelName2();
-    if (model2 && model2 !== NO_WAKE_WORD && !models.includes(model2)) {
-      models.push(model2);
-    }
-    return models;
+    return [this.getModelName()];
   }
 
   /**
@@ -286,9 +284,12 @@ export class WakeWordManager {
         // peak memory — each TFLite runner has its own WASM instance.
         await releaseUnusedMicroModels(activeModels);
         this._log.log('wake-word', 'Loading TFLite wake word models...');
-        const runners = await loadMicroModels(this._tfweb, activeModels, (name) => {
-          this._log.log('wake-word', `Loading model: ${name}`);
-        });
+        const runners = await loadMicroModels(
+          this._tfweb,
+          activeModels,
+          (name) => this._log.log('wake-word', `Loading model: ${name}`),
+          (delayMs) => this._log.log('wake-word', `Staggering next model load by ${delayMs}ms to let V8 settle`),
+        );
 
         const keywordConfigs = this._buildKeywordConfigs(runners);
         this._inference = await MicroWakeWordInference.create(
@@ -486,31 +487,119 @@ export class WakeWordManager {
     // console.log('[wf-diag] _onDetection -- setState + showBlurOverlay');
     session.setState(State.WAKE_WORD_DETECTED);
     session.ui.showBlurOverlay(BlurReason.PIPELINE);
-    // console.log('[wf-diag] _onDetection -- overlay shown, playing chime...');
 
-    // Play wake chime if enabled
     const wakeSound = getSwitchState(
       session.hass, session.config.satellite_entity, 'wake_sound',
     ) !== false;
 
+    // ── Cross-tablet dedupe handling ─────────────────────────────────
+    // If multiple satellites can hear the user, more than one of them
+    // will trigger a local wake word detection. HA's pipeline picks the
+    // first one as authoritative and replies to the others with
+    // `duplicate_wake_up_detected`. To prevent the losing tablets from
+    // chiming and then immediately cleaning up, we:
+    //
+    //   1. mute the mic so the chime won't bleed into STT;
+    //   2. start the pipeline immediately so HA can dedupe ASAP;
+    //   3. schedule the wake chime for WAKE_DEDUPE_WINDOW_MS later;
+    //   4. on duplicate_wake_up_detected the pipeline error handler
+    //      calls cancelPendingChime() before any audio fires.
+    //
+    // The mic stays muted until either the chime finishes (winning
+    // tablet) or the dedupe handler cancels everything (losing tablet),
+    // so the speaker→mic feedback that previously required playing the
+    // chime BEFORE starting the pipeline is no longer a concern.
+
+    this._setMicTracksMuted(true);
+
+    // Kick off the pipeline immediately. We do NOT await — the chime
+    // and STT timing are independent of pipeline.start's resolution,
+    // and we need HA to receive the wake_word_detected event right
+    // away so it can decide if this tablet won the dedupe race.
+    session.pipeline
+      .start({ start_stage: 'stt', wake_word_phrase: this.getWakeWordPhrase(modelName) })
+      .catch((e) => {
+        this._log.error('wake-word', `Pipeline start failed after detection: ${e.message || e}`);
+        // If the pipeline failed to start, we don't want to play the
+        // chime or leave the mic muted forever.
+        this._cancelPendingChimeInternal();
+        this._setMicTracksMuted(false);
+        session.pipeline.restart(session.pipeline.calculateRetryDelay());
+      });
+
+    // Schedule the wake chime (or just an unmute if wake sound is off).
     if (wakeSound) {
-      session.audio.stopSending();
-      session.tts.playChime('wake');
-      const resumeDelay = (CHIME_WAKE.duration * 1000) + 50;
-
-      await new Promise((resolve) => setTimeout(resolve, resumeDelay));
-      // Discard audio captured during chime
-      session.audio.audioBuffer = [];
+      this._pendingChimeHandle = setTimeout(() => {
+        this._pendingChimeHandle = null;
+        // Mic is still muted at this point so the chime won't bleed
+        // into the STT recording. Unmute after the chime + a small
+        // settle window — same total duration the old in-line code used.
+        session.tts.playChime('wake');
+        const unmuteAfter = (CHIME_WAKE.duration * 1000) + 50;
+        this._pendingUnmuteHandle = setTimeout(() => {
+          this._pendingUnmuteHandle = null;
+          this._setMicTracksMuted(false);
+        }, unmuteAfter);
+      }, WAKE_DEDUPE_WINDOW_MS);
+    } else {
+      // No wake chime configured. Still defer the unmute by the dedupe
+      // window so we have a chance to cancel silently if a duplicate
+      // arrives, then unmute so STT records.
+      this._pendingUnmuteHandle = setTimeout(() => {
+        this._pendingUnmuteHandle = null;
+        this._setMicTracksMuted(false);
+      }, WAKE_DEDUPE_WINDOW_MS);
     }
+  }
 
-    // Start pipeline with STT stage (skip server-side wake word)
-    try {
-      await session.pipeline.start({ start_stage: 'stt', wake_word_phrase: this.getWakeWordPhrase(modelName) });
-    } catch (e) {
-      this._log.error('wake-word', `Pipeline start failed after detection: ${e.message || e}`);
-      session.pipeline.restart(session.pipeline.calculateRetryDelay());
+  /**
+   * Mute or unmute the mic stream's tracks. Used by the deferred
+   * wake chime path so the chime audio (played through the speakers)
+   * doesn't get captured by the mic and shipped off to STT. While
+   * muted the audio worklet still runs but receives silence from the
+   * disabled tracks.
+   */
+  _setMicTracksMuted(muted) {
+    const stream = this._session?.audio?._mediaStream;
+    if (!stream) return;
+    stream.getAudioTracks().forEach((t) => { t.enabled = !muted; });
+  }
+
+  /**
+   * Cancel any timers scheduled by _onDetection without touching the
+   * mic mute state. Internal helper — callers usually want
+   * cancelPendingChime() which also handles the unmute.
+   */
+  _cancelPendingChimeInternal() {
+    if (this._pendingChimeHandle) {
+      clearTimeout(this._pendingChimeHandle);
+      this._pendingChimeHandle = null;
     }
+    if (this._pendingUnmuteHandle) {
+      clearTimeout(this._pendingUnmuteHandle);
+      this._pendingUnmuteHandle = null;
+    }
+  }
 
+  /**
+   * Cancel a pending wake chime if one is scheduled (i.e. we're inside
+   * the dedupe window after a local detection but the chime hasn't
+   * fired yet). Returns true if something was cancelled — the caller
+   * (the pipeline error handler) uses this to short-circuit the normal
+   * "expected error" cleanup so the losing tablet stays completely
+   * silent.
+   *
+   * If the chime has already played (we're past the dedupe window),
+   * returns false and the normal cleanup runs.
+   */
+  cancelPendingChime() {
+    const wasPending = this._pendingChimeHandle !== null
+      || this._pendingUnmuteHandle !== null;
+    this._cancelPendingChimeInternal();
+    if (wasPending) {
+      this._setMicTracksMuted(false);
+    }
+    return wasPending;
   }
 
   // ─── Stop model management ──────────────────────────────────────────
@@ -770,7 +859,6 @@ export class WakeWordManager {
 
     const enabled = this.isEnabled();
     const model = this.getModelName();
-    const model2 = this.getModelName2();
     const threshold = this.getThreshold();
     const noiseGate = this._isNoiseGateEnabled();
     const stopWord = this.isStopWordEnabled();
@@ -779,7 +867,6 @@ export class WakeWordManager {
     if (this._cachedEnabled === undefined) {
       this._cachedEnabled = enabled;
       this._cachedModel = model;
-      this._cachedModel2 = model2;
       this._cachedThreshold = threshold;
       this._cachedNoiseGate = noiseGate;
       this._cachedStopWord = stopWord;
@@ -787,7 +874,7 @@ export class WakeWordManager {
     }
 
     const enabledChanged = enabled !== this._cachedEnabled;
-    const modelChanged = model !== this._cachedModel || model2 !== this._cachedModel2;
+    const modelChanged = model !== this._cachedModel;
     const thresholdChanged = threshold !== this._cachedThreshold;
     const noiseGateChanged = noiseGate !== this._cachedNoiseGate;
     const stopWordChanged = stopWord !== this._cachedStopWord;
@@ -825,14 +912,14 @@ export class WakeWordManager {
 
     // Mode or model change requires switching
     if (enabledChanged || modelChanged) {
-      this._applyModeOrModelChange(enabled, model, model2, enabledChanged);
+      this._applyModeOrModelChange(enabled, model, enabledChanged);
     }
   }
 
   /**
    * Apply a detection mode or model change.
    */
-  async _applyModeOrModelChange(enabled, model, model2, enabledChanged) {
+  async _applyModeOrModelChange(enabled, model, enabledChanged) {
     const session = this._session;
 
     // Only switch while waiting for wake word, not mid-interaction.
@@ -864,7 +951,7 @@ export class WakeWordManager {
         }
       } else if (this._active || session.currentState === State.PAUSED) {
         // Model changed while actively listening (or paused)
-        this._log.log('wake-word', `Models → ${this.getActiveModels().join(', ')}`);
+        this._log.log('wake-word', `Model → ${model}`);
         this.stop();
         if (session.currentState !== State.PAUSED) {
           await this.start();
@@ -874,12 +961,10 @@ export class WakeWordManager {
       // Update cache after successful apply
       this._cachedEnabled = enabled;
       this._cachedModel = model;
-      this._cachedModel2 = model2;
     } catch (e) {
       this._log.error('wake-word', `Settings change failed: ${e.message || e}`);
       this._cachedEnabled = enabled;
       this._cachedModel = model;
-      this._cachedModel2 = model2;
       session.pipeline.restart(session.pipeline.calculateRetryDelay());
     } finally {
       this._switching = false;

@@ -403,6 +403,28 @@ export function handleError(mgr, errorData) {
   if (EXPECTED_ERRORS.includes(errorCode)) {
     mgr.log.log('pipeline', `Expected error: ${errorCode} - restarting`);
 
+    // Special case for cross-tablet wake word dedupe: if our wake chime
+    // is still pending (we're inside the WAKE_DEDUPE_WINDOW_MS window
+    // after a local detection), cancel it so the user doesn't hear
+    // anything from this tablet at all. The other tablet — the one
+    // that won the dedupe race — handles the user's actual interaction.
+    if (errorCode === 'duplicate_wake_up_detected'
+        && mgr.card.wakeWord?.cancelPendingChime?.()) {
+      mgr.log.log('pipeline',
+        'Duplicate wake-up — cancelled pending chime, silently aborting');
+      mgr.card.ui.hideBlurOverlay(BlurReason.PIPELINE);
+      if (INTERACTING_STATES.includes(mgr.card.currentState)) {
+        mgr.card.setState(State.IDLE);
+        mgr.card.chat.clear();
+        mgr.shouldContinue = false;
+        mgr.continueConversationId = null;
+        // Skip the "done" chime — the whole point of this branch is
+        // that the losing tablet should make zero sound.
+      }
+      mgr.restart(0);
+      return;
+    }
+
     // Always hide blur — duplicate_wake_up_detected arrives after run-start
     // has already moved state out of INTERACTING_STATES, but overlay is still up.
     mgr.card.ui.hideBlurOverlay(BlurReason.PIPELINE);

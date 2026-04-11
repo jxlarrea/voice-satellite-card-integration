@@ -230,7 +230,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         for suffix, attr_key in (
             ("_wake_word_detection", "wake_word_detection"),
             ("_wake_word_model", "wake_word_model"),
-            ("_wake_word_model_2", "wake_word_model_2"),
             ("_wake_word_sensitivity", "wake_word_sensitivity"),
         ):
             s = self._get_child_state(registry, "select", suffix)
@@ -340,7 +339,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         )
         if ss_timer_eid:
             tracked_eids.append(ss_timer_eid)
-        for suffix in ("_wake_word_detection", "_wake_word_model", "_wake_word_model_2", "_wake_word_sensitivity"):
+        for suffix in ("_wake_word_detection", "_wake_word_model", "_wake_word_sensitivity"):
             eid = registry.async_get_entity_id(
                 "select", DOMAIN, f"{self._entry.entry_id}{suffix}"
             )

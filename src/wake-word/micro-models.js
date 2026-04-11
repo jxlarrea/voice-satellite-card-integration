@@ -112,37 +112,63 @@ async function _loadModelManifest(filename) {
 }
 
 /**
- * Fetch a .tflite file as an ArrayBuffer and read its input
- * quantization params before handing the buffer to TFLite. Returns an
- * object with both the buffer and the parsed params, so callers can
- * use one fetch + one parse for both purposes.
+ * Fetch a .tflite file briefly into a JavaScript ArrayBuffer, parse
+ * the input quantization params out of its flatbuffer, then DROP the
+ * buffer reference. Returns only the small `{scale, zeroPoint}` pair.
+ *
+ * Why we don't keep the buffer to hand to TFLite: when both the JS
+ * ArrayBuffer and TFLite's WASM-side copy of the same bytes are alive
+ * at the same time, peak memory during model load is roughly doubled.
+ * On memory-constrained Android WebViews running dual wake words this
+ * is enough to push the WASM compile path into OOM and falls through
+ * to the slower ArrayBuffer instantiation (or crashes the WebView).
+ *
+ * Loading by URL instead lets the TFLite Web API stream the response
+ * straight into WASM linear memory with no JS-side buffer alive at
+ * the same time. The second URL fetch is essentially free — the
+ * browser HTTP cache holds the .tflite from our quantization probe.
  *
  * The TFLite Web API client doesn't expose tensor quantization at
  * runtime, so we parse it out of the flatbuffer ourselves. This works
  * for any model — built-in or user-supplied — without a build step.
  *
  * @param {string} filename - .tflite base name (without extension)
- * @returns {Promise<{buffer: ArrayBuffer, scale: number, zeroPoint: number}>}
+ * @returns {Promise<{scale: number, zeroPoint: number}>}
  */
-async function _fetchModelBuffer(filename) {
-  const resp = await fetch(`${MODELS_BASE}/${filename}.tflite`);
-  if (!resp.ok) {
-    throw new Error(`Failed to fetch ${filename}.tflite: ${resp.status}`);
-  }
-  const buffer = await resp.arrayBuffer();
-  const quant = readInputQuantization(buffer);
-  return {
-    buffer,
-    scale: quant?.scale ?? DEFAULT_INPUT_SCALE,
-    zeroPoint: quant?.zeroPoint ?? DEFAULT_INPUT_ZERO_POINT,
-  };
+async function _fetchModelQuantization(filename) {
+  let scale = DEFAULT_INPUT_SCALE;
+  let zeroPoint = DEFAULT_INPUT_ZERO_POINT;
+  try {
+    const resp = await fetch(`${MODELS_BASE}/${filename}.tflite`);
+    if (resp.ok) {
+      // Block-scope the buffer so it goes out of scope (and is
+      // eligible for GC) before this function even returns, never
+      // mind before TFLite is asked to allocate.
+      const buffer = await resp.arrayBuffer();
+      const quant = readInputQuantization(buffer);
+      if (quant) {
+        scale = quant.scale;
+        zeroPoint = quant.zeroPoint;
+      }
+    }
+  } catch (_) { /* fall back to defaults */ }
+  return { scale, zeroPoint };
 }
 
 /**
  * Load a single microWakeWord TFLite model (cached per name).
- * Fetches the .tflite as an ArrayBuffer, reads the input quantization
- * out of its flatbuffer, then hands the same buffer to TFLite. Also
- * loads the companion JSON manifest if present.
+ *
+ * Two-step load to keep peak memory low during dual-wake-word startup
+ * on Android WebView (see _fetchModelQuantization for the rationale):
+ *
+ *   1. Fetch the .tflite into a short-lived JS ArrayBuffer just long
+ *      enough to read its input quantization params, then drop it.
+ *   2. Hand the URL (NOT the buffer) to TFLite so it can stream the
+ *      response straight into WASM memory with no JS-side copy alive
+ *      at the same time. The second fetch hits the browser HTTP cache
+ *      and is essentially free.
+ *
+ * Also loads the companion JSON manifest in parallel.
  *
  * @param {object} tfweb - the tfweb namespace
  * @param {string} modelName - e.g. 'ok_nabu', 'stop'
@@ -153,19 +179,22 @@ export async function loadMicroModel(tfweb, modelName, onProgress) {
   if (_modelCache[modelName]) return _modelCache[modelName];
 
   const filename = TFLITE_KEYWORD_FILES[modelName] || modelName;
+  const url = `${MODELS_BASE}/${filename}.tflite`;
   if (onProgress) onProgress(modelName);
 
-  // Fetch the buffer first so we can parse quantization out of it,
-  // then create the runner from the same buffer (no double fetch) and
-  // load the companion JSON manifest in parallel.
-  const [{ buffer, scale, zeroPoint }, manifest] = await Promise.all([
-    _fetchModelBuffer(filename),
+  // Step 1: small JS-side fetch to extract quantization. Buffer is
+  // dropped before we proceed to step 2.
+  const [{ scale, zeroPoint }, manifest] = await Promise.all([
+    _fetchModelQuantization(filename),
     _loadModelManifest(filename),
   ]);
 
+  // Step 2: hand the URL to TFLite. It re-fetches (HTTP-cache hit
+  // from step 1) and streams directly into WASM linear memory — no
+  // JS-side buffer alive while TFLite is allocating its own copy.
   // numThreads: 1 — wake word models are tiny (~50KB), inference <2ms.
   // The default (hardwareConcurrency/2) spawns unnecessary Web Workers.
-  const runner = await tfweb.TFLiteWebModelRunner.create(buffer, { numThreads: 1 });
+  const runner = await tfweb.TFLiteWebModelRunner.create(url, { numThreads: 1 });
 
   // Stash the parsed quantization on the cached manifest so
   // getMicroModelParams() picks it up. This works whether the model
@@ -190,17 +219,46 @@ export async function loadMicroModel(tfweb, modelName, onProgress) {
 }
 
 /**
- * Load multiple microWakeWord models (deduplicated).
+ * Delay between sequential model loads. Each TFLiteWebModelRunner
+ * instance triggers a fresh WASM module instantiation, which V8
+ * implements with a streaming compile that needs a contiguous block
+ * of WASM code memory. When two loads fire back-to-back, V8 hasn't
+ * had time to settle from the first compile before the second one
+ * starts, and on memory-constrained Android WebViews (Fully Kiosk on
+ * wall-mounted tablets) the second compile OOMs and falls through to
+ * the slower ArrayBuffer path — sometimes crashing the WebView
+ * process entirely. Yielding to the event loop and waiting briefly
+ * between loads gives V8 a chance to release transient compile state
+ * before the next compile starts. 500 ms is enough on the tablets
+ * we've tested, and dual wake word startup is a one-time cost so
+ * the extra latency is invisible to users.
+ */
+const MODEL_LOAD_STAGGER_MS = 500;
+
+/**
+ * Load multiple microWakeWord models (deduplicated). Loads are
+ * sequenced with a brief settle delay between each one — see
+ * MODEL_LOAD_STAGGER_MS for the rationale.
  * @param {object} tfweb
  * @param {string[]} modelNames
  * @param {Function} [onProgress]
+ * @param {Function} [onStagger] - called with (delayMs) before each settle delay
  * @returns {Promise<Record<string, object>>} name → runner map
  */
-export async function loadMicroModels(tfweb, modelNames, onProgress) {
+export async function loadMicroModels(tfweb, modelNames, onProgress, onStagger) {
   const unique = [...new Set(modelNames)];
   const runners = {};
+  let first = true;
   for (const name of unique) {
+    if (!first) {
+      // Yield to the event loop and let V8 finish whatever GC /
+      // compile-cleanup work the previous load triggered before we
+      // hit it with another WASM instantiation.
+      if (onStagger) onStagger(MODEL_LOAD_STAGGER_MS);
+      await new Promise((resolve) => setTimeout(resolve, MODEL_LOAD_STAGGER_MS));
+    }
     runners[name] = await loadMicroModel(tfweb, name, onProgress);
+    first = false;
   }
   return runners;
 }
@@ -224,11 +282,15 @@ export async function loadMicroModels(tfweb, modelNames, onProgress) {
  */
 export async function createIsolatedModelRunner(tfweb, modelName) {
   const filename = TFLITE_KEYWORD_FILES[modelName] || modelName;
-  const [{ buffer, scale, zeroPoint }] = await Promise.all([
-    _fetchModelBuffer(filename),
+  const url = `${MODELS_BASE}/${filename}.tflite`;
+  // Same two-step approach as loadMicroModel: parse quantization in a
+  // tight scope, then hand the URL (not the buffer) to TFLite so the
+  // JS heap stays clean while TFLite allocates.
+  const [{ scale, zeroPoint }] = await Promise.all([
+    _fetchModelQuantization(filename),
     _loadModelManifest(filename),
   ]);
-  const runner = await tfweb.TFLiteWebModelRunner.create(buffer, { numThreads: 1 });
+  const runner = await tfweb.TFLiteWebModelRunner.create(url, { numThreads: 1 });
 
   if (_jsonParamsCache[filename]) {
     _jsonParamsCache[filename].inputScale = scale;
