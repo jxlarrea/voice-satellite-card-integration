@@ -212,9 +212,10 @@ export class WakeWordManager {
   }
 
   /**
-   * Get the detection threshold for a specific model based on sensitivity setting.
-   * Base cutoff comes from the model's JSON manifest (or hardcoded fallback).
-   * Sensitivity setting applies a multiplier to the base cutoff.
+   * Get the detection threshold for a specific model. The base cutoff
+   * comes from the model's JSON manifest (or hardcoded fallback) and is
+   * scaled by the Slightly/Moderately/Very sensitive setting.
+   *
    * @param {string} modelName
    * @returns {number}
    */
@@ -245,8 +246,9 @@ export class WakeWordManager {
     return Object.entries(runners).map(([name, runner]) => {
       const params = getMicroModelParams(name);
       const effectiveCutoff = this.getThresholdForModel(name);
+      const label = this._getSensitivityLabel();
       this._log.log('wake-word',
-        `${name}: baseCutoff=${params.cutoff} effective=${effectiveCutoff.toFixed(3)} (${this._getSensitivityLabel()}, margin ×${SENSITIVITY_MARGIN_FACTORS[this._getSensitivityLabel()]}) slidingWindow=${params.slidingWindow} stepSize=${params.stepSize} (${params._source || 'hardcoded'})`
+        `${name}: baseCutoff=${params.cutoff} effective=${effectiveCutoff.toFixed(3)} (${label}, margin ×${SENSITIVITY_MARGIN_FACTORS[label]}) slidingWindow=${params.slidingWindow} stepSize=${params.stepSize} (${params._source || 'hardcoded'})`
       );
       return {
         runner,
@@ -254,6 +256,8 @@ export class WakeWordManager {
         cutoff: effectiveCutoff,
         slidingWindow: params.slidingWindow,
         stepSize: params.stepSize,
+        inputScale: params.inputScale,
+        inputZeroPoint: params.inputZeroPoint,
       };
     });
   }
@@ -287,7 +291,7 @@ export class WakeWordManager {
         });
 
         const keywordConfigs = this._buildKeywordConfigs(runners);
-        this._inference = new MicroWakeWordInference(
+        this._inference = await MicroWakeWordInference.create(
           keywordConfigs, this._log, this._getSensitivityLabel(), this._isNoiseGateEnabled(), this._useDirect,
         );
         this._loadedModelsKey = modelsKey;

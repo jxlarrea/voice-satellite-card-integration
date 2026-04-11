@@ -25,6 +25,8 @@ import {
   behaviorLabels, behaviorHelpers,
 } from '../editor/behavior.js';
 import { skinSchema, skinLabels, skinHelpers } from '../editor/skin.js';
+import { WakeWordTestSession } from '../wake-word/wake-word-test-session.js';
+import { getMicroModelParams } from '../wake-word/micro-models.js';
 
 const P = 'vsp';
 const CONFIG_KEY = 'vs-panel-config';
@@ -174,6 +176,24 @@ class VoiceSatellitePanel extends HTMLElement {
       clearInterval(this._statusInterval);
       this._statusInterval = null;
     }
+    this._stopTesterMonitor();
+    if (this._testerPopulateInterval) {
+      clearInterval(this._testerPopulateInterval);
+      this._testerPopulateInterval = null;
+    }
+    // Tear down the standalone tester session if active so the mic is
+    // released when the user navigates away from the panel. If we paused
+    // the main engine for the test, restart it.
+    if (this._testerSession) {
+      const cs = this._testerSession;
+      const wasRunning = this._testerEngineWasRunning;
+      this._testerSession = null;
+      cs.stop().then(() => {
+        if (wasRunning) this._resumeEngineAfterTester();
+      }).catch(() => {
+        if (wasRunning) this._resumeEngineAfterTester();
+      });
+    }
   }
 
   _getSession() {
@@ -278,6 +298,13 @@ class VoiceSatellitePanel extends HTMLElement {
     if (settingsForm) settingsForm.data = Object.assign({}, this._config);
     this._updateStatus();
     this._updatePreview();
+
+    // If a tester session is running and the user just toggled a Mic
+    // Processing setting, the session has stale browser DSP constraints.
+    // Stop it so the user can restart with the new settings applied.
+    if (this._testerSession?.running) {
+      this._stopTesterSession().catch(() => { /* ignore */ });
+    }
   }
 
   _updatePreview() {
@@ -468,6 +495,121 @@ class VoiceSatellitePanel extends HTMLElement {
           margin-top: 8px;
           line-height: 1.5;
         }
+        .${P}-tester-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 12px;
+        }
+        .${P}-tester-label {
+          font-size: 14px;
+          color: var(--primary-text-color, #fff);
+          flex-shrink: 0;
+          width: 130px;
+        }
+        .${P}-tester-model {
+          flex: 1;
+          background: var(--secondary-background-color, #2c2c2e);
+          color: var(--primary-text-color, #fff);
+          border: 1px solid var(--divider-color, #444);
+          border-radius: 6px;
+          padding: 8px 10px;
+          font-size: 14px;
+          font-family: inherit;
+        }
+        .${P}-tester-meter-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 14px;
+        }
+        .${P}-tester-meter-label {
+          font-size: 13px;
+          color: var(--secondary-text-color, #999);
+          width: 130px;
+          flex-shrink: 0;
+        }
+        .${P}-tester-meter {
+          flex: 1;
+          height: 12px;
+          background: var(--secondary-background-color, #2c2c2e);
+          border-radius: 6px;
+          overflow: hidden;
+          position: relative;
+        }
+        .${P}-tester-meter-fill {
+          height: 100%;
+          width: 0%;
+          background: linear-gradient(90deg, #4caf50 0%, #ffc107 70%, #f44336 100%);
+          transition: width 60ms linear;
+        }
+        .${P}-tester-meter-value {
+          font-size: 12px;
+          color: var(--secondary-text-color, #999);
+          width: 56px;
+          text-align: right;
+          font-variant-numeric: tabular-nums;
+        }
+        .${P}-tester-graph-row {
+          margin-bottom: 14px;
+        }
+        .${P}-tester-graph-row .${P}-tester-meter-label {
+          width: auto;
+          display: block;
+        }
+        .${P}-tester-graph-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 6px;
+        }
+        .${P}-tester-graph-readout {
+          font-size: 12px;
+          color: var(--secondary-text-color, #999);
+          font-variant-numeric: tabular-nums;
+        }
+        .${P}-tester-latest,
+        .${P}-tester-peak,
+        .${P}-tester-threshold-val {
+          color: var(--primary-text-color, #fff);
+          font-weight: 500;
+        }
+        .${P}-tester-graph {
+          width: 100%;
+          height: 120px;
+          display: block;
+          background: var(--secondary-background-color, #2c2c2e);
+          border-radius: 6px;
+        }
+        .${P}-tester-actions {
+          display: flex;
+          gap: 8px;
+          margin-top: 16px;
+        }
+        .${P}-tester-actions button {
+          flex: 1;
+          padding: 10px 16px;
+          border-radius: 8px;
+          border: none;
+          font-size: 13px;
+          font-weight: 500;
+          font-family: inherit;
+          cursor: pointer;
+        }
+        .${P}-tester-toggle {
+          background: #4caf50;
+          color: #fff;
+        }
+        .${P}-tester-toggle.is-running {
+          background: var(--error-color, #f44336);
+        }
+        .${P}-tester-actions button:hover {
+          opacity: 0.85;
+        }
+        .${P}-tester-card.is-idle .${P}-tester-meter,
+        .${P}-tester-card.is-idle .${P}-tester-graph {
+          opacity: 0.4;
+        }
       </style>
 
       <div class="${P}-toolbar">
@@ -527,6 +669,53 @@ class VoiceSatellitePanel extends HTMLElement {
         </div>
       </div>
 
+      <div class="${P}-card ${P}-tester-card">
+        <div class="${P}-card-title">Wake Word Tester</div>
+        <div class="${P}-card-subtitle">
+          Visualize wake word activation in real time. Use this to confirm
+          a model is being detected reliably from your usual distance, or
+          to compare how different models behave on this specific device.
+          The tester runs with the same Microphone Processing settings the
+          engine uses.
+        </div>
+
+        <div class="${P}-tester-row">
+          <label class="${P}-tester-label" for="${P}-tester-model">Model</label>
+          <select class="${P}-tester-model" id="${P}-tester-model"></select>
+        </div>
+
+        <div class="${P}-tester-meter-row">
+          <div class="${P}-tester-meter-label">Mic level</div>
+          <div class="${P}-tester-meter">
+            <div class="${P}-tester-meter-fill"></div>
+          </div>
+          <div class="${P}-tester-meter-value">0.000</div>
+        </div>
+
+        <div class="${P}-tester-graph-row">
+          <div class="${P}-tester-graph-header">
+            <div class="${P}-tester-meter-label">Detection probability (smoothed)</div>
+            <div class="${P}-tester-graph-readout">
+              latest <span class="${P}-tester-latest">0.000</span>
+              &nbsp;·&nbsp; peak <span class="${P}-tester-peak">0.000</span>
+              &nbsp;·&nbsp; threshold <span class="${P}-tester-threshold-val">0.00</span>
+            </div>
+          </div>
+          <canvas class="${P}-tester-graph" width="600" height="120"></canvas>
+        </div>
+
+        <div class="${P}-tester-actions">
+          <button class="${P}-tester-toggle">Start</button>
+        </div>
+
+        <div class="${P}-hint">
+          Click <strong>Start</strong> to grant mic access and begin
+          monitoring. Stand at your usual distance and say the wake word.
+          The probability curve should cross the dashed threshold line —
+          when it does, the engine would have triggered a detection.
+        </div>
+      </div>
+
       </div>
     `;
 
@@ -580,6 +769,344 @@ class VoiceSatellitePanel extends HTMLElement {
 
     // Load ha-form async
     this._loadForm();
+
+    // Wire up the wake word tester card
+    this._initTesterCard();
+  }
+
+  // ─── Wake Word Tester ──────────────────────────────────────────────
+
+  _initTesterCard() {
+    const card = this.querySelector(`.${P}-tester-card`);
+    if (!card) return;
+
+    card.classList.add('is-idle');
+
+    const modelSelect = card.querySelector(`.${P}-tester-model`);
+    const toggleBtn = card.querySelector(`.${P}-tester-toggle`);
+    const thresholdValEl = card.querySelector(`.${P}-tester-threshold-val`);
+
+    // Probability ring buffer (~6s @ 30Hz = 180 samples) — drives the
+    // scrolling chart only. Peak is tracked separately as a session-max
+    // value that persists across the chart's rolling window so the user
+    // can compare attempts that happened more than 6s apart. The peak
+    // resets on each Start (no separate Reset button — keep the UI minimal).
+    this._testerProbBuf = new Float32Array(180);
+    this._testerProbHead = 0;
+    this._testerProbCount = 0;
+    this._testerPeakSmoothed = 0;
+
+    // Cached threshold for the currently selected model. Used to draw
+    // the dashed line on the graph and rendered next to the readouts.
+    this._testerThreshold = 0.85;
+
+    // Standalone tester session (lazy — created on first Start click)
+    this._testerSession = null;
+
+    // Populate model dropdown from known models plus any active models
+    // reported by the wake word manager (when the engine is running).
+    const populate = () => {
+      const known = ['ok_nabu', 'hey_jarvis', 'hey_mycroft', 'alexa',
+        'hey_home_assistant', 'hey_luna', 'okay_computer'];
+      const session = this._getSession();
+      const ww = session?.wakeWord;
+      const active = ww ? ww.getActiveModels() : [];
+      const all = Array.from(new Set([...active, ...known]))
+        .filter((m) => m && m !== 'No wake word' && m !== 'stop');
+      const current = modelSelect.value;
+      modelSelect.innerHTML = '';
+      for (const name of all) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        modelSelect.appendChild(opt);
+      }
+      const initial = current || active[0] || all[0];
+      if (initial) modelSelect.value = initial;
+    };
+
+    populate();
+    this._testerSelectedModel = modelSelect.value;
+
+    const updateThresholdForModel = () => {
+      const name = modelSelect.value;
+      this._testerSelectedModel = name;
+      const params = getMicroModelParams(name);
+      this._testerThreshold = params?.cutoff ?? 0.85;
+      if (thresholdValEl) thresholdValEl.textContent = this._testerThreshold.toFixed(2);
+      // Reset chart + peak for the new model
+      this._testerProbCount = 0;
+      this._testerProbHead = 0;
+      this._testerProbBuf.fill(0);
+      this._testerPeakSmoothed = 0;
+      // Draw the idle frame so the user sees the grid + the dashed
+      // threshold line at the new model's cutoff before they click Start.
+      this._renderTesterIdleChart();
+    };
+
+    updateThresholdForModel();
+
+    modelSelect.addEventListener('change', async () => {
+      updateThresholdForModel();
+      // If a tester session is running, switch models on the fly so the
+      // user doesn't have to Stop and Start to compare two models.
+      if (this._testerSession?.running) {
+        try {
+          await this._testerSession.switchModel(this._testerSelectedModel);
+        } catch (e) {
+          // Best effort — failure here just means the next sample is stale.
+        }
+      }
+    });
+
+    toggleBtn.addEventListener('click', async () => {
+      if (this._testerSession?.running) {
+        await this._stopTesterSession();
+      } else {
+        await this._startTesterSession();
+      }
+    });
+
+    // Refresh dropdown labels periodically so the active-model list
+    // reflects integration changes (e.g. user picked a new wake word
+    // in the satellite settings).
+    this._testerPopulateInterval = setInterval(() => {
+      const current = modelSelect.value;
+      populate();
+      if (current && Array.from(modelSelect.options).some((o) => o.value === current)) {
+        modelSelect.value = current;
+      }
+    }, 4000);
+  }
+
+  async _startTesterSession() {
+    const card = this.querySelector(`.${P}-tester-card`);
+    const toggleBtn = card?.querySelector(`.${P}-tester-toggle`);
+
+    if (!card || !toggleBtn) return;
+    toggleBtn.disabled = true;
+    toggleBtn.textContent = 'Starting...';
+
+    // Pause the main engine so a wake word said during the test doesn't
+    // pop the pipeline UI overlay. Remember whether it was running so we
+    // can restart it after the test ends.
+    const session = this._getSession();
+    this._testerEngineWasRunning = !!session?.isStarted;
+    if (this._testerEngineWasRunning) {
+      try {
+        session._userStopped = true;
+        session.teardown();
+        this._updateStatus();
+      } catch (_) { /* best-effort */ }
+    }
+
+    try {
+      this._testerSession = new WakeWordTestSession();
+      await this._testerSession.start(this._testerSelectedModel, {
+        // Mirror the panel's "Microphone Processing" toggles so the test
+        // runs against the exact same signal the engine will use at runtime.
+        constraints: {
+          echoCancellation: this._config.echo_cancellation === true,
+          noiseSuppression: this._config.noise_suppression === true,
+          autoGainControl: this._config.auto_gain_control === true,
+          voiceIsolation: this._config.voice_isolation === true,
+        },
+      });
+
+      // Reset peak on each fresh start so the user can compare a new
+      // session against itself, not against whatever they did 5 minutes ago.
+      this._testerPeakSmoothed = 0;
+      this._testerProbCount = 0;
+      this._testerProbHead = 0;
+      this._testerProbBuf.fill(0);
+
+      card.classList.remove('is-idle');
+      toggleBtn.classList.add('is-running');
+      toggleBtn.textContent = 'Stop';
+      toggleBtn.disabled = false;
+      this._startTesterMonitor();
+    } catch (e) {
+      this._testerSession = null;
+      toggleBtn.disabled = false;
+      toggleBtn.textContent = 'Start';
+      toggleBtn.classList.remove('is-running');
+      // Restart the engine if we paused it but the test failed to start.
+      if (this._testerEngineWasRunning) {
+        this._resumeEngineAfterTester();
+      }
+    }
+  }
+
+  async _stopTesterSession() {
+    const card = this.querySelector(`.${P}-tester-card`);
+    const toggleBtn = card?.querySelector(`.${P}-tester-toggle`);
+
+    this._stopTesterMonitor();
+
+    if (this._testerSession) {
+      try { await this._testerSession.stop(); } catch (_) { /* ignore */ }
+      this._testerSession = null;
+    }
+
+    if (card) card.classList.add('is-idle');
+    if (toggleBtn) {
+      toggleBtn.classList.remove('is-running');
+      toggleBtn.textContent = 'Start';
+    }
+
+    // Restart the main engine if we paused it for the test.
+    if (this._testerEngineWasRunning) {
+      this._resumeEngineAfterTester();
+    }
+  }
+
+  _resumeEngineAfterTester() {
+    this._testerEngineWasRunning = false;
+    const session = this._getSession();
+    if (!session || !this._config.satellite_entity) return;
+
+    // Mirror the Start button: clear stop guard and kick off after a frame
+    // so any in-flight teardown / mic release settles first.
+    session._userStopped = false;
+    session._startAttempted = false;
+    if (session._cards.size === 0) {
+      const card = document.createElement('voice-satellite-card');
+      card._engineOwned = true;
+      card.setConfig(Object.assign({}, this._config));
+      card.style.display = 'none';
+      document.body.appendChild(card);
+      card.hass = this._hass;
+    }
+    requestAnimationFrame(() => {
+      if (!session.isStarted) session.start();
+      this._updateStatus();
+    });
+  }
+
+  _startTesterMonitor() {
+    if (this._testerRafActive) return;
+    this._testerRafActive = true;
+
+    const card = this.querySelector(`.${P}-tester-card`);
+    const fillEl = card?.querySelector(`.${P}-tester-meter-fill`);
+    const valueEl = card?.querySelector(`.${P}-tester-meter-value`);
+    const canvas = card?.querySelector(`.${P}-tester-graph`);
+    const ctx = canvas?.getContext('2d');
+    const latestEl = card?.querySelector(`.${P}-tester-latest`);
+    const peakEl = card?.querySelector(`.${P}-tester-peak`);
+
+    let lastSampleTs = 0;
+    const SAMPLE_INTERVAL = 33; // ~30Hz
+
+    const tick = (ts) => {
+      if (!this._testerRafActive) return;
+      this._testerRafFrame = requestAnimationFrame(tick);
+
+      const cs = this._testerSession;
+
+      if (ts - lastSampleTs >= SAMPLE_INTERVAL) {
+        lastSampleTs = ts;
+
+        // Clamp display values at 0. The sliding-window mean inside the
+        // inference engine can drift to tiny negative numbers (-1e-15)
+        // from floating-point subtract-then-add, which toFixed renders
+        // as "-0.000". Math.max(0, x) also normalizes negative zero to
+        // positive zero so the readouts don't flicker a minus sign.
+        const rms = cs ? Math.max(0, cs.latestRms) : 0;
+        // Map RMS to 0..1 visual range. Most speech sits around 0.05-0.3.
+        // Cap at 0.5 so the bar doesn't pin to the right on loud bursts.
+        const rmsPct = Math.min(1, rms / 0.5);
+        if (fillEl) fillEl.style.width = `${(rmsPct * 100).toFixed(1)}%`;
+        if (valueEl) valueEl.textContent = rms.toFixed(3);
+
+        // Smoothed (sliding-window mean) probability — what the engine
+        // actually compares against the cutoff for detection.
+        const prob = cs ? Math.max(0, cs.getLatestSmoothedProbability()) : 0;
+        const buf = this._testerProbBuf;
+        buf[this._testerProbHead] = prob;
+        this._testerProbHead = (this._testerProbHead + 1) % buf.length;
+        if (this._testerProbCount < buf.length) this._testerProbCount++;
+        if (latestEl) latestEl.textContent = prob.toFixed(3);
+        if (prob > this._testerPeakSmoothed) this._testerPeakSmoothed = prob;
+        if (peakEl) peakEl.textContent = this._testerPeakSmoothed.toFixed(3);
+      }
+
+      // Repaint graph every frame for smooth scrolling
+      if (ctx && canvas) this._drawTesterGraph(canvas, ctx);
+    };
+
+    this._testerRafFrame = requestAnimationFrame(tick);
+  }
+
+  /**
+   * Draw the static parts of the chart (grid + dashed threshold line)
+   * once, without the live waveform. Called from init and on model
+   * change so the chart is never blank — the user always sees where
+   * the detection threshold lives even before they click Start.
+   */
+  _renderTesterIdleChart() {
+    const canvas = this.querySelector(`.${P}-tester-graph`);
+    const ctx = canvas?.getContext('2d');
+    if (ctx && canvas) this._drawTesterGraph(canvas, ctx);
+  }
+
+  _drawTesterGraph(canvas, ctx) {
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Background grid lines (0, 0.25, 0.5, 0.75, 1.0)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = (i / 4) * h;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+
+    // Threshold line at the model's natural cutoff
+    const threshold = this._testerThreshold;
+    const threshY = h - threshold * h;
+    ctx.strokeStyle = 'rgba(255, 152, 0, 0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(0, threshY);
+    ctx.lineTo(w, threshY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Probability waveform — newest sample at the right edge.
+    const buf = this._testerProbBuf;
+    const count = this._testerProbCount;
+    if (count < 2) return;
+
+    const stepX = w / (buf.length - 1);
+    ctx.strokeStyle = '#03a9f4';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    let started = false;
+    // Walk oldest → newest. The newest sample lives at (head - 1).
+    const start = (this._testerProbHead - count + buf.length) % buf.length;
+    for (let i = 0; i < count; i++) {
+      const idx = (start + i) % buf.length;
+      const v = buf[idx];
+      const x = i * stepX + (buf.length - count) * stepX;
+      const y = h - v * h;
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  _stopTesterMonitor() {
+    this._testerRafActive = false;
+    if (this._testerRafFrame) {
+      cancelAnimationFrame(this._testerRafFrame);
+      this._testerRafFrame = null;
+    }
   }
 
   async _loadForm() {

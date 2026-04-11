@@ -15,7 +15,7 @@
  * the cutoff threshold.
  */
 
-import { MicroFrontend } from './micro-frontend.js';
+import { createWasmMicroFrontend } from './micro-frontend-wasm/index.js';
 import { DirectModelRunner } from './direct-runner.js';
 
 const COOLDOWN_MS = 2000;
@@ -51,8 +51,28 @@ export class MicroWakeWordInference {
    * @param {boolean} [energyGateEnabled=false] - enable energy-based sleep mode
    * @param {boolean} [useDirect=false] - use DirectModelRunner (zero-leak WASM access)
    */
-  constructor(keywordConfigs, log, sensitivityLabel, energyGateEnabled = false, useDirect = false) {
-    this._frontend = new MicroFrontend();
+  /**
+   * Async factory — replaces direct `new MicroWakeWordInference(...)`.
+   * Loads the WASM micro_frontend module before constructing the
+   * inference engine, so we get a bit-exact-to-reference feature
+   * pipeline (same C code that runs on Voice PE and the HA Android app).
+   *
+   * @returns {Promise<MicroWakeWordInference>}
+   */
+  static async create(keywordConfigs, log, sensitivityLabel, energyGateEnabled = false, useDirect = false) {
+    const frontend = await createWasmMicroFrontend();
+    return new MicroWakeWordInference(
+      frontend, keywordConfigs, log, sensitivityLabel, energyGateEnabled, useDirect,
+    );
+  }
+
+  /**
+   * Direct constructor — takes a pre-loaded WASM frontend. Prefer the
+   * static `create()` factory unless you already have a frontend
+   * instance you want to reuse (e.g. in tests).
+   */
+  constructor(frontend, keywordConfigs, log, sensitivityLabel, energyGateEnabled = false, useDirect = false) {
+    this._frontend = frontend;
     this._log = log;
     this._keywords = [];
     this._lastDetectionTime = 0;
@@ -65,6 +85,10 @@ export class MicroWakeWordInference {
     this._wakeRms = energy.wake;
     this._sleeping = false;
     this._silentChunks = 0;
+
+    // Live mic level — read by the Wake Word Tester to draw the meter.
+    this._latestRms = 0;
+
     // Ring buffer for feature frames during sleep (avoids splice/shift)
     this._sleepBufCap = SLEEP_BUFFER_CHUNKS * 8; // max ~64 frames
     this._sleepBuf = new Array(this._sleepBufCap);
@@ -94,6 +118,16 @@ export class MicroWakeWordInference {
         for (const t of inputs) t.delete();
       }
     } catch (_) { /* use fallback */ }
+
+    // Push this keyword's input quantization params to the shared frontend.
+    // The TFLite Web API does not expose per-tensor quantization at runtime,
+    // so we extract scale + zero_point ourselves by parsing the .tflite
+    // flatbuffer in tflite-quant-reader.js when the model is fetched. This
+    // works for any model — bundled or user-supplied custom — without a
+    // build-time step.
+    if (typeof cfg.inputScale === 'number' && typeof cfg.inputZeroPoint === 'number') {
+      this._frontend.setQuantization(cfg.inputScale, cfg.inputZeroPoint);
+    }
 
     // Create DirectRunner if enabled (lazy -- probes on first inference)
     let direct = null;
@@ -136,12 +170,15 @@ export class MicroWakeWordInference {
    * @returns {Promise<{detected: boolean, score: number, vadScore: number, model: string|null}>}
    */
   async processChunk(samples) {
-    // Energy-based sleep: compute RMS to decide whether to run inference
-    if (this._energyGateEnabled) {
-      let sumSq = 0;
-      for (let i = 0; i < samples.length; i++) sumSq += samples[i] * samples[i];
-      const rms = Math.sqrt(sumSq / samples.length);
+    // Always compute RMS so the wake word tester UI can display a live
+    // mic level meter.
+    let sumSq = 0;
+    for (let i = 0; i < samples.length; i++) sumSq += samples[i] * samples[i];
+    const rms = Math.sqrt(sumSq / samples.length);
+    this._latestRms = rms;
 
+    // Energy-based sleep: use RMS to decide whether to run inference
+    if (this._energyGateEnabled) {
       if (rms < this._sleepRms) {
         this._silentChunks++;
         if (!this._sleeping && this._silentChunks >= SLEEP_CHUNKS) {
@@ -327,6 +364,24 @@ export class MicroWakeWordInference {
     }
 
     return kw.outputView[0] / 255.0;
+  }
+
+  /** Current input level RMS (last chunk). */
+  get latestRms() { return this._latestRms; }
+
+  /**
+   * Sliding-window mean of recent inferences for the given keyword. This
+   * is the value the engine actually compares against the cutoff for
+   * detection, so it's the right signal to display in the Wake Word
+   * Tester — single-shot inference probabilities have high natural
+   * variance even on identical input, but the smoothed mean is what
+   * determines whether the wake word fires. Returns 0 until the window
+   * has filled (after warmup).
+   */
+  getLatestSmoothedProbability(name) {
+    const kw = this._keywords.find((k) => k.name === name);
+    if (!kw || kw.probCount === 0) return 0;
+    return kw.probSum / kw.probCount;
   }
 
   /**

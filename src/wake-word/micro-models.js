@@ -8,9 +8,18 @@
  * loaded as a script tag — no tfjs-core dependency at runtime.
  */
 
+import { readInputQuantization } from './tflite-quant-reader.js';
+
 const TFLITE_CLIENT_URL = '/voice_satellite/tflite/tflite_web_api_client.js';
 const TFLITE_WASM_PATH = '/voice_satellite/tflite/';
 const MODELS_BASE = '/voice_satellite/models';
+
+// Fallback input quantization (Kevin Ahrendt's V2 micro-wake-word pipeline
+// produces these values for every model we've seen). Only used if reading
+// the .tflite flatbuffer fails — which should never happen for a valid
+// model file.
+const DEFAULT_INPUT_SCALE = 0.10196078568696976;
+const DEFAULT_INPUT_ZERO_POINT = -128;
 
 // TFLite keyword model filenames (same base names as ONNX but .tflite extension)
 const TFLITE_KEYWORD_FILES = {
@@ -103,8 +112,38 @@ async function _loadModelManifest(filename) {
 }
 
 /**
+ * Fetch a .tflite file as an ArrayBuffer and read its input
+ * quantization params before handing the buffer to TFLite. Returns an
+ * object with both the buffer and the parsed params, so callers can
+ * use one fetch + one parse for both purposes.
+ *
+ * The TFLite Web API client doesn't expose tensor quantization at
+ * runtime, so we parse it out of the flatbuffer ourselves. This works
+ * for any model — built-in or user-supplied — without a build step.
+ *
+ * @param {string} filename - .tflite base name (without extension)
+ * @returns {Promise<{buffer: ArrayBuffer, scale: number, zeroPoint: number}>}
+ */
+async function _fetchModelBuffer(filename) {
+  const resp = await fetch(`${MODELS_BASE}/${filename}.tflite`);
+  if (!resp.ok) {
+    throw new Error(`Failed to fetch ${filename}.tflite: ${resp.status}`);
+  }
+  const buffer = await resp.arrayBuffer();
+  const quant = readInputQuantization(buffer);
+  return {
+    buffer,
+    scale: quant?.scale ?? DEFAULT_INPUT_SCALE,
+    zeroPoint: quant?.zeroPoint ?? DEFAULT_INPUT_ZERO_POINT,
+  };
+}
+
+/**
  * Load a single microWakeWord TFLite model (cached per name).
- * Also attempts to load a companion JSON manifest for model parameters.
+ * Fetches the .tflite as an ArrayBuffer, reads the input quantization
+ * out of its flatbuffer, then hands the same buffer to TFLite. Also
+ * loads the companion JSON manifest if present.
+ *
  * @param {object} tfweb - the tfweb namespace
  * @param {string} modelName - e.g. 'ok_nabu', 'stop'
  * @param {Function} [onProgress] - callback(modelName)
@@ -116,13 +155,36 @@ export async function loadMicroModel(tfweb, modelName, onProgress) {
   const filename = TFLITE_KEYWORD_FILES[modelName] || modelName;
   if (onProgress) onProgress(modelName);
 
-  // Load model and companion JSON in parallel.
-  // numThreads: 1 — wake word models are tiny (50–80KB), inference is <2ms.
-  // The default (hardwareConcurrency/2) spawns unnecessary Web Workers.
-  const [runner] = await Promise.all([
-    tfweb.TFLiteWebModelRunner.create(`${MODELS_BASE}/${filename}.tflite`, { numThreads: 1 }),
+  // Fetch the buffer first so we can parse quantization out of it,
+  // then create the runner from the same buffer (no double fetch) and
+  // load the companion JSON manifest in parallel.
+  const [{ buffer, scale, zeroPoint }, manifest] = await Promise.all([
+    _fetchModelBuffer(filename),
     _loadModelManifest(filename),
   ]);
+
+  // numThreads: 1 — wake word models are tiny (~50KB), inference <2ms.
+  // The default (hardwareConcurrency/2) spawns unnecessary Web Workers.
+  const runner = await tfweb.TFLiteWebModelRunner.create(buffer, { numThreads: 1 });
+
+  // Stash the parsed quantization on the cached manifest so
+  // getMicroModelParams() picks it up. This works whether the model
+  // had a companion JSON or not — _loadModelManifest creates a stub
+  // entry on miss.
+  if (_jsonParamsCache[filename]) {
+    _jsonParamsCache[filename].inputScale = scale;
+    _jsonParamsCache[filename].inputZeroPoint = zeroPoint;
+  } else {
+    _jsonParamsCache[filename] = {
+      cutoff: 0.90,
+      slidingWindow: 3,
+      stepSize: 10,
+      _source: 'tflite',
+      inputScale: scale,
+      inputZeroPoint: zeroPoint,
+    };
+  }
+
   _modelCache[modelName] = runner;
   return runner;
 }
@@ -144,14 +206,85 @@ export async function loadMicroModels(tfweb, modelNames, onProgress) {
 }
 
 /**
- * Get model parameters for a keyword name.
- * Checks companion JSON manifest first, then hardcoded defaults.
+ * Create an isolated TFLite runner for a model — bypasses the shared cache.
+ *
+ * Used by the Wake Word Tester so that the standalone test session can run
+ * in parallel with the main wake word engine without sharing — and
+ * corrupting — the cached runner's stateful VarHandleOp ring buffers
+ * (each runner instance has its own internal state). Quantization is
+ * read from the flatbuffer the same way loadMicroModel does and stashed
+ * in the shared params cache so getMicroModelParams() returns it.
+ *
+ * Caller is responsible for calling .cleanUp() on the returned runner
+ * when finished, otherwise the WASM instance leaks.
+ *
+ * @param {object} tfweb
  * @param {string} modelName
- * @returns {{cutoff: number, slidingWindow: number, stepSize: number}}
+ * @returns {Promise<object>} a fresh, uncached TFLiteWebModelRunner
+ */
+export async function createIsolatedModelRunner(tfweb, modelName) {
+  const filename = TFLITE_KEYWORD_FILES[modelName] || modelName;
+  const [{ buffer, scale, zeroPoint }] = await Promise.all([
+    _fetchModelBuffer(filename),
+    _loadModelManifest(filename),
+  ]);
+  const runner = await tfweb.TFLiteWebModelRunner.create(buffer, { numThreads: 1 });
+
+  if (_jsonParamsCache[filename]) {
+    _jsonParamsCache[filename].inputScale = scale;
+    _jsonParamsCache[filename].inputZeroPoint = zeroPoint;
+  } else {
+    _jsonParamsCache[filename] = {
+      cutoff: 0.90,
+      slidingWindow: 3,
+      stepSize: 10,
+      _source: 'tflite',
+      inputScale: scale,
+      inputZeroPoint: zeroPoint,
+    };
+  }
+
+  return runner;
+}
+
+/**
+ * Get model parameters for a keyword name. Checks (in order):
+ *   1. The cached entry from a prior loadMicroModel call — this is the
+ *      authoritative source: it has both the companion JSON params (if
+ *      any) AND the input quantization extracted from the .tflite
+ *      flatbuffer at load time.
+ *   2. The hardcoded MICRO_MODEL_PARAMS table — covers the case where
+ *      this function is called before the model has been loaded (e.g.
+ *      the Wake Word Tester pre-rendering the threshold line for a
+ *      model the user hasn't selected yet).
+ *   3. Catch-all defaults for unknown custom models.
+ *
+ * Quantization is left as DEFAULT_INPUT_* for unloaded models. The
+ * authoritative scale/zeroPoint are populated when loadMicroModel
+ * actually fetches the .tflite buffer.
+ *
+ * @param {string} modelName
+ * @returns {{cutoff: number, slidingWindow: number, stepSize: number, inputScale: number, inputZeroPoint: number}}
  */
 export function getMicroModelParams(modelName) {
   const filename = TFLITE_KEYWORD_FILES[modelName] || modelName;
-  return _jsonParamsCache[filename] || MICRO_MODEL_PARAMS[modelName] || { cutoff: 0.90, slidingWindow: 3, stepSize: 10 };
+  const cached = _jsonParamsCache[filename];
+  if (cached) {
+    return {
+      cutoff: cached.cutoff,
+      slidingWindow: cached.slidingWindow,
+      stepSize: cached.stepSize,
+      _source: cached._source,
+      inputScale: cached.inputScale ?? DEFAULT_INPUT_SCALE,
+      inputZeroPoint: cached.inputZeroPoint ?? DEFAULT_INPUT_ZERO_POINT,
+    };
+  }
+  const base = MICRO_MODEL_PARAMS[modelName] || { cutoff: 0.90, slidingWindow: 3, stepSize: 10 };
+  return {
+    ...base,
+    inputScale: DEFAULT_INPUT_SCALE,
+    inputZeroPoint: DEFAULT_INPUT_ZERO_POINT,
+  };
 }
 
 /**
