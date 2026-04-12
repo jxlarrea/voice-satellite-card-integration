@@ -20,6 +20,11 @@ import { createJsMicroFrontend } from './micro-frontend-js/index.js';
 const COOLDOWN_MS = 2000;
 // Ignore the first N feature frames after init/reset (~1s warmup)
 const WARMUP_FRAMES = 100;
+// Borderline detections are the most common source of silence/noise false
+// positives. Strong scores still trigger immediately; only scores that barely
+// clear the cutoff must survive one more inference step.
+const BORDERLINE_CONFIRM_MARGIN = 0.03;
+const BORDERLINE_CONFIRM_WINDOW_MS = 750;
 
 // Energy-based sleep mode — skip inference during silence.
 // RMS thresholds are for float32 audio in [-1, 1] range.
@@ -143,6 +148,9 @@ export class MicroWakeWordInference {
       featureAccumLen: 0,
       // Warmup counter (ignore first N frames)
       framesProcessed: 0,
+      pendingConfirm: false,
+      pendingConfirmAt: 0,
+      pendingConfirmScore: 0,
     };
   }
 
@@ -262,11 +270,13 @@ export class MicroWakeWordInference {
         kw.probIndex = (kw.probIndex + 1) % kw.slidingWindow;
         if (kw.probCount < kw.slidingWindow) kw.probCount++;
 
-        // Check detection: mean of sliding window > cutoff
+        // Check detection: mean of sliding window > cutoff. Scores that only
+        // barely clear the cutoff must survive one more inference step so
+        // random silence/noise spikes do not immediately fire the wake word.
         if (kw.probCount >= kw.slidingWindow && cooldownOk) {
           const mean = kw.probSum / kw.slidingWindow;
 
-          if (mean > kw.cutoff) {
+          if (this._shouldTriggerKeyword(kw, mean, now)) {
             this._lastDetectionTime = now;
             return {
               detected: true,
@@ -292,6 +302,35 @@ export class MicroWakeWordInference {
    */
   _runModel(kw) {
     return this._runModelRunner(kw);
+  }
+
+  _shouldTriggerKeyword(kw, mean, now) {
+    if (mean <= kw.cutoff) {
+      kw.pendingConfirm = false;
+      kw.pendingConfirmAt = 0;
+      kw.pendingConfirmScore = 0;
+      return false;
+    }
+
+    if (mean >= kw.cutoff + BORDERLINE_CONFIRM_MARGIN) {
+      kw.pendingConfirm = false;
+      kw.pendingConfirmAt = 0;
+      kw.pendingConfirmScore = 0;
+      return true;
+    }
+
+    if (kw.pendingConfirm) {
+      const confirmFresh = (now - kw.pendingConfirmAt) <= BORDERLINE_CONFIRM_WINDOW_MS;
+      kw.pendingConfirm = false;
+      kw.pendingConfirmAt = 0;
+      kw.pendingConfirmScore = 0;
+      return confirmFresh;
+    }
+
+    kw.pendingConfirm = true;
+    kw.pendingConfirmAt = now;
+    kw.pendingConfirmScore = mean;
+    return false;
   }
 
   /**
@@ -419,6 +458,9 @@ export class MicroWakeWordInference {
       kw.featureAccum.fill(null);
       kw.featureAccumLen = 0;
       kw.framesProcessed = 0;
+      kw.pendingConfirm = false;
+      kw.pendingConfirmAt = 0;
+      kw.pendingConfirmScore = 0;
     }
   }
 
