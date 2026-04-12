@@ -26,6 +26,7 @@ export class AnalyserManager {
     this._audioAnalyser = null;
     this._mediaSourceNode = null;
     this._mediaSourceEl = null;
+    this._mediaSourceCache = new WeakMap();
 
     // Which analyser _tick() reads from
     this._activeAnalyser = null;
@@ -103,15 +104,29 @@ export class AnalyserManager {
         this._audioAnalyser = null;
         this._mediaSourceNode = null;
         this._mediaSourceEl = null;
+        this._mediaSourceCache = new WeakMap();
       }
       if (!this._audioAnalyser) {
         this._audioAnalyser = this._createAnalyser(audioContext);
       }
-      // createMediaElementSource can only be called once per element.
-      // Reuse the cached source node when the same element is reattached
-      // (e.g. TtsManager's persistent Audio element across plays).
+      // createMediaElementSource can only be called once per element for
+      // the life of the document. Cache per-element source nodes so TTS,
+      // notifications, and later reattachments all reuse the original node.
       if (this._mediaSourceEl !== audioEl) {
-        this._mediaSourceNode = audioContext.createMediaElementSource(audioEl);
+        const cached = this._mediaSourceCache.get(audioEl);
+        if (cached) {
+          if (cached.context !== audioContext) {
+            this._log.log('analyser', 'Skipping audio analyser attach - media element is bound to an old AudioContext');
+            return;
+          }
+          this._mediaSourceNode = cached.node;
+        } else {
+          this._mediaSourceNode = audioContext.createMediaElementSource(audioEl);
+          this._mediaSourceCache.set(audioEl, {
+            node: this._mediaSourceNode,
+            context: audioContext,
+          });
+        }
         this._mediaSourceEl = audioEl;
       }
       this._mediaSourceNode.connect(this._audioAnalyser);
@@ -130,7 +145,10 @@ export class AnalyserManager {
       }
     } catch (e) {
       this._log.log('analyser', `Failed to attach audio: ${e.message}`);
-      this._mediaSourceNode = null;
+      if (this._mediaSourceEl === audioEl) {
+        this._mediaSourceNode = null;
+        this._mediaSourceEl = null;
+      }
     }
   }
 
@@ -269,10 +287,8 @@ export class AnalyserManager {
       sum += Math.abs(this._dataArray[i] - 128);
     }
     const meanAbs = (sum / this._dataArray.length) / 128;
-    // Mic input is much quieter than TTS output — boost mic gain so
-    // reactive bars respond similarly to both sources.
-    const gain = this._activeAnalyser === this._micAnalyser ? 7 : 5;
-    const level = Math.min(1, Math.round(Math.min(1, meanAbs * gain) * 20) / 20);
+    const isMic = this._activeAnalyser === this._micAnalyser;
+    const level = Math.min(1, Math.round(this._mapVisualLevel(meanAbs, isMic) * 20) / 20);
 
     if (level !== this._lastLevel) {
       this._lastLevel = level;
@@ -301,5 +317,26 @@ export class AnalyserManager {
     if (!Number.isFinite(raw)) return 33;
     // Cap at 60fps max (minimum interval ~16.67ms, rounded to 17ms).
     return Math.max(17, raw);
+  }
+
+  _mapVisualLevel(meanAbs, isMic) {
+    // This is visual-only remapping for reactive skins. It does not affect
+    // wake word, VAD, or any uploaded audio — only the shared CSS level.
+    //
+    // Mic input tends to sit much lower than local/remote playback, so give
+    // it a slightly stronger lift plus a small visible floor once real input
+    // is present. The nonlinear curve keeps quiet speech readable without
+    // flattening louder speech into a constant maxed-out bar.
+    const gain = isMic ? 7.5 : 5;
+    const scaled = Math.min(1, meanAbs * gain);
+    const curved = Math.pow(scaled, isMic ? 0.6 : 0.8);
+
+    if (isMic) {
+      if (curved <= 0.015) return 0;
+      const floored = 0.12 + curved * 0.88;
+      return Math.min(1, floored);
+    }
+
+    return curved;
   }
 }

@@ -18,7 +18,7 @@
 import { createJsMicroFrontend } from './micro-frontend-js/index.js';
 
 const COOLDOWN_MS = 2000;
-// Ignore the first N feature frames after init/reset (~2s warmup)
+// Ignore the first N feature frames after init/reset (~1s warmup)
 const WARMUP_FRAMES = 100;
 
 // Energy-based sleep mode — skip inference during silence.
@@ -127,6 +127,9 @@ export class MicroWakeWordInference {
       name: cfg.name,
       cutoff: cfg.cutoff,
       slidingWindow: cfg.slidingWindow,
+      stepSize: cfg.stepSize || 1,
+      inputScale: cfg.inputScale,
+      inputZeroPoint: cfg.inputZeroPoint,
       framesPerInfer,
       // Cached output TypedArray view from the model runner
       outputView: null,

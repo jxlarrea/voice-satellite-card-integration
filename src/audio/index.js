@@ -21,6 +21,7 @@ export class AudioManager {
     this._audioBuffer = [];
     this._sendInterval = null;
     this._actualSampleRate = TARGET_SAMPLE_RATE;
+    this._sendSessionCount = 0;
   }
   get card() { return this._card; }
   get log() { return this._log; }
@@ -107,12 +108,15 @@ export class AudioManager {
    */
   startSending(binaryHandlerIdGetter) {
     this.stopSending();
+    this._sendSessionCount += 1;
+    const sendSession = this._sendSessionCount;
     let firstSendLogged = false;
     this._sendInterval = setInterval(() => {
       const handlerId = binaryHandlerIdGetter();
       if (!firstSendLogged && this._audioBuffer.length > 0) {
         firstSendLogged = true;
-        this._log.log('mic', `First audio send - handlerId=${handlerId} bufferChunks=${this._audioBuffer.length}`);
+        const phase = sendSession === 1 ? 'First audio send' : 'Audio send resumed';
+        this._log.log('mic', `${phase} - handlerId=${handlerId} bufferChunks=${this._audioBuffer.length}`);
       }
       sendAudioBuffer(this, handlerId);
     }, 100);

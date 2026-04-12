@@ -19,6 +19,11 @@ const CHIME_MAP = {
   done: CHIME_DONE,
 };
 
+// Arm stop-word listening quickly once playback starts so short assistant
+// replies remain interruptible, while still leaving a brief buffer before
+// local speaker output settles.
+const STOP_WORD_ARM_DELAY_MS = 250;
+
 export class TtsManager {
   constructor(card) {
     this._card = card;
@@ -211,6 +216,7 @@ export class TtsManager {
    */
   playChime(type) {
     const pattern = CHIME_MAP[type] || CHIME_DONE;
+    this._log.log('chime', `Playing ${type} chime${this._card.ttsTarget ? ' (remote)' : ' (local)'}`);
     this._card.mediaPlayer.notifyAudioStart('chime');
     playChimeSound(this._card, pattern, this._log);
     setTimeout(() => {
@@ -317,7 +323,7 @@ export class TtsManager {
       if (wakeWord && this._playing) {
         wakeWord.enableStopModel(true);
       }
-    }, 1000);
+    }, STOP_WORD_ARM_DELAY_MS);
   }
 
   _disableStopWord() {

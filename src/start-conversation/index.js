@@ -40,6 +40,14 @@ export class StartConversationManager {
     this.currentAudio = null;
     this._log.log(LOG, `Prompt #${ann.id} playback complete`);
 
+    // The prompt itself can enable stop-only mode so the user can interrupt
+    // the spoken announcement. Once the prompt finishes and we hand off into
+    // an interactive pipeline session, normal wake keywords must be restored.
+    // Otherwise the session enters STT/TTS with the wake-word engine still in
+    // stop-only mode, and the final TTS cleanup has no wake keywords left to
+    // restore.
+    this._card.wakeWord?.disableStopModel();
+
     sendAck(this._card, ann.id, LOG);
 
     // Partial notification cleanup: clear only announcement-specific state and

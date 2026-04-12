@@ -567,7 +567,11 @@ export class WakeWordManager {
     // and we need HA to receive the wake_word_detected event right
     // away so it can decide if this tablet won the dedupe race.
     session.pipeline
-      .start({ start_stage: 'stt', wake_word_phrase: this.getWakeWordPhrase(modelName) })
+      .start({
+        start_stage: 'stt',
+        wake_word_phrase: this.getWakeWordPhrase(modelName),
+        defer_audio_start: true,
+      })
       .catch((e) => {
         this._log.error('wake-word', `Pipeline start failed after detection: ${e.message || e}`);
         // If the pipeline failed to start, we don't want to play the
@@ -577,10 +581,24 @@ export class WakeWordManager {
         session.pipeline.restart(session.pipeline.calculateRetryDelay());
       });
 
+    this._log.log(
+      'wake-word',
+      wakeSound
+        ? `STT audio deferred until wake chime completes (${WAKE_DEDUPE_WINDOW_MS}ms dedupe window)`
+        : `STT audio deferred for ${WAKE_DEDUPE_WINDOW_MS}ms dedupe window`,
+    );
+
     // Schedule the wake chime (or just an unmute if wake sound is off).
     if (wakeSound) {
       this._pendingChimeHandle = setTimeout(() => {
         this._pendingChimeHandle = null;
+        const audio = session.audio;
+        session.ui.stopReactive();
+        // Even though the mic tracks stay muted through the deferred chime,
+        // the pipeline is already running in STT mode for cross-tablet dedupe.
+        // Pause upstream audio transmission too so the server-side VAD never
+        // sees the wake chime window as part of the user's utterance.
+        audio.stopSending();
         // Mic is still muted at this point so the chime won't bleed
         // into the STT recording. Unmute after the chime + a small
         // settle window — same total duration the old in-line code used.
@@ -589,6 +607,15 @@ export class WakeWordManager {
         this._pendingUnmuteHandle = setTimeout(() => {
           this._pendingUnmuteHandle = null;
           this._setMicTracksMuted(false);
+          // Discard any buffered silence/audio captured during the dedupe
+          // window + chime, then resume streaming into the active pipeline.
+          audio.audioBuffer = [];
+          if (session.pipeline.binaryHandlerId) {
+            audio.startSending(() => session.pipeline.binaryHandlerId);
+          }
+          if ([State.WAKE_WORD_DETECTED, State.STT].includes(session.currentState)) {
+            session.ui.startReactive();
+          }
         }, unmuteAfter);
       }, WAKE_DEDUPE_WINDOW_MS);
     } else {
@@ -598,6 +625,11 @@ export class WakeWordManager {
       this._pendingUnmuteHandle = setTimeout(() => {
         this._pendingUnmuteHandle = null;
         this._setMicTracksMuted(false);
+        const audio = session.audio;
+        audio.audioBuffer = [];
+        if (session.pipeline.binaryHandlerId) {
+          audio.startSending(() => session.pipeline.binaryHandlerId);
+        }
       }, WAKE_DEDUPE_WINDOW_MS);
     }
   }
@@ -688,6 +720,8 @@ export class WakeWordManager {
           cutoff: effectiveCutoff,
           slidingWindow: params.slidingWindow,
           stepSize: params.stepSize,
+          inputScale: params.inputScale,
+          inputZeroPoint: params.inputZeroPoint,
         };
         this._log.log(
           'stop-word',
@@ -700,7 +734,17 @@ export class WakeWordManager {
       this._inference.addKeyword(this._stopMicroConfig);
 
       if (stopOnly) {
-        this._suspendedKeywords = this._inference._keywords.filter((k) => k.name !== 'stop');
+        this._suspendedKeywords = this._inference._keywords
+          .filter((k) => k.name !== 'stop')
+          .map((k) => ({
+            runner: k.runner,
+            name: k.name,
+            cutoff: k.cutoff,
+            slidingWindow: k.slidingWindow,
+            stepSize: k.stepSize,
+            inputScale: k.inputScale,
+            inputZeroPoint: k.inputZeroPoint,
+          }));
         for (const kw of this._suspendedKeywords) {
           this._inference.removeKeyword(kw.name);
         }
@@ -734,8 +778,18 @@ export class WakeWordManager {
         for (const kw of this._suspendedKeywords) {
           this._inference.addKeyword(kw);
         }
+        if (log) {
+          const restored = this._suspendedKeywords.map((kw) => kw.name).join(', ');
+          this._log.log('stop-word', `Restored wake keywords: ${restored}`);
+        }
         this._suspendedKeywords = null;
       }
+      // Stop-only mode has been consuming TTS/notification audio with a
+      // different keyword set. Reset the inference engine before returning
+      // to normal wake-word listening so stale stop-model/TTS state doesn't
+      // carry into the restored wake-word detectors.
+      this._inference.reset();
+      this._active = true;
       this._sampleBufLen = 0;
       this._frameQueue.length = 0;
       this._processing = false;

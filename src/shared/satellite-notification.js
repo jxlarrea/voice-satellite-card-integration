@@ -7,6 +7,7 @@ import { BlurReason, Timing } from '../constants.js';
 
 /** Safety timeout for remote notification playback (matches TTS manager) */
 const REMOTE_SAFETY_TIMEOUT = 30_000;
+const STOP_WORD_ARM_DELAY_MS = 250;
 
 let _lastAnnounceId = 0;
 
@@ -423,7 +424,7 @@ function _enableStopWordDelayed(mgr) {
     if (wakeWord && mgr.playing) {
       wakeWord.enableStopModel(true);
     }
-  }, 1000);
+  }, STOP_WORD_ARM_DELAY_MS);
 }
 
 function _disableStopWord(mgr) {

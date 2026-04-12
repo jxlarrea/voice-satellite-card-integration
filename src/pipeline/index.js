@@ -223,6 +223,12 @@ export class PipelineManager {
       return;
     }
 
+    if (opts.defer_audio_start) {
+      this._log.log('pipeline', `Handler ID confirmed: ${this._binaryHandlerId} - audio deferred`);
+      this._isStreaming = false;
+      return;
+    }
+
     this._log.log('pipeline', `Handler ID confirmed: ${this._binaryHandlerId} - starting audio`);
 
     // Start sending audio now that handler ID is guaranteed to be set.
