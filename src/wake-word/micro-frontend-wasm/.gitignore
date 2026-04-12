@@ -1,7 +1,0 @@
-# Vendored third-party C sources — fetched on demand by
-# scripts/fetch-sources.sh. Pinned versions live in that script.
-third_party/
-
-# Build output. The .js + embedded .wasm are reproducible from source
-# given a working emsdk install.
-dist/

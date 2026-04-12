@@ -42,7 +42,13 @@ export function setupReconnectListener(card, pipeline, connection, listenerRef) 
       card.logger.log('pipeline', 'Tab is paused - deferring restart to resume');
       return;
     }
-    setTimeout(() => pipeline.restart(0), Timing.RECONNECT_DELAY);
+    if (pipeline._reconnectTimeout) {
+      clearTimeout(pipeline._reconnectTimeout);
+    }
+    pipeline._reconnectTimeout = setTimeout(() => {
+      pipeline._reconnectTimeout = null;
+      pipeline.restart(0);
+    }, Timing.RECONNECT_DELAY);
   };
   connection.addEventListener('ready', listenerRef.listener);
 }

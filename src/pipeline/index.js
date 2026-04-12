@@ -65,6 +65,7 @@ export class PipelineManager {
     // HA's TTS proxy evicts pre-allocated tokens after a server-side TTL,
     // making them unplayable.  Restarting allocates a fresh token.
     this._tokenRefreshTimer = null;
+    this._reconnectTimeout = null;
 
     // Generation counter - incremented by stop() so that a stale start()
     // (e.g. from a throttled background-tab timeout) can detect it was
@@ -239,7 +240,7 @@ export class PipelineManager {
   }
 
   async stop() {
-    this._clearTokenRefreshTimer();
+    this._clearScheduledWork();
 
     // Increment generation first - any in-flight start() will see the
     // mismatch after its next await and abort cleanly.
@@ -271,6 +272,8 @@ export class PipelineManager {
       this._card.connection.removeEventListener('ready', this._reconnectRef.listener);
       this._reconnectRef.listener = null;
     }
+
+    this._isRestarting = false;
   }
 
   restart(delay) {
@@ -492,6 +495,31 @@ export class PipelineManager {
     if (this._tokenRefreshTimer) {
       clearTimeout(this._tokenRefreshTimer);
       this._tokenRefreshTimer = null;
+    }
+  }
+
+  _clearScheduledWork() {
+    this._clearTokenRefreshTimer();
+
+    if (this._restartTimeout) {
+      clearTimeout(this._restartTimeout);
+      this._restartTimeout = null;
+    }
+    if (this._reconnectTimeout) {
+      clearTimeout(this._reconnectTimeout);
+      this._reconnectTimeout = null;
+    }
+    if (this._recoveryTimeout) {
+      clearTimeout(this._recoveryTimeout);
+      this._recoveryTimeout = null;
+    }
+    if (this._intentErrorBarTimeout) {
+      clearTimeout(this._intentErrorBarTimeout);
+      this._intentErrorBarTimeout = null;
+    }
+    if (this._muteCheckId) {
+      clearTimeout(this._muteCheckId);
+      this._muteCheckId = null;
     }
   }
 }

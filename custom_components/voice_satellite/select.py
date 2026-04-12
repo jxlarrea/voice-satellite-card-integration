@@ -462,7 +462,8 @@ class VoiceSatelliteWakeWordDetectionSelect(SelectEntity, RestoreEntity):
     """Select entity for choosing wake word detection mode.
 
     "Home Assistant" uses the server-side wake word add-on.
-    "On Device" runs inference locally in the browser via TFLite WASM.
+    "On Device" runs inference locally in the browser with the built-in
+    wake-word runtime.
     """
 
     _attr_entity_category = EntityCategory.CONFIG

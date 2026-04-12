@@ -25,10 +25,6 @@ _LOGGER = logging.getLogger(__name__)
 FRONTEND_DIR = str(Path(__file__).parent / "frontend")
 MODELS_DIR = str(Path(__file__).parent / "models")
 MODELS_URL = f"{URL_BASE}/models"
-TFLITE_DIR = str(Path(__file__).parent / "tflite")
-TFLITE_URL = f"{URL_BASE}/tflite"
-WAKE_WORD_FRONTEND_DIR = str(Path(__file__).parent / "wake-word-frontend")
-WAKE_WORD_FRONTEND_URL = f"{URL_BASE}/wake-word-frontend"
 BRAND_DIR = str(Path(__file__).parent / "brand")
 BRAND_URL = f"{URL_BASE}/brand"
 SOUNDS_DIR = str(Path(__file__).parent / "sounds")
@@ -59,12 +55,6 @@ async def async_register_static_paths(hass: HomeAssistant) -> None:
 
     if Path(MODELS_DIR).is_dir():
         paths.append(StaticPathConfig(MODELS_URL, MODELS_DIR, True))
-
-    if Path(TFLITE_DIR).is_dir():
-        paths.append(StaticPathConfig(TFLITE_URL, TFLITE_DIR, True))
-
-    if Path(WAKE_WORD_FRONTEND_DIR).is_dir():
-        paths.append(StaticPathConfig(WAKE_WORD_FRONTEND_URL, WAKE_WORD_FRONTEND_DIR, True))
 
     if Path(BRAND_DIR).is_dir():
         paths.append(StaticPathConfig(BRAND_URL, BRAND_DIR, True))

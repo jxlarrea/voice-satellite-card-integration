@@ -13,6 +13,17 @@ import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shar
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 
+function isConstrainedWebView() {
+  const ua = navigator.userAgent || '';
+  return /Fully Kiosk/i.test(ua) || /\bwv\b/i.test(ua);
+}
+
+async function settleBeforeWakeWordStart(session) {
+  if (!isConstrainedWebView()) return;
+  session.logger.log('wake-word', 'Constrained WebView detected — delaying initial wake-word startup');
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+}
+
 /**
  * Sync pipeline state to the integration entity.
  * @param {import('./index.js').VoiceSatelliteSession} session
@@ -86,6 +97,7 @@ export async function startListening(session) {
     // On-device wake word: load module lazily, start local inference
     if (session._isWakeWordEnabled()) {
       const ww = await session._loadWakeWordModule();
+      await settleBeforeWakeWordStart(session);
       await ww.start();
     } else {
       await session.pipeline.start();
@@ -140,9 +152,15 @@ export async function startListening(session) {
       session.logger.error('mic', 'Microphone in use or not readable');
     }
 
+    const isWasmOom = errText.includes('out of memory')
+      || errText.includes('cannot allocate wasm memory');
+
     setState(session, State.IDLE);
     if (reason !== 'error') {
       session.ui.showStartButton(reason);
+    } else if (isWasmOom) {
+      session.logger.error('wake-word', 'WASM OOM during startup — auto-retry disabled');
+      session.ui.showServiceError();
     } else {
       session.pipeline.restart(session.pipeline.calculateRetryDelay());
     }

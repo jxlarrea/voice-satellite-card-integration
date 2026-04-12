@@ -91,6 +91,9 @@ const STRAND_DYNAMICS = [
 // retries via MutationObserver on document.body until the UI appears.
 
 let _waveform2dSetupDone = false;
+const HIDDEN_WARMUP_BLOCKED =
+  /Fully Kiosk/i.test(navigator.userAgent || '')
+  || /\bwv\b/i.test(navigator.userAgent || '');
 
 function setup() {
   const ui = document.getElementById('voice-satellite-ui');
@@ -647,6 +650,7 @@ function setup() {
   }
 
   function scheduleWarmup(reason) {
+    if (HIDDEN_WARMUP_BLOCKED) return;
     if (document.hidden || !mounted || overlayEl?.classList.contains('visible')) return;
     if (warmupTimer || rafId) return;
     warmupTimer = setTimeout(() => {

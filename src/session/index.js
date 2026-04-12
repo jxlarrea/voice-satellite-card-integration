@@ -404,6 +404,10 @@ export class VoiceSatelliteSession {
    */
   teardown() {
     this._logger.log('session', 'Tearing down session');
+    if (this._imageLingerTimeout) {
+      clearTimeout(this._imageLingerTimeout);
+      this._imageLingerTimeout = null;
+    }
     try { this._wakeWord?.release(); } catch (e) { this._logger.log('session', `wakeWord.release: ${e.message || e}`); }
     try { this._pipeline.stop(); } catch (e) { this._logger.log('session', `pipeline.stop: ${e.message || e}`); }
     try { this._audio.stopMicrophone(); } catch (e) { this._logger.log('session', `audio.stopMicrophone: ${e.message || e}`); }

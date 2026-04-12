@@ -1,12 +1,12 @@
 /**
  * Standalone Wake Word Test Session
  *
- * Self-contained mic + AudioContext + AudioWorklet + TFLite inference
+ * Self-contained mic + AudioContext + AudioWorklet + wake-word inference
  * loop used by the sidebar panel's Wake Word Tester card. Independent
  * of the main wake word engine — works whether the engine is dormant,
  * running with on-device wake word, or using HA-side wake word.
  *
- * Uses an *isolated* TFLite runner (createIsolatedModelRunner) so it can
+ * Uses an *isolated* model runner (createIsolatedModelRunner) so it can
  * run in parallel with the main engine without sharing — and corrupting —
  * the cached runner's stateful VarHandleOps.
  */
@@ -107,7 +107,10 @@ export class WakeWordTestSession {
       this._isolatedRunner = null;
     }
 
-    this._inference = null;
+    if (this._inference) {
+      try { this._inference.destroy(); } catch (_) {}
+      this._inference = null;
+    }
   }
 
   /**
@@ -122,8 +125,10 @@ export class WakeWordTestSession {
       try { this._isolatedRunner.cleanUp?.(); } catch (_) {}
       this._isolatedRunner = null;
     }
-    this._inference = null;
-
+    if (this._inference) {
+      try { this._inference.destroy(); } catch (_) {}
+      this._inference = null;
+    }
     await this._setupInference();
   }
 
@@ -203,8 +208,8 @@ export class WakeWordTestSession {
   }
 
   async _setupInference() {
-    const tfweb = await loadTFLite();
-    this._isolatedRunner = await createIsolatedModelRunner(tfweb, this._modelName);
+    const runtime = await loadTFLite();
+    this._isolatedRunner = await createIsolatedModelRunner(runtime, this._modelName);
     const params = getMicroModelParams(this._modelName);
 
     this._inference = await MicroWakeWordInference.create(
@@ -222,7 +227,6 @@ export class WakeWordTestSession {
       SILENT_LOG,
       'Moderately sensitive',
       false, // energy gate disabled — keep RMS readout always live
-      false, // direct runner disabled — keep simple Embind path
     );
   }
 

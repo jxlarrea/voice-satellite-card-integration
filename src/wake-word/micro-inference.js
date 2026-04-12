@@ -1,12 +1,12 @@
 /**
- * microWakeWord TFLite Inference Pipeline
+ * microWakeWord inference pipeline
  *
  * Processes raw 16kHz audio through the micro_frontend feature extractor
- * and runs TFLite keyword models with sliding window detection.
+ * and runs keyword models with sliding window detection.
  *
  * Implements the processChunk() interface used by WakeWordManager.
  *
- * Each keyword model is stateful (internal ring buffers via TFLite VarHandleOp).
+ * Each keyword model is stateful (internal ring buffers via VarHandle ops).
  * V2 models have feature_step_size=10 meaning we accumulate 10 feature frames
  * before running inference. The model's input tensor may be [1, 1, 40] (streaming
  * one frame at a time with internal state) — in that case we call infer() per
@@ -15,14 +15,13 @@
  * the cutoff threshold.
  */
 
-import { createWasmMicroFrontend } from './micro-frontend-wasm/index.js';
-import { DirectModelRunner } from './direct-runner.js';
+import { createJsMicroFrontend } from './micro-frontend-js/index.js';
 
 const COOLDOWN_MS = 2000;
 // Ignore the first N feature frames after init/reset (~2s warmup)
 const WARMUP_FRAMES = 100;
 
-// Energy-based sleep mode — skip TFLite inference during silence.
+// Energy-based sleep mode — skip inference during silence.
 // RMS thresholds are for float32 audio in [-1, 1] range.
 // Keyed by sensitivity label; higher thresholds = more noise filtered out.
 const ENERGY_THRESHOLDS = {
@@ -41,7 +40,7 @@ export class MicroWakeWordInference {
   /**
    * @param {object[]} keywordConfigs - array of keyword configurations:
    *   {runner, name, cutoff, slidingWindow, stepSize}
-   *   - runner: TFLiteWebModelRunner instance
+   *   - runner: model runner instance
    *   - name: keyword identifier (e.g. 'ok_nabu', 'stop')
    *   - cutoff: probability threshold [0, 1] (e.g. 0.97)
    *   - slidingWindow: number of probabilities to average (e.g. 5)
@@ -49,34 +48,31 @@ export class MicroWakeWordInference {
    * @param {object} log - logger with .log(category, message) method
    * @param {string} [sensitivityLabel] - sensitivity level for energy gate
    * @param {boolean} [energyGateEnabled=false] - enable energy-based sleep mode
-   * @param {boolean} [useDirect=false] - use DirectModelRunner (zero-leak WASM access)
    */
   /**
    * Async factory — replaces direct `new MicroWakeWordInference(...)`.
-   * Loads the WASM micro_frontend module before constructing the
-   * inference engine, so we get a bit-exact-to-reference feature
-   * pipeline (same C code that runs on Voice PE and the HA Android app).
+   * Loads the shared JavaScript micro_frontend before constructing the
+   * inference engine.
    *
    * @returns {Promise<MicroWakeWordInference>}
    */
-  static async create(keywordConfigs, log, sensitivityLabel, energyGateEnabled = false, useDirect = false) {
-    const frontend = await createWasmMicroFrontend();
+  static async create(keywordConfigs, log, sensitivityLabel, energyGateEnabled = false) {
+    const frontend = await createJsMicroFrontend();
     return new MicroWakeWordInference(
-      frontend, keywordConfigs, log, sensitivityLabel, energyGateEnabled, useDirect,
+      frontend, keywordConfigs, log, sensitivityLabel, energyGateEnabled,
     );
   }
 
   /**
-   * Direct constructor — takes a pre-loaded WASM frontend. Prefer the
+   * Direct constructor — takes a pre-loaded frontend. Prefer the
    * static `create()` factory unless you already have a frontend
    * instance you want to reuse (e.g. in tests).
    */
-  constructor(frontend, keywordConfigs, log, sensitivityLabel, energyGateEnabled = false, useDirect = false) {
+  constructor(frontend, keywordConfigs, log, sensitivityLabel, energyGateEnabled = false) {
     this._frontend = frontend;
     this._log = log;
     this._keywords = [];
     this._lastDetectionTime = 0;
-    this._useDirect = useDirect;
 
     // Energy-based sleep mode state
     this._energyGateEnabled = energyGateEnabled;
@@ -107,7 +103,7 @@ export class MicroWakeWordInference {
    * number of feature frames per inference call (framesPerInfer).
    */
   _initKeyword(cfg) {
-    // Always run Embind init to detect framesPerInfer from the input tensor.
+    // Probe the runner input tensor to detect framesPerInfer.
     let framesPerInfer = cfg.stepSize || 1;
     try {
       const inputs = cfg.runner.getInputs();
@@ -120,34 +116,19 @@ export class MicroWakeWordInference {
     } catch (_) { /* use fallback */ }
 
     // Push this keyword's input quantization params to the shared frontend.
-    // The TFLite Web API does not expose per-tensor quantization at runtime,
-    // so we extract scale + zero_point ourselves by parsing the .tflite
-    // flatbuffer in tflite-quant-reader.js when the model is fetched. This
-    // works for any model — bundled or user-supplied custom — without a
-    // build-time step.
+    // We extract scale + zero_point ourselves by parsing the .tflite
+    // flatbuffer in tflite-quant-reader.js when the model is fetched.
     if (typeof cfg.inputScale === 'number' && typeof cfg.inputZeroPoint === 'number') {
       this._frontend.setQuantization(cfg.inputScale, cfg.inputZeroPoint);
     }
 
-    // Create DirectRunner if enabled (lazy -- probes on first inference)
-    let direct = null;
-    if (this._useDirect) {
-      try {
-        direct = new DirectModelRunner(cfg.runner);
-        this._log.log('wake-word', `Direct runner created for ${cfg.name} (will probe on first inference)`);
-      } catch (e) {
-        this._log.error('wake-word', `Direct runner failed for ${cfg.name}: ${e.message}`);
-      }
-    }
-
     return {
       runner: cfg.runner,
-      direct,
       name: cfg.name,
       cutoff: cfg.cutoff,
       slidingWindow: cfg.slidingWindow,
       framesPerInfer,
-      // Cached output TypedArray view (Embind path only; direct path uses direct.outputView)
+      // Cached output TypedArray view from the model runner
       outputView: null,
       // Probability ring buffer + running sum
       probBuffer: new Float32Array(cfg.slidingWindow),
@@ -251,13 +232,19 @@ export class MicroWakeWordInference {
         if (kw.featureAccumLen < kw.framesPerInfer) continue;
 
         // Run model inference with exactly framesPerInfer frames
-        const probability = this._runModel(kw);
-        // Recycle feature buffers back to the pool
-        for (let j = 0; j < kw.featureAccumLen; j++) {
-          this._frontend.recycleFeature(kw.featureAccum[j]);
-          kw.featureAccum[j] = null; // release reference
+        let probability = 0;
+        try {
+          probability = this._runModel(kw);
+        } finally {
+          // Always recycle/reset the accumulation window, even if inference
+          // fails. Otherwise the next attempt keeps appending frames and the
+          // input tensor write eventually runs past the fixed model input.
+          for (let j = 0; j < kw.featureAccumLen; j++) {
+            this._frontend.recycleFeature(kw.featureAccum[j]);
+            kw.featureAccum[j] = null; // release reference
+          }
+          kw.featureAccumLen = 0;
         }
-        kw.featureAccumLen = 0;
 
         // Skip warmup period — model state from previous detection may still
         // be warm, so don't store probs until state has flushed with silence.
@@ -294,8 +281,6 @@ export class MicroWakeWordInference {
 
   /**
    * Run model inference with exactly framesPerInfer accumulated feature frames.
-   * Uses direct WASM buffer I/O — no tfjs tensor overhead.
-   *
    * featureAccum always contains exactly kw.framesPerInfer frames (set by
    * processChunk). We copy them into the input tensor and run inference.
    *
@@ -303,32 +288,13 @@ export class MicroWakeWordInference {
    * @returns {number} probability [0, 1]
    */
   _runModel(kw) {
-    if (kw.direct?.ready) return this._runModelDirect(kw);
-    return this._runModelEmbind(kw);
+    return this._runModelRunner(kw);
   }
 
   /**
-   * Direct path: write to cached WASM views, call cpp.Infer() directly.
-   * Zero Embind wrapper allocation per inference.
+   * Runner path: uses getInputs()/getOutputs() wrappers.
    */
-  _runModelDirect(kw) {
-    const d = kw.direct;
-
-    let offset = 0;
-    for (let i = 0; i < kw.featureAccumLen; i++) {
-      d.inputView.set(kw.featureAccum[i], offset);
-      offset += kw.featureAccum[i].length;
-    }
-
-    if (!d.infer()) return 0;
-    return d.outputView[0] / 255.0;
-  }
-
-  /**
-   * Embind path: uses getInputs()/getOutputs() wrappers (original behavior).
-   * Leaks ~31 bytes/call in WASM linear memory from Embind wrapper allocation.
-   */
-  _runModelEmbind(kw) {
+  _runModelRunner(kw) {
     const inputs = kw.runner.getInputs();
     if (!inputs || inputs.length === 0) return 0;
 
@@ -353,14 +319,6 @@ export class MicroWakeWordInference {
         for (const t of outputs) t.delete();
       }
       catch (_) { return 0; }
-    }
-
-    // Capture pointers for DirectRunner after warmup completes.
-    // VarHandle stateful models need many Embind inferences to fully
-    // initialize internal ring buffer state before we can bypass Embind.
-    if (kw.direct && !kw.direct.ready && kw.outputView && kw.framesProcessed >= WARMUP_FRAMES) {
-      kw.direct.capturePointers(inputBuffer, kw.outputView);
-      this._log.log('wake-word', `Direct runner ready for ${kw.name} (after ${kw.framesProcessed} frames)`);
     }
 
     return kw.outputView[0] / 255.0;
@@ -462,11 +420,7 @@ export class MicroWakeWordInference {
   }
 
   /**
-   * Free the micro-frontend WASM instance and drop all keyword
-   * references. Call when the engine is being torn down (e.g. on page
-   * unload) so V8 can reclaim the WASM linear memory and compiled
-   * native code before the next page starts allocating. TFLite
-   * runners are freed separately via forceResetWasm().
+   * Free the micro-frontend instance and drop all keyword references.
    */
   destroy() {
     const kwCount = this._keywords.length;

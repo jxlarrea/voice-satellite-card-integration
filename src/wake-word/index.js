@@ -2,15 +2,15 @@
  * WakeWordManager
  *
  * Orchestrates on-device wake word detection using microWakeWord
- * (TFLite via WASM). Processes 16kHz audio through a micro_frontend
- * feature extractor and runs a TFLite keyword model with sliding
+ * and a custom in-browser model runner. Processes 16kHz audio through
+ * a micro_frontend feature extractor and runs a wake word model with sliding
  * window detection.
  */
 
 import { State, BlurReason } from '../constants.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 import { CHIME_WAKE } from '../audio/chime.js';
-import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, releaseMicroModels, getWasmHeapSize, forceResetWasm } from './micro-models.js';
+import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, getWasmHeapSize, forceResetWasm } from './micro-models.js';
 import { MicroWakeWordInference } from './micro-inference.js';
 import { clearNotificationUI } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
@@ -53,10 +53,10 @@ const STOP_SENSITIVITY_FACTORS = {
 };
 const DEFAULT_CUTOFF = 0.90;
 
-// ─── WASM heap monitoring ────────────────────────────────────────────
-// TFLite's infer() leaks ~31 bytes/call inside compiled WASM. Since WASM
-// linear memory can only grow (never shrink), the only recourse is to
-// periodically destroy the entire WASM module and recreate it.
+// ─── Runtime compatibility monitoring ────────────────────────────────
+// The manager still exposes periodic runtime-reset hooks through the same
+// flow as before, but the custom JS runner reports zero heap here. These
+// checks stay inert unless a lower-level runtime is introduced again.
 const WASM_HEAP_THRESHOLD = 48 * 1024 * 1024; // reset when heap exceeds 48 MB (~1.5x initial 32 MB)
 const WASM_CHECK_MS = 15_000;                  // check heap every 15 seconds
 
@@ -86,7 +86,7 @@ export class WakeWordManager {
     this._processing = false;
     this._frameQueue = [];
 
-    // TFLite WASM client (cached)
+    // Runtime compatibility token (cached)
     this._tfweb = null;
 
     // Stop word state
@@ -109,13 +109,10 @@ export class WakeWordManager {
     this._pendingChimeHandle = null;
     this._pendingUnmuteHandle = null;
 
-    // WASM heap reset tracking
+    // Runtime reset tracking
     this._lastWasmCheck = 0;
     this._resetting = false;
 
-    // TFLite runtime mode: 'direct' bypasses Embind (zero-leak),
-    // 'embind' uses the original wrapper-based path.
-    this._useDirect = true;
   }
 
   /** True when actively listening for wake words. */
@@ -237,7 +234,7 @@ export class WakeWordManager {
 
   /**
    * Build keywordConfigs array for the inference engine.
-   * @param {Record<string, object>} runners - name → TFLiteWebModelRunner map
+   * @param {Record<string, object>} runners - name → runner map
    * @returns {{runner: object, name: string, cutoff: number, slidingWindow: number, stepSize: number}[]}
    */
   _buildKeywordConfigs(runners) {
@@ -263,7 +260,7 @@ export class WakeWordManager {
   // ─── Start / Stop ───────────────────────────────────────────────────
 
   /**
-   * Start wake word detection. Loads the TFLite runtime on first call.
+   * Start wake word detection. Initializes the model runtime on first call.
    */
   async start() {
     if (this._active || this._resetting) return;
@@ -274,31 +271,38 @@ export class WakeWordManager {
 
     try {
       if (!this._tfweb) {
-        this._log.log('wake-word', 'Loading TFLite WASM runtime...');
+        this._log.log('wake-word', 'Initializing wake-word runtime...');
         this._tfweb = await loadTFLite();
-        this._log.log('wake-word', 'TFLite runtime loaded');
+        const backend = this._tfweb?.backend ? ` (${this._tfweb.backend})` : '';
+        this._log.log('wake-word', `Wake-word runtime ready${backend}`);
       }
 
       if (!this._inference || this._loadedModelsKey !== modelsKey) {
-        // Release models no longer needed BEFORE loading new ones to reduce
-        // peak memory — each TFLite runner has its own WASM instance.
+        // Only treat "tfweb exists but inference is gone" as stale state
+        // if we had previously completed a model load in this manager.
+        // On a normal cold start _tfweb is created first and _inference
+        // is still null, so resetting here would churn the TFLite loader
+        // and increase startup pressure for no benefit.
+        if (this._tfweb && !this._inference && this._loadedModelsKey !== null) {
+          await this._recreateTfliteRuntime('stale runtime before model reload');
+        }
+        // Release models no longer needed before loading new ones.
         await releaseUnusedMicroModels(activeModels);
-        this._log.log('wake-word', 'Loading TFLite wake word models...');
+        this._log.log('wake-word', 'Loading wake word models...');
         const runners = await loadMicroModels(
           this._tfweb,
           activeModels,
           (name) => this._log.log('wake-word', `Loading model: ${name}`),
-          (delayMs) => this._log.log('wake-word', `Staggering next model load by ${delayMs}ms to let V8 settle`),
         );
 
         const keywordConfigs = this._buildKeywordConfigs(runners);
         this._inference = await MicroWakeWordInference.create(
-          keywordConfigs, this._log, this._getSensitivityLabel(), this._isNoiseGateEnabled(), this._useDirect,
+          keywordConfigs, this._log, this._getSensitivityLabel(), this._isNoiseGateEnabled(),
         );
         this._loadedModelsKey = modelsKey;
 
         const configSummary = keywordConfigs.map((k) => `${k.name}(c=${k.cutoff},sw=${k.slidingWindow})`).join(', ');
-        this._log.log('wake-word', `TFLite models loaded: ${configSummary}`);
+        this._log.log('wake-word', `Wake word models loaded: ${configSummary}`);
       } else {
         this._inference.updateThresholds(
           activeModels.map((name) => ({ name, threshold: this.getThresholdForModel(name) })),
@@ -315,6 +319,13 @@ export class WakeWordManager {
       this._log.log('wake-word', 'On-device wake word detection active');
 
     } catch (e) {
+      if (String(e?.message || e).includes('Out of memory')
+          || String(e?.message || e).includes('Cannot allocate Wasm memory')) {
+        this._log.error('wake-word', 'Wake-word runtime OOM â€” forcing full runtime reset');
+        try {
+          await this._recreateTfliteRuntime('OOM recovery');
+        } catch (_) { /* ignore secondary failure */ }
+      }
       this._log.error('wake-word', `Failed to start: ${e.message || e}`);
       throw e;
     }
@@ -334,30 +345,40 @@ export class WakeWordManager {
     this._log.log('wake-word', 'Stopped');
   }
 
+  _destroyInference(reason = 'cleanup') {
+    if (!this._inference) return;
+    try {
+      this._inference.destroy();
+      this._log.log('wake-word', `${reason}: micro-frontend destroyed`);
+    } catch (e) {
+      this._log.log('wake-word', `${reason}: inference.destroy failed: ${e.message || e}`);
+    }
+    this._inference = null;
+  }
+
+  async _recreateTfliteRuntime(reason = 'runtime reset') {
+    this._log.log('wake-word', `${reason}: resetting wake-word runtime`);
+    await forceResetWasm();
+    this._tfweb = await loadTFLite();
+  }
+
   /**
-   * Full teardown: stop detection and free every WASM tenant this
-   * manager owns — TFLite model runners, the TFLite runtime module,
-   * and the micro-frontend WASM instance. Called from
+   * Full teardown: stop detection and free the wake-word runtime this
+   * manager owns. Called from
    * `session.teardown()` on page unload so V8 can reclaim linear
    * memory and compiled native code before the next page mounts.
    * Synchronous so it runs to completion inside a `pagehide` handler.
    */
   release() {
-    this._log.log('wake-word', 'release() — freeing WASM tenants');
+    this._log.log('wake-word', 'release() — freeing wake-word runtime');
     const heapBefore = getWasmHeapSize();
     try { this.stop(); } catch (e) { this._log.log('wake-word', `release: stop failed: ${e.message || e}`); }
-    try {
-      this._inference?.destroy();
-      this._log.log('wake-word', 'release: micro-frontend destroyed');
-    } catch (e) {
-      this._log.log('wake-word', `release: inference.destroy failed: ${e.message || e}`);
-    }
-    this._inference = null;
+    this._destroyInference('release');
     this._loadedModelsKey = null;
     this._stopMicroConfig = null;
     try {
       forceResetWasm();
-      this._log.log('wake-word', `release: TFLite WASM reset (heap was ${(heapBefore / (1024 * 1024)).toFixed(1)} MB)`);
+      this._log.log('wake-word', `release: wake-word runtime reset (heap was ${(heapBefore / (1024 * 1024)).toFixed(1)} MB)`);
     } catch (e) {
       this._log.log('wake-word', `release: forceResetWasm failed: ${e.message || e}`);
     }
@@ -429,7 +450,7 @@ export class WakeWordManager {
         }
       }
 
-      // Periodic WASM heap check -- reset runtime if leak exceeds threshold
+      // Periodic runtime compatibility check -- kept for the shared reset flow
       if (this._active && !this._resetting) {
         const now = Date.now();
         if (now - this._lastWasmCheck > WASM_CHECK_MS) {
@@ -437,7 +458,7 @@ export class WakeWordManager {
           const heapSize = getWasmHeapSize();
           if (heapSize > WASM_HEAP_THRESHOLD) {
             this._log.log('wake-word',
-              `WASM heap ${(heapSize / (1024 * 1024)).toFixed(1)} MB exceeds ${WASM_HEAP_THRESHOLD / (1024 * 1024)} MB -- resetting runtime`);
+              `Runtime heap ${(heapSize / (1024 * 1024)).toFixed(1)} MB exceeds ${WASM_HEAP_THRESHOLD / (1024 * 1024)} MB -- resetting runtime`);
             await this._resetWasmRuntime();
           }
         }
@@ -670,7 +691,7 @@ export class WakeWordManager {
         };
         this._log.log(
           'stop-word',
-          `TFLite models loaded: stop(c=${this._stopMicroConfig.cutoff},sw=${this._stopMicroConfig.slidingWindow})`,
+          `Stop model loaded: stop(c=${this._stopMicroConfig.cutoff},sw=${this._stopMicroConfig.slidingWindow})`,
         );
       } else {
         this._log.log('stop-word', 'Stop model already loaded (cached)');
@@ -832,9 +853,8 @@ export class WakeWordManager {
   }
 
   /**
-   * Reset the TFLite WASM runtime to reclaim leaked memory.
-   * Destroys all runners, reloads the WASM binary, and recreates the
-   * inference engine. Takes ~1-2s during which detection pauses.
+   * Reset the wake-word runtime and recreate the inference engine.
+   * Takes ~1-2s during which detection pauses.
    */
   async _resetWasmRuntime() {
     this._resetting = true;
@@ -843,21 +863,24 @@ export class WakeWordManager {
     try {
       const heapBefore = getWasmHeapSize();
 
-      this._inference = null;
+      this._destroyInference('reset');
       this._loadedModelsKey = null;
       this._stopMicroConfig = null;
 
       await forceResetWasm();
 
-      // Reload TFLite runtime (fresh WASM module)
+      // Reload runtime token and rebuild models from scratch.
       this._tfweb = await loadTFLite();
 
       const activeModels = this.getActiveModels();
       const runners = await loadMicroModels(this._tfweb, activeModels);
 
       const keywordConfigs = this._buildKeywordConfigs(runners);
-      this._inference = new MicroWakeWordInference(
-        keywordConfigs, this._log, this._getSensitivityLabel(), this._isNoiseGateEnabled(), this._useDirect,
+      this._inference = await MicroWakeWordInference.create(
+        keywordConfigs,
+        this._log,
+        this._getSensitivityLabel(),
+        this._isNoiseGateEnabled(),
       );
       this._loadedModelsKey = activeModels.slice().sort().join(',');
 
@@ -867,13 +890,13 @@ export class WakeWordManager {
 
       const heapAfter = getWasmHeapSize();
       this._log.log('wake-word',
-        `WASM reset complete: ${(heapBefore / (1024 * 1024)).toFixed(1)} MB -> ${(heapAfter / (1024 * 1024)).toFixed(1)} MB`);
+        `Runtime reset complete: ${(heapBefore / (1024 * 1024)).toFixed(1)} MB -> ${(heapAfter / (1024 * 1024)).toFixed(1)} MB`);
     } catch (e) {
-      this._log.error('wake-word', `WASM reset failed: ${e.message || e}`);
+      this._log.error('wake-word', `Runtime reset failed: ${e.message || e}`);
     } finally {
       this._resetting = false;
       if (!this._active && !this._inference) {
-        this._log.log('wake-word', 'Attempting recovery after failed WASM reset');
+        this._log.log('wake-word', 'Attempting recovery after failed runtime reset');
         try { await this.start(); } catch (_) {}
       }
     }
@@ -969,10 +992,11 @@ export class WakeWordManager {
         } else {
           this._log.log('wake-word', 'Mode → Home Assistant — releasing models');
           this.stop();
-          this._inference = null;
+          this._destroyInference('mode-switch');
           this._loadedModelsKey = null;
           this._stopMicroConfig = null;
-          await releaseUnusedMicroModels([], { includeStop: true });
+          await forceResetWasm();
+          this._tfweb = null;
           if (session.currentState !== State.PAUSED) {
             session.setState(State.CONNECTING);
             await session.pipeline.start();
@@ -1009,10 +1033,11 @@ export class WakeWordManager {
       this._log.log('stop-word', 'Stop model unloaded');
       this._stopMicroConfig = null;
     }
-    this._inference = null;
+    this._destroyInference('teardown');
     this._loadedModelsKey = null;
     try {
-      await releaseMicroModels();
+      await forceResetWasm();
+      this._tfweb = null;
     } catch (_) { /* ignore */ }
   }
 }

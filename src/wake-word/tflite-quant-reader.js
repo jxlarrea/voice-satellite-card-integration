@@ -3,8 +3,7 @@
  *
  * Parses just enough of a .tflite flatbuffer to extract the input
  * tensor's affine quantization parameters (scale + zero_point), which
- * the WASM micro_frontend uses to convert float features → int8 model
- * input. The HA Android app does the equivalent at native level via
+ * the wake-word frontend uses to convert float features into int8 model`r`n * input. The HA Android app does the equivalent at native level via
  * TfLiteAffineQuantization (see microwakeword/src/main/cpp/MicroWakeWordEngine.cpp).
  *
  * Why this is a runtime parser, not a build-time tool:
@@ -13,12 +12,7 @@
  *      never seen at build time. A baked-in JSON wouldn't have entries
  *      for them and we'd silently fall back to wrong defaults.
  *
- *   2. The TFLite Web API client we use (tflite_web_api_client.js,
- *      Closure-compiled by Google) does not expose tensor quantization
- *      parameters at all — only id/name/dataType/shape/data(). So even
- *      with the model loaded into the runtime, we cannot ask it for
- *      scale/zero_point. Reading them out of the .tflite buffer
- *      ourselves is the only path.
+ *   2. The runtime needs these values before inference starts, and custom`r`n *      user-installed models can carry different quantization parameters.`r`n *      Reading them directly from the .tflite buffer keeps the browser`r`n *      runner independent from any specific inference backend.
  *
  * The TFLite schema lives at
  *   https://github.com/tensorflow/tensorflow/blob/master/tensorflow/lite/schema/schema.fbs
@@ -171,3 +165,4 @@ export function readInputQuantization(buffer) {
     return null;
   }
 }
+
