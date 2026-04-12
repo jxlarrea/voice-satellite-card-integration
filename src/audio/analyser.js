@@ -31,7 +31,9 @@ export class AnalyserManager {
     // Which analyser _tick() reads from
     this._activeAnalyser = null;
     this._dataArray = null;
+    this._freqDataArray = null;
     this._analyserBuffers = new WeakMap();
+    this._analyserFrequencyBuffers = new WeakMap();
 
     this._rafId = null;
     this._barEl = null;
@@ -229,9 +231,9 @@ export class AnalyserManager {
   }
   _createAnalyser(audioContext) {
     const analyser = audioContext.createAnalyser();
-    // Reactive bar only needs coarse loudness, not detailed frequency bins.
-    // Smaller windows reduce analysis work on low-spec tablets.
-    analyser.fftSize = 128;
+    // Keep this lightweight, but use enough bins to distinguish broad speech
+    // energy from low-frequency environmental hum in the mic path.
+    analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.6;
     return analyser;
   }
@@ -286,8 +288,14 @@ export class AnalyserManager {
     for (let i = 0; i < this._dataArray.length; i++) {
       sum += Math.abs(this._dataArray[i] - 128);
     }
-    const meanAbs = (sum / this._dataArray.length) / 128;
     const isMic = this._activeAnalyser === this._micAnalyser;
+    let meanAbs = (sum / this._dataArray.length) / 128;
+
+    if (isMic && this._freqDataArray) {
+      this._activeAnalyser.getByteFrequencyData(this._freqDataArray);
+      meanAbs *= this._getMicSpeechWeight(this._activeAnalyser, this._freqDataArray);
+    }
+
     const level = Math.min(1, Math.round(this._mapVisualLevel(meanAbs, isMic) * 20) / 20);
 
     if (level !== this._lastLevel) {
@@ -302,6 +310,7 @@ export class AnalyserManager {
     this._activeAnalyser = analyser;
     if (!analyser) {
       this._dataArray = null;
+      this._freqDataArray = null;
       return;
     }
     let buf = this._analyserBuffers.get(analyser);
@@ -310,6 +319,12 @@ export class AnalyserManager {
       this._analyserBuffers.set(analyser, buf);
     }
     this._dataArray = buf;
+    let freqBuf = this._analyserFrequencyBuffers.get(analyser);
+    if (!freqBuf || freqBuf.length !== analyser.frequencyBinCount) {
+      freqBuf = new Uint8Array(analyser.frequencyBinCount);
+      this._analyserFrequencyBuffers.set(analyser, freqBuf);
+    }
+    this._freqDataArray = freqBuf;
   }
 
   _getUpdateIntervalMs() {
@@ -338,5 +353,34 @@ export class AnalyserManager {
     }
 
     return curved;
+  }
+
+  _getMicSpeechWeight(analyser, freqData) {
+    const voice = this._getBandAverage(analyser, freqData, 180, 3400);
+    const low = this._getBandAverage(analyser, freqData, 20, 180);
+    const air = this._getBandAverage(analyser, freqData, 3400, 7000);
+
+    // Favor the speech band and suppress steady HVAC-style rumble/hiss.
+    const speechScore = Math.max(0, voice - low * 0.85 - air * 0.25);
+    const ratio = voice / Math.max(0.05, low + air + voice);
+
+    // Keep some baseline responsiveness so soft voices still register,
+    // but make broad low-frequency noise much less visually dominant.
+    return Math.max(0.18, Math.min(1, speechScore * 1.8 + ratio * 0.9));
+  }
+
+  _getBandAverage(analyser, freqData, fromHz, toHz) {
+    const nyquist = analyser.context.sampleRate / 2;
+    const maxIndex = freqData.length - 1;
+    const start = Math.max(0, Math.min(maxIndex, Math.floor((fromHz / nyquist) * maxIndex)));
+    const end = Math.max(start, Math.min(maxIndex, Math.ceil((toHz / nyquist) * maxIndex)));
+
+    let sum = 0;
+    let count = 0;
+    for (let i = start; i <= end; i++) {
+      sum += freqData[i] / 255;
+      count += 1;
+    }
+    return count ? sum / count : 0;
   }
 }
