@@ -568,7 +568,7 @@ Voice Satellite includes a skin system that themes the entire overlay UI - activ
 |------|-------------|
 | **Default** | Rainbow gradient bar with enhanced glow, floating text with colored fading borders, white overlay |
 | **Alexa** | Cyan glow bar, dark overlay, centered bold text, Echo-inspired design |
-| **Google Home** | Four-color Google gradient bar, left-aligned text, light overlay, Nest-inspired design |
+| **Google Home** | Four-color Google gradient bar, left-aligned text, Nest-inspired design. Supports light and dark mode which automatically follows your HA theme or can be forced via the Theme Mode setting |
 | **Home Assistant** | Matches your HA theme natively in both light and dark mode. All colors derived from your theme's primary color and card background via CSS custom properties — automatically adapts to any HA theme. Monochromatic four-tone activity bar with flowing gradient animation |
 | **Retro Terminal** | Green phosphor CRT aesthetic with scanlines, bezel frame, monospace font, and screen-edge glow |
 | **Siri** | Full-screen gradient border glow (purple -> blue -> teal -> pink), dark frosted overlay, centered clean text, Apple-inspired design |

@@ -79,8 +79,8 @@ export class UIManager {
     this._injectSkinCSS();
     this._applyCustomCSS();
     this._applyTextScale();
-    this._applyBackgroundOpacity();
     this._applyThemeMode();
+    this._applyBackgroundOpacity();
 
     ui.querySelector('.vs-start-btn').addEventListener('click', () => {
       this._card.onStartClick();
@@ -100,27 +100,49 @@ export class UIManager {
     this._injectSkinCSS();
     this._applyCustomCSS();
     this._applyTextScale();
-    this._applyBackgroundOpacity();
     this._applyThemeMode();
+    this._applyBackgroundOpacity();
   }
 
   _applyThemeMode() {
     if (!this._globalUI) return;
     const mode = this._card.config.theme_mode || 'auto';
+    const skin = this._card._activeSkin;
     this._globalUI.dataset.themeMode = mode;
-    // For skins that use HA CSS variables (Home Assistant skin), apply
-    // vs-dark/vs-light classes so CSS overrides can force theme colors.
+
     if (mode === 'dark') {
       this._globalUI.classList.add('vs-dark');
       this._globalUI.classList.remove('vs-light');
     } else if (mode === 'light') {
       this._globalUI.classList.add('vs-light');
       this._globalUI.classList.remove('vs-dark');
+    } else if (skin?.darkOverlayColor) {
+      // Auto + skin has its own dark palette — detect HA theme via
+      // --primary-background-color luminance (same probe as waveform.js).
+      const isDark = this._isHADarkMode();
+      this._globalUI.classList.toggle('vs-dark', isDark);
+      this._globalUI.classList.toggle('vs-light', !isDark);
     } else {
       // Auto — remove forced classes; waveform.js manages its own,
       // HA skin relies on native CSS variables.
       this._globalUI.classList.remove('vs-dark', 'vs-light');
     }
+  }
+
+  _isHADarkMode() {
+    const probe = document.createElement('div');
+    probe.style.cssText =
+      'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none;' +
+      'color:var(--primary-background-color,#fff)';
+    document.body.appendChild(probe);
+    const rgb = getComputedStyle(probe).color;
+    probe.remove();
+    const m = rgb.match(/(\d+)/g);
+    if (m) {
+      const [r, g, b] = m.map(Number);
+      return (0.299 * r + 0.587 * g + 0.114 * b) < 128;
+    }
+    return false;
   }
 
   // ─── State-Driven Bar Updates ─────────────────────────────────────
@@ -1074,9 +1096,11 @@ export class UIManager {
     const overlay = this._globalUI?.querySelector('.vs-blur-overlay');
     if (!overlay) return;
     const skin = this._card._activeSkin;
-    const c = skin?.overlayColor;
+    const isDark = this._globalUI.classList.contains('vs-dark');
+    const c = (isDark && skin?.darkOverlayColor) || skin?.overlayColor;
     if (c) {
-      const skinDefault = Math.round((skin.defaultOpacity ?? 1) * 100);
+      const defOpacity = (isDark && skin.darkDefaultOpacity != null) ? skin.darkDefaultOpacity : (skin.defaultOpacity ?? 1);
+      const skinDefault = Math.round(defOpacity * 100);
       const alpha = (this._card.config.background_opacity ?? skinDefault) / 100;
       overlay.style.background = `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
     }

@@ -53,7 +53,7 @@ export const skinLabels = {
 };
 
 export const skinHelpers = {
-  theme_mode: t(null, 'editor.skin.helper_theme_mode', 'Force light or dark theme for skins that support it (Home Assistant, Waveform). Auto follows your HA theme setting.'),
+  theme_mode: t(null, 'editor.skin.helper_theme_mode', 'Force light or dark theme for skins that support it (Google Home, Home Assistant, Waveform). Auto follows your HA theme setting.'),
   background_opacity: t(null, 'editor.skin.helper_background_opacity', 'If not set, the skin\'s default opacity level will be used'),
   reactive_bar: t(null, 'editor.skin.helper_reactive_bar', 'Activity bar reacts to audio levels. Disable on slow devices to save resources.'),
   reactive_bar_update_interval_ms: t(null, 'editor.skin.helper_reactive_bar_update_interval_ms', 'Lower values feel smoother but use more CPU. Minimum 8ms (~120fps), default 33ms (~30fps). Recommended for slow tablets: 50ms (~20fps).'),

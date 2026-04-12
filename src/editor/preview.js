@@ -173,21 +173,24 @@ export function renderPreview(shadowRoot, config) {
     document.head.appendChild(s);
   }
   const scale = (config.text_scale || 100) / 100;
-  const skinDefault = Math.round((skin.defaultOpacity ?? 1) * 100);
-  const bgOpacity = (config.background_opacity ?? skinDefault) / 100;
-  const overlayStyle = skin.overlayColor
-    ? `background:rgba(${skin.overlayColor[0]},${skin.overlayColor[1]},${skin.overlayColor[2]},${bgOpacity})`
-    : '';
   const themeMode = config.theme_mode || 'auto';
   const isDark = themeMode === 'dark' ? true : themeMode === 'light' ? false : hass?.themes?.darkMode !== false;
+  const defOpacity = (isDark && skin.darkDefaultOpacity != null) ? skin.darkDefaultOpacity : (skin.defaultOpacity ?? 1);
+  const skinDefault = Math.round(defOpacity * 100);
+  const bgOpacity = (config.background_opacity ?? skinDefault) / 100;
+  const overlayColor = (isDark && skin.darkOverlayColor) || skin.overlayColor;
+  const overlayStyle = overlayColor
+    ? `background:rgba(${overlayColor[0]},${overlayColor[1]},${overlayColor[2]},${bgOpacity})`
+    : '';
   const themeClass = isDark ? 'wf-dark' : 'wf-light';
+  const forcedClass = themeMode !== 'auto' ? ' wf-forced' : '';
   shadowRoot.innerHTML = `
     <style>
       ${baseCSS}
       ${skin.previewCSS || ''}
     </style>
     <div class="preview-background"></div>
-    <div class="preview-container ${themeClass}" style="--vs-text-scale:${scale}">
+    <div class="preview-container ${themeClass}${forcedClass}" style="--vs-text-scale:${scale}">
       <div class="preview-label">${tt('editor.preview.label', 'Preview')}</div>
       <div class="preview-blur" style="${overlayStyle}"></div>
       ${skinId === 'waveform' ? `<div class="preview-waveform">${buildWaveformSVG()}</div>` : ''}
