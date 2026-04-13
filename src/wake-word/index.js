@@ -439,7 +439,13 @@ export class WakeWordManager {
         const result = await this._inference.processChunk(frame);
         if (this._framePool.length < MAX_POOL) this._framePool.push(frame);
         if (result.detected) {
-          this._log.log('wake-word', `Detected: ${result.model} (score: ${result.score.toFixed(3)})`);
+          const triggerBits = [];
+          if (result.triggerType) triggerBits.push(`type=${result.triggerType}`);
+          if (typeof result.cutoff === 'number') triggerBits.push(`cutoff=${result.cutoff.toFixed(3)}`);
+          if (typeof result.rms === 'number') triggerBits.push(`rms=${result.rms.toFixed(4)}`);
+          if (typeof result.immediateMargin === 'number') triggerBits.push(`margin=${result.immediateMargin.toFixed(3)}`);
+          const triggerMeta = triggerBits.length ? `, ${triggerBits.join(', ')}` : '';
+          this._log.log('wake-word', `Detected: ${result.model} (score=${result.score.toFixed(3)}${triggerMeta})`);
           this._frameQueue.length = 0;
           if (result.model === 'stop') {
             await this._onStopDetection();

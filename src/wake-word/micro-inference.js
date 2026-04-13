@@ -159,7 +159,7 @@ export class MicroWakeWordInference {
    * Same interface as WakeWordInference.processChunk().
    *
    * @param {Float32Array} samples - 1280 float32 samples, 16kHz, [-1, 1]
-   * @returns {Promise<{detected: boolean, score: number, vadScore: number, model: string|null}>}
+   * @returns {Promise<{detected: boolean, score: number, vadScore: number, model: string|null, triggerType?: string, cutoff?: number, rms?: number, immediateMargin?: number}>}
    */
   async processChunk(samples) {
     // Always compute RMS so the wake word tester UI can display a live
@@ -276,13 +276,22 @@ export class MicroWakeWordInference {
         if (kw.probCount >= kw.slidingWindow && cooldownOk) {
           const mean = kw.probSum / kw.slidingWindow;
 
-          if (this._shouldTriggerKeyword(kw, mean, now)) {
+          const triggerType = this._shouldTriggerKeyword(kw, mean, now);
+          if (triggerType) {
+            this._log.log(
+              'wake-word',
+              `Trigger candidate accepted: model=${kw.name} type=${triggerType} mean=${mean.toFixed(3)} cutoff=${kw.cutoff.toFixed(3)} rms=${rms.toFixed(4)} margin=${(mean - kw.cutoff).toFixed(3)}`
+            );
             this._lastDetectionTime = now;
             return {
               detected: true,
               score: mean,
               vadScore: 0, // microWakeWord doesn't use a separate VAD
               model: kw.name,
+              triggerType,
+              cutoff: kw.cutoff,
+              rms,
+              immediateMargin: mean - kw.cutoff,
             };
           }
         }
@@ -309,28 +318,44 @@ export class MicroWakeWordInference {
       kw.pendingConfirm = false;
       kw.pendingConfirmAt = 0;
       kw.pendingConfirmScore = 0;
-      return false;
+      return null;
     }
 
     if (mean >= kw.cutoff + BORDERLINE_CONFIRM_MARGIN) {
       kw.pendingConfirm = false;
       kw.pendingConfirmAt = 0;
       kw.pendingConfirmScore = 0;
-      return true;
+      return 'immediate';
     }
 
     if (kw.pendingConfirm) {
       const confirmFresh = (now - kw.pendingConfirmAt) <= BORDERLINE_CONFIRM_WINDOW_MS;
+      const firstScore = kw.pendingConfirmScore;
       kw.pendingConfirm = false;
       kw.pendingConfirmAt = 0;
       kw.pendingConfirmScore = 0;
-      return confirmFresh;
+      if (confirmFresh) {
+        this._log.log(
+          'wake-word',
+          `Borderline confirm passed: model=${kw.name} first=${firstScore.toFixed(3)} second=${mean.toFixed(3)} cutoff=${kw.cutoff.toFixed(3)}`
+        );
+        return 'confirmed';
+      }
+      this._log.log(
+        'wake-word',
+        `Borderline confirm expired: model=${kw.name} second=${mean.toFixed(3)} cutoff=${kw.cutoff.toFixed(3)}`
+      );
+      return null;
     }
 
     kw.pendingConfirm = true;
     kw.pendingConfirmAt = now;
     kw.pendingConfirmScore = mean;
-    return false;
+    this._log.log(
+      'wake-word',
+      `Borderline candidate parked: model=${kw.name} mean=${mean.toFixed(3)} cutoff=${kw.cutoff.toFixed(3)} rms=${this._latestRms.toFixed(4)}`
+    );
+    return null;
   }
 
   /**
