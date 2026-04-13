@@ -40,6 +40,9 @@ export class WakeWordTestSession {
     this._frameQueue = [];
     this._processing = false;
     this._running = false;
+    this._detectionSeq = 0;
+    this._lastDetectionAt = 0;
+    this._lastDetectionInfo = null;
 
     // Resampler scratch buffer
     this._resampleBuf = null;
@@ -48,6 +51,9 @@ export class WakeWordTestSession {
 
   get running() { return this._running; }
   get latestRms() { return this._inference?.latestRms ?? 0; }
+  get detectionSeq() { return this._detectionSeq; }
+  get lastDetectionAt() { return this._lastDetectionAt; }
+  get lastDetectionInfo() { return this._lastDetectionInfo; }
   /**
    * Sliding-window mean over recent inferences — what the engine actually
    * compares against the cutoff. The Wake Word Tester graphs this value.
@@ -70,6 +76,9 @@ export class WakeWordTestSession {
     if (this._running) await this.stop();
     this._modelName = modelName;
     this._constraints = opts.constraints || null;
+    this._detectionSeq = 0;
+    this._lastDetectionAt = 0;
+    this._lastDetectionInfo = null;
 
     await this._acquireMic();
     await this._setupAudioContext();
@@ -84,6 +93,9 @@ export class WakeWordTestSession {
     this._running = false;
     this._frameQueue.length = 0;
     this._sampleBufLen = 0;
+    this._detectionSeq = 0;
+    this._lastDetectionAt = 0;
+    this._lastDetectionInfo = null;
 
     try { this._sourceNode?.disconnect(); } catch (_) {}
     try { this._workletNode?.disconnect(); } catch (_) {}
@@ -120,6 +132,9 @@ export class WakeWordTestSession {
   async switchModel(modelName) {
     if (modelName === this._modelName || !this._running) return;
     this._modelName = modelName;
+    this._detectionSeq = 0;
+    this._lastDetectionAt = 0;
+    this._lastDetectionInfo = null;
 
     if (this._isolatedRunner) {
       try { this._isolatedRunner.cleanUp?.(); } catch (_) {}
@@ -269,7 +284,15 @@ export class WakeWordTestSession {
       while (this._frameQueue.length > 0 && this._running && this._inference) {
         const frame = this._frameQueue.shift();
         try {
-          await this._inference.processChunk(frame);
+          const result = await this._inference.processChunk(frame);
+          if (result?.detected) {
+            this._detectionSeq++;
+            this._lastDetectionAt =
+              (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                ? performance.now()
+                : Date.now();
+            this._lastDetectionInfo = result;
+          }
         } catch (_) { /* swallow — the tester is best-effort */ }
       }
     } finally {

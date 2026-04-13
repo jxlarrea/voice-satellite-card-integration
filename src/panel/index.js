@@ -581,6 +581,14 @@ class VoiceSatellitePanel extends HTMLElement {
           background: var(--secondary-background-color, #2c2c2e);
           border-radius: 6px;
         }
+        .${P}-tester-axis-note {
+          margin-top: 6px;
+          font-size: 12px;
+          color: var(--secondary-text-color, #999);
+          display: flex;
+          justify-content: space-between;
+          font-variant-numeric: tabular-nums;
+        }
         .${P}-tester-actions {
           display: flex;
           gap: 8px;
@@ -702,6 +710,10 @@ class VoiceSatellitePanel extends HTMLElement {
             </div>
           </div>
           <canvas class="${P}-tester-graph" width="600" height="120"></canvas>
+          <div class="${P}-tester-axis-note">
+            <span>Y: probability</span>
+            <span>X: time → newest</span>
+          </div>
         </div>
 
         <div class="${P}-tester-actions">
@@ -994,6 +1006,7 @@ class VoiceSatellitePanel extends HTMLElement {
     const ctx = canvas?.getContext('2d');
     const latestEl = card?.querySelector(`.${P}-tester-latest`);
     const peakEl = card?.querySelector(`.${P}-tester-peak`);
+    let lastDetectionSeq = 0;
 
     let lastSampleTs = 0;
     const SAMPLE_INTERVAL = 33; // ~30Hz
@@ -1029,10 +1042,18 @@ class VoiceSatellitePanel extends HTMLElement {
         if (latestEl) latestEl.textContent = prob.toFixed(3);
         if (prob > this._testerPeakSmoothed) this._testerPeakSmoothed = prob;
         if (peakEl) peakEl.textContent = this._testerPeakSmoothed.toFixed(3);
+
+        const detectionSeq = cs?.detectionSeq || 0;
+        if (detectionSeq !== lastDetectionSeq) {
+          lastDetectionSeq = detectionSeq;
+        }
       }
 
       // Repaint graph every frame for smooth scrolling
-      if (ctx && canvas) this._drawTesterGraph(canvas, ctx);
+      if (ctx && canvas) {
+        const flashActive = !!(cs && cs.detectionSeq > 0 && (cs.lastDetectionAt ? (ts - cs.lastDetectionAt) < 220 : false));
+        this._drawTesterGraph(canvas, ctx, flashActive);
+      }
     };
 
     this._testerRafFrame = requestAnimationFrame(tick);
@@ -1047,58 +1068,119 @@ class VoiceSatellitePanel extends HTMLElement {
   _renderTesterIdleChart() {
     const canvas = this.querySelector(`.${P}-tester-graph`);
     const ctx = canvas?.getContext('2d');
-    if (ctx && canvas) this._drawTesterGraph(canvas, ctx);
+    if (ctx && canvas) this._drawTesterGraph(canvas, ctx, false);
   }
 
-  _drawTesterGraph(canvas, ctx) {
+  _drawTesterGraph(canvas, ctx, flashActive = false) {
     const w = canvas.width;
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
+    const padLeft = 38;
+    const padRight = 8;
+    const padTop = 8;
+    const padBottom = 18;
+    const plotW = w - padLeft - padRight;
+    const plotH = h - padTop - padBottom;
+    const plotX0 = padLeft;
+    const plotY0 = padTop;
+
+    ctx.fillStyle = flashActive
+      ? 'rgba(76, 175, 80, 0.22)'
+      : 'rgba(0, 0, 0, 0)';
+    ctx.fillRect(0, 0, w, h);
 
     // Background grid lines (0, 0.25, 0.5, 0.75, 1.0)
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
-      const y = (i / 4) * h;
+      const y = plotY0 + (i / 4) * plotH;
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
+      ctx.moveTo(plotX0, y);
+      ctx.lineTo(plotX0 + plotW, y);
       ctx.stroke();
+    }
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    const yTicks = ['1.00', '0.75', '0.50', '0.25', '0.00'];
+    for (let i = 0; i < yTicks.length; i++) {
+      const y = plotY0 + (i / 4) * plotH;
+      ctx.fillText(yTicks[i], plotX0 - 6, y);
     }
 
     // Threshold line at the model's natural cutoff
     const threshold = this._testerThreshold;
-    const threshY = h - threshold * h;
+    const threshY = plotY0 + plotH - threshold * plotH;
     ctx.strokeStyle = 'rgba(255, 152, 0, 0.85)';
     ctx.lineWidth = 1.5;
     ctx.setLineDash([6, 4]);
     ctx.beginPath();
-    ctx.moveTo(0, threshY);
-    ctx.lineTo(w, threshY);
+    ctx.moveTo(plotX0, threshY);
+    ctx.lineTo(plotX0 + plotW, threshY);
     ctx.stroke();
     ctx.setLineDash([]);
 
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const xTicks = ['-6s', '-4s', '-2s', 'now'];
+    for (let i = 0; i < xTicks.length; i++) {
+      const x = plotX0 + (i / 3) * plotW;
+      ctx.fillText(xTicks[i], x, plotY0 + plotH + 4);
+    }
+
     // Probability waveform — newest sample at the right edge.
+    // Below-threshold segments stay blue; the portion above the threshold
+    // is highlighted in red with exact threshold-crossing splits so the
+    // preceding segment does not get tinted accidentally.
     const buf = this._testerProbBuf;
     const count = this._testerProbCount;
     if (count < 2) return;
 
-    const stepX = w / (buf.length - 1);
-    ctx.strokeStyle = '#03a9f4';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    let started = false;
+    const stepX = plotW / (buf.length - 1);
     // Walk oldest → newest. The newest sample lives at (head - 1).
     const start = (this._testerProbHead - count + buf.length) % buf.length;
+    const points = [];
     for (let i = 0; i < count; i++) {
       const idx = (start + i) % buf.length;
       const v = buf[idx];
-      const x = i * stepX + (buf.length - count) * stepX;
-      const y = h - v * h;
-      if (!started) { ctx.moveTo(x, y); started = true; }
-      else ctx.lineTo(x, y);
+      const x = plotX0 + i * stepX + (buf.length - count) * stepX;
+      const y = plotY0 + plotH - v * plotH;
+      points.push({ x, y, v });
     }
-    ctx.stroke();
+
+    const drawSegment = (strokeStyle, a, b) => {
+      ctx.strokeStyle = strokeStyle;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    };
+
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1];
+      const b = points[i];
+      const aAbove = a.v >= threshold;
+      const bAbove = b.v >= threshold;
+
+      if (aAbove === bAbove) {
+        drawSegment(aAbove ? '#f44336' : '#03a9f4', a, b);
+        continue;
+      }
+
+      const denom = (b.v - a.v);
+      const t = denom === 0 ? 0 : (threshold - a.v) / denom;
+      const cross = {
+        x: a.x + (b.x - a.x) * t,
+        y: threshY,
+        v: threshold,
+      };
+
+      drawSegment(aAbove ? '#f44336' : '#03a9f4', a, cross);
+      drawSegment(bAbove ? '#f44336' : '#03a9f4', cross, b);
+    }
   }
 
   _stopTesterMonitor() {
