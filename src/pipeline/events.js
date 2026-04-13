@@ -408,10 +408,17 @@ export function handleError(mgr, errorData) {
     // after a local detection), cancel it so the user doesn't hear
     // anything from this tablet at all. The other tablet — the one
     // that won the dedupe race — handles the user's actual interaction.
+    if (errorCode === 'duplicate_wake_up_detected') {
+      const duplicateLatencyMs = mgr.card.wakeWord?.getPendingWakeLatencyMs?.();
+      if (duplicateLatencyMs !== null && duplicateLatencyMs !== undefined) {
+        mgr.log.log('pipeline', `Duplicate wake-up received ${duplicateLatencyMs}ms after local wake activation`);
+      }
+    }
     if (errorCode === 'duplicate_wake_up_detected'
         && mgr.card.wakeWord?.cancelPendingChime?.()) {
       mgr.log.log('pipeline',
         'Duplicate wake-up — cancelled pending chime, silently aborting');
+      mgr.card.wakeWord?.clearPendingWakeLatency?.();
       mgr.card.ui.hideBlurOverlay(BlurReason.PIPELINE);
       if (INTERACTING_STATES.includes(mgr.card.currentState)) {
         mgr.card.setState(State.IDLE);
@@ -435,6 +442,9 @@ export function handleError(mgr, errorData) {
       mgr.card.chat.clear();
       mgr.shouldContinue = false;
       mgr.continueConversationId = null;
+      if (errorCode === 'duplicate_wake_up_detected') {
+        mgr.card.wakeWord?.clearPendingWakeLatency?.();
+      }
       if (getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false) {
         mgr.card.tts.playChime('done');
       }

@@ -108,6 +108,7 @@ export class WakeWordManager {
     // duplicate_wake_up_detected from HA.
     this._pendingChimeHandle = null;
     this._pendingUnmuteHandle = null;
+    this._pendingWakeActivatedAt = 0;
 
     // Runtime reset tracking
     this._lastWasmCheck = 0;
@@ -342,6 +343,7 @@ export class WakeWordManager {
     this._sampleBufLen = 0;
     this._frameQueue.length = 0;
     this._framePool.length = 0;
+    this._pendingWakeActivatedAt = 0;
     this._log.log('wake-word', 'Stopped');
   }
 
@@ -483,6 +485,7 @@ export class WakeWordManager {
   async _onDetection(modelName) {
     // Stop listening for more wake words
     this._active = false;
+    this._pendingWakeActivatedAt = performance.now();
 
     const session = this._session;
     const _m = performance.memory;
@@ -688,6 +691,23 @@ export class WakeWordManager {
       this._setMicTracksMuted(false);
     }
     return wasPending;
+  }
+
+  /**
+   * Milliseconds elapsed since local wake activation started, or null if there
+   * is no pending wake activation to measure from.
+   * Used for measuring duplicate_wake_up_detected round-trip latency.
+   */
+  getPendingWakeLatencyMs() {
+    if (!this._pendingWakeActivatedAt) return null;
+    return Math.max(0, Math.round(performance.now() - this._pendingWakeActivatedAt));
+  }
+
+  /**
+   * Clear the current wake activation timing marker.
+   */
+  clearPendingWakeLatency() {
+    this._pendingWakeActivatedAt = 0;
   }
 
   // ─── Stop model management ──────────────────────────────────────────
