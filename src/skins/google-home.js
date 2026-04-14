@@ -14,6 +14,10 @@ export const googleHomeSkin = {
   css,
   reactiveBar: true,
   hasDarkTheme: true,
+  overlayColor: [245, 244, 242],
+  darkOverlayColor: [32, 33, 36],
+  defaultOpacity: 1,
+  darkDefaultOpacity: 1,
   previewCSS,
   fontURL: 'https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap',
 };
