@@ -13,10 +13,7 @@ export const googleHomeSkin = {
   name: 'Google Home',
   css,
   reactiveBar: true,
-  overlayColor: [255, 255, 255],
-  darkOverlayColor: [33, 33, 35],
-  defaultOpacity: 0.80,
-  darkDefaultOpacity: 0.90,
+  hasDarkTheme: true,
   previewCSS,
   fontURL: 'https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap',
 };

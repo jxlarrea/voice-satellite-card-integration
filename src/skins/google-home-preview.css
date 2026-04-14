@@ -20,7 +20,10 @@
 }
 
 .preview-blur {
-  /* Set via inline style from preview.js using overlayColor / darkOverlayColor */
+  background: rgb(245, 244, 242);
+}
+.wf-dark .preview-blur {
+  background: #202124;
 }
 .preview-bar {
   left: 20%;

@@ -116,7 +116,7 @@ export class UIManager {
     } else if (mode === 'light') {
       this._globalUI.classList.add('vs-light');
       this._globalUI.classList.remove('vs-dark');
-    } else if (skin?.darkOverlayColor) {
+    } else if (skin?.hasDarkTheme || skin?.darkOverlayColor) {
       // Auto + skin has its own dark palette — detect HA theme via
       // --primary-background-color luminance (same probe as waveform.js).
       const isDark = this._isHADarkMode();
@@ -319,6 +319,10 @@ export class UIManager {
   showBlurOverlay(reason) {
     if (!this._globalUI) return;
     this._blurReasons[reason || 'default'] = true;
+    // Re-detect HA theme on overlay open so dark/light switches take
+    // effect without a page reload (mirrors waveform.js detectTheme()).
+    this._applyThemeMode();
+    this._applyBackgroundOpacity();
     this._globalUI.querySelector('.vs-blur-overlay').classList.add('visible');
   }
 

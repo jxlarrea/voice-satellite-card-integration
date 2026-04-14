@@ -53,13 +53,16 @@
   left: 0;
   right: 0;
   bottom: 0;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgb(245, 244, 242);
   opacity: 0;
   transition: opacity 0.3s ease;
   z-index: 9999;
   pointer-events: none;
   will-change: opacity;
+}
+
+#voice-satellite-ui.vs-dark .vs-blur-overlay {
+  background: #202124;
 }
 
 #voice-satellite-ui .vs-blur-overlay.visible {
