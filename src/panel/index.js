@@ -22,14 +22,25 @@ import { DEFAULT_CONFIG, State, VERSION } from '../constants.js';
 import { renderPreview } from '../editor/preview.js';
 import {
   behaviorSchema, entitySchema, autoStartSchema, microphoneSchema, debugSchema,
-  behaviorLabels, behaviorHelpers,
+  behaviorLabels, behaviorHelpers, WAKE_WORD_DSP_WARNING,
 } from '../editor/behavior.js';
 import { skinSchema, skinLabels, skinHelpers } from '../editor/skin.js';
 import { WakeWordTestSession } from '../wake-word/wake-word-test-session.js';
+import { resolveDspForMode } from '../audio/dsp-config.js';
 import { getMicroModelParams } from '../wake-word/micro-models.js';
 
 const P = 'vsp';
 const CONFIG_KEY = 'vs-panel-config';
+const SENSITIVITY_MARGIN_FACTORS = {
+  'Slightly sensitive': 0.5,
+  'Moderately sensitive': 1.0,
+  'Very sensitive': 2.0,
+};
+const STOP_SENSITIVITY_FACTORS = {
+  'Slightly sensitive': 0.8,
+  'Moderately sensitive': 1.0,
+  'Very sensitive': 1.2,
+};
 
 
 /* ── Combined schema & labels (mirrors full card editor) ── */
@@ -142,6 +153,21 @@ class VoiceSatellitePanel extends HTMLElement {
     this._rendered = false;
     this._formLoaded = false;
     this._config = Object.assign({}, DEFAULT_CONFIG, getStoredConfig());
+    // Migrate legacy unified DSP keys ONLY into the STT group.  Wake-word
+    // defaults are deliberately all-off now (raw mic matches the training
+    // data for microWakeWord) — copying a previously-enabled legacy AGC
+    // into `wake_word_auto_gain_control: true` would reintroduce the
+    // false-trigger behavior this release specifically fixes.  Users who
+    // genuinely want AGC on for wake-word can toggle it explicitly in the
+    // panel; the STT side carries their old preference forward so
+    // transcription quality is unchanged.
+    const LEGACY_DSP_KEYS = ['noise_suppression', 'echo_cancellation', 'auto_gain_control', 'voice_isolation'];
+    for (const key of LEGACY_DSP_KEYS) {
+      const legacy = this._config[key];
+      if (legacy !== true && legacy !== false) continue;
+      const stt = `stt_${key}`;
+      if (this._config[stt] === undefined) this._config[stt] = legacy;
+    }
     // Sync entity from dedicated storage into config
     const storedEntity = getStoredEntity();
     if (storedEntity) this._config.satellite_entity = storedEntity;
@@ -618,6 +644,66 @@ class VoiceSatellitePanel extends HTMLElement {
         .${P}-tester-card.is-idle .${P}-tester-graph {
           opacity: 0.4;
         }
+        .${P}-tester-log-row {
+          margin-top: 8px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .${P}-tester-log-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 12px;
+          color: var(--secondary-text-color);
+        }
+        .${P}-tester-log-clear {
+          background: transparent;
+          color: var(--secondary-text-color);
+          border: 1px solid var(--divider-color);
+          border-radius: 4px;
+          padding: 2px 8px;
+          font-size: 11px;
+          cursor: pointer;
+        }
+        .${P}-tester-log-clear:hover {
+          background: var(--secondary-background-color);
+        }
+        .${P}-tester-log {
+          width: 100%;
+          height: 180px;
+          overflow-y: auto;
+          background: var(--code-editor-background-color, #1e1e1e);
+          color: var(--primary-text-color, #eee);
+          border: 1px solid var(--divider-color);
+          border-radius: 4px;
+          font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+          font-size: 11px;
+          line-height: 1.45;
+          padding: 6px 8px;
+          box-sizing: border-box;
+          white-space: pre;
+        }
+        .${P}-tester-log-entry {
+          display: block;
+          padding: 1px 0;
+        }
+        .${P}-tester-log-entry.is-trigger {
+          color: #4caf50;
+          font-weight: 600;
+        }
+        .${P}-tester-log-entry.is-warn {
+          color: #ff9800;
+        }
+        .${P}-tester-log-entry.is-info {
+          color: #64b5f6;
+        }
+        .${P}-tester-log-entry.is-diag {
+          color: #b0bec5;
+        }
+        /* Wake-word DSP warning — the actual warning element gets
+           inline-styled because it's injected into ha-form-expandable's
+           shadow root, which light-DOM CSS can't penetrate. */
       </style>
 
       <div class="${P}-toolbar">
@@ -692,6 +778,15 @@ class VoiceSatellitePanel extends HTMLElement {
           <select class="${P}-tester-model" id="${P}-tester-model"></select>
         </div>
 
+        <div class="${P}-tester-row">
+          <label class="${P}-tester-label" for="${P}-tester-sensitivity">Sensitivity</label>
+          <select class="${P}-tester-model" id="${P}-tester-sensitivity">
+            <option value="Slightly sensitive">Slightly sensitive</option>
+            <option value="Moderately sensitive" selected>Moderately sensitive</option>
+            <option value="Very sensitive">Very sensitive</option>
+          </select>
+        </div>
+
         <div class="${P}-tester-meter-row">
           <div class="${P}-tester-meter-label">Mic level</div>
           <div class="${P}-tester-meter">
@@ -718,6 +813,14 @@ class VoiceSatellitePanel extends HTMLElement {
 
         <div class="${P}-tester-actions">
           <button class="${P}-tester-toggle">Start</button>
+        </div>
+
+        <div class="${P}-tester-log-row">
+          <div class="${P}-tester-log-header">
+            <span>Live log — probabilities, warnings, and triggers</span>
+            <button type="button" class="${P}-tester-log-clear">Clear</button>
+          </div>
+          <div class="${P}-tester-log" role="log" aria-live="polite"></div>
         </div>
 
         <div class="${P}-hint">
@@ -794,7 +897,8 @@ class VoiceSatellitePanel extends HTMLElement {
 
     card.classList.add('is-idle');
 
-    const modelSelect = card.querySelector(`.${P}-tester-model`);
+    const modelSelect = card.querySelector(`#${P}-tester-model`);
+    const sensitivitySelect = card.querySelector(`#${P}-tester-sensitivity`);
     const toggleBtn = card.querySelector(`.${P}-tester-toggle`);
     const thresholdValEl = card.querySelector(`.${P}-tester-threshold-val`);
 
@@ -839,12 +943,18 @@ class VoiceSatellitePanel extends HTMLElement {
 
     populate();
     this._testerSelectedModel = modelSelect.value;
+    this._testerSensitivity = sensitivitySelect?.value || 'Moderately sensitive';
 
     const updateThresholdForModel = () => {
       const name = modelSelect.value;
+      const sensitivity = sensitivitySelect?.value || 'Moderately sensitive';
       this._testerSelectedModel = name;
+      this._testerSensitivity = sensitivity;
       const params = getMicroModelParams(name);
-      this._testerThreshold = params?.cutoff ?? 0.85;
+      const baseCutoff = params?.cutoff ?? 0.85;
+      const factors = name === 'stop' ? STOP_SENSITIVITY_FACTORS : SENSITIVITY_MARGIN_FACTORS;
+      const factor = factors[sensitivity] ?? 1.0;
+      this._testerThreshold = Math.max(0.1, Math.min(1 - (1 - baseCutoff) * factor, 0.99));
       if (thresholdValEl) thresholdValEl.textContent = this._testerThreshold.toFixed(2);
       // Reset chart + peak for the new model
       this._testerProbCount = 0;
@@ -864,10 +974,19 @@ class VoiceSatellitePanel extends HTMLElement {
       // user doesn't have to Stop and Start to compare two models.
       if (this._testerSession?.running) {
         try {
-          await this._testerSession.switchModel(this._testerSelectedModel);
+          await this._testerSession.switchModel(this._testerSelectedModel, {
+            threshold: this._testerThreshold,
+          });
         } catch (e) {
           // Best effort — failure here just means the next sample is stale.
         }
+      }
+    });
+
+    sensitivitySelect?.addEventListener('change', () => {
+      updateThresholdForModel();
+      if (this._testerSession?.running) {
+        this._testerSession.setThreshold(this._testerThreshold);
       }
     });
 
@@ -878,6 +997,11 @@ class VoiceSatellitePanel extends HTMLElement {
         await this._startTesterSession();
       }
     });
+
+    const clearBtn = card.querySelector(`.${P}-tester-log-clear`);
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => this._clearTesterLog());
+    }
 
     // Refresh dropdown labels periodically so the active-model list
     // reflects integration changes (e.g. user picked a new wake word
@@ -914,14 +1038,25 @@ class VoiceSatellitePanel extends HTMLElement {
 
     try {
       this._testerSession = new WakeWordTestSession();
+      // Route the tester through the *wake-word* DSP settings so it mirrors
+      // the audio path the main engine uses during wake-word listening.
+      const dsp = resolveDspForMode(this._config, 'wake_word');
+
+      // Subscribe to the session's log BEFORE calling start() — the DSP
+      // requested/applied diagnostic emits during _acquireMic(), which runs
+      // inside start().  If we subscribed afterwards we'd miss those lines.
+      this._clearTesterLog();
+      this._unsubscribeTesterLog = this._testerSession.onLogMessage(
+        (cat, msg, ts) => this._appendTesterLog(cat, msg, ts),
+      );
+
       await this._testerSession.start(this._testerSelectedModel, {
-        // Mirror the panel's "Microphone Processing" toggles so the test
-        // runs against the exact same signal the engine will use at runtime.
+        threshold: this._testerThreshold,
         constraints: {
-          echoCancellation: this._config.echo_cancellation === true,
-          noiseSuppression: this._config.noise_suppression === true,
-          autoGainControl: this._config.auto_gain_control === true,
-          voiceIsolation: this._config.voice_isolation === true,
+          echoCancellation: dsp.echoCancellation === true,
+          noiseSuppression: dsp.noiseSuppression === true,
+          autoGainControl: dsp.autoGainControl === true,
+          voiceIsolation: dsp.voiceIsolation === true,
         },
       });
 
@@ -931,6 +1066,7 @@ class VoiceSatellitePanel extends HTMLElement {
       this._testerProbCount = 0;
       this._testerProbHead = 0;
       this._testerProbBuf.fill(0);
+      this._appendTesterLog('info', `started "${this._testerSelectedModel}" — listening`);
 
       card.classList.remove('is-idle');
       toggleBtn.classList.add('is-running');
@@ -954,6 +1090,13 @@ class VoiceSatellitePanel extends HTMLElement {
     const toggleBtn = card?.querySelector(`.${P}-tester-toggle`);
 
     this._stopTesterMonitor();
+
+    // Detach log subscriber before we drop the session reference.
+    if (this._unsubscribeTesterLog) {
+      try { this._unsubscribeTesterLog(); } catch (_) { /* ignore */ }
+      this._unsubscribeTesterLog = null;
+    }
+    this._appendTesterLog('info', 'stopped');
 
     if (this._testerSession) {
       try { await this._testerSession.stop(); } catch (_) { /* ignore */ }
@@ -1191,6 +1334,35 @@ class VoiceSatellitePanel extends HTMLElement {
     }
   }
 
+  // ─── Tester log pane ───────────────────────────────────────────────
+  // These render inline in the panel instead of the browser console so the
+  // user can see probability diag frames, clip-guard warnings, and
+  // detections without opening DevTools.
+  _appendTesterLog(cat, msg, ts) {
+    const pane = this.querySelector(`.${P}-tester-log`);
+    if (!pane) return;
+    const when = new Date(ts ?? Date.now());
+    const pad = (n, w = 2) => String(n).padStart(w, '0');
+    const stamp =
+      `${pad(when.getHours())}:${pad(when.getMinutes())}:${pad(when.getSeconds())}.${pad(when.getMilliseconds(), 3)}`;
+    const entry = document.createElement('span');
+    entry.className = `${P}-tester-log-entry is-${cat}`;
+    entry.textContent = `${stamp}  [${cat}]  ${msg}`;
+    pane.appendChild(entry);
+    // Bound the log so it doesn't grow unbounded over a long session.
+    const MAX_ENTRIES = 400;
+    while (pane.childNodes.length > MAX_ENTRIES) pane.removeChild(pane.firstChild);
+    // Auto-scroll unless the user has scrolled up to read older entries.
+    const nearBottom =
+      pane.scrollHeight - pane.scrollTop - pane.clientHeight < 40;
+    if (nearBottom) pane.scrollTop = pane.scrollHeight;
+  }
+
+  _clearTesterLog() {
+    const pane = this.querySelector(`.${P}-tester-log`);
+    if (pane) pane.innerHTML = '';
+  }
+
   async _loadForm() {
     if (this._formLoaded) return;
     try {
@@ -1223,17 +1395,73 @@ class VoiceSatellitePanel extends HTMLElement {
     if (!container) return;
     container.innerHTML = '';
 
+    // Single ha-form, unchanged rendering — one call, nothing custom.
     const form = document.createElement('ha-form');
     form.hass = this._hass;
     form.data = Object.assign({}, this._config);
     form.schema = panelSchema;
-    form.computeLabel = (schema) => allLabels[schema.name] || '';
-    form.computeHelper = (schema) => allHelpers[schema.name] || '';
-    form.addEventListener('value-changed', (e) => {
-      this._onSettingsChange(e.detail.value);
-    });
-
+    form.computeLabel = (s) => allLabels[s.name] || '';
+    form.computeHelper = (s) => allHelpers[s.name] || '';
+    form.addEventListener('value-changed', (e) => this._onSettingsChange(e.detail.value));
     container.appendChild(form);
+
+    // The Wake-Word DSP warning has to sit INSIDE the Wake Word expandable
+    // so users see it right where the toggles are.  ha-form-expandable
+    // renders an `<ha-expansion-panel>` in its own shadow root with the
+    // inner ha-form as its light-DOM child — that panel slot-projects
+    // any light-DOM children into the expanded content area.  So we
+    // walk ha-form's shadow tree, find the Wake Word expandable by its
+    // header text, and append our warning as a second light-DOM child
+    // of the ha-expansion-panel.  No new custom elements — we're just
+    // placing a plain <div> into an existing expansion panel's default
+    // slot exactly the way ha-form itself places the inner ha-form.
+    this._placeWakeWordWarning(form);
+  }
+
+  _placeWakeWordWarning(form) {
+    const TARGET_TITLE = /wake.?word/i;
+    const tryPlace = () => {
+      const expandables = form.shadowRoot
+        ? form.shadowRoot.querySelectorAll('ha-form-expandable')
+        : [];
+      for (const exp of expandables) {
+        const headerEl = exp.shadowRoot?.querySelector('div[slot="header"]');
+        const headerText = headerEl?.textContent?.trim() || '';
+        if (!TARGET_TITLE.test(headerText)) continue;
+        const panel = exp.shadowRoot.querySelector('ha-expansion-panel');
+        if (!panel) return false;
+        if (panel.querySelector('.vs-ww-dsp-warning')) return true; // already placed
+        const warning = document.createElement('div');
+        warning.className = 'vs-ww-dsp-warning';
+        warning.setAttribute('role', 'alert');
+        warning.textContent = WAKE_WORD_DSP_WARNING;
+        // Inline styles — the div is slot-projected into ha-expansion-panel
+        // which lives inside ha-form-expandable's shadow root, so external
+        // CSS rules from the panel's light DOM don't reach it.
+        warning.style.cssText = [
+          'display: block',
+          'margin: 12px 16px 16px',
+          'padding: 10px 14px',
+          'border-radius: 6px',
+          'background: rgba(255, 152, 0, 0.14)',
+          'border: 1px solid rgba(255, 152, 0, 0.55)',
+          'color: var(--warning-color, #ff9800)',
+          'font-size: 13px',
+          'line-height: 1.45',
+          'font-weight: 500',
+        ].join(';');
+        panel.appendChild(warning);
+        return true;
+      }
+      return false;
+    };
+    if (tryPlace()) return;
+    // ha-form mounts its sub-forms asynchronously in some builds — poll
+    // briefly until the Wake Word expandable shows up, then stop.
+    let attempts = 0;
+    const timer = setInterval(() => {
+      if (tryPlace() || ++attempts > 40) clearInterval(timer);
+    }, 50);
   }
 }
 

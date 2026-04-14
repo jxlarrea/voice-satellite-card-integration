@@ -311,14 +311,25 @@ export class VoiceSatelliteSession {
    */
   updateConfig(config, { fromPanel } = {}) {
     if (!config) return;
+    // Panel config keys the session cares about.  Changes to any `micKeys`
+    // entry trigger a mic restart so constraint updates take effect live.
+    const micKeys = [
+      // Legacy shared keys — kept for backwards-compat with saved dashboards
+      // from before the wake-word / STT split.
+      'echo_cancellation', 'noise_suppression', 'auto_gain_control', 'voice_isolation',
+      // Wake-word-specific DSP
+      'wake_word_echo_cancellation', 'wake_word_noise_suppression',
+      'wake_word_auto_gain_control', 'wake_word_voice_isolation',
+      // STT-specific DSP (change triggers a restart too so the next STT
+      // cycle picks them up; currently the main engine boots in wake-word
+      // mode, so live toggle changes rebind the wake-word stream).
+      'stt_echo_cancellation', 'stt_noise_suppression',
+      'stt_auto_gain_control', 'stt_voice_isolation',
+    ];
     const sessionKeys = [
       'satellite_entity', 'debug',
-      'echo_cancellation', 'noise_suppression', 'auto_gain_control',
-      'voice_isolation', 'reactive_bar', 'reactive_bar_update_interval_ms',
-    ];
-    const micKeys = [
-      'echo_cancellation', 'noise_suppression', 'auto_gain_control',
-      'voice_isolation',
+      ...micKeys,
+      'reactive_bar', 'reactive_bar_update_interval_ms',
     ];
 
     const oldEntity = this._config.satellite_entity;

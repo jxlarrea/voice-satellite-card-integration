@@ -11,39 +11,55 @@ import { sendBinaryAudio } from './comms.js';
  * @param {import('./index.js').AudioManager} mgr
  * @param {MediaStreamAudioSourceNode} sourceNode
  */
+// Track which AudioContexts have already had our worklet processor
+// registered.  registerProcessor() inside an AudioWorkletGlobalScope
+// throws NotSupportedError on re-registration, and a single AudioContext
+// can have its processors registered exactly once for its lifetime.
+// The context now survives stop/start cycles (kept alive so persistent
+// MediaElementSources for TTS/notifications stay valid) so we'd hit
+// re-registration on every restart without this guard.
+const _registeredContexts = new WeakSet();
+
 export async function setupAudioWorklet(mgr, sourceNode) {
   // Batch 10 render quanta (10 * 128 = 1280 samples) before posting.
   // This reduces postMessage structured-clone overhead from 125/s to 12.5/s
   // at 16 kHz, and produces 5120-byte ArrayBuffers that V8 tracks as external
   // memory — preventing native backing-store buildup on low-RAM devices.
   const BATCH_QUANTA = 10;
-  const workletCode =
-    'var B=' + BATCH_QUANTA + ';' +
-    'class VoiceSatelliteProcessor extends AudioWorkletProcessor {' +
-    'constructor(){super();this._buf=null;this._sz=0;this._pos=0;}' +
-    'process(inputs){' +
-    'var input=inputs[0];' +
-    'if(input&&input[0]){' +
-    'var ch=input[0];' +
-    'var len=ch.length;' +
-    'if(!this._buf){this._sz=len*B;this._buf=new Float32Array(this._sz);}' +
-    'this._buf.set(ch,this._pos);' +
-    'this._pos+=len;' +
-    'if(this._pos>=this._sz){' +
-    'this.port.postMessage(this._buf,[this._buf.buffer]);' +
-    'this._buf=new Float32Array(this._sz);' +
-    'this._pos=0;' +
-    '}' +
-    '}' +
-    'return true;' +
-    '}' +
-    '}' +
-    'registerProcessor("voice-satellite-processor",VoiceSatelliteProcessor);';
 
-  const blob = new Blob([workletCode], { type: 'application/javascript' });
-  const workletUrl = URL.createObjectURL(blob);
-  await mgr.audioContext.audioWorklet.addModule(workletUrl);
-  URL.revokeObjectURL(workletUrl);
+  if (!_registeredContexts.has(mgr.audioContext)) {
+    const workletCode =
+      'var B=' + BATCH_QUANTA + ';' +
+      'class VoiceSatelliteProcessor extends AudioWorkletProcessor {' +
+      'constructor(){super();this._buf=null;this._sz=0;this._pos=0;}' +
+      'process(inputs){' +
+      'var input=inputs[0];' +
+      'if(input&&input[0]){' +
+      'var ch=input[0];' +
+      'var len=ch.length;' +
+      'if(!this._buf){this._sz=len*B;this._buf=new Float32Array(this._sz);}' +
+      'this._buf.set(ch,this._pos);' +
+      'this._pos+=len;' +
+      'if(this._pos>=this._sz){' +
+      'this.port.postMessage(this._buf,[this._buf.buffer]);' +
+      'this._buf=new Float32Array(this._sz);' +
+      'this._pos=0;' +
+      '}' +
+      '}' +
+      'return true;' +
+      '}' +
+      '}' +
+      'registerProcessor("voice-satellite-processor",VoiceSatelliteProcessor);';
+
+    const blob = new Blob([workletCode], { type: 'application/javascript' });
+    const workletUrl = URL.createObjectURL(blob);
+    try {
+      await mgr.audioContext.audioWorklet.addModule(workletUrl);
+      _registeredContexts.add(mgr.audioContext);
+    } finally {
+      URL.revokeObjectURL(workletUrl);
+    }
+  }
 
   mgr.workletNode = new AudioWorkletNode(mgr.audioContext, 'voice-satellite-processor');
   mgr.workletNode.port.onmessage = (e) => {

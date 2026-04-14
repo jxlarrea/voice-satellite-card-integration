@@ -509,6 +509,7 @@ export class MiniUIManager {
   }
 
   stopReactive() {}
+  setReactiveSuppressed(_suppressed) { /* mini card has no reactive bar */ }
 
   showStartButton(reason) {
     // Mini card uses the idle mic icon in the status row as the start affordance.

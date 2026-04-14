@@ -21,9 +21,6 @@ import { MicroWakeWordInference } from './micro-inference.js';
 const CHUNK_SIZE = 1280; // 80ms @ 16 kHz
 const TARGET_RATE = 16000;
 
-// Silent logger — the tester shouldn't spam the console.
-const SILENT_LOG = { log: () => {}, error: () => {} };
-
 export class WakeWordTestSession {
   constructor() {
     this._modelName = null;
@@ -35,6 +32,7 @@ export class WakeWordTestSession {
     this._inference = null;
     this._isolatedRunner = null;
     this._actualSampleRate = TARGET_RATE;
+    this._threshold = null;
     this._sampleBuf = new Float32Array(CHUNK_SIZE * 2);
     this._sampleBufLen = 0;
     this._frameQueue = [];
@@ -47,6 +45,77 @@ export class WakeWordTestSession {
     // Resampler scratch buffer
     this._resampleBuf = null;
     this._resampleBufLen = 0;
+
+    // Per-session event log.  Panel subscribes via `onLogMessage()` and renders
+    // the entries in the Wake Word Tester's log pane instead of the browser
+    // console.  Categories: 'diag' (probability/RMS trace), 'trigger' (a
+    // detection fired), 'info' (lifecycle), 'warn' (clip-guard, etc).
+    this._logSubscribers = new Set();
+    this._instanceLog = {
+      log: (cat, msg) => this._emitLog(cat, msg),
+      error: (cat, msg) => this._emitLog('warn', `[${cat}] ${msg}`),
+    };
+
+    // Rolling capture for offline inspection.  Holds the most recent
+    // CAPTURE_SECONDS of 16 kHz mono Float32 samples that were fed to the
+    // frontend, so the user can dump exactly what the JS pipeline saw right
+    // before a (possibly false) trigger.  Overwrites itself — ring buffer.
+    this._captureSeconds = 6;
+    this._captureBuf = new Float32Array(TARGET_RATE * this._captureSeconds);
+    this._captureHead = 0;      // next write index
+    this._captureFilled = 0;    // total samples ever written (for "how full")
+  }
+
+  /**
+   * Export the last few seconds of audio fed to the frontend as a 16 kHz
+   * mono WAV (Int16 PCM).  Triggers a browser download.  Useful when live
+   * probabilities diverge from offline WAV tests — the returned file is the
+   * exact signal the JS frontend processed, including mic + DSP + resampling.
+   */
+  exportCapture(filename = 'voice-satellite-capture.wav') {
+    const n = Math.min(this._captureFilled, this._captureBuf.length);
+    if (n === 0) return false;
+    // Rotate ring buffer so the oldest sample is first.
+    const out = new Float32Array(n);
+    if (this._captureFilled < this._captureBuf.length) {
+      out.set(this._captureBuf.subarray(0, n));
+    } else {
+      out.set(this._captureBuf.subarray(this._captureHead));
+      out.set(this._captureBuf.subarray(0, this._captureHead), this._captureBuf.length - this._captureHead);
+    }
+    // Float32 [-1, 1] → Int16 PCM.
+    const pcm = new Int16Array(n);
+    for (let i = 0; i < n; i++) {
+      let v = out[i] * 32768;
+      if (v > 32767) v = 32767;
+      else if (v < -32768) v = -32768;
+      pcm[i] = v | 0;
+    }
+    // Build a minimal WAV container.
+    const header = new ArrayBuffer(44);
+    const dv = new DataView(header);
+    const writeAscii = (off, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i)); };
+    const byteLen = pcm.byteLength;
+    writeAscii(0, 'RIFF');  dv.setUint32(4, 36 + byteLen, true);
+    writeAscii(8, 'WAVE');
+    writeAscii(12, 'fmt ');  dv.setUint32(16, 16, true);
+    dv.setUint16(20, 1, true);              // PCM
+    dv.setUint16(22, 1, true);              // mono
+    dv.setUint32(24, TARGET_RATE, true);
+    dv.setUint32(28, TARGET_RATE * 2, true);
+    dv.setUint16(32, 2, true);
+    dv.setUint16(34, 16, true);
+    writeAscii(36, 'data');  dv.setUint32(40, byteLen, true);
+    const blob = new Blob([header, pcm.buffer], { type: 'audio/wav' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
   }
 
   get running() { return this._running; }
@@ -76,6 +145,7 @@ export class WakeWordTestSession {
     if (this._running) await this.stop();
     this._modelName = modelName;
     this._constraints = opts.constraints || null;
+    this._threshold = typeof opts.threshold === 'number' ? opts.threshold : null;
     this._detectionSeq = 0;
     this._lastDetectionAt = 0;
     this._lastDetectionInfo = null;
@@ -86,6 +156,9 @@ export class WakeWordTestSession {
     await this._setupInference();
 
     this._running = true;
+    // Park a convenience pointer on window so a user can trigger a capture
+    // export from the browser devtools: `__vsTester.exportCapture()`.
+    try { if (typeof window !== 'undefined') window.__vsTester = this; } catch (_) {}
   }
 
   /** Tear down the entire test loop and release resources. */
@@ -129,9 +202,17 @@ export class WakeWordTestSession {
    * Switch to a different wake word model (tears down inference and rebuilds).
    * @param {string} modelName
    */
-  async switchModel(modelName) {
-    if (modelName === this._modelName || !this._running) return;
+  async switchModel(modelName, opts = {}) {
+    const nextThreshold =
+      typeof opts.threshold === 'number' ? opts.threshold : this._threshold;
+    if (modelName === this._modelName && nextThreshold === this._threshold) return;
+    if (!this._running) {
+      this._modelName = modelName;
+      this._threshold = nextThreshold;
+      return;
+    }
     this._modelName = modelName;
+    this._threshold = nextThreshold;
     this._detectionSeq = 0;
     this._lastDetectionAt = 0;
     this._lastDetectionInfo = null;
@@ -147,6 +228,15 @@ export class WakeWordTestSession {
     await this._setupInference();
   }
 
+  setThreshold(threshold) {
+    this._threshold = typeof threshold === 'number' ? threshold : null;
+    if (!this._running || !this._inference || !this._modelName) return;
+    this._inference.updateThresholds([{
+      name: this._modelName,
+      threshold: this._threshold ?? getMicroModelParams(this._modelName).cutoff,
+    }]);
+  }
+
   // ─── Internal setup ─────────────────────────────────────────────────
 
   async _acquireMic() {
@@ -155,19 +245,59 @@ export class WakeWordTestSession {
     // caller didn't supply constraints, default to "raw" — every DSP off —
     // so the user tests against the unmodified mic.
     const c = this._constraints || {};
-    const audioConstraints = {
-      sampleRate: TARGET_RATE,
-      channelCount: 1,
+    const requested = {
       echoCancellation: c.echoCancellation === true,
       noiseSuppression: c.noiseSuppression === true,
       autoGainControl: c.autoGainControl === true,
+      voiceIsolation: c.voiceIsolation === true,
     };
-    if (c.voiceIsolation === true) {
+    const audioConstraints = {
+      sampleRate: TARGET_RATE,
+      channelCount: 1,
+      echoCancellation: requested.echoCancellation,
+      noiseSuppression: requested.noiseSuppression,
+      autoGainControl: requested.autoGainControl,
+    };
+    if (requested.voiceIsolation) {
       audioConstraints.advanced = [{ voiceIsolation: true }];
     }
     this._stream = await navigator.mediaDevices.getUserMedia({
       audio: audioConstraints,
     });
+
+    // Surface both the requested DSP toggles and what the browser actually
+    // applied, so the user can see at a glance whether their mic driver
+    // honored the request or silently overrode it (common on Windows with
+    // some USB mics).
+    this._emitLog(
+      'info',
+      `DSP requested: EC=${requested.echoCancellation} `
+      + `NS=${requested.noiseSuppression} AGC=${requested.autoGainControl} `
+      + `VI=${requested.voiceIsolation}`,
+    );
+    try {
+      const track = this._stream.getAudioTracks()[0];
+      if (track) {
+        const s = track.getSettings() || {};
+        const label = track.label ? ` "${track.label}"` : '';
+        this._emitLog(
+          'info',
+          `DSP applied:   EC=${!!s.echoCancellation} NS=${!!s.noiseSuppression} `
+          + `AGC=${!!s.autoGainControl} VI=${!!s.voiceIsolation} `
+          + `rate=${s.sampleRate ?? '?'}Hz ch=${s.channelCount ?? '?'}${label}`,
+        );
+        // Call out mismatches between what we asked for and what the driver
+        // actually gave us — these are the common root cause of "I turned
+        // AGC off but clipping guard still fires" reports.
+        const mism = [];
+        for (const key of ['echoCancellation', 'noiseSuppression', 'autoGainControl', 'voiceIsolation']) {
+          if (!!s[key] !== requested[key]) mism.push(`${key}: requested ${requested[key]}, got ${!!s[key]}`);
+        }
+        if (mism.length) {
+          this._emitLog('warn', `mic driver overrode DSP request — ${mism.join('; ')}`);
+        }
+      }
+    } catch (_) { /* best-effort diagnostic */ }
   }
 
   async _setupAudioContext() {
@@ -231,15 +361,13 @@ export class WakeWordTestSession {
       [{
         runner: this._isolatedRunner,
         name: this._modelName,
-        // Use the model's natural cutoff. The tester is for visualization
-        // only — there's no override knob anymore.
-        cutoff: params.cutoff,
+        cutoff: this._threshold ?? params.cutoff,
         slidingWindow: params.slidingWindow,
         stepSize: params.stepSize,
         inputScale: params.inputScale,
         inputZeroPoint: params.inputZeroPoint,
       }],
-      SILENT_LOG,
+      this._instanceLog,
       'Moderately sensitive',
       false, // energy gate disabled — keep RMS readout always live
     );
@@ -255,6 +383,17 @@ export class WakeWordTestSession {
     if (this._actualSampleRate !== TARGET_RATE) {
       s = this._resample(samples, this._actualSampleRate, TARGET_RATE);
     }
+
+    // Ring-buffer the post-resample samples so `exportCapture()` can write
+    // out the exact signal the frontend saw.
+    const cap = this._captureBuf;
+    let head = this._captureHead;
+    for (let i = 0; i < s.length; i++) {
+      cap[head] = s[i];
+      head = (head + 1) % cap.length;
+    }
+    this._captureHead = head;
+    this._captureFilled += s.length;
 
     // Buffer and chunk to fixed CHUNK_SIZE frames.
     const needed = this._sampleBufLen + s.length;
@@ -292,11 +431,37 @@ export class WakeWordTestSession {
                 ? performance.now()
                 : Date.now();
             this._lastDetectionInfo = result;
+            const model = result.model ?? this._modelName ?? '?';
+            const mean = typeof result.score === 'number' ? result.score.toFixed(3) : '?';
+            const cutoff = typeof result.cutoff === 'number' ? result.cutoff.toFixed(2) : '?';
+            this._emitLog(
+              'trigger',
+              `DETECTED "${model}" mean=${mean} cutoff=${cutoff} rms=${(result.rms ?? 0).toFixed(3)}`,
+            );
           }
         } catch (_) { /* swallow — the tester is best-effort */ }
       }
     } finally {
       this._processing = false;
+    }
+  }
+
+  /**
+   * Subscribe to tester log events.  Returns an unsubscribe function.
+   * The callback receives `(category, message, timestamp)`.  Categories:
+   * 'diag', 'trigger', 'info', 'warn'.
+   */
+  onLogMessage(cb) {
+    if (typeof cb !== 'function') return () => {};
+    this._logSubscribers.add(cb);
+    return () => this._logSubscribers.delete(cb);
+  }
+
+  _emitLog(cat, msg) {
+    if (!msg || !this._logSubscribers.size) return;
+    const ts = Date.now();
+    for (const cb of this._logSubscribers) {
+      try { cb(cat, msg, ts); } catch (_) { /* ignore */ }
     }
   }
 

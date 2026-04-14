@@ -13,19 +13,56 @@ export const entitySchema = [
   },
 ];
 
-export const microphoneSchema = [
+export const WAKE_WORD_DSP_WARNING = t(
+  null,
+  'editor.behavior.helper_wake_word_dsp_warning',
+  'WARNING: Enabling any of the above may reduce wake-word reliability (false triggers on similar-sounding words).',
+);
+
+// Split into two halves so the panel can render the warning as a plain
+// <div> between them (ha-form's built-in text schema types all render a
+// label/separator prefix we can't cleanly suppress).
+export const wakeWordMicrophoneSchema = [
   {
-    type: 'expandable', name: '', title: t(null, 'editor.behavior.microphone_processing', 'Microphone Processing'), flatten: true,
+    type: 'expandable',
+    name: '',
+    title: t(null, 'editor.behavior.microphone_processing_wake_word', 'Microphone Processing — Wake Word'),
+    flatten: true,
     schema: [{
       type: 'grid', name: '', flatten: true,
       schema: [
-        { name: 'noise_suppression', selector: { boolean: {} } },
-        { name: 'echo_cancellation', selector: { boolean: {} } },
-        { name: 'auto_gain_control', selector: { boolean: {} } },
-        { name: 'voice_isolation', selector: { boolean: {} } },
+        { name: 'wake_word_noise_suppression', selector: { boolean: {} } },
+        { name: 'wake_word_echo_cancellation', selector: { boolean: {} } },
+        { name: 'wake_word_auto_gain_control', selector: { boolean: {} } },
+        { name: 'wake_word_voice_isolation', selector: { boolean: {} } },
       ],
     }],
   },
+];
+
+export const sttMicrophoneSchema = [
+  {
+    type: 'expandable',
+    name: '',
+    title: t(null, 'editor.behavior.microphone_processing_stt', 'Microphone Processing — Speech to Text'),
+    flatten: true,
+    schema: [{
+      type: 'grid', name: '', flatten: true,
+      schema: [
+        { name: 'stt_noise_suppression', selector: { boolean: {} } },
+        { name: 'stt_echo_cancellation', selector: { boolean: {} } },
+        { name: 'stt_auto_gain_control', selector: { boolean: {} } },
+        { name: 'stt_voice_isolation', selector: { boolean: {} } },
+      ],
+    }],
+  },
+];
+
+// Kept as combined for call-sites that want the whole mic section at once
+// (e.g. the full-card editor, which doesn't render the warning).
+export const microphoneSchema = [
+  ...wakeWordMicrophoneSchema,
+  ...sttMicrophoneSchema,
 ];
 
 export const autoStartSchema = [
@@ -40,14 +77,21 @@ export const behaviorLabels = {
   satellite_entity: t(null, 'editor.behavior.satellite_entity', 'Satellite entity'),
   auto_start: t(null, 'editor.behavior.auto_start', 'Auto start'),
   debug: t(null, 'editor.behavior.debug', 'Debug logging'),
-  noise_suppression: t(null, 'editor.behavior.noise_suppression', 'Noise suppression'),
-  echo_cancellation: t(null, 'editor.behavior.echo_cancellation', 'Echo cancellation'),
-  auto_gain_control: t(null, 'editor.behavior.auto_gain_control', 'Auto gain control'),
-  voice_isolation: t(null, 'editor.behavior.voice_isolation', 'Voice isolation (Chrome only)'),
+  // Wake-word group
+  wake_word_noise_suppression: t(null, 'editor.behavior.noise_suppression', 'Noise suppression'),
+  wake_word_echo_cancellation: t(null, 'editor.behavior.echo_cancellation', 'Echo cancellation'),
+  wake_word_auto_gain_control: t(null, 'editor.behavior.auto_gain_control', 'Auto gain control'),
+  wake_word_voice_isolation: t(null, 'editor.behavior.voice_isolation', 'Voice isolation (Chrome only)'),
+  // STT group
+  stt_noise_suppression: t(null, 'editor.behavior.noise_suppression', 'Noise suppression'),
+  stt_echo_cancellation: t(null, 'editor.behavior.echo_cancellation', 'Echo cancellation'),
+  stt_auto_gain_control: t(null, 'editor.behavior.auto_gain_control', 'Auto gain control'),
+  stt_voice_isolation: t(null, 'editor.behavior.voice_isolation', 'Voice isolation (Chrome only)'),
 };
 
 export const behaviorHelpers = {
   satellite_entity: t(null, 'editor.behavior.helper_satellite_entity', 'Add a satellite device first via Settings → Devices & Services → Voice Satellite.'),
   auto_start: t(null, 'editor.behavior.helper_auto_start', 'Automatically start the voice engine when the page loads. When off, use the Start button to activate manually.'),
-  voice_isolation: t(null, 'editor.behavior.helper_voice_isolation', 'AI-based voice isolation, currently only available in Chrome'),
+  wake_word_voice_isolation: t(null, 'editor.behavior.helper_voice_isolation', 'AI-based voice isolation, currently only available in Chrome'),
+  stt_voice_isolation: t(null, 'editor.behavior.helper_voice_isolation', 'AI-based voice isolation, currently only available in Chrome'),
 };

@@ -26,6 +26,7 @@ const WARMUP_FRAMES = 100;
 const BORDERLINE_CONFIRM_MARGIN = 0.03;
 const BORDERLINE_CONFIRM_WINDOW_MS = 750;
 
+
 // Energy-based sleep mode — skip inference during silence.
 // RMS thresholds are for float32 audio in [-1, 1] range.
 // Keyed by sensitivity label; higher thresholds = more noise filtered out.
@@ -34,6 +35,33 @@ const ENERGY_THRESHOLDS = {
   'Moderately sensitive': { sleep: 0.05,  wake: 0.06  },
   'Very sensitive':       { sleep: 0.02,  wake: 0.025 },
 };
+
+// Clipping guard.  If samples in a chunk saturate near ±1.0, the mic
+// preamp is overloaded and the signal is distorted beyond what the model was
+// trained on — harmonics from clipping routinely excite prefix-match false
+// triggers ("ok google" → "ok nabu", "hey google" → "hey luna").  We flag
+// the chunk as unreliable and skip inference for it (features still flow into
+// the frontend so noise-reduction state stays warm).
+//
+// Distinguishing real clipping from a loud plosive transient:
+//   • A plosive ("k" in "ok") briefly peaks ONCE near ±0.98–0.99 with no
+//     plateau — that's normal speech, not clipping.
+//   • Real digital saturation produces EITHER a sample at exactly ±1.0
+//     (the ADC/driver clamped) OR several samples plateaued near max
+//     (the analog signal exceeded headroom for an extended fragment).
+// We reject only when one of those two signatures is present.
+const CLIP_HARD_THRESHOLD = 0.9999;  // exact-saturation cutoff (one sample is enough)
+const CLIP_NEAR_THRESHOLD = 0.995;   // sustained-near-peak cutoff
+const CLIP_NEAR_MIN_SAMPLES = 3;     // need ≥N samples at NEAR_THRESHOLD
+//
+// Clipping rarely hits every chunk of a loud word: typically only the
+// first/middle/last chunks saturate, with near-peak-but-unclipped chunks
+// (|v|≈0.95) in between.  Those unclipped chunks still contain the distorted
+// harmonics and are enough to false-trigger on their own.  So once we see a
+// clipped chunk, we arm a cooldown that rejects the next COOLDOWN_CHUNKS
+// chunks as well — effectively dropping the whole peri-saturation region.
+const CLIP_COOLDOWN_CHUNKS = 4;      // also reject next N chunks after a clip
+const CLIP_LOG_COOLDOWN_MS = 2000;   // rate-limit the diagnostic log
 const DEFAULT_ENERGY = ENERGY_THRESHOLDS['Moderately sensitive'];
 const SLEEP_CHUNKS = 30;            // ~2.4s of silence before sleeping
 // Buffer recent feature frames during sleep so we can replay them on wake.
@@ -89,6 +117,14 @@ export class MicroWakeWordInference {
 
     // Live mic level — read by the Wake Word Tester to draw the meter.
     this._latestRms = 0;
+
+    // Clipping guard state — last time we logged a clipped chunk, a rolling
+    // count of consecutive clipped chunks, and a cooldown counter that keeps
+    // the guard armed for a few chunks after the last saturated chunk (so we
+    // also reject the unclipped-but-near-peak chunks flanking the saturation).
+    this._lastClipLogAt = 0;
+    this._clippedChunks = 0;
+    this._clipCooldown = 0;
 
     // Ring buffer for feature frames during sleep (avoids splice/shift)
     this._sleepBufCap = SLEEP_BUFFER_CHUNKS * 8; // max ~64 frames
@@ -162,12 +198,24 @@ export class MicroWakeWordInference {
    * @returns {Promise<{detected: boolean, score: number, vadScore: number, model: string|null, triggerType?: string, cutoff?: number, rms?: number, immediateMargin?: number}>}
    */
   async processChunk(samples) {
-    // Always compute RMS so the wake word tester UI can display a live
-    // mic level meter.
+    // Single pass: RMS for the live meter + two clipping counters so we can
+    // distinguish a brief plosive transient (one sample peaks high) from real
+    // saturation (sample at exactly ±1.0, or several samples plateaued).
     let sumSq = 0;
-    for (let i = 0; i < samples.length; i++) sumSq += samples[i] * samples[i];
+    let nHard = 0;   // |v| ≥ CLIP_HARD_THRESHOLD (true digital saturation)
+    let nNear = 0;   // |v| ≥ CLIP_NEAR_THRESHOLD (sustained near-peak)
+    for (let i = 0; i < samples.length; i++) {
+      const v = samples[i];
+      sumSq += v * v;
+      const abs = v < 0 ? -v : v;
+      if (abs >= CLIP_NEAR_THRESHOLD) {
+        nNear++;
+        if (abs >= CLIP_HARD_THRESHOLD) nHard++;
+      }
+    }
     const rms = Math.sqrt(sumSq / samples.length);
     this._latestRms = rms;
+    const isClipped = nHard >= 1 || nNear >= CLIP_NEAR_MIN_SAMPLES;
 
     // Energy-based sleep: use RMS to decide whether to run inference
     if (this._energyGateEnabled) {
@@ -198,6 +246,40 @@ export class MicroWakeWordInference {
         this._sleepBufHead = (this._sleepBufHead + 1) % this._sleepBufCap;
         if (this._sleepBufLen < this._sleepBufCap) this._sleepBufLen++;
       }
+      return { detected: false, score: 0, vadScore: 0, model: null };
+    }
+
+    // Clipping guard.  When the mic saturates, the captured spectrum has
+    // harmonics that weren't in the original speech — those harmonics are a
+    // known trigger for prefix-match false positives ("ok google" firing
+    // ok_nabu, "ok man" firing ok_nabu) since the model was never trained on
+    // clipped audio.  Drop inference for this chunk and for a cooldown window
+    // of subsequent chunks (which are typically loud-but-not-clipping tails
+    // of the same overloaded utterance).  Features still flow into the
+    // frontend so NR/PCAN state stays warm.
+    if (isClipped) {
+      this._clippedChunks++;
+      this._clipCooldown = CLIP_COOLDOWN_CHUNKS;
+    } else if (this._clipCooldown > 0) {
+      this._clipCooldown--;
+    } else {
+      this._clippedChunks = 0;
+    }
+    if (isClipped || this._clipCooldown > 0) {
+      const nowLog = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now() : Date.now();
+      if (nowLog - this._lastClipLogAt >= CLIP_LOG_COOLDOWN_MS) {
+        this._lastClipLogAt = nowLog;
+        const reason = isClipped
+          ? `nHard=${nHard} nNear=${nNear}/${samples.length} rms=${rms.toFixed(3)}`
+          : `cooldown (${this._clipCooldown} chunks remaining)`;
+        this._log.log(
+          'warn',
+          `clip-guard rejecting chunk — ${reason}. `
+          + `Lower mic/speaker volume or enable Auto Gain Control.`,
+        );
+      }
+      for (const f of features) this._frontend.recycleFeature(f);
       return { detected: false, score: 0, vadScore: 0, model: null };
     }
 
@@ -270,17 +352,23 @@ export class MicroWakeWordInference {
         kw.probIndex = (kw.probIndex + 1) % kw.slidingWindow;
         if (kw.probCount < kw.slidingWindow) kw.probCount++;
 
-        // Check detection: mean of sliding window > cutoff. Scores that only
-        // barely clear the cutoff must survive one more inference step so
-        // random silence/noise spikes do not immediately fire the wake word.
+        if (probability > 0.3) {
+          const windowMean = kw.probCount > 0 ? (kw.probSum / kw.probCount) : 0;
+          this._log.log(
+            'diag',
+            `${kw.name} prob=${probability.toFixed(3)} win5=${windowMean.toFixed(3)} rms=${rms.toFixed(3)}`,
+          );
+        }
+
+        // Detection: sliding-window mean > cutoff.  Matches ESPHome.
         if (kw.probCount >= kw.slidingWindow && cooldownOk) {
           const mean = kw.probSum / kw.slidingWindow;
 
           const triggerType = this._shouldTriggerKeyword(kw, mean, now);
           if (triggerType) {
             this._log.log(
-              'wake-word',
-              `Trigger candidate accepted: model=${kw.name} type=${triggerType} mean=${mean.toFixed(3)} cutoff=${kw.cutoff.toFixed(3)} rms=${rms.toFixed(4)} margin=${(mean - kw.cutoff).toFixed(3)}`
+              'info',
+              `trigger accepted: ${kw.name} (${triggerType}) mean=${mean.toFixed(3)} cutoff=${kw.cutoff.toFixed(3)} margin=${(mean - kw.cutoff).toFixed(3)}`,
             );
             this._lastDetectionTime = now;
             return {

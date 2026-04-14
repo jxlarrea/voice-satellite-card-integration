@@ -364,6 +364,7 @@ function compileModel(arrayBuffer) {
           variableInfo.set(handleId, {
             shape: outTensor.shape,
             quant: outTensor.quant,
+            type: outTensor.type,
           });
         }
         compiledOps.push({ kind: 'READ_VARIABLE', handleId, output: outputs[0] });
@@ -412,15 +413,20 @@ function compileModel(arrayBuffer) {
           outputs,
         });
         break;
-      case BUILTIN_CONV_2D:
+      case BUILTIN_CONV_2D: {
+        const inputTensor = tensors[inputs[0]];
+        const weightTensor = tensors[inputs[1]];
+        const outTensor = tensors[outputs[0]];
         compiledOps.push({
           kind: 'CONV_2D',
           input: inputs[0],
-          weights: compileWeightTensor(tensors[inputs[1]]),
+          weights: compileWeightTensor(weightTensor),
           bias: compileBiasTensor(tensors[inputs[2]]),
           output: outputs[0],
-          outputQuant: tensors[outputs[0]].quant,
-          outputType: tensors[outputs[0]].type,
+          outputType: outTensor.type,
+          inputOffset: -(inputTensor.quant?.zeroPoints?.[0] ?? 0),
+          outputOffset: outTensor.quant?.zeroPoints?.[0] ?? 0,
+          perChannelMultipliers: computePerChannelMultipliers(inputTensor.quant, weightTensor.quant, outTensor.quant, weightTensor.shape[0]),
           padding: readOptionalU8(fb, optionsOff, CONV2D_PADDING, PADDING_SAME),
           strideW: readOptionalU32(fb, optionsOff, CONV2D_STRIDE_W, 1),
           strideH: readOptionalU32(fb, optionsOff, CONV2D_STRIDE_H, 1),
@@ -429,15 +435,21 @@ function compileModel(arrayBuffer) {
           dilationH: readOptionalU32(fb, optionsOff, CONV2D_DILATION_H, 1),
         });
         break;
-      case BUILTIN_DEPTHWISE_CONV_2D:
+      }
+      case BUILTIN_DEPTHWISE_CONV_2D: {
+        const inputTensor = tensors[inputs[0]];
+        const weightTensor = tensors[inputs[1]];
+        const outTensor = tensors[outputs[0]];
         compiledOps.push({
           kind: 'DEPTHWISE_CONV_2D',
           input: inputs[0],
-          weights: compileWeightTensor(tensors[inputs[1]]),
+          weights: compileWeightTensor(weightTensor),
           bias: compileBiasTensor(tensors[inputs[2]]),
           output: outputs[0],
-          outputQuant: tensors[outputs[0]].quant,
-          outputType: tensors[outputs[0]].type,
+          outputType: outTensor.type,
+          inputOffset: -(inputTensor.quant?.zeroPoints?.[0] ?? 0),
+          outputOffset: outTensor.quant?.zeroPoints?.[0] ?? 0,
+          perChannelMultipliers: computePerChannelMultipliers(inputTensor.quant, weightTensor.quant, outTensor.quant, weightTensor.shape[3]),
           padding: readOptionalU8(fb, optionsOff, DEPTHWISE_PADDING, PADDING_SAME),
           strideW: readOptionalU32(fb, optionsOff, DEPTHWISE_STRIDE_W, 1),
           strideH: readOptionalU32(fb, optionsOff, DEPTHWISE_STRIDE_H, 1),
@@ -447,36 +459,55 @@ function compileModel(arrayBuffer) {
           dilationH: readOptionalU32(fb, optionsOff, DEPTHWISE_DILATION_H, 1),
         });
         break;
-      case BUILTIN_FULLY_CONNECTED:
+      }
+      case BUILTIN_FULLY_CONNECTED: {
+        const inputTensor = tensors[inputs[0]];
+        const weightTensor = tensors[inputs[1]];
+        const outTensor = tensors[outputs[0]];
         compiledOps.push({
           kind: 'FULLY_CONNECTED',
           input: inputs[0],
-          weights: compileWeightTensor(tensors[inputs[1]]),
+          weights: compileWeightTensor(weightTensor),
           bias: compileBiasTensor(tensors[inputs[2]]),
           output: outputs[0],
-          outputQuant: tensors[outputs[0]].quant,
-          outputType: tensors[outputs[0]].type,
+          outputType: outTensor.type,
+          inputOffset: -(inputTensor.quant?.zeroPoints?.[0] ?? 0),
+          outputOffset: outTensor.quant?.zeroPoints?.[0] ?? 0,
+          perChannelMultipliers: computePerChannelMultipliers(inputTensor.quant, weightTensor.quant, outTensor.quant, weightTensor.shape[0]),
           activation: readOptionalU8(fb, optionsOff, FULLY_CONNECTED_FUSED_ACTIVATION, ACT_NONE),
         });
         break;
-      case BUILTIN_LOGISTIC:
+      }
+      case BUILTIN_LOGISTIC: {
+        const inputTensor = tensors[inputs[0]];
+        const outTensor = tensors[outputs[0]];
         compiledOps.push({
           kind: 'LOGISTIC',
           input: inputs[0],
           output: outputs[0],
-          outputQuant: tensors[outputs[0]].quant,
-          outputType: tensors[outputs[0]].type,
+          outputType: outTensor.type,
+          inputScale: inputTensor.quant?.scales?.[0] ?? 1,
+          inputZeroPoint: inputTensor.quant?.zeroPoints?.[0] ?? 0,
+          outputScale: outTensor.quant?.scales?.[0] ?? 1,
+          outputZeroPoint: outTensor.quant?.zeroPoints?.[0] ?? 0,
         });
         break;
-      case BUILTIN_QUANTIZE:
+      }
+      case BUILTIN_QUANTIZE: {
+        const inputTensor = tensors[inputs[0]];
+        const outTensor = tensors[outputs[0]];
         compiledOps.push({
           kind: 'QUANTIZE',
           input: inputs[0],
           output: outputs[0],
-          outputQuant: tensors[outputs[0]].quant,
-          outputType: tensors[outputs[0]].type,
+          outputType: outTensor.type,
+          inputScale: inputTensor.quant?.scales?.[0] ?? 1,
+          inputZeroPoint: inputTensor.quant?.zeroPoints?.[0] ?? 0,
+          outputScale: outTensor.quant?.scales?.[0] ?? 1,
+          outputZeroPoint: outTensor.quant?.zeroPoints?.[0] ?? 0,
         });
         break;
+      }
       default:
         throw new Error(`Unsupported wake word op code: ${code}`);
     }
@@ -549,11 +580,20 @@ function compileInitInitializers(fb, subgraphs, buffersVec, opCodeValues, initSu
         || `tensor:${outputs[0]}`;
       handleKeys.set(outputs[0], sharedName);
     } else if (code === BUILTIN_ASSIGN_VARIABLE) {
+      const src = tensors[inputs[1]];
+      // Keep the init buffer as raw int8 bytes when possible so variables
+      // can be filled via a byte-level memcpy — matching the reference
+      // interpreter's init behavior.
+      const rawBytes = src.type === TENSOR_TYPE_INT8 && src.rawBuffer?.length
+        ? new Int8Array(src.rawBuffer.buffer, src.rawBuffer.byteOffset, src.rawBuffer.byteLength)
+        : null;
       initializers.push({
         handleId: handleKeys.get(inputs[0]) || `tensor:${inputs[0]}`,
-        data: materializeConstantTensor(tensors[inputs[1]]),
-        shape: tensors[inputs[1]].shape.slice(),
-        quant: tensors[inputs[1]].quant,
+        rawBytes,
+        data: rawBytes ? null : materializeConstantTensor(src),
+        shape: src.shape.slice(),
+        quant: src.quant,
+        type: src.type,
       });
     }
   }
@@ -578,61 +618,80 @@ class CompiledWakeWordModel {
   createExecutionState() {
     const tensors = this.tensors.map((tensor) => ({
       meta: tensor,
-      data: tensor.type === TENSOR_TYPE_UINT8
-        ? new Uint8Array(sizeOf(tensor.shape))
-        : new Float32Array(sizeOf(tensor.shape)),
+      data: allocTensorData(tensor.type, sizeOf(tensor.shape)),
     }));
 
+    // Initialize constant tensors from their raw buffer.  For INT8/UINT8/INT32
+    // tensors this is a direct byte copy — no dequantization, values stay in
+    // their native quantized representation exactly like the TFLite reference.
     for (const tensorState of tensors) {
       const { meta, data } = tensorState;
       if (!meta.rawBuffer?.length || meta.type === TENSOR_TYPE_RESOURCE) continue;
-      if (data instanceof Uint8Array) {
-        const source = new Uint8Array(
-          meta.rawBuffer.buffer, meta.rawBuffer.byteOffset, meta.rawBuffer.byteLength,
-        );
-        data.set(source.subarray(0, data.length));
-      } else {
-        data.set(materializeConstantTensor(meta));
-      }
+      copyRawBufferToTensor(meta, data);
     }
 
+    // Variables are stored in their native type (int8 bytes for quantized
+    // state).  ReadVariable/AssignVariable are byte copies — same as the
+    // reference which uses memcpy.
     const variables = new Map();
     for (const [handleId, info] of this.variableInfo) {
       variables.set(handleId, {
         shape: info.shape.slice(),
         quant: info.quant,
-        data: new Float32Array(sizeOf(info.shape)),
+        type: info.type ?? TENSOR_TYPE_INT8,
+        data: allocTensorData(info.type ?? TENSOR_TYPE_INT8, sizeOf(info.shape)),
       });
     }
 
-    for (const init of this.initInitializers) {
-      if (!variables.has(init.handleId)) {
-        variables.set(init.handleId, {
-          shape: init.shape.slice(),
-          quant: init.quant,
-          data: new Float32Array(init.data.length),
-        });
+    // Initialize variables from the CALL_ONCE subgraph if present.  Init
+    // values are stored in native type bytes (int8 for quantized state).
+    // Fill with the tensor's zero point if no explicit init — matches the
+    // reference (micro_resource_variable.cc memset to zero_point).
+    for (const [handleId, info] of this.variableInfo) {
+      const v = variables.get(handleId);
+      if (info.quant?.zeroPoints?.length && v.data instanceof Int8Array) {
+        v.data.fill(info.quant.zeroPoints[0] & 0xff);
       }
-      variables.get(init.handleId).data.set(init.data);
+    }
+    for (const init of this.initInitializers) {
+      const v = variables.get(init.handleId);
+      if (!v) continue;
+      if (init.rawBytes && v.data instanceof Int8Array) {
+        v.data.set(init.rawBytes.subarray(0, v.data.length));
+      } else if (init.data) {
+        // Legacy: dequantized float init — requantize to int8 on the fly.
+        const scale = v.quant?.scales?.[0] ?? 1;
+        const zp = v.quant?.zeroPoints?.[0] ?? 0;
+        for (let i = 0; i < init.data.length && i < v.data.length; i++) {
+          let q = Math.round(init.data[i] / scale + zp);
+          if (q < -128) q = -128;
+          else if (q > 127) q = 127;
+          v.data[i] = q;
+        }
+      }
     }
 
     return { tensors, variables };
   }
 
   invoke(inputBuffer, outputBuffer, state) {
+    // Input: direct byte copy into the model's input tensor.  No
+    // dequantization — features stay int8 all the way through conv layers
+    // and only get converted to float for sigmoid (LOGISTIC).
     const inputTensor = state.tensors[this.inputId];
-    dequantizeInto(inputBuffer, inputTensor.data, this.inputTensor.quant);
+    inputTensor.data.set(inputBuffer.subarray(0, inputTensor.data.length));
 
     for (const op of this.ops) {
       switch (op.kind) {
         case 'READ_VARIABLE':
-          assignTensor(state.tensors[op.output], state.variables.get(op.handleId).data);
+          // Byte copy — variable and tensor are same native type.
+          state.tensors[op.output].data.set(state.variables.get(op.handleId).data);
           break;
         case 'ASSIGN_VARIABLE':
           state.variables.get(op.handleId).data.set(state.tensors[op.input].data);
           break;
         case 'RESHAPE':
-          assignTensor(state.tensors[op.output], state.tensors[op.input].data);
+          state.tensors[op.output].data.set(state.tensors[op.input].data);
           break;
         case 'CONCATENATION':
           concatTensors(state, op);
@@ -675,20 +734,150 @@ function compileWeightTensor(tensor) {
   return {
     shape: tensor.shape,
     quant: q,
+    // Keep the raw int8 bytes — no dequantization.  Conv/FC read these
+    // int8 values directly into an int32 accumulator, matching TFLite's
+    // reference integer-only kernel.
     values: new Int8Array(tensor.rawBuffer.buffer, tensor.rawBuffer.byteOffset, tensor.rawBuffer.byteLength),
   };
 }
 
 function compileBiasTensor(tensor) {
-  const values = new Int32Array(tensor.rawBuffer.buffer, tensor.rawBuffer.byteOffset, tensor.rawBuffer.byteLength / 4);
-  const q = tensor.quant;
-  const scales = q?.scales || [];
-  const out = new Float32Array(values.length);
-  for (let i = 0; i < values.length; i++) {
-    const scale = scales.length === 1 ? scales[0] : scales[i];
-    out[i] = values[i] * scale;
+  // Return the raw int32 bias values unscaled.  The reference kernel adds
+  // the int32 bias directly to the int32 accumulator before the final
+  // MultiplyByQuantizedMultiplier requantization step.
+  const byteLength = tensor.rawBuffer.byteLength;
+  const length = byteLength / 4;
+  const out = new Int32Array(length);
+  const dv = new DataView(tensor.rawBuffer.buffer, tensor.rawBuffer.byteOffset, byteLength);
+  for (let i = 0; i < length; i++) {
+    out[i] = dv.getInt32(i * 4, true);
   }
   return out;
+}
+
+// Allocate a typed array matching the TFLite tensor type.
+function allocTensorData(type, size) {
+  switch (type) {
+    case TENSOR_TYPE_INT8: return new Int8Array(size);
+    case TENSOR_TYPE_UINT8: return new Uint8Array(size);
+    case TENSOR_TYPE_INT32: return new Int32Array(size);
+    default: return new Float32Array(size);
+  }
+}
+
+// Copy a model-embedded constant tensor's raw bytes into its execution
+// state buffer.  No dequantization — the values stay in their native
+// quantized representation, identical to how the reference interpreter
+// stores them.
+function copyRawBufferToTensor(meta, dst) {
+  const buf = meta.rawBuffer;
+  if (!buf?.length) return;
+  if (dst instanceof Int8Array) {
+    const src = new Int8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    dst.set(src.subarray(0, dst.length));
+  } else if (dst instanceof Uint8Array) {
+    const src = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    dst.set(src.subarray(0, dst.length));
+  } else if (dst instanceof Int32Array) {
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const count = Math.min(dst.length, Math.floor(buf.byteLength / 4));
+    for (let i = 0; i < count; i++) dst[i] = dv.getInt32(i * 4, true);
+  } else {
+    // Float32 fallback — dequantize int8/uint8 if the tensor is quantized.
+    dst.set(materializeConstantTensor(meta).subarray(0, dst.length));
+  }
+}
+
+// Pre-compute per-channel quantized multiplier + shift for a conv/FC op.
+// effective_scale = input_scale * weight_scale[ch] / output_scale
+// Each returns a Q0.31 fixed-point multiplier and a power-of-two shift
+// exponent, exactly like tflite's QuantizeMultiplier.
+function computePerChannelMultipliers(inputQuant, weightQuant, outputQuant, channelCount) {
+  const inputScale = inputQuant?.scales?.[0] ?? 1;
+  const outputScale = outputQuant?.scales?.[0] ?? 1;
+  const weightScales = weightQuant?.scales || [];
+  const multipliers = new Int32Array(channelCount);
+  const shifts = new Int32Array(channelCount);
+  for (let ch = 0; ch < channelCount; ch++) {
+    const weightScale = weightScales.length === 1 ? weightScales[0] : weightScales[ch];
+    const effective = (inputScale * weightScale) / outputScale;
+    const { multiplier, shift } = quantizeMultiplier(effective);
+    multipliers[ch] = multiplier;
+    shifts[ch] = shift;
+  }
+  return { multipliers, shifts };
+}
+
+// Decompose a positive real number M into (q, n) where M = q * 2^(n - 31)
+// and q is a Q0.31 signed int in [2^30, 2^31 - 1] (i.e., representing
+// [0.5, 1.0)).  Matches tflite/kernels/internal/quantization_util.cc.
+function quantizeMultiplier(doubleMultiplier) {
+  if (doubleMultiplier === 0 || !isFinite(doubleMultiplier)) {
+    return { multiplier: 0, shift: 0 };
+  }
+  // frexp: doubleMultiplier = q * 2^shift, q in [0.5, 1.0)
+  let shift = 0;
+  let q = doubleMultiplier;
+  while (q >= 1.0) { q *= 0.5; shift++; }
+  while (q < 0.5) { q *= 2.0; shift--; }
+  // q now in [0.5, 1.0); represent as Q0.31 fixed-point.
+  // 2^31 = 2147483648.  Multiplying by it and rounding gives the int.
+  let qFixed = Math.round(q * 2147483648);
+  if (qFixed === 2147483648) { qFixed = 1073741824; shift++; }
+  if (shift < -31) { shift = 0; qFixed = 0; }
+  if (shift > 30) { shift = 30; qFixed = 2147483647; }
+  return { multiplier: qFixed | 0, shift };
+}
+
+// MultiplyByQuantizedMultiplier using the double-rounding path
+// (gemmlowp-style).  This is the DEFAULT in TFLite/TFLite-Micro unless
+// TFLITE_SINGLE_ROUNDING is explicitly defined.  Two rounding steps:
+//   1. SaturatingRoundingDoublingHighMul — multiply x by multiplier,
+//      keeping the high 32 bits with round-half-away-from-zero on the
+//      doubled product.
+//   2. RoundingDivideByPOT — a correctly-rounded right shift.
+// This bit-exactly matches what ESPHome's TFLite Micro uses for wake
+// word model inference.
+function multiplyByQuantizedMultiplier(x, multiplier, shift) {
+  const leftShift = shift > 0 ? shift : 0;
+  const rightShift = shift > 0 ? 0 : -shift;
+
+  // Left-shift x (with overflow to BigInt territory handled safely).
+  let xShifted = BigInt(x);
+  if (leftShift > 0) xShifted <<= BigInt(leftShift);
+
+  // SaturatingRoundingDoublingHighMul(a, b):
+  //   ab_64 = a * b (int64)
+  //   nudge = ab_64 >= 0 ? (1 << 30) : (1 - (1 << 30))
+  //   return (int32_t)((ab_64 + nudge) / (1LL << 31))
+  //   — with overflow saturation when a == b == INT32_MIN.
+  const ab64 = xShifted * BigInt(multiplier);
+  const nudge = ab64 >= 0n ? (1n << 30n) : (1n - (1n << 30n));
+  // C integer division truncates toward zero.  BigInt `/` also truncates
+  // toward zero (per the BigInt spec), matching the reference exactly —
+  // which is CRITICAL here because the nudge is designed to turn
+  // trunc-toward-zero into round-half-away-from-zero.  Using `>>` (floor
+  // toward -infinity) would give wrong results for negative values.
+  let high = (ab64 + nudge) / (1n << 31n);
+  // Saturate to int32 range
+  const INT32_MAX = (1n << 31n) - 1n;
+  const INT32_MIN = -(1n << 31n);
+  if (high > INT32_MAX) high = INT32_MAX;
+  else if (high < INT32_MIN) high = INT32_MIN;
+
+  // RoundingDivideByPOT(x, exp):
+  //   mask = (1 << exp) - 1
+  //   remainder = x & mask
+  //   threshold = (mask >> 1) + (x < 0 ? 1 : 0)
+  //   return (x >> exp) + (remainder > threshold ? 1 : 0)
+  if (rightShift === 0) return Number(high);
+  const expShift = BigInt(rightShift);
+  const mask = (1n << expShift) - 1n;
+  const remainder = high & mask;
+  const threshold = (mask >> 1n) + (high < 0n ? 1n : 0n);
+  let result = high >> expShift;
+  if (remainder > threshold) result += 1n;
+  return Number(result);
 }
 
 function materializeConstantTensor(tensor) {
@@ -810,6 +999,9 @@ function splitV(state, op) {
   }
 }
 
+// Integer-only Conv2D matching tflite's reference ConvPerChannel.
+// Accumulates in int32, adds int32 bias, then uses per-channel
+// MultiplyByQuantizedMultiplier to requantize to int8.
 function conv2d(state, op) {
   const input = state.tensors[op.input];
   const output = state.tensors[op.output];
@@ -817,13 +1009,22 @@ function conv2d(state, op) {
   const [outC, kernelH, kernelW, filterC] = op.weights.shape;
   const [, outH, outW] = output.meta.shape;
   const pad = computePadding(op.padding, inH, inW, kernelH, kernelW, op.strideH, op.strideW, op.dilationH, op.dilationW, outH, outW);
+  const weights = op.weights.values;
+  const { multipliers, shifts } = op.perChannelMultipliers;
+  const inputOffset = op.inputOffset;
+  const outputOffset = op.outputOffset;
+  const [actMin, actMax] = activationRange(op.activation, op.outputType, outputOffset);
+  const outMin = op.outputType === TENSOR_TYPE_INT8 ? -128 : 0;
+  const outMax = op.outputType === TENSOR_TYPE_INT8 ? 127 : 255;
 
   let outIndex = 0;
   for (let n = 0; n < batch; n++) {
     for (let oh = 0; oh < outH; oh++) {
       for (let ow = 0; ow < outW; ow++) {
         for (let oc = 0; oc < outC; oc++) {
-          let sum = op.bias[oc] || 0;
+          // int32 accumulator — starts at 0.  Weight zero point is 0 for
+          // per-channel symmetric quantization, so filter_val is used raw.
+          let acc = 0;
           for (let kh = 0; kh < kernelH; kh++) {
             const inY = oh * op.strideH + kh * op.dilationH - pad.top;
             if (inY < 0 || inY >= inH) continue;
@@ -833,18 +1034,25 @@ function conv2d(state, op) {
               const inputBase = (((n * inH + inY) * inW + inX) * inC);
               const weightBase = (((oc * kernelH + kh) * kernelW + kw) * filterC);
               for (let ic = 0; ic < filterC; ic++) {
-                const w = dequantizeWeight(op.weights, weightBase + ic, oc);
-                sum += input.data[inputBase + ic] * w;
+                acc += weights[weightBase + ic] * (input.data[inputBase + ic] + inputOffset);
               }
             }
           }
-          output.data[outIndex++] = requantizeActivation(applyActivation(sum, op.activation), op.outputQuant, op.outputType);
+          if (op.bias) acc += op.bias[oc];
+          acc = multiplyByQuantizedMultiplier(acc, multipliers[oc], shifts[oc]);
+          acc += outputOffset;
+          if (acc < actMin) acc = actMin;
+          else if (acc > actMax) acc = actMax;
+          if (acc < outMin) acc = outMin;
+          else if (acc > outMax) acc = outMax;
+          output.data[outIndex++] = acc;
         }
       }
     }
   }
 }
 
+// Integer-only DepthwiseConv2D matching tflite's DepthwiseConvPerChannel.
 function depthwiseConv2d(state, op) {
   const input = state.tensors[op.input];
   const output = state.tensors[op.output];
@@ -853,6 +1061,13 @@ function depthwiseConv2d(state, op) {
   const [, outH, outW] = output.meta.shape;
   const pad = computePadding(op.padding, inH, inW, kernelH, kernelW, op.strideH, op.strideW, op.dilationH, op.dilationW, outH, outW);
   const channelsPerInput = op.depthMultiplier;
+  const weights = op.weights.values;
+  const { multipliers, shifts } = op.perChannelMultipliers;
+  const inputOffset = op.inputOffset;
+  const outputOffset = op.outputOffset;
+  const [actMin, actMax] = activationRange(op.activation, op.outputType, outputOffset);
+  const outMin = op.outputType === TENSOR_TYPE_INT8 ? -128 : 0;
+  const outMax = op.outputType === TENSOR_TYPE_INT8 ? 127 : 255;
 
   let outIndex = 0;
   for (let n = 0; n < batch; n++) {
@@ -860,7 +1075,7 @@ function depthwiseConv2d(state, op) {
       for (let ow = 0; ow < outW; ow++) {
         for (let oc = 0; oc < outC; oc++) {
           const ic = Math.floor(oc / channelsPerInput);
-          let sum = op.bias[oc] || 0;
+          let acc = 0;
           for (let kh = 0; kh < kernelH; kh++) {
             const inY = oh * op.strideH + kh * op.dilationH - pad.top;
             if (inY < 0 || inY >= inH) continue;
@@ -869,47 +1084,112 @@ function depthwiseConv2d(state, op) {
               if (inX < 0 || inX >= inW) continue;
               const inputIdx = (((n * inH + inY) * inW + inX) * inC) + ic;
               const weightIdx = (((kh * kernelW + kw) * outC) + oc);
-              sum += input.data[inputIdx] * dequantizeWeight(op.weights, weightIdx, oc);
+              acc += weights[weightIdx] * (input.data[inputIdx] + inputOffset);
             }
           }
-          output.data[outIndex++] = requantizeActivation(applyActivation(sum, op.activation), op.outputQuant, op.outputType);
+          if (op.bias) acc += op.bias[oc];
+          acc = multiplyByQuantizedMultiplier(acc, multipliers[oc], shifts[oc]);
+          acc += outputOffset;
+          if (acc < actMin) acc = actMin;
+          else if (acc > actMax) acc = actMax;
+          if (acc < outMin) acc = outMin;
+          else if (acc > outMax) acc = outMax;
+          output.data[outIndex++] = acc;
         }
       }
     }
   }
 }
 
+// Integer-only FullyConnected matching tflite's FullyConnectedPerChannel
+// for int8 activations with per-channel symmetric weights.
 function fullyConnected(state, op) {
   const input = state.tensors[op.input];
   const output = state.tensors[op.output];
   const inVec = input.data;
   const [outCount, inCount] = op.weights.shape;
+  const weights = op.weights.values;
+  const { multipliers, shifts } = op.perChannelMultipliers;
+  const inputOffset = op.inputOffset;
+  const outputOffset = op.outputOffset;
+  const [actMin, actMax] = activationRange(op.activation, op.outputType, outputOffset);
+  const outMin = op.outputType === TENSOR_TYPE_INT8 ? -128 : 0;
+  const outMax = op.outputType === TENSOR_TYPE_INT8 ? 127 : 255;
 
   for (let oc = 0; oc < outCount; oc++) {
-    let sum = op.bias[oc] || 0;
+    let acc = 0;
     const base = oc * inCount;
     for (let ic = 0; ic < inCount; ic++) {
-      sum += inVec[ic] * dequantizeWeight(op.weights, base + ic, oc);
+      acc += weights[base + ic] * (inVec[ic] + inputOffset);
     }
-    output.data[oc] = requantizeActivation(applyActivation(sum, op.activation), op.outputQuant, op.outputType);
+    if (op.bias) acc += op.bias[oc];
+    acc = multiplyByQuantizedMultiplier(acc, multipliers[oc], shifts[oc]);
+    acc += outputOffset;
+    if (acc < actMin) acc = actMin;
+    else if (acc > actMax) acc = actMax;
+    if (acc < outMin) acc = outMin;
+    else if (acc > outMax) acc = outMax;
+    output.data[oc] = acc;
   }
 }
 
+// LOGISTIC on int8 input producing int8 or uint8 output.  The reference
+// TFLite int8 LOGISTIC uses a fixed-point sigmoid approximation; here we
+// dequantize to float for the sigmoid (tiny output tensor, negligible
+// cost) and quantize back.  The output zero point for a sigmoid int8
+// tensor is typically -128 with scale 1/256 so values cover [0, 1].
 function logistic(state, op) {
   const input = state.tensors[op.input];
   const output = state.tensors[op.output];
+  const invInScale = op.inputScale;
+  const inZp = op.inputZeroPoint;
+  const outScale = op.outputScale;
+  const outZp = op.outputZeroPoint;
+  const outMin = op.outputType === TENSOR_TYPE_INT8 ? -128 : 0;
+  const outMax = op.outputType === TENSOR_TYPE_INT8 ? 127 : 255;
   for (let i = 0; i < input.data.length; i++) {
-    const value = 1 / (1 + Math.exp(-input.data[i]));
-    output.data[i] = requantizeActivation(value, op.outputQuant, op.outputType);
+    const f = (input.data[i] - inZp) * invInScale;
+    const s = 1 / (1 + Math.exp(-f));
+    let q = Math.round(s / outScale + outZp);
+    if (q < outMin) q = outMin;
+    else if (q > outMax) q = outMax;
+    output.data[i] = q;
   }
 }
 
+// QUANTIZE re-quantizes an int8 tensor to a different scale/zero-point
+// (e.g., the sigmoid output's int8 [-128..127] at scale 1/256 becomes
+// the final uint8 [0..255] at scale 1/256 so `/255` reads correctly).
 function quantizeOp(state, op) {
   const input = state.tensors[op.input];
   const output = state.tensors[op.output];
+  const inScale = op.inputScale;
+  const inZp = op.inputZeroPoint;
+  const outScale = op.outputScale;
+  const outZp = op.outputZeroPoint;
+  const outMin = op.outputType === TENSOR_TYPE_INT8 ? -128 : 0;
+  const outMax = op.outputType === TENSOR_TYPE_INT8 ? 127 : 255;
   for (let i = 0; i < input.data.length; i++) {
-    output.data[i] = quantizeValue(input.data[i], op.outputQuant, op.outputType);
+    const f = (input.data[i] - inZp) * inScale;
+    let q = Math.round(f / outScale + outZp);
+    if (q < outMin) q = outMin;
+    else if (q > outMax) q = outMax;
+    output.data[i] = q;
   }
+}
+
+// Compute the clamp range corresponding to a fused ReLU-style activation
+// in the requantized output domain.  Returns [min, max] as ints.  The
+// activation is applied AFTER requantization and BEFORE the normal int8
+// clamp, matching tflite's CalculateActivationRangeQuantized.
+function activationRange(activation, outputType, outputZeroPoint) {
+  const typeMin = outputType === TENSOR_TYPE_INT8 ? -128 : 0;
+  const typeMax = outputType === TENSOR_TYPE_INT8 ? 127 : 255;
+  if (activation === ACT_RELU) {
+    // ReLU clamps real values to [0, inf).  In quantized space: q_min = zp.
+    return [outputZeroPoint, typeMax];
+  }
+  return [typeMin, typeMax];
 }
 
 function computePadding(paddingType, inH, inW, kernelH, kernelW, strideH, strideW, dilationH, dilationW, outH, outW) {

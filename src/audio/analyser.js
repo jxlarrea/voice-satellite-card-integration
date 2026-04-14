@@ -192,8 +192,20 @@ export class AnalyserManager {
    *   run once attachAudio() switches to the audio analyser — otherwise
    *   the bar would react to mic input during the pre-announce chime.
    */
-  start(barEl, { deferred } = {}) {
+  start(barEl, { deferred, warmupMs } = {}) {
     this._barEl = barEl;
+    // Warmup window: discard the first `warmupMs` of output writes.  Used
+    // right after the mic is unmuted to hide the activation transient —
+    // when a MediaStreamTrack flips from enabled=false to true, the first
+    // few hundred samples often carry a DC step or driver-level click
+    // which the speech-band weighting (`_getMicSpeechWeight`) amplifies
+    // into a visible glow "bleep" on the reactive bar before the real
+    // signal settles.  Ticks still run so the analyser's smoothing fills
+    // with live data during the warmup — only the CSS-var write is
+    // suppressed.
+    this._warmupUntil = (typeof warmupMs === 'number' && warmupMs > 0)
+      ? performance.now() + warmupMs
+      : 0;
     if (!this._visibilityHandler) {
       this._visibilityHandler = () => {
         if (document.hidden) {
@@ -261,6 +273,18 @@ export class AnalyserManager {
     this._log.log('analyser', 'Active -> none (audio detached)');
   }
 
+  /**
+   * Invalidate the "last level" cache so the next `_tick()` writes its
+   * computed value to `--vs-audio-level` unconditionally.  The tick
+   * otherwise skips writes when the level hasn't changed, which leaves
+   * the bar stuck on whatever value was in the CSS variable when the
+   * analyser started — e.g. a residual synthetic pulse value written by
+   * the wake-word "breathing" animation.
+   */
+  invalidateLastLevel() {
+    this._lastLevel = -1;
+  }
+
   _tick() {
     if (!this._barEl || !this._activeAnalyser) {
       this._rafId = null;
@@ -297,6 +321,22 @@ export class AnalyserManager {
     }
 
     const level = Math.min(1, Math.round(this._mapVisualLevel(meanAbs, isMic) * 20) / 20);
+
+    // During the post-unmute warmup window, keep the analyser running
+    // (so smoothing converges on live audio) but suppress writes to
+    // --vs-audio-level — any transient "bleep" from mic activation gets
+    // absorbed here instead of being rendered.  When the window ends we
+    // force the next real value through by resetting _lastLevel, so the
+    // "skip-write-when-unchanged" optimization doesn't leave the bar
+    // stuck on whatever pre-warmup value was there.
+    if (this._warmupUntil) {
+      if (now < this._warmupUntil) {
+        this._rafId = requestAnimationFrame(this._boundTick);
+        return;
+      }
+      this._warmupUntil = 0;
+      this._lastLevel = -1;
+    }
 
     if (level !== this._lastLevel) {
       this._lastLevel = level;
@@ -347,8 +387,16 @@ export class AnalyserManager {
     const curved = Math.pow(scaled, isMic ? 0.6 : 0.8);
 
     if (isMic) {
-      if (curved <= 0.015) return 0;
-      const floored = 0.12 + curved * 0.88;
+      // Noise gate: values at or below this are ambient room noise
+      // (HVAC, fan, AC hum, distant traffic) and must render as fully
+      // dark — users expect "no sound → no glow".  The old threshold
+      // of 0.015 was set low enough that any quiet room passed it,
+      // and the floor of 0.12 kept a visible glow on through silence.
+      if (curved <= 0.06) return 0;
+      // Above the gate, lift soft voices with a small visible floor
+      // that's low enough not to read as "always on" when the mic
+      // briefly clips a keyboard click or door close.
+      const floored = 0.05 + curved * 0.95;
       return Math.min(1, floored);
     }
 

@@ -6,7 +6,7 @@
 
 import { State, INTERACTING_STATES, EXPECTED_ERRORS, BlurReason, Timing } from '../constants.js';
 import { getSwitchState } from '../shared/satellite-state.js';
-import { CHIME_WAKE } from '../audio/chime.js';
+import { CHIME_WAKE, getChimeDuration } from '../audio/chime.js';
 import { onTTSComplete } from '../session/events.js';
 import { humanizeToolName } from '../shared/tool-name.js';
 
@@ -123,7 +123,16 @@ export function handleWakeWordEnd(mgr, eventData) {
     const audio = mgr.card.audio;
     audio.stopSending();
     tts.playChime('wake');
-    const resumeDelay = (CHIME_WAKE.duration * 1000) + 50;
+    // Speaker output buffers + echo-cancellation adapt time mean the
+    // chime is still physically emerging from the speakers for a while
+    // after the audio file ends.  +50 ms was too tight — the mic
+    // resumed sending mid-tail and the chime bled into STT audio.
+    // +250 ms matches the drain margin the local wake-word path uses.
+    // `getChimeDuration` reads the real file length (users can drop
+    // custom chime MP3s into /config/voice_satellite/sounds/), falling
+    // back to the declared value if metadata isn't loaded yet.
+    const SPEAKER_DRAIN_MS = 250;
+    const resumeDelay = (getChimeDuration(CHIME_WAKE) * 1000) + SPEAKER_DRAIN_MS;
     setTimeout(() => {
       // Discard audio captured during the chime, then resume sending.
       audio.audioBuffer = [];

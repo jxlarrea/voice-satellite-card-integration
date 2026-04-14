@@ -6,6 +6,7 @@
  */
 
 import { setupAudioWorklet, sendAudioBuffer } from './processing.js';
+import { resolveDspForMode } from './dsp-config.js';
 
 const TARGET_SAMPLE_RATE = 16000;
 
@@ -22,6 +23,27 @@ export class AudioManager {
     this._sendInterval = null;
     this._actualSampleRate = TARGET_SAMPLE_RATE;
     this._sendSessionCount = 0;
+    // Authoritative mute flag — separate from any specific MediaStreamTrack
+    // so a stream swap (switchMicMode) can re-apply it to the new tracks
+    // without racing the wake-word handler's synchronous mute call.
+    this._micTracksMuted = false;
+  }
+
+  /** Read-only — true while all mic tracks should be silent. */
+  get micTracksMuted() { return this._micTracksMuted; }
+
+  /**
+   * Mute / unmute all audio tracks on the current MediaStream.  Records
+   * the desired state so subsequent stream rebuilds (switchMicMode) can
+   * reproduce it.  Replaces the wake-word handler's direct
+   * `track.enabled = ...` poking, which had no way to survive a stream
+   * swap mid-mute.
+   */
+  setMicTracksMuted(muted) {
+    this._micTracksMuted = !!muted;
+    if (this._mediaStream) {
+      this._mediaStream.getAudioTracks().forEach((t) => { t.enabled = !this._micTracksMuted; });
+    }
   }
   get card() { return this._card; }
   get log() { return this._log; }
@@ -32,21 +54,31 @@ export class AudioManager {
   get audioBuffer() { return this._audioBuffer; }
   set audioBuffer(val) { this._audioBuffer = val; }
   get actualSampleRate() { return this._actualSampleRate; }
-  async startMicrophone() {
+  /**
+   * Acquire the mic.  `mode` selects which DSP config group applies — the
+   * panel exposes separate toggles for wake-word listening vs. STT
+   * streaming, and the engine restarts the mic on the state transition so
+   * each phase gets the signal shape it was tuned for.
+   *
+   * @param {'wake_word' | 'stt'} [mode='wake_word']
+   */
+  async startMicrophone(mode = 'wake_word') {
     await this._ensureAudioContextRunning();
 
     const { config } = this._card;
-    this._log.log('mic', `AudioContext state=${this._audioContext.state} sampleRate=${this._audioContext.sampleRate}`);
+    this._currentMicMode = mode;
+    this._log.log('mic', `AudioContext state=${this._audioContext.state} sampleRate=${this._audioContext.sampleRate} mode=${mode}`);
 
+    const dsp = resolveDspForMode(config, mode);
     const audioConstraints = {
       sampleRate: TARGET_SAMPLE_RATE,
       channelCount: 1,
-      echoCancellation: config.echo_cancellation,
-      noiseSuppression: config.noise_suppression,
-      autoGainControl: config.auto_gain_control,
+      echoCancellation: dsp.echoCancellation,
+      noiseSuppression: dsp.noiseSuppression,
+      autoGainControl: dsp.autoGainControl,
     };
 
-    if (config.voice_isolation) {
+    if (dsp.voiceIsolation) {
       audioConstraints.advanced = [{ voiceIsolation: true }];
     }
 
@@ -75,10 +107,107 @@ export class AudioManager {
     this._log.log('mic', 'Audio capture via AudioWorklet');
   }
 
+  /**
+   * Swap the MediaStream to a new DSP mode without tearing down the
+   * AudioContext or AudioWorklet.  Re-acquires getUserMedia with the
+   * target-mode constraints, reconnects the new source to the existing
+   * worklet, and leaves the send loop running.  Typical dropout: ~20–50 ms
+   * (getUserMedia latency), far less than a full startMicrophone+context
+   * teardown.
+   *
+   * Called on pipeline state transitions so the wake-word and STT phases
+   * each see the signal shape they were tuned for.
+   *
+   * @param {'wake_word' | 'stt'} mode
+   */
+  async switchMicMode(mode) {
+    if (!this._audioContext || !this._workletNode) return;
+    if (this._currentMicMode === mode) return;
+    const { config } = this._card;
+    const dsp = resolveDspForMode(config, mode);
+    this._log.log('mic', `switchMicMode → ${mode}`);
+
+    const audioConstraints = {
+      sampleRate: TARGET_SAMPLE_RATE,
+      channelCount: 1,
+      echoCancellation: dsp.echoCancellation,
+      noiseSuppression: dsp.noiseSuppression,
+      autoGainControl: dsp.autoGainControl,
+    };
+    if (dsp.voiceIsolation) audioConstraints.advanced = [{ voiceIsolation: true }];
+
+    // Acquire the new stream BEFORE tearing the old one down so the old
+    // sourceNode keeps feeding the analyser (reactive bar) and the worklet
+    // throughout the getUserMedia round-trip.  Otherwise the UI shows a
+    // 50-200 ms dead patch between wake-word detection and STT start that
+    // looks like a UI stagger.  Cutover is a single synchronous disconnect +
+    // connect, well under one audio render quantum.
+    let nextStream;
+    try {
+      nextStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+    } catch (e) {
+      this._log.error('mic', `switchMicMode getUserMedia failed: ${e.message || e}`);
+      return;
+    }
+
+    // If the session was torn down while we were awaiting getUserMedia,
+    // clean up the stream we just got and bail.
+    if (!this._audioContext || !this._workletNode) {
+      nextStream.getTracks().forEach((t) => { try { t.stop(); } catch (_) {} });
+      return;
+    }
+
+    const oldSource = this._sourceNode;
+    const oldStream = this._mediaStream;
+
+    // Carry mute state across the swap.  The wake-word handler mutes the
+    // mic via setMicTracksMuted() between `setState(WAKE_WORD_DETECTED)`
+    // (which triggers this swap) and the chime playing — if we left the
+    // new stream's tracks live while getUserMedia was in flight, the
+    // chime would bleed into the mic for 100-200 ms once the new tracks
+    // came up, showing as a clearly-audio-reactive bar during the chime.
+    // Reading from `_micTracksMuted` (authoritative flag) instead of
+    // sampling `oldStream`'s track.enabled state avoids races with the
+    // synchronous mute call that runs while we're awaiting getUserMedia.
+    if (this._micTracksMuted) {
+      nextStream.getAudioTracks().forEach((t) => { t.enabled = false; });
+    }
+
+    // Build the new graph first: attach the new source to the analyser and
+    // worklet while the old source is still connected to both.  During the
+    // overlap (a handful of audio ticks) both sources feed into the mic
+    // analyser — harmless; they carry the same room audio with a sub-ms
+    // skew so the reactive-bar spectrum stays coherent.  This is the key
+    // trick that eliminates the "wake word fires, UI pops up, bar freezes,
+    // chime plays, bar unfreezes" stagger.
+    const nextSource = this._audioContext.createMediaStreamSource(nextStream);
+    if (this._card.isReactiveBarEnabled) {
+      this._card.analyser.attachMic(nextSource, this._audioContext);
+    }
+    nextSource.connect(this._workletNode);
+
+    // ...then drop the old source.  IMPORTANT: call sourceNode.disconnect()
+    // directly instead of analyser.detachMic().  detachMic() clears the
+    // analyser's `_activeAnalyser` to null as a side-effect, which stops the
+    // reactive bar even though `nextSource` is still feeding the same
+    // underlying AnalyserNode.  A plain disconnect() unhooks the old source
+    // from every destination (including the analyser) without touching the
+    // analyser's active-source bookkeeping.
+    if (oldSource) {
+      try { oldSource.disconnect(); } catch (_) {}
+    }
+    if (oldStream) {
+      oldStream.getTracks().forEach((t) => { try { t.stop(); } catch (_) {} });
+    }
+
+    this._mediaStream = nextStream;
+    this._sourceNode = nextSource;
+    this._currentMicMode = mode;
+  }
+
   stopMicrophone() {
     const hadWorklet = !!this._workletNode;
     const hadStream = !!this._mediaStream;
-    const hadContext = !!this._audioContext;
     this.stopSending();
     if (this._workletNode) {
       this._workletNode.disconnect();
@@ -93,13 +222,33 @@ export class AudioManager {
       this._mediaStream.getTracks().forEach((track) => track.stop());
       this._mediaStream = null;
     }
+    // Deliberately leave this._audioContext open.  `createMediaElementSource`
+    // permanently binds the TTS <audio> element to whatever AudioContext
+    // first wraps it (per Web Audio spec — one MediaElementSource per
+    // element, forever).  If we close the context here, the next
+    // startMicrophone() creates a fresh one, subsequent attachAudio()
+    // throws "HTMLMediaElement already connected previously to a
+    // different MediaElementSourceNode", AND the old binding sinks TTS
+    // audio into the dead graph so playback is silent.  The context is
+    // cheap to keep alive; real teardown happens in destroy().
+    this._audioBuffer = [];
+    if (hadWorklet || hadStream) {
+      this._log.log('mic', `stopMicrophone: worklet=${hadWorklet} stream=${hadStream} (ctx kept)`);
+    }
+  }
+
+  /**
+   * Final teardown — call only on card destroy, not on a normal
+   * start/stop cycle.  Closes the AudioContext, which invalidates every
+   * MediaElementSource bound to it (TTS, notification audio).  The card
+   * controller is responsible for dropping references to those <audio>
+   * elements afterward so a restart rebuilds them fresh.
+   */
+  destroyContext() {
     if (this._audioContext) {
       this._audioContext.close().catch(() => {});
       this._audioContext = null;
-    }
-    this._audioBuffer = [];
-    if (hadWorklet || hadStream || hadContext) {
-      this._log.log('mic', `stopMicrophone: worklet=${hadWorklet} stream=${hadStream} ctx=${hadContext}`);
+      this._log.log('mic', 'AudioContext closed (destroyContext)');
     }
   }
 
@@ -167,6 +316,13 @@ export class AudioManager {
     }
   }
   async _ensureAudioContextRunning() {
+    // A closed context can't be reused — treat it like null so we build
+    // a fresh one on the next start.  (stopMicrophone no longer closes,
+    // but a prior destroyContext() or browser-initiated close can leave
+    // the reference behind.)
+    if (this._audioContext && this._audioContext.state === 'closed') {
+      this._audioContext = null;
+    }
     if (!this._audioContext) {
       this._audioContext = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: TARGET_SAMPLE_RATE,

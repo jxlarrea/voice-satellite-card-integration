@@ -70,8 +70,12 @@ export class UIBroadcastProxy {
     for (const c of this._cards) c.ui.stopReactive();
   }
 
-  startReactive() {
-    for (const c of this._cards) c.ui.startReactive();
+  startReactive(opts) {
+    for (const c of this._cards) c.ui.startReactive(opts);
+  }
+
+  setReactiveSuppressed(suppressed) {
+    for (const c of this._cards) c.ui.setReactiveSuppressed?.(suppressed);
   }
 
   setAnnouncementMode(on) {

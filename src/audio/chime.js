@@ -13,11 +13,25 @@ import { buildMediaUrl } from './media-playback.js';
 
 const SOUNDS_BASE = '/voice_satellite/sounds';
 
-/** Chime definitions: URL path + duration in seconds */
-export const CHIME_WAKE = { url: `${SOUNDS_BASE}/wake.mp3`, duration: 0.25 };
-export const CHIME_DONE = { url: `${SOUNDS_BASE}/done.mp3`, duration: 0.25 };
-export const CHIME_ERROR = { url: `${SOUNDS_BASE}/error.mp3`, duration: 0.15 };
-export const CHIME_ALERT = { url: `${SOUNDS_BASE}/alert.mp3`, duration: 0.6 };
+/** Chime definitions.
+ *
+ *  Only the URL is canonical.  The `duration` field is a conservative
+ *  fallback used before the browser has loaded the MP3's metadata —
+ *  callers that schedule a post-chime unmute should prefer
+ *  `getChimeDuration(chime)` which returns the real file length read
+ *  off the cached Audio element's `duration` property.
+ *
+ *  Why it matters: users can drop their own chime files into
+ *  `/config/voice_satellite/sounds/` and the integration (see
+ *  `_sync_custom_sounds()` in __init__.py) copies them over the
+ *  built-in ones at startup.  Those custom files can be any length.
+ *  A hardcoded duration would under-declare them, re-arming the mic
+ *  mid-chime and bleeding audio into STT.
+ */
+export const CHIME_WAKE = { url: `${SOUNDS_BASE}/wake.mp3`, duration: 0.29 };
+export const CHIME_DONE = { url: `${SOUNDS_BASE}/done.mp3`, duration: 0.29 };
+export const CHIME_ERROR = { url: `${SOUNDS_BASE}/error.mp3`, duration: 0.19 };
+export const CHIME_ALERT = { url: `${SOUNDS_BASE}/alert.mp3`, duration: 0.63 };
 export const CHIME_ANNOUNCE_URL = `${SOUNDS_BASE}/announce.mp3`;
 
 /** Cache of preloaded Audio elements keyed by URL */
@@ -47,6 +61,42 @@ function getCachedAudio(url) {
 export function preloadChimes() {
   getCachedAudio(CHIME_WAKE.url);
   getCachedAudio(CHIME_DONE.url);
+}
+
+/**
+ * Runtime-overridden durations keyed by filename (e.g. `wake.mp3`).
+ * Populated by the client from a server-provided manifest probed in the
+ * Python integration after it syncs user-supplied sound files into the
+ * integration dir (see `_sync_custom_sounds()` in __init__.py).  Falls
+ * back to the hardcoded `chime.duration` when no entry is present
+ * (fresh install, manifest fetch failed, etc.).
+ */
+const _durationOverrides = new Map();
+
+export function setChimeDurationOverrides(map) {
+  _durationOverrides.clear();
+  if (!map) return;
+  for (const [filename, seconds] of Object.entries(map)) {
+    if (Number.isFinite(seconds) && seconds > 0) {
+      _durationOverrides.set(filename, seconds);
+    }
+  }
+}
+
+/**
+ * Return the chime's duration in seconds.  Prefers the server-probed
+ * override (accurate for user-supplied custom sound files); falls back
+ * to the hardcoded declared value.
+ *
+ * @param {{ url: string, duration: number }} chime
+ * @returns {number} duration in seconds
+ */
+export function getChimeDuration(chime) {
+  if (!chime || !chime.url) return 0;
+  const filename = chime.url.split('/').pop();
+  const override = _durationOverrides.get(filename);
+  if (override !== undefined) return override;
+  return chime.duration ?? 0;
 }
 
 /**

@@ -182,22 +182,42 @@ export class UIManager {
 
     if (config.barVisible) {
       bar.classList.add('visible');
-      bar.classList.remove('connecting', 'listening', 'processing', 'speaking', 'reactive');
-      if (config.animation) {
+      // IMPORTANT: only swap the animation class when the target is
+      // actually different from what's currently on the bar.  Removing
+      // and re-adding the same class restarts its CSS `@keyframes` from
+      // 0%, which visibly jumps the gradient flow to its leading edge —
+      // e.g. every WAKE_WORD_DETECTED → STT transition (both of which
+      // map to `animation: 'listening'`) would yank the flowing colors
+      // back a full phase.  Removing only the OTHER animation classes
+      // leaves the matching one untouched so the keyframe keeps ticking.
+      const ANIM_CLASSES = ['connecting', 'listening', 'processing', 'speaking'];
+      for (const a of ANIM_CLASSES) {
+        if (a !== config.animation) bar.classList.remove(a);
+      }
+      if (config.animation && !bar.classList.contains(config.animation)) {
         bar.classList.add(config.animation);
       }
       // Skip reactivity for remote TTS — no local audio to visualize
       const isRemoteTts = state === 'TTS' && !!this._card.ttsTarget;
-      const shouldReact = config.useReactive && !isRemoteTts;
-      if (reactive && shouldReact) {
-        bar.classList.add('reactive');
-        this._globalUI.classList.add('reactive-mode');
-        this._card.analyser.reconnectMic();
-        this._card.analyser.start(bar);
-      } else {
-        bar.classList.remove('reactive');
-        this._globalUI.classList.remove('reactive-mode');
-        if (reactive) this._card.analyser.stop();
+      // Wake-word handler may suppress analyser-driven reactivity while the
+      // mic is muted for the dedupe-window + chime.  In that case the UI
+      // itself manages the .reactive class + --vs-audio-level (via the
+      // synthetic pulse in setReactiveSuppressed), so updateForState must
+      // NOT touch either — otherwise state transitions during the wait
+      // (WAKE_WORD_DETECTED → STT → ...) would toggle reactive off and
+      // wipe the pulse.
+      if (!this._reactiveSuppressed) {
+        const shouldReact = config.useReactive && !isRemoteTts;
+        if (reactive && shouldReact) {
+          bar.classList.add('reactive');
+          this._globalUI.classList.add('reactive-mode');
+          this._card.analyser.reconnectMic();
+          this._card.analyser.start(bar);
+        } else {
+          bar.classList.remove('reactive');
+          this._globalUI.classList.remove('reactive-mode');
+          if (reactive) this._card.analyser.stop();
+        }
       }
     } else {
       bar.classList.remove('visible', 'connecting', 'listening', 'processing', 'speaking', 'reactive');
@@ -217,17 +237,59 @@ export class UIManager {
   }
 
   /**
+   * While set, `updateForState()` keeps the analyser-driven reactive path
+   * OFF even in states (WAKE_WORD_DETECTED, STT, TTS) that would normally
+   * enable it.  Used while the mic is intentionally muted (wake chime
+   * dedupe window + chime playback) — the analyser would read silence
+   * and the bar would render as a frozen scaleY(1)/no-glow even though
+   * `.reactive` was on, looking like a stagger until unmute.
+   *
+   * Instead of leaving the bar completely inert during the wait, we drive
+   * `--vs-audio-level` with a synthetic sine pulse.  The existing
+   * `.reactive` CSS (scaleY + ::after glow) reads that variable, so the
+   * bar "breathes" while we wait for STT to start — same visual language
+   * as real voice reactivity, just shallower.
+   */
+  setReactiveSuppressed(suppressed) {
+    const on = !!suppressed;
+    if (this._reactiveSuppressed === on) return;
+    this._reactiveSuppressed = on;
+    if (on) {
+      // Stop the analyser tick loop and pin `--vs-audio-level` at 0 so
+      // the bar shows its pure-CSS `.listening` gradient-flow animation
+      // with no scaleY pulse or glow overlay during the dedupe + chime
+      // window.  Keeping the bar completely dark through the wait is
+      // less visually noisy than the earlier synthetic-breath
+      // experiment, which the user reported as a visible "glow bleep"
+      // before the analyser took over at unmute.
+      this._card.analyser.stop();
+      if (this._globalUI) {
+        const bar = this._globalUI.querySelector('.vs-rainbow-bar');
+        if (bar) bar.style.setProperty('--vs-audio-level', '0');
+      }
+    }
+    // No action on suppressed=false — the wake-word handler calls
+    // startReactive() right after to resume analyser-driven rendering.
+  }
+
+  /**
    * Start reactive bar on mic (counterpart to stopReactive).
    * Used when updateForState is blocked (e.g. notifPlaying guard)
    * but the bar should react to mic input (ask_question STT).
+   *
+   * @param {object} [opts]
+   * @param {number} [opts.warmupMs] - Suppress `--vs-audio-level` writes
+   *   for this many ms after start so the mic-activation transient (DC
+   *   step / driver click when a track flips from disabled → enabled)
+   *   doesn't show as a glow bleep on the bar.
    */
-  startReactive() {
+  startReactive(opts) {
     if (!this._globalUI || !this._card.isReactiveBarEnabled) return;
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     bar.classList.add('reactive');
     this._globalUI.classList.add('reactive-mode');
     this._card.analyser.reconnectMic();
-    this._card.analyser.start(bar);
+    this._card.analyser.start(bar, opts);
   }
 
   // ─── Start Button ─────────────────────────────────────────────────

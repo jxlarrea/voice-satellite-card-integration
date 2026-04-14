@@ -9,6 +9,7 @@ JavaScript automatically.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -92,6 +93,62 @@ def _sync_custom_models(config_dir: str) -> None:
             _LOGGER.info("Restored custom model from persistent storage: %s", src.name)
 
 
+_DURATIONS_FILENAME = "durations.json"
+
+
+def _write_sound_durations(config_dir: str) -> None:
+    """Probe every .mp3 in the integration sounds dir and write a manifest.
+
+    Users can drop their own chime files into /config/voice_satellite/sounds/
+    (synced into the integration dir by `_sync_custom_sounds()` just above).
+    Those custom files can be any length; the client needs the true duration
+    so it can schedule the post-chime mic unmute / STT resume correctly —
+    the hardcoded fallbacks in src/audio/chime.js are only safe for the
+    shipped defaults.
+
+    Writes `sounds/durations.json` mapping filename → seconds (float).
+    The client fetches this at startup and feeds it to
+    `setChimeDurationOverrides()`.  Runs after the sync so both built-in
+    and user-replaced files are probed identically.
+    """
+    try:
+        # mutagen is listed in manifest.json "requirements" — always present.
+        from mutagen.mp3 import MP3
+    except ImportError:
+        _LOGGER.warning(
+            "mutagen not available — skipping chime duration probe; "
+            "client will use hardcoded fallbacks"
+        )
+        return
+
+    sounds_dir = Path(__file__).parent / "sounds"
+    if not sounds_dir.is_dir():
+        return
+
+    durations: dict[str, float] = {}
+    for mp3 in sorted(sounds_dir.glob("*.mp3")):
+        try:
+            length = MP3(str(mp3)).info.length
+        except Exception as e:  # noqa: BLE001 — any probe failure is non-fatal
+            _LOGGER.warning("Failed to probe duration of %s: %s", mp3.name, e)
+            continue
+        if isinstance(length, (int, float)) and length > 0:
+            durations[mp3.name] = round(float(length), 4)
+
+    manifest_path = sounds_dir / _DURATIONS_FILENAME
+    try:
+        manifest_path.write_text(json.dumps(durations, indent=2), encoding="utf-8")
+    except OSError as e:
+        _LOGGER.warning("Failed to write %s: %s", manifest_path, e)
+        return
+
+    # Log each probed duration so operators can confirm the real lengths
+    # and spot any surprisingly-long custom chimes that might affect
+    # post-chime mute-release timing.
+    for name, secs in durations.items():
+        _LOGGER.info("Probed chime duration: %s = %.3fs", name, secs)
+
+
 def _sync_custom_sounds(config_dir: str) -> None:
     """Sync custom .mp3 sounds between persistent storage and integration dir.
 
@@ -141,6 +198,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     # Sync custom wake word models and custom sounds with persistent storage
     await hass.async_add_executor_job(_sync_custom_models, hass.config.config_dir)
     await hass.async_add_executor_job(_sync_custom_sounds, hass.config.config_dir)
+    # Probe actual MP3 durations AFTER the sync so user-replaced files are
+    # measured correctly, then write a manifest the client fetches at
+    # startup to override the hardcoded fallbacks in src/audio/chime.js.
+    await hass.async_add_executor_job(_write_sound_durations, hass.config.config_dir)
 
     # Register WebSocket commands (once, not per-entry)
     websocket_api.async_register_command(hass, ws_announce_finished)

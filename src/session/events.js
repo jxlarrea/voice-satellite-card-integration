@@ -12,6 +12,44 @@ import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
 import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
+import { setChimeDurationOverrides } from '../audio/chime.js';
+
+/**
+ * Fetch the server-probed chime duration manifest from
+ * `/voice_satellite/sounds/durations.json` and install the values into
+ * the chime module.  The integration writes this file in
+ * `_write_sound_durations()` (__init__.py) after syncing any user-
+ * supplied sound files, so the values reflect the *real* lengths of
+ * whatever chimes are currently installed — including custom user
+ * overrides.  Logs through the session logger so the lines only show
+ * with debug enabled.  Called from startListening once the session has
+ * been configured (logger.debug already reflects the user's setting).
+ */
+async function fetchChimeDurations(session) {
+  const log = session.logger;
+  try {
+    const resp = await fetch('/voice_satellite/sounds/durations.json', {
+      cache: 'no-cache',
+      credentials: 'same-origin',
+    });
+    if (!resp.ok) {
+      log.error('chime', `duration manifest fetch: HTTP ${resp.status}; using hardcoded defaults`);
+      return;
+    }
+    const data = await resp.json();
+    if (!data || typeof data !== 'object') {
+      log.error('chime', 'duration manifest: invalid JSON payload; using hardcoded defaults');
+      return;
+    }
+    setChimeDurationOverrides(data);
+    const summary = Object.entries(data)
+      .map(([k, v]) => `${k}=${Number(v).toFixed(3)}s`)
+      .join(' ');
+    log.log('chime', `duration manifest loaded: ${summary || '(empty)'}`);
+  } catch (e) {
+    log.error('chime', `duration manifest fetch failed: ${e?.message || e}; using hardcoded defaults`);
+  }
+}
 
 function isConstrainedWebView() {
   const ua = navigator.userAgent || '';
@@ -56,6 +94,27 @@ export function setState(session, newState) {
   // Dismiss screensaver when a voice interaction begins
   if (INTERACTING_STATES.includes(newState)) {
     session.screensaver.dismiss();
+  }
+
+  // Swap mic DSP config between wake-word and STT modes.  WAKE_WORD_DETECTED
+  // fires locally *before* the server sends `stt-start`, giving us a ~200 ms
+  // head start to re-acquire the mic with STT constraints so no audio is
+  // dropped once STT actually begins recording.  On the way back out of STT
+  // (INTENT/TTS/IDLE/LISTENING), we swap back to wake-word mode — that
+  // happens during server-side intent processing, not while the user is
+  // speaking, so dropout there is free.
+  //
+  // Fire-and-forget (async): the setState flow must stay synchronous so UI
+  // updates render immediately.  The mic swap runs in the background and
+  // settles within a few tens of ms.
+  const sttPhase = (s) => s === State.WAKE_WORD_DETECTED || s === State.STT;
+  const wasStt = sttPhase(oldState);
+  const isStt = sttPhase(newState);
+  if (wasStt !== isStt && session._hasStarted && session.audio?.switchMicMode) {
+    const targetMode = isStt ? 'stt' : 'wake_word';
+    session.audio.switchMicMode(targetMode).catch((e) => {
+      session.logger.error('mic', `switchMicMode(${targetMode}) failed: ${e.message || e}`);
+    });
   }
 
   session.ui.updateForState(newState, session.pipeline.serviceUnavailable, session.tts.isPlaying);
@@ -105,6 +164,13 @@ export async function startListening(session) {
 
     session._hasStarted = true;
     session.ui.hideStartButton();
+
+    // Pull the server-probed chime durations (custom user MP3s included)
+    // now that the session is up and the logger reflects the user's
+    // debug preference — earlier in bootstrap the logger is still gated
+    // off, so the manifest-load line never reaches the console even
+    // with debug on.
+    fetchChimeDurations(session);
 
     // Log session duration setting
     const sessionDuration = getSelectState(

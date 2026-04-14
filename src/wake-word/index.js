@@ -9,7 +9,7 @@
 
 import { State, BlurReason } from '../constants.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
-import { CHIME_WAKE } from '../audio/chime.js';
+import { CHIME_WAKE, getChimeDuration } from '../audio/chime.js';
 import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, getWasmHeapSize, forceResetWasm } from './micro-models.js';
 import { MicroWakeWordInference } from './micro-inference.js';
 import { clearNotificationUI } from '../shared/satellite-notification.js';
@@ -488,9 +488,6 @@ export class WakeWordManager {
     this._pendingWakeActivatedAt = performance.now();
 
     const session = this._session;
-    const _m = performance.memory;
-    const _ms = _m ? `heap ${(_m.usedJSHeapSize/1048576).toFixed(1)}/${(_m.totalJSHeapSize/1048576).toFixed(1)}MB` : '';
-    // console.log(`[wf-diag] _onDetection(${modelName}) ${_ms}`);
 
     // If the tab is paused (screen off / background), unpause so pipeline
     // events aren't dropped. The wake word worklet keeps running while
@@ -571,6 +568,18 @@ export class WakeWordManager {
 
     this._setMicTracksMuted(true);
 
+    // The 'reactive' bar class drives transform/glow off `--vs-audio-level`,
+    // which the mic-analyser updates each frame.  Once we mute the tracks
+    // the analyser reads silence, the CSS var stays ~0, and the bar
+    // renders as a frozen flat rainbow until the chime finishes and we
+    // unmute — that's the "stagger" the user sees between wake word and
+    // chime.  Just calling stopReactive() here doesn't work: the
+    // subsequent state transitions WAKE_WORD_DETECTED → STT both re-run
+    // updateForState() which would turn reactive right back on.  A
+    // suppression flag survives those state changes and is cleared only
+    // once the mic is actually unmuted below.
+    session.ui.setReactiveSuppressed(true);
+
     // Kick off the pipeline immediately. We do NOT await — the chime
     // and STT timing are independent of pipeline.start's resolution,
     // and we need HA to receive the wake_word_detected event right
@@ -587,6 +596,7 @@ export class WakeWordManager {
         // chime or leave the mic muted forever.
         this._cancelPendingChimeInternal();
         this._setMicTracksMuted(false);
+        try { session.ui.setReactiveSuppressed(false); } catch (_) {}
         session.pipeline.restart(session.pipeline.calculateRetryDelay());
       });
 
@@ -602,7 +612,7 @@ export class WakeWordManager {
       this._pendingChimeHandle = setTimeout(() => {
         this._pendingChimeHandle = null;
         const audio = session.audio;
-        session.ui.stopReactive();
+        // (reactive was already stopped at mute-time above; no-op here)
         // Even though the mic tracks stay muted through the deferred chime,
         // the pipeline is already running in STT mode for cross-tablet dedupe.
         // Pause upstream audio transmission too so the server-side VAD never
@@ -612,7 +622,20 @@ export class WakeWordManager {
         // into the STT recording. Unmute after the chime + a small
         // settle window — same total duration the old in-line code used.
         session.tts.playChime('wake');
-        const unmuteAfter = (CHIME_WAKE.duration * 1000) + 50;
+        // Speaker output buffers + echo-cancellation adapt time mean the
+        // chime is still physically emerging from the speakers for a
+        // while after the audio file ends.  +50 ms was too tight (mic
+        // re-armed mid-tail).  +250 ms covers OS audio-buffer drain
+        // with comfortable margin.
+        //
+        // Read the actual file duration off the cached Audio element
+        // (getChimeDuration) rather than trusting the hardcoded
+        // `CHIME_WAKE.duration`: users can replace the built-in sound
+        // files with their own in /config/voice_satellite/sounds/ (see
+        // `_sync_custom_sounds()` in __init__.py) and their files can
+        // be any length.
+        const SPEAKER_DRAIN_MS = 250;
+        const unmuteAfter = (getChimeDuration(CHIME_WAKE) * 1000) + SPEAKER_DRAIN_MS;
         this._pendingUnmuteHandle = setTimeout(() => {
           this._pendingUnmuteHandle = null;
           this._setMicTracksMuted(false);
@@ -622,8 +645,18 @@ export class WakeWordManager {
           if (session.pipeline.binaryHandlerId) {
             audio.startSending(() => session.pipeline.binaryHandlerId);
           }
+          // Mic is live again — let updateForState() re-enable reactive on
+          // the next state change, and flip it on right now for the current
+          // state since we're already mid-interaction.
+          session.ui.setReactiveSuppressed(false);
           if ([State.WAKE_WORD_DETECTED, State.STT].includes(session.currentState)) {
-            session.ui.startReactive();
+            // Suppress the first ~200 ms of analyser writes: flipping the
+            // mic tracks back on produces a brief activation transient
+            // (DC step / driver click) that the speech-band weighting
+            // amplifies into a visible "bleep" glow before the real
+            // signal settles.  The analyser's RAF still runs so its
+            // smoothing warms up against live audio during the window.
+            session.ui.startReactive({ warmupMs: 200 });
           }
         }, unmuteAfter);
       }, WAKE_DEDUPE_WINDOW_MS);
@@ -639,6 +672,17 @@ export class WakeWordManager {
         if (session.pipeline.binaryHandlerId) {
           audio.startSending(() => session.pipeline.binaryHandlerId);
         }
+        session.ui.setReactiveSuppressed(false);
+        // Mirror the wake-sound-on path: once the mic is live again, kick
+        // the reactive bar over to mic-driven rendering.  Without this,
+        // setReactiveSuppressed(false) alone just cancels the synthetic
+        // pulse — the analyser tick loop stays stopped because
+        // updateForState() already ran (during suppression) and won't
+        // re-fire until the next state change, leaving the bar dark
+        // even as the user speaks.
+        if ([State.WAKE_WORD_DETECTED, State.STT].includes(session.currentState)) {
+          session.ui.startReactive();
+        }
       }, WAKE_DEDUPE_WINDOW_MS);
     }
   }
@@ -651,9 +695,13 @@ export class WakeWordManager {
    * disabled tracks.
    */
   _setMicTracksMuted(muted) {
-    const stream = this._session?.audio?._mediaStream;
-    if (!stream) return;
-    stream.getAudioTracks().forEach((t) => { t.enabled = !muted; });
+    // Delegate to AudioManager so the mute state is recorded against the
+    // session, not against whichever MediaStream happens to be active
+    // right now.  switchMicMode() reads the same flag when bringing up a
+    // new stream during the wake-word → STT mic-mode transition, so the
+    // mute survives the cross-fade and the chime can't bleed into the
+    // freshly-acquired stream.
+    this._session?.audio?.setMicTracksMuted?.(muted);
   }
 
   /**
@@ -689,6 +737,11 @@ export class WakeWordManager {
     this._cancelPendingChimeInternal();
     if (wasPending) {
       this._setMicTracksMuted(false);
+      // Losing-tablet path: clear the reactive suppression so a later
+      // interaction doesn't inherit a stuck flag.  The bar will be hidden
+      // anyway (state goes back to IDLE/LISTENING), but keep bookkeeping
+      // honest.
+      try { this._session?.ui?.setReactiveSuppressed(false); } catch (_) {}
     }
     return wasPending;
   }
