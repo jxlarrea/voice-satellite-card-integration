@@ -221,7 +221,6 @@ The satellite entity exposes the following attributes for use in templates and a
 | `announcement_display_duration` | integer | Configured announcement display duration in seconds |
 | `wake_word_detection` | string | Current wake word detection mode: "On Device" or "Home Assistant" |
 | `wake_word_model` | string | Selected primary on-device wake word model name (e.g., "ok_nabu") |
-| `wake_word_model_2` | string | Selected second on-device wake word model name, or "No wake word" if disabled |
 | `screensaver_enabled` | boolean | Whether the built-in screensaver is enabled |
 | `screensaver_timer` | integer | Screensaver idle timeout in seconds |
 
