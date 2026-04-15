@@ -45,7 +45,7 @@ https://github.com/user-attachments/assets/af3956a8-3f58-420a-85ef-872ab9e33e8f
 Voice Satellite runs as a **global engine** that loads on every page of Home Assistant - no dashboard card required. Once you assign a satellite entity in the sidebar panel, the engine starts automatically and listens for wake words across all page navigations.
 
 - **Turns your browser into a real satellite** - registered as a proper `assist_satellite` device in HA with full feature parity with physical voice assistants
-- **On-device wake word detection** - runs microWakeWord locally via TFLite WASM with custom model support and optional voice-activated stop interruption. Falls back to server-side detection when preferred
+- **On-device wake word detection** - runs microWakeWord locally in pure JavaScript with custom model support and optional voice-activated stop interruption. Falls back to server-side detection when preferred
 - **Timers, announcements, conversations** - voice-activated timers with countdown pills, `assist_satellite.announce` / `start_conversation` / `ask_question` from automations
 - **Media player entity** - volume control, `tts.speak` targeting, and `media_player.play_media` from automations. TTS can route to browser or a remote speaker
 - **Skins** - 7 built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri, Waveform) with CSS overrides. Reactive audio-level animation on the activity bar
@@ -494,7 +494,7 @@ Voice Satellite includes built-in wake word detection that runs entirely in the 
 
 ### How It Works
 
-On-device detection uses [microWakeWord](https://github.com/kahrendt/microWakeWord) TFLite models running via TensorFlow Lite WebAssembly. The browser continuously processes audio and runs lightweight keyword classifiers to detect the wake word. Audio is only streamed to Home Assistant after detection. This means:
+On-device detection uses [microWakeWord](https://github.com/kahrendt/microWakeWord) TFLite models running entirely in pure JavaScript — a hand-rolled interpreter for the streaming model plus a bit-exact port of the TFLM audio frontend (windowing, KISS FFT, mel filterbank, noise reduction, PCAN, log-scale). The browser continuously processes audio and runs lightweight keyword classifiers to detect the wake word. Audio is only streamed to Home Assistant after detection. This means:
 
 - **Lower latency** - detection happens instantly on the device, no network round-trip
 - **Reduced server load** - audio is only sent to HA for STT after the wake word is detected
@@ -745,7 +745,7 @@ The financial card uses the same featured panel layout as weather — it appears
 
 1. **Check the device settings:** Go to the satellite's device page and verify "Wake word detection" is set to "On Device" and a wake word model is selected.
 2. **Try adjusting sensitivity:** Change "Wake word sensitivity" to "Very sensitive" to see if detection improves.
-3. **Check browser compatibility:** On-device detection uses WebAssembly (TFLite). Ensure your browser supports WASM - all modern browsers do, but very old versions may not.
+3. **Check browser compatibility:** On-device detection runs in pure JavaScript with `AudioWorklet` and `Float32Array` — both are supported in every current browser, but very old versions may not qualify.
 4. Enable **Debug logging** in the sidebar panel to see wake word scores in the browser console (F12).
 
 **Server-side mode ("Home Assistant"):**

@@ -10,7 +10,7 @@
 import { State, BlurReason } from '../constants.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 import { CHIME_WAKE, getChimeDuration } from '../audio/chime.js';
-import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, getWasmHeapSize, forceResetWasm } from './micro-models.js';
+import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, resetRuntime } from './micro-models.js';
 import { MicroWakeWordInference } from './micro-inference.js';
 import { clearNotificationUI } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
@@ -52,13 +52,6 @@ const STOP_SENSITIVITY_FACTORS = {
   'Very sensitive': 1.2,
 };
 const DEFAULT_CUTOFF = 0.90;
-
-// ─── Runtime compatibility monitoring ────────────────────────────────
-// The manager still exposes periodic runtime-reset hooks through the same
-// flow as before, but the custom JS runner reports zero heap here. These
-// checks stay inert unless a lower-level runtime is introduced again.
-const WASM_HEAP_THRESHOLD = 48 * 1024 * 1024; // reset when heap exceeds 48 MB (~1.5x initial 32 MB)
-const WASM_CHECK_MS = 15_000;                  // check heap every 15 seconds
 
 // Wake word phrases matching microWakeWord conventions.
 // DATA_LAST_WAKE_UP in HA core uses these exact strings for dedup.
@@ -110,8 +103,6 @@ export class WakeWordManager {
     this._pendingUnmuteHandle = null;
     this._pendingWakeActivatedAt = 0;
 
-    // Runtime reset tracking
-    this._lastWasmCheck = 0;
     this._resetting = false;
 
   }
@@ -285,7 +276,7 @@ export class WakeWordManager {
         // is still null, so resetting here would churn the TFLite loader
         // and increase startup pressure for no benefit.
         if (this._tfweb && !this._inference && this._loadedModelsKey !== null) {
-          await this._recreateTfliteRuntime('stale runtime before model reload');
+          await this._recreateRuntime('stale runtime before model reload');
         }
         // Release models no longer needed before loading new ones.
         await releaseUnusedMicroModels(activeModels);
@@ -320,11 +311,10 @@ export class WakeWordManager {
       this._log.log('wake-word', 'On-device wake word detection active');
 
     } catch (e) {
-      if (String(e?.message || e).includes('Out of memory')
-          || String(e?.message || e).includes('Cannot allocate Wasm memory')) {
-        this._log.error('wake-word', 'Wake-word runtime OOM â€” forcing full runtime reset');
+      if (String(e?.message || e).includes('Out of memory')) {
+        this._log.error('wake-word', 'Wake-word runtime OOM — forcing full runtime reset');
         try {
-          await this._recreateTfliteRuntime('OOM recovery');
+          await this._recreateRuntime('OOM recovery');
         } catch (_) { /* ignore secondary failure */ }
       }
       this._log.error('wake-word', `Failed to start: ${e.message || e}`);
@@ -358,9 +348,9 @@ export class WakeWordManager {
     this._inference = null;
   }
 
-  async _recreateTfliteRuntime(reason = 'runtime reset') {
+  async _recreateRuntime(reason = 'runtime reset') {
     this._log.log('wake-word', `${reason}: resetting wake-word runtime`);
-    await forceResetWasm();
+    await resetRuntime();
     this._tfweb = await loadTFLite();
   }
 
@@ -373,16 +363,15 @@ export class WakeWordManager {
    */
   release() {
     this._log.log('wake-word', 'release() — freeing wake-word runtime');
-    const heapBefore = getWasmHeapSize();
     try { this.stop(); } catch (e) { this._log.log('wake-word', `release: stop failed: ${e.message || e}`); }
     this._destroyInference('release');
     this._loadedModelsKey = null;
     this._stopMicroConfig = null;
     try {
-      forceResetWasm();
-      this._log.log('wake-word', `release: wake-word runtime reset (heap was ${(heapBefore / (1024 * 1024)).toFixed(1)} MB)`);
+      resetRuntime();
+      this._log.log('wake-word', 'release: wake-word runtime reset');
     } catch (e) {
-      this._log.log('wake-word', `release: forceResetWasm failed: ${e.message || e}`);
+      this._log.log('wake-word', `release: resetRuntime failed: ${e.message || e}`);
     }
   }
 
@@ -455,20 +444,6 @@ export class WakeWordManager {
             await this._onDetection(result.model);
           }
           return;
-        }
-      }
-
-      // Periodic runtime compatibility check -- kept for the shared reset flow
-      if (this._active && !this._resetting) {
-        const now = Date.now();
-        if (now - this._lastWasmCheck > WASM_CHECK_MS) {
-          this._lastWasmCheck = now;
-          const heapSize = getWasmHeapSize();
-          if (heapSize > WASM_HEAP_THRESHOLD) {
-            this._log.log('wake-word',
-              `Runtime heap ${(heapSize / (1024 * 1024)).toFixed(1)} MB exceeds ${WASM_HEAP_THRESHOLD / (1024 * 1024)} MB -- resetting runtime`);
-            await this._resetWasmRuntime();
-          }
         }
       }
     } catch (e) {
@@ -986,56 +961,6 @@ export class WakeWordManager {
   }
 
   /**
-   * Reset the wake-word runtime and recreate the inference engine.
-   * Takes ~1-2s during which detection pauses.
-   */
-  async _resetWasmRuntime() {
-    this._resetting = true;
-    this._active = false;
-
-    try {
-      const heapBefore = getWasmHeapSize();
-
-      this._destroyInference('reset');
-      this._loadedModelsKey = null;
-      this._stopMicroConfig = null;
-
-      await forceResetWasm();
-
-      // Reload runtime token and rebuild models from scratch.
-      this._tfweb = await loadTFLite();
-
-      const activeModels = this.getActiveModels();
-      const runners = await loadMicroModels(this._tfweb, activeModels);
-
-      const keywordConfigs = this._buildKeywordConfigs(runners);
-      this._inference = await MicroWakeWordInference.create(
-        keywordConfigs,
-        this._log,
-        this._getSensitivityLabel(),
-        this._isNoiseGateEnabled(),
-      );
-      this._loadedModelsKey = activeModels.slice().sort().join(',');
-
-      this._sampleBufLen = 0;
-      this._frameQueue.length = 0;
-      this._active = true;
-
-      const heapAfter = getWasmHeapSize();
-      this._log.log('wake-word',
-        `Runtime reset complete: ${(heapBefore / (1024 * 1024)).toFixed(1)} MB -> ${(heapAfter / (1024 * 1024)).toFixed(1)} MB`);
-    } catch (e) {
-      this._log.error('wake-word', `Runtime reset failed: ${e.message || e}`);
-    } finally {
-      this._resetting = false;
-      if (!this._active && !this._inference) {
-        this._log.log('wake-word', 'Attempting recovery after failed runtime reset');
-        try { await this.start(); } catch (_) {}
-      }
-    }
-  }
-
-  /**
    * Check for wake word setting changes and react.
    * Called from session.updateHass() on every HA state change.
    */
@@ -1128,7 +1053,7 @@ export class WakeWordManager {
           this._destroyInference('mode-switch');
           this._loadedModelsKey = null;
           this._stopMicroConfig = null;
-          await forceResetWasm();
+          await resetRuntime();
           this._tfweb = null;
           if (session.currentState !== State.PAUSED) {
             session.setState(State.CONNECTING);
@@ -1169,7 +1094,7 @@ export class WakeWordManager {
     this._destroyInference('teardown');
     this._loadedModelsKey = null;
     try {
-      await forceResetWasm();
+      await resetRuntime();
       this._tfweb = null;
     } catch (_) { /* ignore */ }
   }

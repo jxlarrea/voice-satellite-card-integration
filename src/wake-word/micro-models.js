@@ -191,13 +191,9 @@ export async function releaseMicroModels() {
   clearCustomWakeWordModels();
 }
 
-export function getWasmHeapSize() {
-  return 0;
-}
-
-export async function forceResetWasm() {
+export async function resetRuntime() {
   const modelCount = Object.keys(_modelCache).length;
   await releaseMicroModels();
   _runtime = null;
-  console.info(`[VS][wake-word] forceResetWasm: cleaned ${modelCount} custom runner(s)`);
+  console.info(`[VS][wake-word] resetRuntime: cleaned ${modelCount} custom runner(s)`);
 }

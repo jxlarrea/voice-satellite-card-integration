@@ -218,15 +218,9 @@ export async function startListening(session) {
       session.logger.error('mic', 'Microphone in use or not readable');
     }
 
-    const isWasmOom = errText.includes('out of memory')
-      || errText.includes('cannot allocate wasm memory');
-
     setState(session, State.IDLE);
     if (reason !== 'error') {
       session.ui.showStartButton(reason);
-    } else if (isWasmOom) {
-      session.logger.error('wake-word', 'WASM OOM during startup — auto-retry disabled');
-      session.ui.showServiceError();
     } else {
       session.pipeline.restart(session.pipeline.calculateRetryDelay());
     }
