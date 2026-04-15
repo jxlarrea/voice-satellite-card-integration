@@ -165,7 +165,7 @@ Each satellite device exposes configuration entities on its device page (**Setti
 | **Assist pipeline** | Select | Choose which Assist pipeline to use for this satellite |
 | **External screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
 | **Finished speaking detection** | Select | VAD sensitivity - how aggressively to detect end of speech |
-| **Session duration** | Select | Controls how long conversation context is retained between wake word activations. After the selected duration elapses without interaction, the next wake word starts a fresh conversation. Options: "Persistent" (default — never expires, matching physical Voice PE satellite behavior), 5 minutes, 10 minutes, 15 minutes, 30 minutes, 1 hour, 3 hours, 6 hours, or "Isolated" (every wake word activation starts completely fresh). Multi-turn exchanges within a single session always share context regardless of this setting |
+| **Session duration** | Select | Controls how long conversation context is retained between wake word activations. After the selected duration elapses without interaction, the next wake word starts a fresh conversation. Options: "Persistent" (default - never expires, matching physical Voice PE satellite behavior), 5 minutes, 10 minutes, 15 minutes, 30 minutes, 1 hour, 3 hours, 6 hours, or "Isolated" (every wake word activation starts completely fresh). Multi-turn exchanges within a single session always share context regardless of this setting |
 | **Mute** | Switch | Mute/unmute the satellite - when muted, wake word detection is paused |
 | **Screensaver** | Switch | Enable/disable the built-in screensaver. When enabled, a black overlay covers the screen after the idle timeout. Dismissed on voice interaction, tap, or motion detection. On Fully Kiosk Browser with the JavaScript Interface enabled (**Advanced Web Settings -> Enable JavaScript Interface**): the backlight is dimmed to 0 on activation and restored on dismiss, and FK's camera-based motion detection automatically wakes the screen when someone approaches the device |
 | **Screensaver active** | Binary sensor | Sensor showing whether the screensaver overlay is currently displayed.|
@@ -423,6 +423,26 @@ Sentence templates use [hassil](https://github.com/home-assistant/hassil) syntax
 
 The engine provides audio and visual feedback: a done chime on successful match, or an error chime with a flashing red gradient bar when the response doesn't match any answer.
 
+### Voice Satellite Wake Action
+
+Trigger the satellite as if a wake word were detected. Skips wake-word listening and goes directly to STT. Works regardless of the configured wake-word detection mode (On Device, Home Assistant, or Disabled), and is the primary way to drive interactions in [Disabled mode](#disabled-mode).
+
+```yaml
+action: voice_satellite.wake
+target:
+  entity_id: assist_satellite.living_room_tablet
+```
+
+When fired, the wake chime plays and the mic begins capturing speech for STT. The rest of the pipeline (intent → TTS → optional continue-conversation) runs normally. Multi-turn follow-ups are preserved - once the assistant ends the turn without a continue, the mic is released.
+
+Common uses:
+
+- A dashboard button that says "Talk to Assist" - wire its `tap_action` to call this service
+- An automation that activates the satellite when motion or a doorbell triggers
+- Older devices (e.g. Android 7-9) where always-on wake-word detection isn't viable
+
+> **Note:** The first manual wake on a fresh page load may require a prior user gesture in the tab to satisfy the browser's autoplay/permission policy. After that, the action works freely from any source.
+
 ### Media Player
 
 Each satellite automatically exposes a `media_player` entity in Home Assistant. This entity:
@@ -494,7 +514,7 @@ Voice Satellite includes built-in wake word detection that runs entirely in the 
 
 ### How It Works
 
-On-device detection uses [microWakeWord](https://github.com/kahrendt/microWakeWord) TFLite models running entirely in pure JavaScript — a hand-rolled interpreter for the streaming model plus a bit-exact port of the TFLM audio frontend (windowing, KISS FFT, mel filterbank, noise reduction, PCAN, log-scale). The browser continuously processes audio and runs lightweight keyword classifiers to detect the wake word. Audio is only streamed to Home Assistant after detection. This means:
+On-device detection uses [microWakeWord](https://github.com/kahrendt/microWakeWord) TFLite models running entirely in pure JavaScript - a hand-rolled interpreter for the streaming model plus a bit-exact port of the TFLM audio frontend (windowing, KISS FFT, mel filterbank, noise reduction, PCAN, log-scale). The browser continuously processes audio and runs lightweight keyword classifiers to detect the wake word. Audio is only streamed to Home Assistant after detection. This means:
 
 - **Lower latency** - detection happens instantly on the device, no network round-trip
 - **Reduced server load** - audio is only sent to HA for STT after the wake word is detected
@@ -533,12 +553,24 @@ The filename (without `.tflite`) becomes the option name in the dropdown. For ex
 
 All wake word settings are configured per-device on the satellite's device page (**Settings -> Devices & Services -> Voice Satellite -> [device]**):
 
-- **Wake word detection** - "On Device" (default) or "Home Assistant" (server-side)
+- **Wake word detection** - "On Device" (default), "Home Assistant" (server-side), or "Disabled" (no automatic listening)
 - **Wake word** - select the wake word to listen for
 - **Stop word interruption** - optional on-device `stop` keyword that can cancel timer alerts, TTS, and announcement playback. Disabled by default
 - **Wake word sensitivity** - "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive"
 
 To use server-side detection instead, set "Wake word detection" to "Home Assistant". This requires a wake word service (openWakeWord or microWakeWord) configured in your Assist pipeline.
+
+### Disabled Mode
+
+Set "Wake word detection" to **Disabled** when you want full manual control over when the satellite listens. The microphone stream is **not activated at all** until you explicitly trigger a wake. Useful for older or low-powered devices (e.g. Android 7-9 tablets where always-on detection is unreliable), shared spaces where passive listening isn't wanted, or fully automation-driven workflows.
+
+In Disabled mode:
+
+- The mic stays off and no audio is streamed to Home Assistant
+- Announcements, `start_conversation`, and `ask_question` from automations still work normally - they bring the mic up only for the brief STT phase, then release it
+- Trigger listening via the [`voice_satellite.wake`](#voice-satellite-wake-action) action from a dashboard button, automation, or the mini card's mic icon
+
+The mini card keeps its small mic-dot icon visible so users can tap to talk. The full card stays clean - wake it via the action.
 
 ## Custom Sounds
 
@@ -569,7 +601,7 @@ Voice Satellite includes a skin system that themes the entire overlay UI - activ
 | **Default** | Rainbow gradient bar with enhanced glow, floating text with colored fading borders, white overlay |
 | **Alexa** | Cyan glow bar, dark overlay, centered bold text, Echo-inspired design |
 | **Google Home** | Four-color Google gradient bar, left-aligned text, Nest-inspired design. Supports light and dark mode which automatically follows your HA theme or can be forced via the Theme Mode setting |
-| **Home Assistant** | Matches your HA theme natively in both light and dark mode. All colors derived from your theme's primary color and card background via CSS custom properties — automatically adapts to any HA theme. Monochromatic four-tone activity bar with flowing gradient animation |
+| **Home Assistant** | Matches your HA theme natively in both light and dark mode. All colors derived from your theme's primary color and card background via CSS custom properties - automatically adapts to any HA theme. Monochromatic four-tone activity bar with flowing gradient animation |
 | **Retro Terminal** | Green phosphor CRT aesthetic with scanlines, bezel frame, monospace font, and screen-edge glow |
 | **Siri** | Full-screen gradient border glow (purple -> blue -> teal -> pink), dark frosted overlay, centered clean text, Apple-inspired design |
 | **Waveform** | Animated flowing neon waveform with strands that react to audio in real time. Automatically adapts to light and dark modes based on your Home Assistant theme settings. **GPU-intensive! Not recommended for low-end devices** |
@@ -586,7 +618,7 @@ Each skin defines CSS classes for all UI elements. Use the **Custom CSS** field 
 
 ### Waveform Skin CSS Variables
 
-The Waveform skin exposes CSS variables for full color customization of strands, background, and UI elements. Override them in the **Custom CSS** field. Dark and light themes have independent variables — set them separately to customize each mode.
+The Waveform skin exposes CSS variables for full color customization of strands, background, and UI elements. Override them in the **Custom CSS** field. Dark and light themes have independent variables - set them separately to customize each mode.
 
 #### Available Variables
 
@@ -710,7 +742,7 @@ Ask your assistant about the weather:
 - *"What's the weather today?"*
 - *"What's the forecast for this week?"*
 
-The assistant responds with a spoken summary while displaying a weather card in the media panel showing the current temperature, condition, humidity, and a scrollable forecast (hourly, daily, or twice-daily depending on the range requested). The weather icon is sourced from Google Weather SVGs via Home Assistant. The weather card uses the same featured panel layout as web search and Wikipedia — it appears alongside the chat response and dismisses immediately after TTS completes (no 30-second linger).
+The assistant responds with a spoken summary while displaying a weather card in the media panel showing the current temperature, condition, humidity, and a scrollable forecast (hourly, daily, or twice-daily depending on the range requested). The weather icon is sourced from Google Weather SVGs via Home Assistant. The weather card uses the same featured panel layout as web search and Wikipedia - it appears alongside the chat response and dismisses immediately after TTS completes (no 30-second linger).
 
 ### Financial Data
 
@@ -728,7 +760,7 @@ Ask your assistant about stocks, crypto, or currency conversions:
 
 **Currency conversions** display the converted amount prominently with the exchange rate below.
 
-The financial card uses the same featured panel layout as weather — it appears alongside the chat response and dismisses immediately after TTS completes.
+The financial card uses the same featured panel layout as weather - it appears alongside the chat response and dismisses immediately after TTS completes.
 
 ## Troubleshooting
 
@@ -745,13 +777,13 @@ The financial card uses the same featured panel layout as weather — it appears
 
 1. **Check the device settings:** Go to the satellite's device page and verify "Wake word detection" is set to "On Device" and a wake word model is selected.
 2. **Try adjusting sensitivity:** Change "Wake word sensitivity" to "Very sensitive" to see if detection improves.
-3. **Check browser compatibility:** On-device detection runs in pure JavaScript with `AudioWorklet` and `Float32Array` — both are supported in every current browser, but very old versions may not qualify.
+3. **Check browser compatibility:** On-device detection runs in pure JavaScript with `AudioWorklet` and `Float32Array` - both are supported in every current browser, but very old versions may not qualify.
 4. Enable **Debug logging** in the sidebar panel to see wake word scores in the browser console (F12).
 
 **Server-side mode ("Home Assistant"):**
 
-1. **Verify your wake word service is running:** Check that your wake word engine (e.g., openWakeWord, microWakeWord) is available to Home Assistant — either as an add-on (**Settings -> Add-ons**) or as a Wyoming integration (**Settings -> Devices & Services**).
-2. **Verify wake word detection is enabled in your pipeline:** Go to **Settings -> Voice assistants**, select your pipeline, and check that a wake word is selected. **This setting is hidden by default** — click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown.
+1. **Verify your wake word service is running:** Check that your wake word engine (e.g., openWakeWord, microWakeWord) is available to Home Assistant - either as an add-on (**Settings -> Add-ons**) or as a Wyoming integration (**Settings -> Devices & Services**).
+2. **Verify wake word detection is enabled in your pipeline:** Go to **Settings -> Voice assistants**, select your pipeline, and check that a wake word is selected. **This setting is hidden by default** - click the **⋮ three-dot menu** at the top right of the pipeline settings to reveal the wake word configuration dropdown.
 3. Enable **Debug logging** in the sidebar panel to see pipeline events in the browser console (F12).
 
 ### No audio response
