@@ -9,8 +9,6 @@
  * and internal pool/queue sizes from the wake word engine and audio pipeline.
  */
 
-import { getWasmHeapSize } from './wake-word/micro-models.js';
-
 const STORAGE_KEY = 'vs-diag-enabled';
 const SAMPLE_INTERVAL = 60_000;
 
@@ -93,10 +91,6 @@ function sample(session) {
       if (fe) parts.push(`featPool=${fe._featurePool?.length ?? '?'}`);
       parts.push(`sleeping=${inf._sleeping ? 'Y' : 'N'}`);
     }
-
-    // WASM heap size (TFLite linear memory -- can only grow, never shrink)
-    const wasmHeap = getWasmHeapSize();
-    if (wasmHeap > 0) parts.push(`wasm=${mb(wasmHeap)}MB`);
   }
 
   // Chat DOM element count (should be bounded per interaction)
