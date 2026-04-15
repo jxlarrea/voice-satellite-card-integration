@@ -1,0 +1,10 @@
+wake:
+  name: Wake
+  description: >-
+    Trigger the satellite as if a wake word were detected. Skips wake-word
+    listening and goes directly to STT. Works regardless of the wake-word
+    detection mode (including Disabled).
+  target:
+    entity:
+      integration: voice_satellite
+      domain: assist_satellite

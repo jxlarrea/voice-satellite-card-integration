@@ -19,7 +19,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import Context, HomeAssistant
+from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
@@ -193,6 +193,24 @@ def _sync_custom_sounds(config_dir: str) -> None:
             _LOGGER.info("Restored sound from persistent storage: %s", src.name)
 
 
+async def _async_handle_wake_service(call: ServiceCall) -> None:
+    """Handle voice_satellite.wake - push a wake event to the matching card(s).
+
+    The card listens for the `wake` satellite event and skips wake-word
+    detection, going straight into STT. Lets users drive activation from
+    dashboard buttons, automations, or scripts.
+    """
+    hass = call.hass
+    entity_ids = call.data["entity_id"]
+
+    for entity_id in entity_ids:
+        entity = _find_entity(hass, entity_id)
+        if entity is None:
+            _LOGGER.warning("voice_satellite.wake: entity %s not found", entity_id)
+            continue
+        entity._push_satellite_event("wake", {})
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up integration-wide resources: frontend JS + WebSocket commands."""
     # Sync custom wake word models and custom sounds with persistent storage
@@ -213,6 +231,18 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     websocket_api.async_register_command(hass, ws_cancel_timer)
     websocket_api.async_register_command(hass, ws_media_player_event)
     websocket_api.async_register_command(hass, ws_screensaver_state)
+
+    # Register services
+    hass.services.async_register(
+        DOMAIN,
+        "wake",
+        _async_handle_wake_service,
+        schema=vol.Schema(
+            {
+                vol.Required("entity_id"): cv.entity_ids,
+            }
+        ),
+    )
 
     # Register frontend static paths, Lovelace resource, and sidebar panel
     try:

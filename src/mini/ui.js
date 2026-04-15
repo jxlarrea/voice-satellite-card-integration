@@ -509,6 +509,7 @@ export class MiniUIManager {
   }
 
   stopReactive() {}
+  startReactive(_opts) { /* mini card has no reactive bar */ }
   setReactiveSuppressed(_suppressed) { /* mini card has no reactive bar */ }
 
   showStartButton(reason) {

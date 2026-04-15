@@ -1048,7 +1048,18 @@ export class WakeWordManager {
             await this.start();
           }
         } else {
-          this._log.log('wake-word', 'Mode → Home Assistant — releasing models');
+          // Off can mean either Home Assistant (server pipeline takes over)
+          // or Disabled (mic stays off until voice_satellite.wake fires).
+          const disabled = getSelectState(
+            session.hass, session.config.satellite_entity,
+            'wake_word_detection', 'Home Assistant',
+          ) === 'Disabled';
+          this._log.log(
+            'wake-word',
+            disabled
+              ? 'Mode → Disabled — releasing models and stopping mic'
+              : 'Mode → Home Assistant — releasing models',
+          );
           this.stop();
           this._destroyInference('mode-switch');
           this._loadedModelsKey = null;
@@ -1056,8 +1067,13 @@ export class WakeWordManager {
           await resetRuntime();
           this._tfweb = null;
           if (session.currentState !== State.PAUSED) {
-            session.setState(State.CONNECTING);
-            await session.pipeline.start();
+            if (disabled) {
+              try { session.audio.stopMicrophone(); } catch (_) { /* ignore */ }
+              session.setState(State.IDLE);
+            } else {
+              session.setState(State.CONNECTING);
+              await session.pipeline.start();
+            }
           }
         }
       } else if (this._active || session.currentState === State.PAUSED) {

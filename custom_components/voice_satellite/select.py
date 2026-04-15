@@ -428,7 +428,12 @@ class VoiceSatelliteSessionDurationSelect(SelectEntity, RestoreEntity):
 
 WAKE_WORD_DETECTION_HA = "Home Assistant"
 WAKE_WORD_DETECTION_LOCAL = "On Device"
-WAKE_WORD_DETECTION_OPTIONS = [WAKE_WORD_DETECTION_HA, WAKE_WORD_DETECTION_LOCAL]
+WAKE_WORD_DETECTION_DISABLED = "Disabled"
+WAKE_WORD_DETECTION_OPTIONS = [
+    WAKE_WORD_DETECTION_HA,
+    WAKE_WORD_DETECTION_LOCAL,
+    WAKE_WORD_DETECTION_DISABLED,
+]
 
 # Common infrastructure models (not keyword models).
 _COMMON_MODELS = {"stop"}

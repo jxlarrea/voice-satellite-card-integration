@@ -14,6 +14,24 @@ import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 import { setChimeDurationOverrides } from '../audio/chime.js';
 
+const WAKE_MODE_HA = 'home-assistant';
+const WAKE_MODE_LOCAL = 'on-device';
+const WAKE_MODE_DISABLED = 'disabled';
+
+/**
+ * Read the wake-word detection mode from the integration's select entity.
+ * @returns {'home-assistant'|'on-device'|'disabled'}
+ */
+export function getWakeWordMode(session) {
+  const raw = getSelectState(
+    session.hass, session.config.satellite_entity,
+    'wake_word_detection', 'Home Assistant',
+  );
+  if (raw === 'On Device') return WAKE_MODE_LOCAL;
+  if (raw === 'Disabled') return WAKE_MODE_DISABLED;
+  return WAKE_MODE_HA;
+}
+
 /**
  * Fetch the server-probed chime duration manifest from
  * `/voice_satellite/sounds/durations.json` and install the values into
@@ -126,10 +144,20 @@ export function setState(session, newState) {
 
 /**
  * Handle start button click.
+ *
+ * In Disabled wake-word mode the start button doubles as the wake
+ * affordance: once the session is up, tapping it triggers the same flow
+ * as the voice_satellite.wake action (mic + STT) instead of trying to
+ * (re)start a wake-word listener that doesn't exist.
+ *
  * @param {import('./index.js').VoiceSatelliteSession} session
  */
 export async function handleStartClick(session) {
   await session.audio.ensureAudioContextForGesture();
+  if (session._hasStarted && getWakeWordMode(session) === WAKE_MODE_DISABLED) {
+    await triggerWake(session);
+    return;
+  }
   await startListening(session);
 }
 
@@ -150,11 +178,32 @@ export async function startListening(session) {
   session._starting = true;
 
   try {
+    const mode = getWakeWordMode(session);
+
+    // Disabled: don't acquire the mic and don't start the pipeline. The
+    // session sits idle waiting for voice_satellite.wake to fire, which
+    // starts the mic on demand and jumps straight to STT.  The full
+    // card's start-button overlay stays hidden — wake is driven by the
+    // service action (or dashboard buttons wired to it).  The mini card
+    // still surfaces its small mic icon for IDLE state via _statusFor.
+    if (mode === WAKE_MODE_DISABLED) {
+      session.logger.log('wake-word', 'Mode = Disabled — skipping mic and pipeline');
+      session._hasStarted = true;
+      setState(session, State.IDLE);
+      session.ui.hideStartButton();
+      fetchChimeDurations(session);
+      session.visibility.setup();
+      session.timer.update();
+      subscribeSatelliteEvents(session, (event) => dispatchSatelliteEvent(session, event));
+      session.doubleTap.setup();
+      return;
+    }
+
     setState(session, State.CONNECTING);
     await session.audio.startMicrophone();
 
     // On-device wake word: load module lazily, start local inference
-    if (session._isWakeWordEnabled()) {
+    if (mode === WAKE_MODE_LOCAL) {
       const ww = await session._loadWakeWordModule();
       await settleBeforeWakeWordStart(session);
       await ww.start();
@@ -363,5 +412,78 @@ export function handlePipelineMessage(session, message) {
     case 'reload':
       session.logger.log('pipeline', 'Integration reloading - pipeline will restart');
       break;
+  }
+}
+
+/**
+ * Trigger the satellite as if a wake word had fired. Mode-aware: skips
+ * any local detection / running pipeline and routes straight to STT.
+ * Called by voice_satellite.wake via the satellite event dispatcher.
+ *
+ * @param {import('./index.js').VoiceSatelliteSession} session
+ */
+export async function triggerWake(session) {
+  // Block if mid-interaction — the user is already in STT/INTENT/TTS
+  // and another wake would just thrash state.
+  const interacting = INTERACTING_STATES.includes(session.currentState);
+  if (interacting) {
+    session.logger.log('wake', `Ignored - already interacting (${session.currentState})`);
+    return;
+  }
+
+  if (!session._hasStarted) {
+    // Card hasn't started yet (no gesture, satellite_entity unset, etc.).
+    // Defer: try start() first, which will pick the right path including
+    // the disabled fast-path that skips mic acquisition.
+    session.logger.log('wake', 'Session not started — starting first');
+    try { await session.start(); } catch (_) { /* fall through */ }
+  }
+
+  const mode = getWakeWordMode(session);
+  session.logger.log('wake', `Triggering manual wake (mode=${mode})`);
+
+  try {
+    if (mode === WAKE_MODE_LOCAL && session.wakeWord) {
+      // Local detector is running.  Stop it, then start the server
+      // pipeline at STT — same shape as a real local detection.
+      try { session.wakeWord.stop(); } catch (_) { /* ignore */ }
+    } else if (mode === WAKE_MODE_HA) {
+      // Server pipeline is currently waiting for a wake word.  Stop it
+      // first so the next start() begins from STT instead of wake_word.
+      await session.pipeline.stop();
+    } else if (mode === WAKE_MODE_DISABLED) {
+      // Mic is intentionally off in disabled mode — bring it up now.
+      if (!session.audio._mediaStream) {
+        await session.audio.startMicrophone('stt');
+      }
+    }
+
+    setState(session, State.WAKE_WORD_DETECTED);
+
+    // Hide the manual-wake affordance for the duration of the
+    // interaction so it doesn't overlap the active UI.  The pipeline
+    // restart's disabled branch re-shows it once the turn ends.
+    session.ui.hideStartButton();
+
+    // Show the blur overlay — normally the HA wake_word-end handler or
+    // the local wake-word detection path raises this; manual wake skips
+    // both so we have to do it explicitly.
+    session.ui.showBlurOverlay(BlurReason.PIPELINE);
+
+    // Audible cue so the user (or whoever fired the action) knows the
+    // satellite is now listening.  Honors the per-satellite wake_sound
+    // switch, matching local/HA wake behavior.
+    if (getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false) {
+      session.tts.playChime('wake');
+    }
+
+    await session.pipeline.start({ start_stage: 'stt' });
+  } catch (e) {
+    session.logger.error('wake', `Manual wake failed: ${e?.message || e}`);
+    setState(session, State.IDLE);
+    // Always re-expose the wake affordance so the user can retry — pass
+    // the not-allowed reason when relevant so the title prompt asks for
+    // mic permission instead of just "tap to start".
+    session.ui.showStartButton(e?.name === 'NotAllowedError' ? 'not-allowed' : undefined);
   }
 }

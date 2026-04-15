@@ -36,6 +36,7 @@ import {
   startListening,
   onTTSComplete,
   handlePipelineMessage,
+  triggerWake,
 } from './events.js';
 
 // Singleton via window namespace so multiple bundles share state
@@ -179,6 +180,7 @@ export class VoiceSatelliteSession {
   onStartClick() { handleStartClick(this); }
   onPipelineMessage(message) { handlePipelineMessage(this, message); }
   onTTSComplete(playbackFailed) { onTTSComplete(this, playbackFailed); }
+  onWakeAction() { triggerWake(this); }
 
   // ── Session API (cards call these) ────────────────────────────────
 
@@ -297,6 +299,7 @@ export class VoiceSatelliteSession {
         this._wakeWord.checkSettingsChanged();
       } else {
         this._checkWakeWordActivation();
+        this._checkDetectionDisabled();
       }
       this._screensaver.checkSettings();
       subscribeSatelliteEvents(this, (event) => dispatchSatelliteEvent(this, event));
@@ -452,6 +455,33 @@ export class VoiceSatelliteSession {
   }
 
   /**
+   * Check if wake-word detection is set to "Disabled".
+   * @returns {boolean}
+   */
+  _isDetectionDisabled() {
+    return getSelectState(
+      this._hass, this._config.satellite_entity,
+      'wake_word_detection', 'Home Assistant',
+    ) === 'Disabled';
+  }
+
+  /**
+   * Tear down the running pipeline and mic when detection switches to
+   * Disabled mid-session.  Mirrors _checkWakeWordActivation but for the
+   * inverse transition (HA → Disabled, where the wake-word module never
+   * loaded so the wake-word manager's settings watcher won't fire).
+   */
+  _checkDetectionDisabled() {
+    if (!this._isDetectionDisabled()) return;
+    if (![State.LISTENING, State.IDLE].includes(this._state)) return;
+    if (!this._pipeline.binaryHandlerId && !this._audio._mediaStream) return;
+    this._logger.log('wake-word', 'Mode changed to Disabled — stopping pipeline and mic');
+    try { this._pipeline.stop(); } catch (_) { /* ignore */ }
+    try { this._audio.stopMicrophone(); } catch (_) { /* ignore */ }
+    this.setState(State.IDLE);
+  }
+
+  /**
    * Dynamically load the wake word module and create the manager.
    * Cached — only loads the chunk once.
    * @returns {Promise<import('../wake-word').WakeWordManager>}
@@ -474,10 +504,14 @@ export class VoiceSatelliteSession {
     this._wakeWordLoading = true;
     try {
       await this._loadWakeWordModule();
-      // If in listening/idle state, switch from HA pipeline to on-device
+      // If in listening/idle state, switch from HA pipeline to on-device.
+      // Coming from disabled mode the mic is off — bring it up first.
       if ([State.LISTENING, State.IDLE].includes(this._state)) {
         this._logger.log('wake-word', 'Mode changed to On Device — loading');
         this._pipeline.stop();
+        if (!this._audio._mediaStream) {
+          await this._audio.startMicrophone('wake_word');
+        }
         await this._wakeWord.start();
       }
     } catch (e) {

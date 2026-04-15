@@ -10,7 +10,7 @@
  */
 
 import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
-import { getSwitchState } from '../shared/satellite-state.js';
+import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 import { subscribePipelineRun, setupReconnectListener } from './comms.js';
 import {
   handleRunStart,
@@ -75,6 +75,15 @@ export class PipelineManager {
   }
   get card() { return this._card; }
   get log() { return this._log; }
+
+  /** True when wake-word detection is set to "Disabled" — mic stays off
+   *  until voice_satellite.wake fires. */
+  _isDetectionDisabled() {
+    return getSelectState(
+      this._card.hass, this._card.config.satellite_entity,
+      'wake_word_detection', 'Home Assistant',
+    ) === 'Disabled';
+  }
   get binaryHandlerId() { return this._binaryHandlerId; }
   set binaryHandlerId(val) { this._binaryHandlerId = val; }
   get isRestarting() { return this._isRestarting; }
@@ -236,6 +245,21 @@ export class PipelineManager {
     // pipeline is down and the buffer may contain chime residue that
     // would trigger a false VAD detection on the server.
     const { audio } = this._card;
+
+    // In Disabled detection mode the mic is normally off — bring it up
+    // here so server-driven STT entries (start_conversation, ask_question)
+    // and any other indirect pipeline.start callers get a live stream
+    // without each one having to know about the disabled-mode quirk.
+    if (!audio._mediaStream) {
+      this._log.log('pipeline', 'Mic not running — acquiring before STT stream');
+      try {
+        await audio.startMicrophone('stt');
+      } catch (e) {
+        this._log.error('pipeline', `Mic acquire failed: ${e?.message || e}`);
+        throw e;
+      }
+    }
+
     audio.audioBuffer = [];
     audio.startSending(() => this._binaryHandlerId);
 
@@ -304,6 +328,25 @@ export class PipelineManager {
         if (ww?.isEnabled()) {
           ww.restart();
           this._card.setState(State.LISTENING);
+          return;
+        }
+
+        // Disabled mode: don't auto-resubscribe to a wake-word pipeline.
+        // The mic stays off until the next voice_satellite.wake fires —
+        // unless a continue-conversation is pending, in which case the
+        // restartContinue() path still needs the live mic stream to feed
+        // the next STT turn.
+        if (this._isDetectionDisabled()) {
+          if (this._shouldContinue) {
+            this._log.log('pipeline', 'Detection disabled — keeping mic alive for continue-conversation');
+          } else {
+            this._log.log('pipeline', 'Detection disabled — not restarting; awaiting wake action');
+            try { this._card.audio.stopMicrophone(); } catch (_) { /* ignore */ }
+            this._card.setState(State.IDLE);
+            // Mini card surfaces its small mic icon for IDLE state via
+            // _statusFor automatically.  The full card's start-button
+            // overlay stays hidden — wake is driven by the service.
+          }
           return;
         }
 

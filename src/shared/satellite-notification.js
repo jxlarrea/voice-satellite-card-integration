@@ -75,6 +75,14 @@ export function dispatchSatelliteEvent(card, event) {
     return;
   }
 
+  // Manual wake — fired by the voice_satellite.wake action. Skips wake-word
+  // detection and goes directly to STT.  No `id` field; can't be queued
+  // while hidden because it requires a live mic gesture context.
+  if (type === 'wake') {
+    card.onWakeAction?.();
+    return;
+  }
+
   if (!data || !data.id) return;
 
   // Queue events while the tab is hidden - audio can't play and UI state
