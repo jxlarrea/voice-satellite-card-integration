@@ -10,7 +10,10 @@ export const defaultSkin = {
   name: 'Default',
   css,
   reactiveBar: true,
-  overlayColor: [255, 255, 255],
-  defaultOpacity: 0.85,
+  hasDarkTheme: true,
+  overlayColor: [245, 244, 242],
+  darkOverlayColor: [18, 18, 18],
+  defaultOpacity: 1,
+  darkDefaultOpacity: 1,
   previewCSS,
 };
