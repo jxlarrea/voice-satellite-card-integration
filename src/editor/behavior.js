@@ -13,15 +13,6 @@ export const entitySchema = [
   },
 ];
 
-export const WAKE_WORD_DSP_WARNING = t(
-  null,
-  'editor.behavior.helper_wake_word_dsp_warning',
-  'WARNING: Enabling any of the above may reduce wake-word reliability (false triggers on similar-sounding words).',
-);
-
-// Split into two halves so the panel can render the warning as a plain
-// <div> between them (ha-form's built-in text schema types all render a
-// label/separator prefix we can't cleanly suppress).
 export const wakeWordMicrophoneSchema = [
   {
     type: 'expandable',

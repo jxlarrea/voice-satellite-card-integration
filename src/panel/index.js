@@ -22,7 +22,7 @@ import { DEFAULT_CONFIG, State, VERSION } from '../constants.js';
 import { renderPreview } from '../editor/preview.js';
 import {
   behaviorSchema, entitySchema, autoStartSchema, microphoneSchema, debugSchema,
-  behaviorLabels, behaviorHelpers, WAKE_WORD_DSP_WARNING,
+  behaviorLabels, behaviorHelpers,
 } from '../editor/behavior.js';
 import { skinSchema, skinLabels, skinHelpers } from '../editor/skin.js';
 import { WakeWordTestSession } from '../wake-word/wake-word-test-session.js';
@@ -153,20 +153,22 @@ class VoiceSatellitePanel extends HTMLElement {
     this._rendered = false;
     this._formLoaded = false;
     this._config = Object.assign({}, DEFAULT_CONFIG, getStoredConfig());
-    // Migrate legacy unified DSP keys ONLY into the STT group.  Wake-word
-    // defaults are deliberately all-off now (raw mic matches the training
-    // data for microWakeWord) — copying a previously-enabled legacy AGC
-    // into `wake_word_auto_gain_control: true` would reintroduce the
-    // false-trigger behavior this release specifically fixes.  Users who
-    // genuinely want AGC on for wake-word can toggle it explicitly in the
-    // panel; the STT side carries their old preference forward so
-    // transcription quality is unchanged.
+    // Migrate legacy unified DSP keys into the STT group.
     const LEGACY_DSP_KEYS = ['noise_suppression', 'echo_cancellation', 'auto_gain_control', 'voice_isolation'];
     for (const key of LEGACY_DSP_KEYS) {
       const legacy = this._config[key];
       if (legacy !== true && legacy !== false) continue;
       const stt = `stt_${key}`;
       if (this._config[stt] === undefined) this._config[stt] = legacy;
+    }
+    // v6.10.x shipped wake-word DSP defaulting to off — fix persisted
+    // false values back to true (matching Voice PE hardware behavior).
+    if (!(this._config._dsp_version >= 2)) {
+      this._config.wake_word_noise_suppression = true;
+      this._config.wake_word_echo_cancellation = true;
+      this._config.wake_word_auto_gain_control = true;
+      this._config._dsp_version = 2;
+      setStoredConfig(this._config);
     }
     // Sync entity from dedicated storage into config
     const storedEntity = getStoredEntity();
@@ -1415,53 +1417,6 @@ class VoiceSatellitePanel extends HTMLElement {
     // of the ha-expansion-panel.  No new custom elements — we're just
     // placing a plain <div> into an existing expansion panel's default
     // slot exactly the way ha-form itself places the inner ha-form.
-    this._placeWakeWordWarning(form);
-  }
-
-  _placeWakeWordWarning(form) {
-    const TARGET_TITLE = /wake.?word/i;
-    const tryPlace = () => {
-      const expandables = form.shadowRoot
-        ? form.shadowRoot.querySelectorAll('ha-form-expandable')
-        : [];
-      for (const exp of expandables) {
-        const headerEl = exp.shadowRoot?.querySelector('div[slot="header"]');
-        const headerText = headerEl?.textContent?.trim() || '';
-        if (!TARGET_TITLE.test(headerText)) continue;
-        const panel = exp.shadowRoot.querySelector('ha-expansion-panel');
-        if (!panel) return false;
-        if (panel.querySelector('.vs-ww-dsp-warning')) return true; // already placed
-        const warning = document.createElement('div');
-        warning.className = 'vs-ww-dsp-warning';
-        warning.setAttribute('role', 'alert');
-        warning.textContent = WAKE_WORD_DSP_WARNING;
-        // Inline styles — the div is slot-projected into ha-expansion-panel
-        // which lives inside ha-form-expandable's shadow root, so external
-        // CSS rules from the panel's light DOM don't reach it.
-        warning.style.cssText = [
-          'display: block',
-          'margin: 12px 16px 16px',
-          'padding: 10px 14px',
-          'border-radius: 6px',
-          'background: rgba(255, 152, 0, 0.14)',
-          'border: 1px solid rgba(255, 152, 0, 0.55)',
-          'color: var(--warning-color, #ff9800)',
-          'font-size: 13px',
-          'line-height: 1.45',
-          'font-weight: 500',
-        ].join(';');
-        panel.appendChild(warning);
-        return true;
-      }
-      return false;
-    };
-    if (tryPlace()) return;
-    // ha-form mounts its sub-forms asynchronously in some builds — poll
-    // briefly until the Wake Word expandable shows up, then stop.
-    let attempts = 0;
-    const timer = setInterval(() => {
-      if (tryPlace() || ++attempts > 40) clearInterval(timer);
-    }, 50);
   }
 }
 

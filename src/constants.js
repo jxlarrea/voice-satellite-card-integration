@@ -72,21 +72,18 @@ export const DEFAULT_CONFIG = {
   // Microphone Processing — Wake Word listening.
   // All DSP off by default.  The microWakeWord models were trained on raw
   // hardware-captured audio (Voice PE, ESPHome, Raspberry Pi boards — no
-  // software WebRTC DSP in the signal path).  Running the browser's AGC /
-  // NS / EC reshapes the spectrum in ways the model wasn't trained on and
-  // measurably increases prefix-match false triggers ("ok google" → ok_nabu,
-  // "ok man" → ok_nabu).  EC is also moot in the wake-word phase because
-  // the mic is muted through the chime.  Users can opt individual toggles
-  // back on per their hardware.
-  wake_word_noise_suppression: false,
-  wake_word_echo_cancellation: false,
-  wake_word_auto_gain_control: false,
+  // Microphone Processing — Wake Word.
+  // Browser WebRTC DSP (AGC, NS, EC) normalizes volume and removes
+  // background noise, matching what the XMOS chip does on Voice PE
+  // hardware before audio reaches the wake-word model.
+  wake_word_noise_suppression: true,
+  wake_word_echo_cancellation: true,
+  wake_word_auto_gain_control: true,
   wake_word_voice_isolation: false,
 
   // Microphone Processing — Speech to Text streaming.
-  // STT generally benefits from aggressive DSP (cleaner audio → better
-  // transcription). Mic is re-acquired with these constraints on the
-  // wake-word → STT transition.
+  // Mic is re-acquired with these constraints on the wake-word → STT
+  // transition.
   stt_noise_suppression: true,
   stt_echo_cancellation: true,
   stt_auto_gain_control: true,

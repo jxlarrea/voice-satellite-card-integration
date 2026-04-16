@@ -29,6 +29,25 @@ function getStoredConfig() {
 }
 
 /**
+ * One-time migration: v6.10.x shipped with wake-word DSP defaulting to
+ * off.  Users who opened the panel during that window have explicit
+ * `false` values persisted — flip them back to true (matching Voice PE
+ * hardware behavior) and stamp a version flag so this only runs once.
+ */
+function migrateWakeWordDsp() {
+  try {
+    const config = getStoredConfig();
+    if (config._dsp_version >= 2) return;
+    config.wake_word_noise_suppression = true;
+    config.wake_word_echo_cancellation = true;
+    config.wake_word_auto_gain_control = true;
+    // voice_isolation stays off (Chrome-only, aggressive)
+    config._dsp_version = 2;
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  } catch (_) { /* private browsing */ }
+}
+
+/**
  * Initialize the global engine. Safe to call multiple times —
  * guards against double-init.
  */
@@ -46,6 +65,7 @@ export function initEngine() {
 }
 
 async function bootstrapEngine() {
+  migrateWakeWordDsp();
   const ha = await waitForHass();
   const session = VoiceSatelliteSession.getInstance();
 
