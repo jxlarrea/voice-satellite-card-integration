@@ -82,6 +82,13 @@ def _sync_custom_models(config_dir: str) -> None:
         if not dest.exists():
             shutil.copy2(src, dest)
             _LOGGER.info("Saved custom model to persistent storage: %s", src.name)
+        # Also sync companion .json manifest if present
+        json_src = src.with_suffix(".json")
+        if json_src.exists():
+            json_dest = persistent / json_src.name
+            if not json_dest.exists():
+                shutil.copy2(json_src, json_dest)
+                _LOGGER.info("Saved custom model manifest to persistent storage: %s", json_src.name)
 
     # Restore: persistent → integration (recover after HACS update)
     for src in persistent.glob("*.tflite"):
@@ -91,6 +98,13 @@ def _sync_custom_models(config_dir: str) -> None:
         if not dest.exists():
             shutil.copy2(src, dest)
             _LOGGER.info("Restored custom model from persistent storage: %s", src.name)
+        # Also restore companion .json manifest if present
+        json_src = src.with_suffix(".json")
+        if json_src.exists():
+            json_dest = integration_models / json_src.name
+            if not json_dest.exists():
+                shutil.copy2(json_src, json_dest)
+                _LOGGER.info("Restored custom model manifest from persistent storage: %s", json_src.name)
 
 
 _DURATIONS_FILENAME = "durations.json"

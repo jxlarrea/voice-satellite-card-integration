@@ -107,13 +107,22 @@ export async function loadCustomWakeWordModel(modelName) {
   const url = `${getModelsBase()}/${modelName}.tflite`;
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Failed to fetch wake word model: ${modelName}`);
+    throw new Error(`Failed to fetch wake word model: ${modelName} (HTTP ${response.status})`);
   }
 
   const buffer = await response.arrayBuffer();
-  const model = compileModel(buffer);
-  MODEL_CACHE.set(modelName, model);
-  return model;
+  try {
+    const model = compileModel(buffer);
+    MODEL_CACHE.set(modelName, model);
+    return model;
+  } catch (e) {
+    throw new Error(
+      `Model "${modelName}" is not compatible with Voice Satellite. `
+      + `Only microWakeWord models are supported (int8 quantized streaming .tflite). `
+      + `openWakeWord and other model formats cannot be used. `
+      + `Detail: ${e.message}`,
+    );
+  }
 }
 
 export function releaseCustomWakeWordModels(namesToKeep = []) {
@@ -310,6 +319,28 @@ function compileModel(arrayBuffer) {
 
   const inputIds = Array.from(fb.readIntVector(inputsField));
   const outputIds = Array.from(fb.readIntVector(outputsField));
+
+  // Validate: microWakeWord models use INT8 quantized input tensors.
+  // Float32 inputs indicate a different model type (e.g. openWakeWord).
+  const inputTensor = tensors[inputIds[0]];
+  if (inputTensor && inputTensor.type !== TENSOR_TYPE_INT8) {
+    const typeNames = { 0: 'float32', 3: 'uint8', 9: 'int8' };
+    const typeName = typeNames[inputTensor.type] || `type=${inputTensor.type}`;
+    throw new Error(
+      `Input tensor is ${typeName} — expected int8. `
+      + `This looks like an openWakeWord or other non-microWakeWord model`,
+    );
+  }
+
+  // Validate: microWakeWord models use 40-feature mel frames.
+  const inputShape = inputTensor?.shape || [];
+  const featureSize = inputShape[inputShape.length - 1];
+  if (featureSize && featureSize !== 40) {
+    throw new Error(
+      `Input feature size is ${featureSize} — expected 40. `
+      + `This model uses a different audio frontend than microWakeWord`,
+    );
+  }
 
   const compiledOps = [];
   const variableInfo = new Map();
@@ -508,8 +539,11 @@ function compileModel(arrayBuffer) {
         });
         break;
       }
-      default:
-        throw new Error(`Unsupported wake word op code: ${code}`);
+      default: {
+        const OP_NAMES = { 0:'ADD', 18:'MUL', 39:'BATCH_TO_SPACE_ND', 40:'MEAN', 41:'SUB', 76:'RSQRT', 77:'SHAPE', 81:'REDUCE_PROD', 83:'PACK', 94:'FILL', 99:'SQUARED_DIFFERENCE' };
+        const opName = OP_NAMES[code] || `op=${code}`;
+        throw new Error(`Unsupported op: ${opName} — this model uses operations not found in microWakeWord models`);
+      }
     }
   }
 
@@ -729,7 +763,11 @@ class CompiledWakeWordModel {
 function compileWeightTensor(tensor) {
   const q = tensor.quant;
   if (tensor.type !== TENSOR_TYPE_INT8 || !q?.scales?.length) {
-    throw new Error('Unsupported weight tensor');
+    const typeNames = { 0: 'float32', 3: 'uint8', 9: 'int8' };
+    const typeName = typeNames[tensor.type] || `type=${tensor.type}`;
+    throw new Error(
+      `Weight tensor is ${typeName} without per-channel quantization — expected int8 with scales`,
+    );
   }
   return {
     shape: tensor.shape,

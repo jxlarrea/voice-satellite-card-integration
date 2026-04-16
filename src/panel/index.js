@@ -28,6 +28,7 @@ import { skinSchema, skinLabels, skinHelpers } from '../editor/skin.js';
 import { WakeWordTestSession } from '../wake-word/wake-word-test-session.js';
 import { resolveDspForMode } from '../audio/dsp-config.js';
 import { getMicroModelParams } from '../wake-word/micro-models.js';
+import { getSelectOptions } from '../shared/satellite-state.js';
 
 const P = 'vsp';
 const CONFIG_KEY = 'vs-panel-config';
@@ -921,15 +922,18 @@ class VoiceSatellitePanel extends HTMLElement {
     // Standalone tester session (lazy — created on first Start click)
     this._testerSession = null;
 
-    // Populate model dropdown from known models plus any active models
-    // reported by the wake word manager (when the engine is running).
+    // Populate model dropdown from the HA entity's options list (which
+    // includes built-in + any custom .tflite files discovered at startup).
     const populate = () => {
-      const known = ['ok_nabu', 'hey_jarvis', 'hey_mycroft', 'alexa',
+      const entityOptions = getSelectOptions(
+        this._hass, this._config.satellite_entity, 'wake_word_model',
+      );
+      const fallback = ['ok_nabu', 'hey_jarvis', 'hey_mycroft', 'alexa',
         'hey_home_assistant', 'hey_luna', 'okay_computer'];
       const session = this._getSession();
       const ww = session?.wakeWord;
       const active = ww ? ww.getActiveModels() : [];
-      const all = Array.from(new Set([...active, ...known]))
+      const all = Array.from(new Set([...active, ...(entityOptions.length ? entityOptions : fallback)]))
         .filter((m) => m && m !== 'No wake word' && m !== 'stop');
       const current = modelSelect.value;
       modelSelect.innerHTML = '';
@@ -1076,6 +1080,7 @@ class VoiceSatellitePanel extends HTMLElement {
       toggleBtn.disabled = false;
       this._startTesterMonitor();
     } catch (e) {
+      this._appendTesterLog('warn', `Failed to start: ${e.message || e}`);
       this._testerSession = null;
       toggleBtn.disabled = false;
       toggleBtn.textContent = 'Start';

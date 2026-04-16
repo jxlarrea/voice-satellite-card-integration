@@ -568,6 +568,10 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
         elif self._selected_option not in self._options:
             # Model was removed — fall back to first available
             self._selected_option = self._options[0] if self._options else "ok_nabu"
+        # Force a state write so the options attribute reflects the freshly
+        # discovered model list — without this, HA's cached state from the
+        # previous run can show stale/removed models in the frontend.
+        self.async_write_ha_state()
 
     async def async_select_option(self, option: str) -> None:
         """Handle option selection."""

@@ -100,6 +100,28 @@ export function getSelectState(hass, satelliteId, translationKey, defaultValue) 
 }
 
 /**
+ * Read a select entity's options list from its HA state attributes.
+ * @param {object} hass - HA frontend object
+ * @param {string} satelliteId - Satellite entity ID
+ * @param {string} translationKey - Select translation_key (e.g. 'wake_word_model')
+ * @returns {string[]} The options array, or empty array if not found
+ */
+export function getSelectOptions(hass, satelliteId, translationKey) {
+  if (!hass?.entities || !satelliteId) return [];
+  const satellite = hass.entities[satelliteId];
+  if (!satellite?.device_id) return [];
+  for (const [eid, entry] of Object.entries(hass.entities)) {
+    if (entry.device_id === satellite.device_id &&
+        entry.platform === 'voice_satellite' &&
+        entry.translation_key === translationKey) {
+      const options = hass.states[eid]?.attributes?.options;
+      return Array.isArray(options) ? options : [];
+    }
+  }
+  return [];
+}
+
+/**
  * Read a switch entity's on/off state directly from the entity registry
  * and state cache, bypassing satellite extra_state_attributes (which can
  * be stale if the state-change listener wasn't set up in time).
