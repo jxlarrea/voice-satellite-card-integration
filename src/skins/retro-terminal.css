@@ -368,7 +368,6 @@
 #voice-satellite-ui .vs-chat-msg.thinking.idle .vs-thinking-dots span,
 #voice-satellite-ui .vs-chat-msg.tool-call .vs-thinking-dots span {
   animation: none;
-  opacity: 0.4;
   transform: none;
   font-size: calc(28px * var(--vs-text-scale, 1));
   text-shadow: none;

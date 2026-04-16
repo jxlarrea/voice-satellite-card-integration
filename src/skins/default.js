@@ -13,7 +13,7 @@ export const defaultSkin = {
   hasDarkTheme: true,
   overlayColor: [245, 244, 242],
   darkOverlayColor: [18, 18, 18],
-  defaultOpacity: 1,
-  darkDefaultOpacity: 1,
+  defaultOpacity: 0.85,
+  darkDefaultOpacity: 0.85,
   previewCSS,
 };

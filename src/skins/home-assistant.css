@@ -298,11 +298,9 @@
 @keyframes ha-dot-bounce {
   0%, 60%, 100% {
     transform: translateY(0);
-    opacity: 0.35;
   }
   30% {
     transform: translateY(-8px);
-    opacity: 1;
   }
 }
 
@@ -310,7 +308,6 @@
 #voice-satellite-ui .vs-chat-msg.thinking.idle .vs-thinking-dots span,
 #voice-satellite-ui .vs-chat-msg.tool-call .vs-thinking-dots span {
   animation: none;
-  opacity: 0.45;
   transform: none;
   font-size: calc(22px * var(--vs-text-scale, 1));
 }
@@ -318,6 +315,7 @@
 /* Tool name text beside dots */
 #voice-satellite-ui .vs-thinking-text {
   margin-left: 8px;
+  padding-right: 2px;
   font-size: calc(22px * var(--vs-text-scale, 1));
   color: var(--secondary-text-color, rgba(0, 0, 0, 0.54));
   font-style: italic;

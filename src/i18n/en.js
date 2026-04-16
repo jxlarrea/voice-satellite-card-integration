@@ -108,7 +108,7 @@ export default {
       helper_voice_isolation: 'AI-based voice isolation, currently only available in Chrome',
     },
     skin: {
-      appearance: 'Appearance',
+      appearance: 'Skins & Appearance',
       skin: 'Skin',
       text_scale: 'Text Scale',
       background_opacity: 'Background Opacity',
