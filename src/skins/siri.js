@@ -17,5 +17,4 @@ export const siriSkin = {
   overlayColor: [0, 0, 0],
   defaultOpacity: 0.85,
   previewCSS,
-  fontURL: 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap',
 };

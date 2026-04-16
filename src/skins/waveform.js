@@ -730,5 +730,4 @@ export const waveformSkin = {
   overlayColor: null,
   defaultOpacity: 0.90,
   previewCSS,
-  fontURL: 'https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap',
 };

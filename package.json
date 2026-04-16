@@ -4,9 +4,9 @@
   "description": "Voice Satellite for Home Assistant — turns browsers into Assist satellites.",
   "private": true,
   "scripts": {
-    "prebuild": "node scripts/sync-version.js",
+    "prebuild": "node scripts/sync-version.js && node scripts/copy-fonts.js",
     "build": "webpack --mode production",
-    "predev": "node scripts/sync-version.js",
+    "predev": "node scripts/sync-version.js && node scripts/copy-fonts.js",
     "dev": "webpack --mode development && xcopy /E /I /Y custom_components\\voice_satellite \\\\hassio\\config\\custom_components\\voice_satellite"
   },
   "devDependencies": {

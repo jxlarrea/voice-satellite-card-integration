@@ -19,5 +19,4 @@ export const googleHomeSkin = {
   defaultOpacity: 1,
   darkDefaultOpacity: 1,
   previewCSS,
-  fontURL: 'https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap',
 };

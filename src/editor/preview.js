@@ -17,7 +17,6 @@ const PREVIEW_ONLY_SKINS = {
     previewCSS: waveformPreviewCSS,
     overlayColor: null,
     defaultOpacity: 0.90,
-    fontURL: 'https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap',
   },
 };
 
@@ -159,11 +158,20 @@ export function renderPreview(shadowRoot, config) {
       if (loaded !== skin) renderPreview(shadowRoot, config);
     });
   }
-  if (skin.fontURL && !document.querySelector(`link[href="${skin.fontURL}"]`)) {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = skin.fontURL;
-    document.head.appendChild(link);
+  // @font-face rules must live at document level (shadow DOM support varies).
+  // Always update content because on first render for non-default skins,
+  // `skin` is the default fallback — the async re-render has the real skin.
+  const previewFontCSS = skin.previewCSS || '';
+  const fontFaceRules = previewFontCSS.match(/@font-face\s*\{[^}]+\}/g);
+  if (fontFaceRules) {
+    const fontStyleId = `vs-preview-font-${skinId}`;
+    let fs = document.getElementById(fontStyleId);
+    if (!fs) {
+      fs = document.createElement('style');
+      fs.id = fontStyleId;
+      document.head.appendChild(fs);
+    }
+    fs.textContent = fontFaceRules.join('\n');
   }
   // @property rules must live at document level (shadow DOM ignores them)
   if (skinId === 'siri' && !document.querySelector('#vs-siri-preview-prop')) {
