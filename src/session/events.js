@@ -11,7 +11,7 @@
 import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
 import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
-import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
+import { getSwitchState, getSelectState, getNumberState } from '../shared/satellite-state.js';
 import { setChimeDurationOverrides } from '../audio/chime.js';
 
 const WAKE_MODE_HA = 'home-assistant';
@@ -351,7 +351,14 @@ export function onTTSComplete(session, playbackFailed) {
     if (session._imageLingerTimeout) clearTimeout(session._imageLingerTimeout);
     session._imageLingerTimeout = setTimeout(cleanup, Timing.TTS_FAILED_LINGER);
   } else {
-    cleanup();
+    const overlayLingerS = getNumberState(session.hass, session.config.satellite_entity, 'overlay_linger', 0);
+    if (overlayLingerS > 0) {
+      session.ui.stopReactive();
+      if (session._imageLingerTimeout) clearTimeout(session._imageLingerTimeout);
+      session._imageLingerTimeout = setTimeout(cleanup, overlayLingerS * 1000);
+    } else {
+      cleanup();
+    }
   }
 }
 

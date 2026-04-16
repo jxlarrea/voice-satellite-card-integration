@@ -164,6 +164,7 @@ Each satellite device exposes configuration entities on its device page (**Setti
 | **Announcement display duration** | Number | How long (1-60 seconds) to show the announcement text on screen after playback completes |
 | **Assist pipeline** | Select | Choose which Assist pipeline to use for this satellite |
 | **External screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
+| **Finish delay** | Number | How long (0-15 seconds) to keep the overlay visible after TTS finishes so you can continue reading the response. 0 dismisses immediately (default) |
 | **Finished speaking detection** | Select | VAD sensitivity - how aggressively to detect end of speech |
 | **Session duration** | Select | Controls how long conversation context is retained between wake word activations. After the selected duration elapses without interaction, the next wake word starts a fresh conversation. Options: "Persistent" (default - never expires, matching physical Voice PE satellite behavior), 5 minutes, 10 minutes, 15 minutes, 30 minutes, 1 hour, 3 hours, 6 hours, or "Isolated" (every wake word activation starts completely fresh). Multi-turn exchanges within a single session always share context regardless of this setting |
 | **Mute** | Switch | Mute/unmute the satellite - when muted, wake word detection is paused |

@@ -68,6 +68,9 @@
       },
       "screensaver_timer": {
         "name": "Screensaver timer"
+      },
+      "overlay_linger": {
+        "name": "Finish delay"
       }
     },
     "switch": {

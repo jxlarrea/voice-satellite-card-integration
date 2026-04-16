@@ -29,6 +29,7 @@ async def async_setup_entry(
     async_add_entities([
         VoiceSatelliteAnnouncementDurationNumber(entry),
         VoiceSatelliteScreensaverTimerNumber(entry),
+        VoiceSatelliteOverlayLingerNumber(entry),
     ])
 
 
@@ -116,5 +117,49 @@ class VoiceSatelliteScreensaverTimerNumber(NumberEntity, RestoreEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the screensaver timer."""
+        self._attr_native_value = int(value)
+        self.async_write_ha_state()
+
+
+class VoiceSatelliteOverlayLingerNumber(NumberEntity, RestoreEntity):
+    """Number entity for overlay fade out delay after TTS finishes."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "overlay_linger"
+    _attr_icon = "mdi:timer-sand-complete"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 15
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        """Initialize the overlay linger number."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_overlay_linger"
+        self._attr_native_value = 0  # Default: 0 seconds (dismiss immediately)
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous value on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            "unknown", "unavailable",
+        ):
+            try:
+                self._attr_native_value = int(float(last_state.state))
+            except (ValueError, TypeError):
+                pass
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set the overlay linger duration."""
         self._attr_native_value = int(value)
         self.async_write_ha_state()
