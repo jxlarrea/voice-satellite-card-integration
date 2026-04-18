@@ -63,7 +63,7 @@ Voice Satellite runs as a **global engine** that loads on every page of Home Ass
 
 ## Important: Browser Requirements
 
-**Warning:** Voice Satellite requires microphone access and works best when:
+**Warning:** Voice Satellite requires microphone access so make sure that:
 
 1. **The browser has microphone permissions granted** - you will be prompted on first use.
 2. **The page is served over HTTPS** - required for microphone access in modern browsers.
