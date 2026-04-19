@@ -109,9 +109,16 @@ export function setState(session, newState) {
   session.currentState = newState;
   session.logger.log('state', `${oldState} -> ${newState}`);
 
-  // Dismiss screensaver when a voice interaction begins
-  if (INTERACTING_STATES.includes(newState)) {
+  // Dismiss screensaver when a voice interaction begins; also manage
+  // the external-screensaver keep-alive loop so the tablet's native
+  // screensaver can't cover the voice UI mid-conversation.
+  const wasInteracting = INTERACTING_STATES.includes(oldState);
+  const isInteracting = INTERACTING_STATES.includes(newState);
+  if (isInteracting) {
     session.screensaver.dismiss();
+    if (!wasInteracting) session.screensaver.startExternalKeepalive();
+  } else if (wasInteracting) {
+    session.screensaver.stopExternalKeepalive();
   }
 
   // Swap mic DSP config between wake-word and STT modes.  WAKE_WORD_DETECTED

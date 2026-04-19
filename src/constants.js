@@ -96,4 +96,19 @@ export const DEFAULT_CONFIG = {
   text_scale: 100,
   reactive_bar: true,
   reactive_bar_update_interval_ms: 33,
+
+  // Screensaver
+  screensaver_enabled: false,
+  screensaver_timer_s: 60,
+  screensaver_type: 'black', // 'black' | 'media'
+  screensaver_media_id: '',
+  screensaver_media_interval_s: 10,
+  screensaver_media_shuffle: false,
+  screensaver_suppress_external: '',
+
+  // Fully Kiosk — only effective when FK's JavaScript Interface is
+  // enabled.  Ignored on other browsers.  `screensaver_dim_percent`
+  // is intentionally NOT listed here — an undefined value means "no
+  // dimming" (matches the background_opacity pattern).
+  screensaver_fk_motion_dismiss: false,
 };

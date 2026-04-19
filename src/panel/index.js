@@ -25,6 +25,8 @@ import {
   behaviorLabels, behaviorHelpers,
 } from '../editor/behavior.js';
 import { skinSchema, skinLabels, skinHelpers } from '../editor/skin.js';
+import { buildScreensaverPreSchema, buildScreensaverPostSchema, screensaverFkSchema, screensaverLabels, screensaverHelpers } from '../editor/screensaver.js';
+import { openMediaPicker, deriveParentMediaId } from './media-picker-dialog.js';
 import { WakeWordTestSession } from '../wake-word/wake-word-test-session.js';
 import { resolveDspForMode } from '../audio/dsp-config.js';
 import { getMicroModelParams } from '../wake-word/micro-models.js';
@@ -46,16 +48,18 @@ const STOP_SENSITIVITY_FACTORS = {
 
 /* ── Combined schema & labels (mirrors full card editor) ── */
 
-const panelSchema = [
-  ...behaviorSchema,
-  ...autoStartSchema,
-  ...skinSchema,
-  ...microphoneSchema,
-  ...debugSchema,
-];
+function buildPanelSchema(_cfg) {
+  return [
+    ...behaviorSchema,
+    ...autoStartSchema,
+    ...skinSchema,
+    ...microphoneSchema,
+    ...debugSchema,
+  ];
+}
 
-const allLabels = Object.assign({}, behaviorLabels, skinLabels);
-const allHelpers = Object.assign({}, behaviorHelpers, skinHelpers);
+const allLabels = Object.assign({}, behaviorLabels, skinLabels, screensaverLabels);
+const allHelpers = Object.assign({}, behaviorHelpers, skinHelpers, screensaverHelpers);
 
 /* ── Engine status display ── */
 
@@ -178,11 +182,62 @@ class VoiceSatellitePanel extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._migrateScreensaverFromEntities();
     if (!this._rendered) {
       this._buildDom();
     }
     this._updateForm();
     this._updateStatus();
+  }
+
+  /**
+   * One-shot migration from the v6.11.x screensaver entities (switch,
+   * number, select) into the panel config.  Reads satellite attrs and
+   * the screensaver select entity state while they still exist; after
+   * the entities are removed by the integration update, this becomes
+   * a no-op and users keep whatever defaults the panel has.
+   */
+  _migrateScreensaverFromEntities() {
+    if (this._config._screensaver_migrated_v1) return;
+    const hass = this._hass;
+    const eid = this._config.satellite_entity;
+    if (!hass || !eid) return;
+
+    const attrs = hass.states?.[eid]?.attributes || {};
+    let migratedSomething = false;
+    if (typeof attrs.screensaver_enabled === 'boolean') {
+      this._config.screensaver_enabled = attrs.screensaver_enabled;
+      migratedSomething = true;
+    }
+    if (typeof attrs.screensaver_timer === 'number' && attrs.screensaver_timer >= 10) {
+      this._config.screensaver_timer_s = attrs.screensaver_timer;
+      migratedSomething = true;
+    }
+
+    // Find the external-screensaver select entity via the satellite's device
+    const satEntity = hass.entities?.[eid];
+    if (satEntity?.device_id && hass.entities) {
+      for (const [otherEid, entry] of Object.entries(hass.entities)) {
+        if (entry.device_id !== satEntity.device_id) continue;
+        if (entry.platform !== 'voice_satellite') continue;
+        if (entry.translation_key !== 'screensaver') continue;
+        const extState = hass.states?.[otherEid];
+        const extAttrEid = extState?.attributes?.entity_id;
+        if (extAttrEid) {
+          this._config.screensaver_suppress_external = extAttrEid;
+          migratedSomething = true;
+        }
+        break;
+      }
+    }
+
+    this._config._screensaver_migrated_v1 = true;
+    setStoredConfig(this._config);
+
+    if (migratedSomething) {
+      const session = this._getSession();
+      if (session) session.updateConfig(Object.assign({}, this._config), { fromPanel: true });
+    }
   }
 
   set narrow(narrow) {
@@ -237,6 +292,12 @@ class VoiceSatellitePanel extends HTMLElement {
     if (entityForm) entityForm.hass = this._hass;
     const form = this.querySelector(`.${P}-form-container ha-form`);
     if (form) form.hass = this._hass;
+    const ssPreForm = this.querySelector(`.${P}-ss-pre-container ha-form`);
+    if (ssPreForm) ssPreForm.hass = this._hass;
+    const ssPostForm = this.querySelector(`.${P}-ss-post-container ha-form`);
+    if (ssPostForm) ssPostForm.hass = this._hass;
+    const ssFkForm = this.querySelector(`.${P}-ss-fk-form ha-form`);
+    if (ssFkForm) ssFkForm.hass = this._hass;
   }
 
   _updateStatus() {
@@ -313,6 +374,8 @@ class VoiceSatellitePanel extends HTMLElement {
   }
 
   _onSettingsChange(newData) {
+    const prevScreensaverType = this._config.screensaver_type;
+    const prevScreensaverEnabled = this._config.screensaver_enabled;
     Object.assign(this._config, newData);
     setStoredConfig(this._config);
 
@@ -322,9 +385,30 @@ class VoiceSatellitePanel extends HTMLElement {
       session.updateConfig(Object.assign({}, this._config), { fromPanel: true });
     }
 
-    // Sync settings form
+    // Sync main settings form
     const settingsForm = this.querySelector(`.${P}-form-container ha-form`);
     if (settingsForm) settingsForm.data = Object.assign({}, this._config);
+
+    // Sync Screensaver sub-forms — rebuild schemas if enabled or type
+    // changed so the relevant fields show or hide.
+    const ssStructureChanged =
+      this._config.screensaver_type !== prevScreensaverType ||
+      this._config.screensaver_enabled !== prevScreensaverEnabled;
+
+    const preForm = this.querySelector(`.${P}-ss-pre-container ha-form`);
+    if (preForm) {
+      preForm.data = Object.assign({}, this._config);
+      if (ssStructureChanged) preForm.schema = buildScreensaverPreSchema(this._config);
+    }
+    const postForm = this.querySelector(`.${P}-ss-post-container ha-form`);
+    if (postForm) {
+      postForm.data = Object.assign({}, this._config);
+      if (ssStructureChanged) postForm.schema = buildScreensaverPostSchema(this._config);
+    }
+    const fkForm = this.querySelector(`.${P}-ss-fk-form ha-form`);
+    if (fkForm) fkForm.data = Object.assign({}, this._config);
+    this._syncFkSectionVisibility();
+    this._updateScreensaverMediaVisibility();
     this._updateStatus();
     this._updatePreview();
 
@@ -334,6 +418,71 @@ class VoiceSatellitePanel extends HTMLElement {
     if (this._testerSession?.running) {
       this._stopTesterSession().catch(() => { /* ignore */ });
     }
+  }
+
+  /**
+   * Show/hide the Fully Kiosk Integration sub-section.  It's only
+   * relevant when the screensaver is enabled (there's nothing for FK
+   * to do otherwise).  When shown, also render the detection banner
+   * and disable the inner controls if Fully Kiosk isn't detected.
+   */
+  _syncFkSectionVisibility() {
+    const section = this.querySelector(`.${P}-ss-fk`);
+    if (!section) return;
+    const enabled = this._config.screensaver_enabled === true;
+    section.style.display = enabled ? '' : 'none';
+    if (!enabled) return;
+
+    const detected = typeof window !== 'undefined' && !!window.fully;
+
+    const status = this.querySelector(`.${P}-ss-fk-status`);
+    if (status) {
+      status.classList.toggle('is-ok', detected);
+      status.classList.toggle('is-missing', !detected);
+      status.textContent = detected
+        ? '✓ Fully Kiosk JavaScript Interface detected.'
+        : '⚠ Fully Kiosk JavaScript Interface not detected — controls disabled.';
+    }
+
+    const formWrap = this.querySelector(`.${P}-ss-fk-form`);
+    if (formWrap) formWrap.classList.toggle('is-disabled', !detected);
+    if (this._ssFkForm) this._ssFkForm.disabled = !detected;
+  }
+
+  /** Toggle visibility of the Media Browse widget — only shown when
+   *  the screensaver is enabled AND type='media'. */
+  _updateScreensaverMediaVisibility() {
+    const container = this.querySelector(`.${P}-ss-media`);
+    if (!container) return;
+    const visible =
+      this._config.screensaver_enabled === true &&
+      this._config.screensaver_type === 'media';
+    container.style.display = visible ? 'flex' : 'none';
+    if (visible) this._renderScreensaverMediaCurrent();
+  }
+
+  _renderScreensaverMediaCurrent() {
+    const input = this.querySelector(`.${P}-ss-media-input`);
+    if (!input) return;
+    const id = this._config.screensaver_media_id || '';
+    // Don't overwrite what the user is currently typing.  ha-textfield
+    // hosts its real <input> in a shadow root, so :focus-within is the
+    // correct check (document.activeElement is always the host itself).
+    if (!input.matches(':focus-within')) input.value = id;
+  }
+
+  async _openMediaPicker() {
+    const hass = this._hass;
+    if (!hass?.connection) return;
+    // Start at the parent folder of the current selection so the user
+    // sees siblings of their current choice (e.g. for
+    // media-source://image/image.wi_fi_access, open at
+    // media-source://image).  Empty parent means "open at ROOT".
+    const current = this._config.screensaver_media_id || '';
+    const initial = deriveParentMediaId(current);
+    const result = await openMediaPicker(hass, initial, 'Pick screensaver media');
+    if (!result) return;
+    this._onSettingsChange({ screensaver_media_id: result.media_content_id });
   }
 
   _updatePreview() {
@@ -524,6 +673,95 @@ class VoiceSatellitePanel extends HTMLElement {
           margin-top: 8px;
           line-height: 1.5;
         }
+        .${P}-ss-media {
+          flex-direction: column;
+          gap: 8px;
+          margin: 24px 0;
+        }
+        .${P}-ss-fk {
+          margin-top: 16px;
+          border: 1px solid var(--divider-color, #333);
+          border-radius: 8px;
+          overflow: hidden;
+        }
+        .${P}-ss-fk-summary {
+          padding: 12px 16px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          list-style: none;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          user-select: none;
+        }
+        .${P}-ss-fk-summary::-webkit-details-marker { display: none; }
+        .${P}-ss-fk-summary::before {
+          content: '▶';
+          font-size: 10px;
+          transition: transform 0.2s ease;
+          color: var(--secondary-text-color, #999);
+        }
+        .${P}-ss-fk[open] > .${P}-ss-fk-summary::before { transform: rotate(90deg); }
+        .${P}-ss-fk-summary:hover { background: rgba(255,255,255,0.04); }
+        .${P}-ss-fk-body {
+          padding: 12px 16px 16px;
+          border-top: 1px solid var(--divider-color, #333);
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .${P}-ss-fk-intro {
+          font-size: 13px;
+          color: var(--secondary-text-color, #999);
+          line-height: 1.5;
+        }
+        .${P}-ss-fk-status {
+          font-size: 13px;
+          padding: 8px 12px;
+          border-radius: 6px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .${P}-ss-fk-status.is-ok {
+          background: color-mix(in srgb, #4caf50 16%, transparent);
+          color: #81c784;
+        }
+        .${P}-ss-fk-status.is-missing {
+          background: color-mix(in srgb, #ff9800 16%, transparent);
+          color: #ffb74d;
+        }
+        .${P}-ss-fk-form.is-disabled {
+          opacity: 0.5;
+          pointer-events: none;
+        }
+        .${P}-ss-media-label {
+          font-size: 14px;
+          color: var(--primary-text-color, #fff);
+        }
+        .${P}-ss-media-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .${P}-ss-media-input {
+          flex: 1;
+          min-width: 0;
+        }
+        .${P}-ss-browse-btn {
+          flex-shrink: 0;
+          background: var(--primary-color, #03a9f4);
+          color: #fff;
+          border: none;
+          border-radius: 6px;
+          padding: 10px 18px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          font-family: inherit;
+        }
+        .${P}-ss-browse-btn:hover { opacity: 0.88; }
         .${P}-tester-row {
           display: flex;
           align-items: center;
@@ -764,6 +1002,32 @@ class VoiceSatellitePanel extends HTMLElement {
         <div class="${P}-hint">
           Settings are stored per-browser and persist across sessions.
         </div>
+      </div>
+
+      <div class="${P}-card">
+        <div class="${P}-card-title">Screensaver</div>
+        <div class="${P}-ss-pre-container">
+          <div class="${P}-form-loading">Loading settings...</div>
+        </div>
+        <div class="${P}-ss-media" style="display: none;">
+          <div class="${P}-ss-media-label">Media source</div>
+          <div class="${P}-ss-media-row">
+            <ha-textfield class="${P}-ss-media-input" placeholder="media-source://..."></ha-textfield>
+            <button type="button" class="${P}-ss-browse-btn">Browse</button>
+          </div>
+        </div>
+        <div class="${P}-ss-post-container"></div>
+
+        <details class="${P}-ss-fk" style="display: none;">
+          <summary class="${P}-ss-fk-summary">Fully Kiosk Integration</summary>
+          <div class="${P}-ss-fk-body">
+            <div class="${P}-ss-fk-intro">
+              These settings only apply when running inside Fully Kiosk Browser with the JavaScript Interface enabled.
+            </div>
+            <div class="${P}-ss-fk-status"></div>
+            <div class="${P}-ss-fk-form"></div>
+          </div>
+        </details>
       </div>
 
       <div class="${P}-card ${P}-tester-card">
@@ -1406,22 +1670,68 @@ class VoiceSatellitePanel extends HTMLElement {
     const form = document.createElement('ha-form');
     form.hass = this._hass;
     form.data = Object.assign({}, this._config);
-    form.schema = panelSchema;
+    form.schema = buildPanelSchema(this._config);
     form.computeLabel = (s) => allLabels[s.name] || '';
     form.computeHelper = (s) => allHelpers[s.name] || '';
     form.addEventListener('value-changed', (e) => this._onSettingsChange(e.detail.value));
     container.appendChild(form);
+    this._settingsForm = form;
 
-    // The Wake-Word DSP warning has to sit INSIDE the Wake Word expandable
-    // so users see it right where the toggles are.  ha-form-expandable
-    // renders an `<ha-expansion-panel>` in its own shadow root with the
-    // inner ha-form as its light-DOM child — that panel slot-projects
-    // any light-DOM children into the expanded content area.  So we
-    // walk ha-form's shadow tree, find the Wake Word expandable by its
-    // header text, and append our warning as a second light-DOM child
-    // of the ha-expansion-panel.  No new custom elements — we're just
-    // placing a plain <div> into an existing expansion panel's default
-    // slot exactly the way ha-form itself places the inner ha-form.
+    // Screensaver — split into pre/post forms so the Media Browse
+    // widget can render directly under the Type dropdown instead of
+    // at the end of the form.
+    const makeSsForm = (schema) => {
+      const f = document.createElement('ha-form');
+      f.hass = this._hass;
+      f.data = Object.assign({}, this._config);
+      f.schema = schema;
+      f.computeLabel = (s) => allLabels[s.name] || '';
+      f.computeHelper = (s) => allHelpers[s.name] || '';
+      f.addEventListener('value-changed', (e) => this._onSettingsChange(e.detail.value));
+      return f;
+    };
+
+    const ssPreContainer = this.querySelector(`.${P}-ss-pre-container`);
+    if (ssPreContainer) {
+      ssPreContainer.innerHTML = '';
+      const preForm = makeSsForm(buildScreensaverPreSchema(this._config));
+      ssPreContainer.appendChild(preForm);
+      this._ssPreForm = preForm;
+    }
+
+    const ssPostContainer = this.querySelector(`.${P}-ss-post-container`);
+    if (ssPostContainer) {
+      ssPostContainer.innerHTML = '';
+      const postForm = makeSsForm(buildScreensaverPostSchema(this._config));
+      ssPostContainer.appendChild(postForm);
+      this._ssPostForm = postForm;
+    }
+
+    // Fully Kiosk Integration sub-form — a separate ha-form so we can
+    // gracefully disable the whole thing when Fully Kiosk isn't
+    // detected, and surface a detection banner above it.
+    const fkFormContainer = this.querySelector(`.${P}-ss-fk-form`);
+    if (fkFormContainer) {
+      fkFormContainer.innerHTML = '';
+      const fkForm = makeSsForm(screensaverFkSchema);
+      fkFormContainer.appendChild(fkForm);
+      this._ssFkForm = fkForm;
+    }
+    this._syncFkSectionVisibility();
+
+    // Media Browse button (native HTML, no shadow DOM hack)
+    const browseBtn = this.querySelector(`.${P}-ss-browse-btn`);
+    if (browseBtn) browseBtn.addEventListener('click', () => this._openMediaPicker());
+
+    // Manual URI editing via the text input
+    const mediaInput = this.querySelector(`.${P}-ss-media-input`);
+    if (mediaInput) {
+      mediaInput.addEventListener('change', (e) => {
+        this._onSettingsChange({ screensaver_media_id: e.target.value.trim() });
+      });
+    }
+
+    this._updateScreensaverMediaVisibility();
   }
 }
 

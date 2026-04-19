@@ -23,7 +23,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 # Unique-ID suffixes of switch entities removed in past versions.
-_STALE_SWITCH_SUFFIXES = {"_fresh_conversation"}
+_STALE_SWITCH_SUFFIXES = {"_fresh_conversation", "_builtin_screensaver"}
 
 
 async def async_setup_entry(
@@ -37,7 +37,6 @@ async def async_setup_entry(
         VoiceSatelliteMuteSwitch(entry),
         VoiceSatelliteNoiseGateSwitch(entry),
         VoiceSatelliteStopWordSwitch(entry),
-        VoiceSatelliteScreensaverSwitch(entry),
     ]
     async_add_entities(entities)
 
@@ -214,45 +213,3 @@ class VoiceSatelliteStopWordSwitch(SwitchEntity, RestoreEntity):
         self.async_write_ha_state()
 
 
-class VoiceSatelliteScreensaverSwitch(SwitchEntity, RestoreEntity):
-    """Switch entity for the built-in screensaver.
-
-    When enabled, the browser overlay dims to a solid color after an
-    idle timeout configured by the companion number entity.  The
-    screensaver is dismissed on voice interaction or single tap.
-    """
-
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_has_entity_name = True
-    _attr_translation_key = "builtin_screensaver"
-    _attr_icon = "mdi:sleep"
-
-    def __init__(self, entry: ConfigEntry) -> None:
-        """Initialize the screensaver switch."""
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_builtin_screensaver"
-        self._attr_is_on = False  # Default: screensaver disabled
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device info - same identifiers as the satellite entity."""
-        return {
-            "identifiers": {(DOMAIN, self._entry.entry_id)},
-        }
-
-    async def async_added_to_hass(self) -> None:
-        """Restore previous state on startup."""
-        await super().async_added_to_hass()
-        last_state = await self.async_get_last_state()
-        if last_state is not None:
-            self._attr_is_on = last_state.state == "on"
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        """Enable the screensaver."""
-        self._attr_is_on = True
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        """Disable the screensaver."""
-        self._attr_is_on = False
-        self.async_write_ha_state()

@@ -143,6 +143,22 @@ All settings are stored per-browser in local storage and persist across sessions
 | **Voice isolation** | AI-based voice isolation (Chrome only) |
 | **Debug logging** | Show debug info in the browser console |
 
+### Screensaver
+
+A browser overlay that kicks in after an idle timeout. Configured per-browser in the sidebar panel; automatically dismissed on voice interaction, tap, or Fully Kiosk motion detection. Does not activate while the engine is stopped.
+
+| Setting | Description |
+|---------|-------------|
+| **Enable Voice Satellite screensaver** | Master toggle for the overlay |
+| **Idle timeout** | Seconds before the screensaver activates (10–600, default 60) |
+| **Type** | **Black overlay** — solid black overlay. **Media** — image, video, folder, or camera feed selected from the HA media library |
+| **Media source** *(Media type only)* | Paste a `media-source://` URI or use the **Browse** button to open the HA media browser. Folders cycle through their playable contents; cameras stream live via MJPEG; images cross-fade on transitions |
+| **Item interval** *(Media type, folders only)* | Seconds per image when cycling through a folder (2–600, default 10). Videos play to completion regardless |
+| **Shuffle folder items** *(Media type, folders only)* | Randomize the playback order each time the folder is opened |
+| **External screensaver** *(screensaver disabled only)* | A `switch` or `input_boolean` that's turned off when a voice interaction starts and turned back on when it ends. Useful to manage Fully Kiosk's screensaver so it doesn't cover the voice UI mid-conversation |
+| **Fully Kiosk Integration → Screen brightness while active** | Hardware backlight level (0–100%) while the screensaver is showing. The previous brightness is restored on dismiss. 0% = fully dark, 100% = leave the backlight untouched (default) |
+| **Fully Kiosk Integration → Dismiss on motion** | Dismiss the screensaver when Fully Kiosk's camera-based motion detection fires. Requires Motion Detection to be enabled in the Fully Kiosk settings. Default off |
+
 ### Preview
 
 A live preview of the selected skin updates as you change appearance settings.
@@ -163,14 +179,11 @@ Each satellite device exposes configuration entities on its device page (**Setti
 |--------|------|-------------|
 | **Announcement display duration** | Number | How long (1-60 seconds) to show the announcement text on screen after playback completes |
 | **Assist pipeline** | Select | Choose which Assist pipeline to use for this satellite |
-| **External screensaver** | Select | A `switch` or `input_boolean` entity to automatically turn off when a voice interaction begins (e.g., a Fully Kiosk screensaver toggle). Set to "Disabled" to skip |
 | **Finish delay** | Number | How long (0-15 seconds) to keep the overlay visible after TTS finishes so you can continue reading the response. 0 dismisses immediately (default) |
 | **Finished speaking detection** | Select | VAD sensitivity - how aggressively to detect end of speech |
 | **Session duration** | Select | Controls how long conversation context is retained between wake word activations. After the selected duration elapses without interaction, the next wake word starts a fresh conversation. Options: "Persistent" (default - never expires, matching physical Voice PE satellite behavior), 5 minutes, 10 minutes, 15 minutes, 30 minutes, 1 hour, 3 hours, 6 hours, or "Isolated" (every wake word activation starts completely fresh). Multi-turn exchanges within a single session always share context regardless of this setting |
 | **Mute** | Switch | Mute/unmute the satellite - when muted, wake word detection is paused |
-| **Screensaver** | Switch | Enable/disable the built-in screensaver. When enabled, a black overlay covers the screen after the idle timeout. Dismissed on voice interaction, tap, or motion detection. On Fully Kiosk Browser with the JavaScript Interface enabled (**Advanced Web Settings -> Enable JavaScript Interface**): the backlight is dimmed to 0 on activation and restored on dismiss, and FK's camera-based motion detection automatically wakes the screen when someone approaches the device |
-| **Screensaver active** | Binary sensor | Sensor showing whether the screensaver overlay is currently displayed.|
-| **Screensaver timer** | Number | Idle timeout (30-600 seconds, default 60) before the screensaver activates |
+| **Screensaver active** | Binary sensor | Sensor showing whether the screensaver overlay is currently displayed. (Screensaver settings live in the sidebar panel — see [Screensaver](#screensaver)) |
 | **TTS Output** | Select | Where to play TTS audio: "Browser" (default) plays audio locally, or select any `media_player` entity to route TTS to an external speaker |
 | **Wake sound** | Switch | Enable/disable chime sounds (wake, done, error) |
 | **Stop word interruption** | Switch | Opt-in on-device `stop` keyword detection for interruptible states such as timer alerts, TTS playback, and announcements. Disabled by default to avoid extra CPU/memory use on slower devices |
@@ -222,8 +235,6 @@ The satellite entity exposes the following attributes for use in templates and a
 | `announcement_display_duration` | integer | Configured announcement display duration in seconds |
 | `wake_word_detection` | string | Current wake word detection mode: "On Device" or "Home Assistant" |
 | `wake_word_model` | string | Selected primary on-device wake word model name (e.g., "ok_nabu") |
-| `screensaver_enabled` | boolean | Whether the built-in screensaver is enabled |
-| `screensaver_timer` | integer | Screensaver idle timeout in seconds |
 
 Example template to check for active timers:
 

@@ -32,9 +32,6 @@
           "aggressive": "Aggressive"
         }
       },
-      "screensaver": {
-        "name": "External screensaver"
-      },
       "tts_output": {
         "name": "TTS output"
       },
@@ -66,9 +63,6 @@
       "announcement_display_duration": {
         "name": "Announcement display duration"
       },
-      "screensaver_timer": {
-        "name": "Screensaver timer"
-      },
       "overlay_linger": {
         "name": "Finish delay"
       }
@@ -85,9 +79,6 @@
       },
       "stop_word": {
         "name": "Stop word interruption"
-      },
-      "builtin_screensaver": {
-        "name": "Screensaver"
       }
     },
     "binary_sensor": {

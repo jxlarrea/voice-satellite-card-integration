@@ -28,10 +28,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import (
-    async_track_state_change_event,
-    async_track_time_interval,
-)
+from homeassistant.helpers.event import async_track_state_change_event
 
 # Conditional import for ask_question support (HA 2025.7+)
 try:
@@ -48,9 +45,8 @@ try:
 except ImportError:
     HAS_HASSIL = False
 
-from datetime import timedelta
 
-from .const import DOMAIN, INTEGRATION_VERSION, SCREENSAVER_INTERVAL
+from .const import DOMAIN, INTEGRATION_VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -124,9 +120,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
         # Satellite event subscription (Phase 2 - direct push to card)
         self._satellite_subscribers: list[tuple[Any, int]] = []
-
-        # Screensaver keep-alive
-        self._screensaver_unsub = None
 
     @property
     def available(self) -> bool:
@@ -236,20 +229,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             if s and s.state not in ("unknown", "unavailable"):
                 attrs[attr_key] = s.state
 
-        # Expose built-in screensaver settings for the card
-        s = self._get_child_state(registry, "switch", "_builtin_screensaver")
-        if s is not None:
-            attrs["screensaver_enabled"] = s.state == "on"
-
-        s = self._get_child_state(
-            registry, "number", "_screensaver_timer"
-        )
-        if s and s.state not in ("unknown", "unavailable"):
-            try:
-                attrs["screensaver_timer"] = int(float(s.state))
-            except (ValueError, TypeError):
-                pass
-
         return attrs
 
     # --- Public accessors for __init__.py WebSocket handlers ---
@@ -316,7 +295,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         # extra_state_attributes are re-evaluated and the card sees updates.
         registry = er.async_get(self.hass)
         tracked_eids = []
-        for suffix in ("_mute", "_wake_sound", "_stop_word", "_builtin_screensaver"):
+        for suffix in ("_mute", "_wake_sound", "_stop_word"):
             eid = registry.async_get_entity_id(
                 "switch", DOMAIN, f"{self._entry.entry_id}{suffix}"
             )
@@ -333,12 +312,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         )
         if ann_dur_eid:
             tracked_eids.append(ann_dur_eid)
-        ss_timer_eid = registry.async_get_entity_id(
-            "number", DOMAIN,
-            f"{self._entry.entry_id}_screensaver_timer"
-        )
-        if ss_timer_eid:
-            tracked_eids.append(ss_timer_eid)
         for suffix in ("_wake_word_detection", "_wake_word_model", "_wake_word_sensitivity"):
             eid = registry.async_get_entity_id(
                 "select", DOMAIN, f"{self._entry.entry_id}{suffix}"
@@ -402,7 +375,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             except Exception:
                 pass
         self._satellite_subscribers.clear()
-        self._stop_screensaver_keepalive()
 
         await super().async_will_remove_from_hass()
 
@@ -457,8 +429,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         event subscription, then blocks until the card ACKs playback
         via the voice_satellite/announce_finished WebSocket command.
         """
-        self._start_screensaver_keepalive()
-
         self._announce_id += 1
         announce_id = self._announce_id
 
@@ -519,11 +489,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         finally:
             self._announce_event = None
             self._preannounce_pending = True
-            # Stop keep-alive unless satellite is still active
-            # (e.g. start_conversation set state to "listening")
-            current = self.hass.states.get(self.entity_id)
-            if not current or current.state == "idle":
-                self._stop_screensaver_keepalive()
 
     @callback
     def announce_finished(self, announce_id: int) -> None:
@@ -574,8 +539,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         the card enters STT mode (skipping wake word) so the user can
         respond to the prompt.
         """
-        self._start_screensaver_keepalive()
-
         self._announce_id += 1
         announce_id = self._announce_id
 
@@ -639,11 +602,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             self._announce_event = None
             self._preannounce_pending = True
             self._pending_extra_system_prompt = None
-            # Stop keep-alive unless satellite is still active
-            # (state is "listening" if ACK succeeded -> card entering STT mode)
-            current = self.hass.states.get(self.entity_id)
-            if not current or current.state == "idle":
-                self._stop_screensaver_keepalive()
 
     async def async_internal_ask_question(
         self,
@@ -707,10 +665,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
         # Phase 1 complete - card has ACK'd announcement and entered
         # STT-only mode. Now wait for the transcribed answer.
-
-        # Re-start keep-alive for Phase 2 (async_announce's finally may
-        # have stopped it when it saw idle state)
-        self._start_screensaver_keepalive()
 
         # Set state to listening (card is now in STT mode)
         self._set_satellite_state("listening")
@@ -777,10 +731,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             # _question_match_event fires but before this finally runs.
             # It will be overwritten on the next ask_question call.
             self.async_write_ha_state()
-            # Stop keep-alive - card is done with the question flow
-            current = self.hass.states.get(self.entity_id)
-            if not current or current.state == "idle":
-                self._stop_screensaver_keepalive()
 
     def _match_answer(
         self, sentence: str, answers: list[dict[str, Any]]
@@ -902,12 +852,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         if mapped is None:
             return
 
-        # Screensaver keep-alive: active whenever satellite is non-idle
-        if mapped != "idle":
-            self._start_screensaver_keepalive()
-        else:
-            self._stop_screensaver_keepalive()
-
         self._set_satellite_state(mapped)
         _LOGGER.debug(
             "Pipeline state for '%s': %s -> %s",
@@ -915,74 +859,6 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             state,
             mapped,
         )
-
-    def _get_screensaver_entity_id(self) -> str | None:
-        """Get the configured screensaver entity ID from the select entity."""
-        registry = er.async_get(self.hass)
-        select_eid = registry.async_get_entity_id(
-            "select", DOMAIN, f"{self._entry.entry_id}_screensaver"
-        )
-        if not select_eid:
-            return None
-        state = self.hass.states.get(select_eid)
-        if not state or state.state in ("Disabled", "unknown", "unavailable"):
-            return None
-        # The select entity stores the entity_id in an attribute
-        return state.attributes.get("entity_id")
-
-    @callback
-    def _start_screensaver_keepalive(self) -> None:
-        """Start periodic screensaver keep-alive (turn off screensaver entity)."""
-        entity_id = self._get_screensaver_entity_id()
-        if not entity_id:
-            return
-        if self._screensaver_unsub is not None:
-            return  # Already running
-
-        # Turn off immediately
-        self.hass.async_create_task(
-            self._screensaver_turn_off(entity_id)
-        )
-
-        @callback
-        def _tick(_now):
-            eid = self._get_screensaver_entity_id()
-            if not eid:
-                self._stop_screensaver_keepalive()
-                return
-            self.hass.async_create_task(
-                self._screensaver_turn_off(eid)
-            )
-
-        self._screensaver_unsub = async_track_time_interval(
-            self.hass, _tick, timedelta(seconds=SCREENSAVER_INTERVAL),
-        )
-        _LOGGER.debug(
-            "Screensaver keep-alive started for '%s' (entity: %s)",
-            self._satellite_name,
-            entity_id,
-        )
-
-    @callback
-    def _stop_screensaver_keepalive(self) -> None:
-        """Stop periodic screensaver keep-alive."""
-        if self._screensaver_unsub is not None:
-            self._screensaver_unsub()
-            self._screensaver_unsub = None
-            _LOGGER.debug(
-                "Screensaver keep-alive stopped for '%s'",
-                self._satellite_name,
-            )
-
-    async def _screensaver_turn_off(self, entity_id: str) -> None:
-        """Turn off the screensaver entity, swallowing errors during shutdown."""
-        try:
-            await self.hass.services.async_call(
-                "homeassistant", "turn_off", {"entity_id": entity_id},
-            )
-        except Exception:
-            if not self.hass.is_stopping:
-                _LOGGER.debug("Failed to turn off screensaver %s", entity_id)
 
     async def async_run_pipeline(
         self,

@@ -333,6 +333,9 @@ export class VoiceSatelliteSession {
       'satellite_entity', 'debug',
       ...micKeys,
       'reactive_bar', 'reactive_bar_update_interval_ms',
+      'screensaver_enabled', 'screensaver_timer_s', 'screensaver_dim_percent', 'screensaver_type',
+      'screensaver_media_id', 'screensaver_media_interval_s', 'screensaver_media_shuffle',
+      'screensaver_suppress_external', 'screensaver_fk_motion_dismiss',
     ];
 
     const oldEntity = this._config.satellite_entity;
@@ -369,6 +372,11 @@ export class VoiceSatelliteSession {
       for (const c of this._cards) {
         c.setConfig(config);
       }
+    }
+
+    // Apply screensaver config changes (enable/disable, type, timer, media, etc.)
+    try { this._screensaver.checkSettings(); } catch (e) {
+      this._logger.log('session', `screensaver.checkSettings: ${e.message || e}`);
     }
 
     this._syncFullCardSuppression();
