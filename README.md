@@ -49,6 +49,7 @@ Voice Satellite runs as a **global engine** that loads on every page of Home Ass
 - **Timers, announcements, conversations** - voice-activated timers with countdown pills, `assist_satellite.announce` / `start_conversation` / `ask_question` from automations
 - **Media player entity** - volume control, `tts.speak` targeting, and `media_player.play_media` from automations. TTS can route to browser or a remote speaker
 - **Skins** - 7 built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri, Waveform) with CSS overrides. Reactive audio-level animation on the activity bar
+- **Screensaver** - black overlay, image/video/folder from the HA media library, or live camera feed. Cross-fades between folder items; integrates with Fully Kiosk backlight dimming and motion-dismiss
 - **Mini card** - optional `voice-satellite-mini-card` for in-dashboard text display without the fullscreen overlay
 - **LLM tools** *(experimental)* - image/video/web/Wikipedia search, weather, stocks/crypto with visual panels. Requires [Voice Satellite - LLM Tools](https://github.com/jxlarrea/voice-satellite-card-llm-tools)
 - **Works on any device** - tablets, phones, computers, kiosks
