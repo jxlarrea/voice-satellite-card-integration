@@ -99,11 +99,19 @@ Or search for `Voice Satellite` in the HACS default repository.
 
 The **Voice Satellite** sidebar panel is the central configuration hub. Pick the satellite entity for this browser, tune microphone processing, choose a skin, and set up the screensaver - all stored per-browser in local storage. The optional [Mini Card](docs/configuration.md#mini-card) provides an inline, text-first dashboard variant when you don't want the fullscreen overlay.
 
+<p align="center">
+ <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/sidepanel.png" alt="Sidebar Panel" width="650"/>
+</p>
+
 See the [Configuration reference](docs/configuration.md) for every setting in the sidebar panel and mini card.
 
 ## Integration
 
 Each satellite is a real `assist_satellite` device in Home Assistant, with a companion `media_player`, per-device configuration entities (pipeline, wake word, TTS output, mute, etc.), and live state sync (`idle` / `listening` / `processing` / `responding`). After every turn the integration fires a `voice_satellite_chat` event carrying the user's transcript, the assistant's full reply, and the tools the LLM invoked, ready to drive automations.
+
+<p align="center">
+   <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/integration.png" alt="Integration" width="650"/>
+</p>
 
 See the [Integration reference](docs/integration.md) for device entities, state values, attribute list, and event payload.
 
@@ -119,11 +127,13 @@ On-device detection runs [microWakeWord](https://github.com/kahrendt/microWakeWo
 
 See the [Wake Word reference](docs/wake-word.md) for built-in models, custom model loading, configuration, and disabled mode.
 
-## Customization
+## Skins & Customization
 
 Seven built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri, Waveform) theme the overlay, timer pills, and activity bar. Every skin can be further tweaked via the **Custom CSS** field in the sidebar panel, and the Waveform skin exposes dedicated CSS variables for per-strand color control. Built-in chime sounds (`wake`, `done`, `error`, `alert`, `announce`) can be replaced with your own MP3s that survive HACS updates.
 
-See the [Customization reference](docs/customization.md) for the skin list, CSS variable tables, and the custom sounds folder layout.
+<img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/skins.jpg" alt="Skins" width="100%"/>
+
+See the [Skins & Customization reference](docs/customization.md) for the skin list, CSS variable tables, and the custom sounds folder layout.
 
 ## Experimental: LLM Tools
 
