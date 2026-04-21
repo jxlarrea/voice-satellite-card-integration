@@ -53,9 +53,6 @@ Voice Satellite runs as a **global engine** that loads on every page of Home Ass
   - Conversation agent ([Home Assistant](https://www.home-assistant.io/integrations/conversation/), OpenAI, Qwen, etc.)
   - Text-to-Speech ([Piper](https://www.home-assistant.io/integrations/piper/), Kokoro, etc.)
 
-<details>
-<summary><strong>Browser requirements (microphone, HTTPS, companion app)</strong></summary>
-
 Voice Satellite requires microphone access, so make sure that:
 
 1. **The browser has microphone permissions granted** - you will be prompted on first use.
@@ -65,8 +62,6 @@ Voice Satellite requires microphone access, so make sure that:
 For kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/details?id=de.ozerov.fully), make sure to enable microphone permissions and use the screensaver feature (not screen off) to keep the microphone active while dimming the display.
 
 For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings -> Companion App -> Other settings. Without this, the WebView will block TTS audio playback.
-
-</details>
 
 ## Installation
 
