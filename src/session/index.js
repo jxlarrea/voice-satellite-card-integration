@@ -338,6 +338,7 @@ export class VoiceSatelliteSession {
       'reactive_bar', 'reactive_bar_update_interval_ms',
       'screensaver_enabled', 'screensaver_timer_s', 'screensaver_dim_percent', 'screensaver_type',
       'screensaver_media_id', 'screensaver_media_interval_s', 'screensaver_media_shuffle',
+      'screensaver_website_url',
       'screensaver_suppress_external', 'screensaver_fk_motion_dismiss',
     ];
 

@@ -60,11 +60,12 @@ A browser overlay that kicks in after an idle timeout. Configured per-browser in
 |---------|-------------|
 | **Enable Voice Satellite screensaver** | Master toggle for the overlay |
 | **Idle timeout** | Seconds before the screensaver activates (10-600, default 60) |
-| **Type** | **Black overlay** - solid black overlay. **Media** - image, video, folder, or camera feed selected from the HA media library |
+| **Type** | **Black overlay** - solid black overlay. **Media** - image, video, folder, or camera feed selected from the HA media library. **Website** - embed any URL in an iframe (e.g. immich-kiosk, photo frame apps, a dashboard) |
 | **Media source** *(Media type only)* | Paste a `media-source://` URI or use the **Browse** button to open the HA media browser. Folders cycle through their playable contents; cameras stream live via MJPEG; images cross-fade on transitions |
 | **Item interval** *(Media type, folders only)* | Seconds per image when cycling through a folder (2-600, default 10). Videos play to completion regardless |
 | **Shuffle folder items** *(Media type, folders only)* | Randomize the playback order each time the folder is opened |
-| **External screensaver** *(screensaver disabled only)* | A `switch` or `input_boolean` that's turned off when a voice interaction starts and turned back on when it ends. Useful to manage Fully Kiosk's screensaver so it doesn't cover the voice UI mid-conversation |
+| **Website URL** *(Website type only)* | Full URL to embed. The site must permit iframe embedding (no strict `X-Frame-Options` / `frame-ancestors`). Touch input on the iframe is suppressed so a tap anywhere on the screen dismisses the screensaver |
+| **External screensaver** *(screensaver disabled only)* | A `switch` or `input_boolean` that's forced off for the duration of each voice interaction, then left alone so its owner (typically Fully Kiosk) can resume its own idle timer. Useful to keep Fully Kiosk's screensaver from covering the voice UI mid-conversation |
 | **Fully Kiosk Integration -> Screen brightness while active** | Hardware backlight level (0-100%) while the screensaver is showing. The previous brightness is restored on dismiss. 0% = fully dark, 100% = leave the backlight untouched (default) |
 | **Fully Kiosk Integration -> Dismiss on motion** | Dismiss the screensaver when Fully Kiosk's camera-based motion detection fires. Requires Motion Detection to be enabled in the Fully Kiosk settings. Default off |
 

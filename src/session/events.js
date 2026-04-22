@@ -111,13 +111,18 @@ export function setState(session, newState) {
 
   // Dismiss screensaver when a voice interaction begins; also manage
   // the external-screensaver keep-alive loop so the tablet's native
-  // screensaver can't cover the voice UI mid-conversation.
+  // screensaver can't cover the voice UI mid-conversation.  We keep
+  // the keep-alive running while TTS audio is still playing even if
+  // the pipeline state has already transitioned away — otherwise the
+  // external screensaver can sneak back in before the response
+  // finishes speaking.  onTTSComplete stops the loop once playback
+  // actually ends.
   const wasInteracting = INTERACTING_STATES.includes(oldState);
   const isInteracting = INTERACTING_STATES.includes(newState);
   if (isInteracting) {
     session.screensaver.dismiss();
     if (!wasInteracting) session.screensaver.startExternalKeepalive();
-  } else if (wasInteracting) {
+  } else if (wasInteracting && !session.tts?.isPlaying) {
     session.screensaver.stopExternalKeepalive();
   }
 
@@ -323,6 +328,11 @@ export function onTTSComplete(session, playbackFailed) {
     session.ui.hideBlurOverlay(BlurReason.PIPELINE);
     session.ui.updateForState(session.currentState, session.pipeline.serviceUnavailable, false);
     syncSatelliteState(session, 'IDLE');
+
+    // Now that the interaction has really ended (TTS audio too), stop
+    // forcing the external screensaver off so whatever owns that
+    // switch (usually Fully Kiosk) can resume its own idle timer.
+    session.screensaver.stopExternalKeepalive();
 
     // Reset screensaver idle timer after interaction completes
     session.screensaver.notifyActivity();

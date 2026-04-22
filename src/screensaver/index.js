@@ -2,11 +2,13 @@
  * ScreensaverManager
  *
  * Built-in screensaver that overlays the display after an idle timeout.
- * Supports two display types:
- *   - 'black' — solid black overlay (original behavior, dims FK backlight)
- *   - 'media' — images/videos/cameras from a media-source URI (single
- *               file, folder for cycling, or a camera feed from HA's
- *               media library)
+ * Supports three display types:
+ *   - 'black'   — solid black overlay (original behavior, dims FK backlight)
+ *   - 'media'   — images/videos/cameras from a media-source URI (single
+ *                 file, folder for cycling, or a camera feed from HA's
+ *                 media library)
+ *   - 'website' — arbitrary URL in an <iframe>, useful for kiosk-style
+ *                 apps like immich-kiosk
  *
  * Also runs an external-screensaver keep-alive loop: while a voice
  * interaction is active, periodically turns off a user-selected switch
@@ -56,6 +58,7 @@ export class ScreensaverManager {
     this._mediaId = '';
     this._mediaIntervalSeconds = 10;
     this._mediaShuffle = false;
+    this._websiteUrl = '';
     this._suppressExternal = '';
     this._activityHandler = null;
     this._savedBrightness = null;
@@ -94,11 +97,12 @@ export class ScreensaverManager {
       }
     }
     const newFkMotionDismiss = cfg.screensaver_fk_motion_dismiss === true;
-    const newType = ['black', 'media'].includes(cfg.screensaver_type)
+    const newType = ['black', 'media', 'website'].includes(cfg.screensaver_type)
       ? cfg.screensaver_type : 'black';
     const newMediaId = cfg.screensaver_media_id || '';
     const newMediaInterval = Math.max(2, parseInt(cfg.screensaver_media_interval_s, 10) || 10);
     const newMediaShuffle = cfg.screensaver_media_shuffle === true;
+    const newWebsiteUrl = (cfg.screensaver_website_url || '').trim();
     const newSuppressExternal = cfg.screensaver_suppress_external || '';
 
     const settingsChanged =
@@ -109,7 +113,8 @@ export class ScreensaverManager {
       newType !== this._type ||
       newMediaId !== this._mediaId ||
       newMediaInterval !== this._mediaIntervalSeconds ||
-      newMediaShuffle !== this._mediaShuffle;
+      newMediaShuffle !== this._mediaShuffle ||
+      newWebsiteUrl !== this._websiteUrl;
 
     this._suppressExternal = newSuppressExternal;
 
@@ -125,6 +130,7 @@ export class ScreensaverManager {
     this._mediaId = newMediaId;
     this._mediaIntervalSeconds = newMediaInterval;
     this._mediaShuffle = newMediaShuffle;
+    this._websiteUrl = newWebsiteUrl;
 
     this._log.log('screensaver', `Settings: enabled=${newEnabled}, timer=${newTimer}s, type=${newType}`);
 
@@ -195,15 +201,16 @@ export class ScreensaverManager {
   }
 
   /**
-   * Stop the external screensaver keep-alive loop and restore the
-   * switch to its pre-interaction state (on).  Called when a voice
-   * interaction ends (pipeline returns to idle).
+   * Stop the external screensaver keep-alive loop.  We intentionally
+   * do NOT turn the switch back on here — Fully Kiosk (or whichever
+   * integration owns the switch) should re-activate on its own
+   * schedule so the user sees the dashboard first and only re-enters
+   * the screensaver after FK's normal idle timeout.
    */
   stopExternalKeepalive() {
     if (!this._keepaliveTimer) return;
     clearInterval(this._keepaliveTimer);
     this._keepaliveTimer = null;
-    this._turnOnExternal();
   }
 
   /**
@@ -282,6 +289,8 @@ export class ScreensaverManager {
       this._renderBlack();
     } else if (this._type === 'media') {
       this._renderMedia();
+    } else if (this._type === 'website') {
+      this._renderWebsite();
     }
 
     // Force reflow so the transition plays from opacity 0
@@ -318,6 +327,41 @@ export class ScreensaverManager {
   _renderBlack() {
     this._overlay.style.backgroundColor = '#000000';
     if (this._contentEl) this._contentEl.innerHTML = '';
+  }
+
+  _renderWebsite() {
+    this._overlay.style.backgroundColor = '#000000';
+    if (!this._contentEl) return;
+    this._contentEl.innerHTML = '';
+
+    if (!this._websiteUrl) {
+      this._log.log('screensaver', 'Website mode but no URL configured — falling back to black');
+      return;
+    }
+
+    const iframe = document.createElement('iframe');
+    iframe.src = this._websiteUrl;
+    iframe.referrerPolicy = 'no-referrer';
+    iframe.allow = 'autoplay; fullscreen';
+    iframe.style.cssText = [
+      'position:absolute',
+      'inset:0',
+      'width:100%',
+      'height:100%',
+      'border:0',
+      'background:#000',
+      // Let taps fall through to the overlay so the standard
+      // click-to-dismiss gesture works even though the iframe's
+      // (usually cross-origin) content would otherwise swallow them.
+      'pointer-events:none',
+      'opacity:0',
+      `transition:opacity ${MEDIA_FADE_MS}ms ease`,
+    ].join(';');
+    iframe.addEventListener('load', () => this._fadeInAndSweep(iframe), { once: true });
+    iframe.addEventListener('error', () => {
+      this._log.log('screensaver', `Website iframe failed to load: ${this._websiteUrl}`);
+    }, { once: true });
+    this._contentEl.appendChild(iframe);
   }
 
   async _renderMedia() {
@@ -524,16 +568,6 @@ export class ScreensaverManager {
     if (!hass || !this._suppressExternal) return;
     try {
       hass.callService('homeassistant', 'turn_off', {
-        entity_id: this._suppressExternal,
-      });
-    } catch (_) { /* best-effort */ }
-  }
-
-  _turnOnExternal() {
-    const hass = this._session.hass;
-    if (!hass || !this._suppressExternal) return;
-    try {
-      hass.callService('homeassistant', 'turn_on', {
         entity_id: this._suppressExternal,
       });
     } catch (_) { /* best-effort */ }

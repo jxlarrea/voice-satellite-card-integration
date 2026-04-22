@@ -461,6 +461,17 @@ class VoiceSatellitePanel extends HTMLElement {
       this._config.screensaver_type === 'media';
     container.style.display = visible ? 'flex' : 'none';
     if (visible) this._renderScreensaverMediaCurrent();
+
+    // Same visibility rule for the iframe-embedding hint — only shown
+    // when the screensaver is enabled AND the type is 'website'.
+    const hint = this.querySelector(`.${P}-ss-website-hint`);
+    if (hint) {
+      hint.style.display =
+        this._config.screensaver_enabled === true &&
+        this._config.screensaver_type === 'website'
+          ? ''
+          : 'none';
+    }
   }
 
   _renderScreensaverMediaCurrent() {
@@ -679,6 +690,16 @@ class VoiceSatellitePanel extends HTMLElement {
           flex-direction: column;
           gap: 8px;
           margin: 24px 0;
+        }
+        .${P}-ss-post-container { margin-top: 16px; }
+        .${P}-ss-post-container:empty { margin: 0; }
+        .${P}-ss-website-hint {
+          color: var(--secondary-text-color, #999);
+          font-size: 0.75rem;
+          line-height: 1rem;
+          letter-spacing: 0.03333em;
+          padding: 4px 16px 0;
+          margin-top: -8px;
         }
         .${P}-ss-fk {
           margin-top: 16px;
@@ -1242,6 +1263,9 @@ class VoiceSatellitePanel extends HTMLElement {
           </div>
         </div>
         <div class="${P}-ss-post-container"></div>
+        <div class="${P}-ss-website-hint" style="display: none;">
+          The URL must allow iframe embedding; sites with strict X-Frame-Options or frame-ancestors rules won't load. Touch input is suppressed so a tap anywhere dismisses the screensaver.
+        </div>
 
         <details class="${P}-ss-fk" style="display: none;">
           <summary class="${P}-ss-fk-summary">Fully Kiosk Integration</summary>
