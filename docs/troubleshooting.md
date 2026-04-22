@@ -12,6 +12,10 @@
 
 Before digging through the rest of this page, open the **Voice Satellite** sidebar panel and scroll to **Diagnostics & troubleshooting**. Tap **Run diagnostics** to execute the full check battery against this browser and the Home Assistant server.
 
+<p align="center">
+   <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/diagnostics.png" alt="Integration" width="650"/>
+</p>
+
 Checks cover the common failure modes:
 
 - **Browser environment:** secure context (HTTPS/localhost), `navigator.mediaDevices` availability, `Permissions-Policy` for microphone and autoplay, microphone permission state, at least one audio input device, `localStorage` writeability.
