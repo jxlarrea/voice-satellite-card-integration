@@ -781,17 +781,20 @@ class VoiceSatellitePanel extends HTMLElement {
         .${P}-diag-summary.is-running {
           color: var(--primary-text-color, #fff);
         }
+        /* Colored tint backgrounds convey status; text inherits from the
+           theme's primary text color so it stays legible in both light
+           and dark modes. */
         .${P}-diag-summary.is-pass {
-          background: color-mix(in srgb, #4caf50 18%, transparent);
-          color: #a5d6a7;
+          background: color-mix(in srgb, #4caf50 22%, transparent);
+          color: var(--primary-text-color, #fff);
         }
         .${P}-diag-summary.is-warn {
-          background: color-mix(in srgb, #ff9800 18%, transparent);
-          color: #ffb74d;
+          background: color-mix(in srgb, #ff9800 22%, transparent);
+          color: var(--primary-text-color, #fff);
         }
         .${P}-diag-summary.is-fail {
-          background: color-mix(in srgb, #f44336 22%, transparent);
-          color: #ef9a9a;
+          background: color-mix(in srgb, #f44336 26%, transparent);
+          color: var(--primary-text-color, #fff);
         }
         .${P}-diag-spinner {
           flex-shrink: 0;
@@ -892,7 +895,9 @@ class VoiceSatellitePanel extends HTMLElement {
           margin-top: 6px;
           padding: 6px 10px;
           border-left: 3px solid currentColor;
-          background: rgba(255,255,255,0.04);
+          /* Theme-aware tint: derives from the current text color so it
+             reads as a subtle inset in both light and dark modes. */
+          background: color-mix(in srgb, var(--primary-text-color, #fff) 6%, transparent);
           border-radius: 0 4px 4px 0;
           line-height: 1.45;
         }
@@ -956,7 +961,9 @@ class VoiceSatellitePanel extends HTMLElement {
         .${P}-diag-rerun {
           flex: 1;
           background: var(--primary-color, #03a9f4);
-          color: var(--text-primary-color, #fff);
+          /* Hardcoded white: some light themes set --text-primary-color
+             to black, which fails against the saturated primary color. */
+          color: #fff;
           border: none;
         }
         .${P}-diag-copy {
