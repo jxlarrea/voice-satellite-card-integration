@@ -140,7 +140,9 @@ See the [LLM Tools reference](docs/llm-tools.md) for each supported tool and the
 
 Most setup issues come from missing microphone permissions, mixed HTTP/HTTPS content, Fully Kiosk autoplay settings, or a mismatched `internal_url` that breaks the TTS proxy for announcements.
 
-See the [Troubleshooting reference](docs/troubleshooting.md) for the four most common issues and their fixes.
+The sidebar panel ships with a **Diagnostics & troubleshooting** section that runs automated client-side and server-side checks (secure context, microphone permission, pipeline configuration, mixed-content TTS, wake word mode, Lovelace resource registration, and more). A **Copy report** button produces a paste-ready markdown block with the full results, ready to attach to a GitHub issue.
+
+See the [Troubleshooting reference](docs/troubleshooting.md) for the most common issues and their fixes.
 
 ## Contributing
 

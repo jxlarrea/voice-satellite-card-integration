@@ -1,5 +1,5 @@
 /**
- * Memory Diagnostics
+ * Memory Sampler
  *
  * Periodic sampling of key resource metrics to identify memory leaks.
  * Enable via URL: ?vs_diag=true  (persisted in localStorage)
@@ -7,6 +7,9 @@
  *
  * Logs [VS][diag] every 60s with JS heap size, DOM node count,
  * and internal pool/queue sizes from the wake word engine and audio pipeline.
+ *
+ * Unrelated to the user-facing DiagnosticsManager in src/diagnostics/.
+ * This module is a debug tool for investigating leaks over long sessions.
  */
 
 const STORAGE_KEY = 'vs-diag-enabled';

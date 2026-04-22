@@ -13,7 +13,7 @@ import { VERSION, DEFAULT_CONFIG } from '../constants.js';
 import { VoiceSatelliteSession } from '../session';
 import { resolveEntity } from '../shared/entity-picker.js';
 import { preloadChimes } from '../audio/chime.js';
-import { startDiagnostics } from '../diagnostics.js';
+import { startDiagnostics } from '../memory-sampler.js';
 
 const ENGINE_KEY = '__vsEngine';
 const CONFIG_KEY = 'vs-panel-config';

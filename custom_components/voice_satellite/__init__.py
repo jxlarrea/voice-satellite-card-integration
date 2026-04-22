@@ -23,6 +23,7 @@ from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
+from .diagnostics import register as register_diagnostics
 from .frontend import (
     async_register_resource,
     async_register_sidebar_panel,
@@ -245,6 +246,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     websocket_api.async_register_command(hass, ws_cancel_timer)
     websocket_api.async_register_command(hass, ws_media_player_event)
     websocket_api.async_register_command(hass, ws_screensaver_state)
+    register_diagnostics(hass)
 
     # Register services
     hass.services.async_register(

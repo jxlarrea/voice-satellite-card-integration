@@ -2,10 +2,27 @@
 
 ## Contents
 
+- [Running diagnostics](#running-diagnostics)
 - [Nothing happens when I tap Start](#nothing-happens-when-i-tap-start)
 - [Wake word not detected](#wake-word-not-detected)
 - [No audio response](#no-audio-response)
 - [No TTS / Audio on Announcements, Start Conversation, or Ask Question (CORS / mixed content error)](#no-tts--audio-on-announcements-start-conversation-or-ask-question-cors--mixed-content-error)
+
+## Running diagnostics
+
+Before digging through the rest of this page, open the **Voice Satellite** sidebar panel and scroll to **Diagnostics & troubleshooting**. Tap **Run diagnostics** to execute the full check battery against this browser and the Home Assistant server.
+
+Checks cover the common failure modes:
+
+- **Browser environment:** secure context (HTTPS/localhost), `navigator.mediaDevices` availability, `Permissions-Policy` for microphone and autoplay, microphone permission state, at least one audio input device, `localStorage` writeability.
+- **Voice Satellite bundle:** overlay bundle loaded on this page, Lovelace resource registered exactly once (no duplicates from the archived standalone card).
+- **Satellite configuration:** an entity is selected, the entity exists in Home Assistant, the Assist pipeline is resolvable, the pipeline has STT / TTS / conversation engines configured, those provider entities are loaded.
+- **URLs and TTS:** Home Assistant `internal_url` and `external_url` match the page protocol. A mismatch here is the single most common cause of "text shows but TTS is silent" for `assist_satellite.announce`.
+- **Wake word:** current detection mode (On Device / Home Assistant / Disabled). In Home Assistant mode, a wake word entity is configured on the pipeline and loaded.
+- **Audio:** page-load autoplay probe reporting whether media element playback and `AudioContext` capture will start without a user tap. Remediation text is tailored to the current host (HA Companion App, Fully Kiosk, or a plain browser).
+- **Platform:** detects Fully Kiosk, Companion App, ChromeOS, iOS, and other hosts so remediation instructions match the actual settings path.
+
+Failures and warnings render at the top of the panel with specific remediation for your platform. Passing checks collapse into a **Show all checks** disclosure below. The **Copy report** button writes a markdown block with the full results, card/overlay version, page URL, and user agent. Paste it into a GitHub issue instead of enabling Debug Logs when asking for help.
 
 ## Nothing happens when I tap Start
 

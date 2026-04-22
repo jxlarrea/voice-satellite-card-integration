@@ -31,6 +31,8 @@ import { WakeWordTestSession } from '../wake-word/wake-word-test-session.js';
 import { resolveDspForMode } from '../audio/dsp-config.js';
 import { getMicroModelParams } from '../wake-word/micro-models.js';
 import { getSelectOptions } from '../shared/satellite-state.js';
+import { DiagnosticsManager } from '../diagnostics';
+import { buildMarkdownReport } from '../diagnostics/report.js';
 
 const P = 'vsp';
 const CONFIG_KEY = 'vs-panel-config';
@@ -762,6 +764,211 @@ class VoiceSatellitePanel extends HTMLElement {
           font-family: inherit;
         }
         .${P}-ss-browse-btn:hover { opacity: 0.88; }
+        .${P}-diag-summary {
+          position: relative;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 10px 12px;
+          border-radius: 8px;
+          font-size: 14px;
+          background: var(--secondary-background-color, #2c2c2e);
+          overflow: hidden;
+        }
+        .${P}-diag-summary.is-idle {
+          color: var(--secondary-text-color, #bbb);
+        }
+        .${P}-diag-summary.is-running {
+          color: var(--primary-text-color, #fff);
+        }
+        .${P}-diag-summary.is-pass {
+          background: color-mix(in srgb, #4caf50 18%, transparent);
+          color: #a5d6a7;
+        }
+        .${P}-diag-summary.is-warn {
+          background: color-mix(in srgb, #ff9800 18%, transparent);
+          color: #ffb74d;
+        }
+        .${P}-diag-summary.is-fail {
+          background: color-mix(in srgb, #f44336 22%, transparent);
+          color: #ef9a9a;
+        }
+        .${P}-diag-spinner {
+          flex-shrink: 0;
+          width: 14px;
+          height: 14px;
+          border: 2px solid currentColor;
+          border-top-color: transparent;
+          border-radius: 50%;
+          animation: ${P}-diag-spin 0.8s linear infinite;
+        }
+        @keyframes ${P}-diag-spin {
+          to { transform: rotate(360deg); }
+        }
+        /* Indeterminate progress bar that streaks across the summary while
+           diagnostics are running. The spinner alone is easy to miss on
+           wide displays, and the combination makes it unambiguous that
+           work is in progress. */
+        .${P}-diag-summary.is-running::after {
+          content: '';
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          height: 2px;
+          background: linear-gradient(
+            90deg,
+            transparent 0%,
+            var(--primary-color, #03a9f4) 50%,
+            transparent 100%
+          );
+          animation: ${P}-diag-progress 1.1s ease-in-out infinite;
+        }
+        @keyframes ${P}-diag-progress {
+          0% { transform: translateX(-40%); }
+          100% { transform: translateX(40%); }
+        }
+        .${P}-diag-results {
+          margin-top: 14px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .${P}-diag-results.is-collapsed { display: none; }
+        .${P}-diag-group-title {
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          color: var(--secondary-text-color, #999);
+          margin: 14px 0 4px;
+        }
+        .${P}-diag-group-title:first-child { margin-top: 2px; }
+        .${P}-diag-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          padding: 8px 10px;
+          border-radius: 6px;
+          background: var(--secondary-background-color, #2c2c2e);
+        }
+        .${P}-diag-row.is-pass { background: transparent; opacity: 0.7; }
+        .${P}-diag-row.is-fail {
+          background: color-mix(in srgb, #f44336 12%, transparent);
+        }
+        .${P}-diag-row.is-warn {
+          background: color-mix(in srgb, #ff9800 12%, transparent);
+        }
+        .${P}-diag-status {
+          flex-shrink: 0;
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 12px;
+          font-weight: 700;
+          margin-top: 1px;
+          color: #fff;
+        }
+        .${P}-diag-status.is-pass { background: #4caf50; }
+        .${P}-diag-status.is-warn { background: #ff9800; }
+        .${P}-diag-status.is-fail { background: #f44336; }
+        .${P}-diag-status.is-info { background: #2196f3; }
+        .${P}-diag-status.is-skip { background: #9e9e9e; }
+        .${P}-diag-text { flex: 1; min-width: 0; }
+        .${P}-diag-title {
+          font-size: 14px;
+          color: var(--primary-text-color, #fff);
+        }
+        .${P}-diag-detail {
+          font-size: 13px;
+          color: var(--secondary-text-color, #bbb);
+          margin-top: 2px;
+          line-height: 1.45;
+        }
+        .${P}-diag-remediation {
+          font-size: 13px;
+          margin-top: 6px;
+          padding: 6px 10px;
+          border-left: 3px solid currentColor;
+          background: rgba(255,255,255,0.04);
+          border-radius: 0 4px 4px 0;
+          line-height: 1.45;
+        }
+        .${P}-diag-details {
+          margin-top: 12px;
+          border: 1px solid var(--divider-color, #333);
+          border-radius: 8px;
+          overflow: hidden;
+        }
+        .${P}-diag-details-summary {
+          padding: 10px 14px;
+          cursor: pointer;
+          list-style: none;
+          font-size: 13px;
+          color: var(--secondary-text-color, #bbb);
+          background: var(--secondary-background-color, #2c2c2e);
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          user-select: none;
+        }
+        .${P}-diag-details-summary::-webkit-details-marker { display: none; }
+        .${P}-diag-details-summary::before {
+          content: '▶';
+          font-size: 10px;
+          transition: transform 0.15s ease;
+          color: var(--secondary-text-color, #999);
+        }
+        .${P}-diag-details[open] > .${P}-diag-details-summary::before {
+          transform: rotate(90deg);
+        }
+        .${P}-diag-details-summary:hover {
+          color: var(--primary-text-color, #fff);
+        }
+        .${P}-diag-details-body {
+          padding: 6px 10px 10px;
+          border-top: 1px solid var(--divider-color, #333);
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .${P}-diag-actions {
+          display: flex;
+          gap: 8px;
+          margin-top: 14px;
+        }
+        .${P}-diag-actions button {
+          padding: 10px 18px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          font-family: inherit;
+          cursor: pointer;
+          transition: opacity 0.15s ease, background 0.15s ease;
+        }
+        .${P}-diag-actions button:hover:not(:disabled) { opacity: 0.88; }
+        .${P}-diag-actions button:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
+        .${P}-diag-rerun {
+          flex: 1;
+          background: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
+          border: none;
+        }
+        .${P}-diag-copy {
+          flex: 0 0 auto;
+          background: transparent;
+          color: var(--primary-text-color, #fff);
+          border: 1px solid var(--divider-color, #444);
+        }
+        .${P}-diag-copy:hover:not(:disabled) {
+          background: var(--secondary-background-color, #2c2c2e);
+          opacity: 1;
+        }
         .${P}-tester-row {
           display: flex;
           align-items: center;
@@ -989,6 +1196,17 @@ class VoiceSatellitePanel extends HTMLElement {
         <div class="${P}-entity-hint">Add a satellite device first via Settings → Devices &amp; Services → Voice Satellite.</div>
       </div>
 
+      <div class="${P}-card ${P}-diag-card">
+        <div class="${P}-card-title">Diagnostics &amp; troubleshooting</div>
+        <div class="${P}-card-subtitle">Check for the most common setup problems: secure context, microphone permission, pipeline configuration, and mixed-content TTS.</div>
+        <div class="${P}-diag-summary is-idle"><span>Diagnostics have not been run yet.</span></div>
+        <div class="${P}-diag-results is-collapsed"></div>
+        <div class="${P}-diag-actions">
+          <button type="button" class="${P}-diag-rerun">Run diagnostics</button>
+          <button type="button" class="${P}-diag-copy" disabled>Copy report</button>
+        </div>
+      </div>
+
       <div class="${P}-card">
         <div class="${P}-card-title">Preview</div>
         <div class="${P}-preview-host"></div>
@@ -1154,6 +1372,234 @@ class VoiceSatellitePanel extends HTMLElement {
 
     // Wire up the wake word tester card
     this._initTesterCard();
+
+    // Wire up the diagnostics card and kick off the first run
+    this._initDiagnosticsCard();
+  }
+
+  // ─── Diagnostics & troubleshooting ─────────────────────────────────
+
+  /**
+   * Lazy-create a panel-owned DiagnosticsManager. The panel exposes its
+   * own hass/config/connection so diagnostics work even when the card
+   * bundle hasn't finished instantiating a session yet, which is the
+   * typical state on first paint inside the HA Companion App.
+   */
+  _getDiagnostics() {
+    if (!this._diagnostics) {
+      const panel = this;
+      this._diagnostics = new DiagnosticsManager({
+        get logger() {
+          return panel._diagLogger || (panel._diagLogger = {
+            log: () => { /* panel diagnostics are quiet */ },
+            error: (cat, msg) => console.error(`[VS][${cat}] ${msg}`),
+          });
+        },
+        get hass() { return panel._hass; },
+        get config() { return panel._config; },
+        get connection() { return panel._hass?.connection || null; },
+      });
+    }
+    return this._diagnostics;
+  }
+
+  _initDiagnosticsCard() {
+    const card = this.querySelector(`.${P}-diag-card`);
+    if (!card) return;
+
+    const rerun = card.querySelector(`.${P}-diag-rerun`);
+    const copy = card.querySelector(`.${P}-diag-copy`);
+
+    rerun?.addEventListener('click', () => this._runDiagnostics());
+    copy?.addEventListener('click', () => this._copyDiagnosticsReport());
+    // No auto-run. The user triggers the first run with the button.
+  }
+
+  async _runDiagnostics() {
+    if (this._diagnosticsRunning) return;
+    this._diagnosticsRunning = true;
+
+    const card = this.querySelector(`.${P}-diag-card`);
+    if (!card) { this._diagnosticsRunning = false; return; }
+    const summary = card.querySelector(`.${P}-diag-summary`);
+    const results = card.querySelector(`.${P}-diag-results`);
+    const rerun = card.querySelector(`.${P}-diag-rerun`);
+    const copy = card.querySelector(`.${P}-diag-copy`);
+
+    this._setDiagnosticsRunningUI(summary, results, 'Running checks...');
+    const prevRerunLabel = rerun?.textContent;
+    if (rerun) {
+      rerun.disabled = true;
+      rerun.textContent = 'Running...';
+    }
+    if (copy) copy.disabled = true;
+
+    try {
+      if (!this._hass?.connection) {
+        if (summary) {
+          summary.className = `${P}-diag-summary is-fail`;
+          summary.textContent = 'Home Assistant connection is not ready. Reload the page and try again.';
+        }
+        return;
+      }
+      this._setDiagnosticsRunningUI(summary, results, 'Running server-side checks...');
+      const report = await this._getDiagnostics().runAll();
+      this._lastDiagnosticsReport = report;
+      this._renderDiagnostics(report);
+    } catch (err) {
+      if (summary) {
+        summary.className = `${P}-diag-summary is-fail`;
+        summary.textContent = `Diagnostics failed: ${err?.message || err}`;
+      }
+    } finally {
+      this._diagnosticsRunning = false;
+      if (rerun) {
+        rerun.disabled = false;
+        rerun.textContent = this._lastDiagnosticsReport ? 'Run again' : (prevRerunLabel || 'Run diagnostics');
+      }
+      if (copy) copy.disabled = !this._lastDiagnosticsReport;
+    }
+  }
+
+  _setDiagnosticsRunningUI(summary, results, label) {
+    if (summary) {
+      summary.className = `${P}-diag-summary is-running`;
+      summary.innerHTML = `<span class="${P}-diag-spinner" aria-hidden="true"></span><span>${label}</span>`;
+      summary.setAttribute('role', 'status');
+      summary.setAttribute('aria-live', 'polite');
+    }
+    if (results) {
+      results.innerHTML = '';
+      results.classList.add('is-collapsed');
+    }
+  }
+
+  _renderDiagnostics(report) {
+    const card = this.querySelector(`.${P}-diag-card`);
+    if (!card || !report) return;
+    const summary = card.querySelector(`.${P}-diag-summary`);
+    const results = card.querySelector(`.${P}-diag-results`);
+
+    const { summary: s, results: rows } = report;
+    const worst = s.worst;
+
+    if (summary) {
+      summary.className = `${P}-diag-summary is-${worst}`;
+      summary.innerHTML = this._renderDiagnosticsSummary(s);
+    }
+
+    if (!results) return;
+    results.innerHTML = '';
+    results.classList.remove('is-collapsed');
+
+    // Split: issues (fail/warn) are always visible; everything else goes
+    // into a collapsible section collapsed by default.
+    const issues = rows.filter((r) => r.status === 'fail' || r.status === 'warn');
+    const passed = rows.filter((r) => r.status !== 'fail' && r.status !== 'warn');
+
+    if (issues.length) {
+      // Sort failures before warnings, then by category for stable grouping.
+      issues.sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'fail' ? -1 : 1;
+        return (a.category || '').localeCompare(b.category || '');
+      });
+      this._appendDiagnosticsGroup(results, issues);
+    }
+
+    if (passed.length) {
+      const passedCount = passed.filter((r) => r.status === 'pass').length;
+      const skippedCount = passed.filter((r) => r.status === 'skip').length;
+      const infoCount = passed.filter((r) => r.status === 'info').length;
+
+      const details = document.createElement('details');
+      details.className = `${P}-diag-details`;
+      const labelParts = [];
+      if (passedCount) labelParts.push(`${passedCount} passed`);
+      if (infoCount) labelParts.push(`${infoCount} info`);
+      if (skippedCount) labelParts.push(`${skippedCount} skipped`);
+      const summaryEl = document.createElement('summary');
+      summaryEl.className = `${P}-diag-details-summary`;
+      summaryEl.textContent = `Show all checks (${labelParts.join(', ')})`;
+      details.appendChild(summaryEl);
+
+      const body = document.createElement('div');
+      body.className = `${P}-diag-details-body`;
+      passed.sort((a, b) => (a.category || '').localeCompare(b.category || ''));
+      this._appendDiagnosticsGroup(body, passed);
+      details.appendChild(body);
+      results.appendChild(details);
+    }
+  }
+
+  _appendDiagnosticsGroup(container, rows) {
+    let lastCategory = null;
+    for (const r of rows) {
+      if (r.category !== lastCategory) {
+        const h = document.createElement('div');
+        h.className = `${P}-diag-group-title`;
+        h.textContent = r.category || 'Other';
+        container.appendChild(h);
+        lastCategory = r.category;
+      }
+      container.appendChild(this._renderDiagnosticsRow(r));
+    }
+  }
+
+  _renderDiagnosticsSummary(s) {
+    if (s.fail > 0) {
+      return `<strong>${s.fail}</strong> issue${s.fail === 1 ? '' : 's'} need attention${s.warn ? ` (${s.warn} warning${s.warn === 1 ? '' : 's'})` : ''}.`;
+    }
+    if (s.warn > 0) {
+      return `<strong>${s.warn}</strong> warning${s.warn === 1 ? '' : 's'}.`;
+    }
+    return `All ${s.total} checks passed.`;
+  }
+
+  _renderDiagnosticsRow(r) {
+    const row = document.createElement('div');
+    row.className = `${P}-diag-row is-${r.status}`;
+    const status = document.createElement('div');
+    status.className = `${P}-diag-status is-${r.status}`;
+    status.textContent = { pass: '✓', warn: '!', fail: '×', info: 'i', skip: '-' }[r.status] || '?';
+    const text = document.createElement('div');
+    text.className = `${P}-diag-text`;
+    const title = document.createElement('div');
+    title.className = `${P}-diag-title`;
+    title.textContent = r.title;
+    text.appendChild(title);
+    if (r.detail) {
+      const detail = document.createElement('div');
+      detail.className = `${P}-diag-detail`;
+      detail.textContent = r.detail;
+      text.appendChild(detail);
+    }
+    if (r.remediation && (r.status === 'fail' || r.status === 'warn')) {
+      const rem = document.createElement('div');
+      rem.className = `${P}-diag-remediation`;
+      rem.textContent = r.remediation;
+      text.appendChild(rem);
+    }
+    row.appendChild(status);
+    row.appendChild(text);
+    return row;
+  }
+
+  async _copyDiagnosticsReport() {
+    if (!this._lastDiagnosticsReport) return;
+    const md = buildMarkdownReport(this._lastDiagnosticsReport);
+    const copy = this.querySelector(`.${P}-diag-copy`);
+    try {
+      await navigator.clipboard.writeText(md);
+      if (copy) {
+        const prev = copy.textContent;
+        copy.textContent = 'Copied';
+        setTimeout(() => { copy.textContent = prev; }, 1800);
+      }
+    } catch (_) {
+      // Fallback for environments without clipboard access: drop into a
+      // selectable prompt so the user can still grab the text.
+      window.prompt('Copy the diagnostics report below:', md);
+    }
   }
 
   // ─── Wake Word Tester ──────────────────────────────────────────────

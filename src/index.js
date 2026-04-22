@@ -7,7 +7,12 @@ import { VoiceSatelliteCard } from './card';
 import { VoiceSatelliteMiniCard } from './mini/index.js';
 import { t } from './i18n/index.js';
 import { initEngine } from './engine/index.js';
+import { probeAutoplay } from './autoplay-probe.js';
 
+// Probe autoplay policy before any user gesture on this page. Later
+// probes inside the diagnostics panel are biased by the click that
+// opened them and always report 'allowed'.
+probeAutoplay();
 
 if (!customElements.get('voice-satellite-card')) {
   customElements.define('voice-satellite-card', VoiceSatelliteCard);

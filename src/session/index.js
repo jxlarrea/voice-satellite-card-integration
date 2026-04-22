@@ -25,6 +25,7 @@ import { StartConversationManager } from '../start-conversation';
 import { MediaPlayerManager } from '../media-player';
 import { getSelectEntityId, getNumberState, getSelectState } from '../shared/satellite-state.js';
 import { ScreensaverManager } from '../screensaver';
+import { DiagnosticsManager } from '../diagnostics';
 import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
 import { dispatchSatelliteEvent, checkRemoteNotificationPlayback } from '../shared/satellite-notification.js';
 import { isEditorPreview } from '../editor/preview.js';
@@ -108,6 +109,7 @@ export class VoiceSatelliteSession {
     this._wakeWord = null;
     this._wakeWordLoading = false;
     this._screensaver = new ScreensaverManager(this);
+    this._diagnostics = new DiagnosticsManager(this);
 
     // Broadcast proxies
     this._uiProxy = new UIBroadcastProxy(this);
@@ -139,6 +141,7 @@ export class VoiceSatelliteSession {
   get mediaPlayer() { return this._mediaPlayer; }
   get wakeWord() { return this._wakeWord; }
   get screensaver() { return this._screensaver; }
+  get diagnostics() { return this._diagnostics; }
 
   get currentState() { return this._state; }
   set currentState(val) { this._state = val; }

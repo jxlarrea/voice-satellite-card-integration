@@ -21,7 +21,7 @@ body:
           required: true
         - label: I have selected the correct `assist_satellite.*` entity in the Voice Satellite panel.
           required: true
-        - label: "I have wake word detection configured: either **On Device** (default — no server-side setup needed) or **Home Assistant** mode with wake word detection enabled in my Assist pipeline (Settings → Voice assistants → pipeline → ⋮ three-dot menu)."
+        - label: "I have wake word detection configured: either **On Device** (default, no server-side setup needed) or **Home Assistant** mode with wake word detection enabled in my Assist pipeline (Settings → Voice assistants → pipeline → ⋮ three-dot menu)."
           required: true
         - label: My Assist pipeline has **Speech-to-Text** (e.g., Whisper) and **Text-to-Speech** (e.g., Piper) configured.
           required: true
@@ -61,12 +61,14 @@ body:
       required: true
 
   - type: textarea
-    id: ha-logs
+    id: diagnostics-report
     attributes:
-      label: Home Assistant logs
+      label: Diagnostics report
       description: |
-        Go to Settings > System > Logs and filter by "voice_satellite". If the issue involves pipelines, also filter by "assist_pipeline". Paste any relevant log entries here.
-      render: shell
+        Open the **Voice Satellite** sidebar panel on the affected device, scroll to **Diagnostics & troubleshooting**, click **Run diagnostics**, then click **Copy report** and paste the result here. The report captures browser environment, pipeline configuration, mixed-content URL state, wake word mode, and the card/integration versions. This replaces the older "paste debug logs" workflow and usually contains enough information to reproduce or rule out the most common setup issues.
+      render: markdown
+    validations:
+      required: true
 
   - type: textarea
     id: entity-state
