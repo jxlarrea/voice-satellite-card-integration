@@ -142,6 +142,10 @@ Most setup issues come from missing microphone permissions, mixed HTTP/HTTPS con
 
 The sidebar panel ships with a **Diagnostics & troubleshooting** section that runs automated client-side and server-side checks (secure context, microphone permission, pipeline configuration, mixed-content TTS, wake word mode, Lovelace resource registration, and more). A **Copy report** button produces a paste-ready markdown block with the full results, ready to attach to a GitHub issue.
 
+<p align="center">
+   <img src="https://raw.githubusercontent.com/jxlarrea/voice-satellite-card-integration/refs/heads/main/assets/screenshots/diagnostics.png" alt="Integration" width="650"/>
+</p>
+
 See the [Troubleshooting reference](docs/troubleshooting.md) for the most common issues and their fixes.
 
 ## Contributing
