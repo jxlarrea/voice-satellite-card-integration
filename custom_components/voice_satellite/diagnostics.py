@@ -336,51 +336,64 @@ def _check_wake_word_mode(hass: HomeAssistant, entity, pipeline) -> list[dict[st
         return out
 
     if mode == WAKE_MODE_HA:
-        wake_entity = getattr(pipeline, "wake_word_entity", None)
-        if not wake_entity:
+        # Enumerate every wake_word.* entity in HA and check which ones
+        # are actually usable (not 'unavailable'). HA's assist_pipeline
+        # falls back to any available wake word service when the pipeline
+        # itself has no wake_word_entity set, so "pipeline has wake word
+        # configured" is NOT the right question to ask; "is a wake word
+        # service available at all" is.
+        all_ww = [
+            s for s in hass.states.async_all("wake_word")
+            if s.state != "unavailable"
+        ]
+        pipeline_wake_entity = getattr(pipeline, "wake_word_entity", None)
+
+        if not all_ww:
             out.append(_result(
-                "srv.wake.ha_pipeline_configured",
+                "srv.wake.ha_service_available",
                 CAT_WAKE,
-                "Pipeline has a wake word entity (Home Assistant mode)",
+                "Wake word service available",
                 "fail",
-                detail="The satellite is set to Home Assistant wake word detection, but the pipeline has no wake word entity configured.",
-                remediation="Settings → Voice assistants → (your pipeline) → three-dot menu → set a wake word, OR switch the satellite to On Device wake word detection.",
+                detail="No wake word service is loaded and available in Home Assistant.",
+                remediation="Install and start a wake word service (for example the openWakeWord or microWakeWord add-on, or a Wyoming-based provider). Or switch the satellite to On Device wake word detection.",
             ))
             return out
-        out.append(_result(
-            "srv.wake.ha_pipeline_configured",
-            CAT_WAKE,
-            "Pipeline has a wake word entity (Home Assistant mode)",
-            "pass",
-            detail=str(wake_entity),
-        ))
 
-        ww_state = hass.states.get(str(wake_entity))
-        if ww_state is None:
-            out.append(_result(
-                "srv.wake.ha_entity_available",
-                CAT_WAKE,
-                "Wake word entity loaded",
-                "warn",
-                detail=f"Entity {wake_entity} is not loaded in Home Assistant.",
-                remediation="Reload the wake word integration (openWakeWord or microWakeWord).",
-            ))
-        elif ww_state.state == "unavailable":
-            out.append(_result(
-                "srv.wake.ha_entity_available",
-                CAT_WAKE,
-                "Wake word entity loaded",
-                "fail",
-                detail=f"{wake_entity} is unavailable.",
-                remediation="Start or restart the wake word add-on (openWakeWord or microWakeWord).",
-            ))
+        if pipeline_wake_entity:
+            # The pipeline pins a specific wake word entity; verify it's one
+            # of the available ones.
+            match = next((s for s in all_ww if s.entity_id == pipeline_wake_entity), None)
+            if match is None:
+                out.append(_result(
+                    "srv.wake.ha_service_available",
+                    CAT_WAKE,
+                    "Pipeline's wake word entity is available",
+                    "fail",
+                    detail=f"Pipeline is pinned to {pipeline_wake_entity}, but that entity is not available.",
+                    remediation="Start the corresponding wake word add-on, or pick a different wake word entity on the pipeline.",
+                ))
+            else:
+                out.append(_result(
+                    "srv.wake.ha_service_available",
+                    CAT_WAKE,
+                    "Pipeline's wake word entity is available",
+                    "pass",
+                    detail=pipeline_wake_entity,
+                ))
         else:
+            # No explicit wake_word_entity on the pipeline: HA will pick
+            # one of the available wake word services at runtime. Surface
+            # as an info so the user knows the implicit fallback is in play.
+            names = ", ".join(s.entity_id for s in all_ww)
             out.append(_result(
-                "srv.wake.ha_entity_available",
+                "srv.wake.ha_service_available",
                 CAT_WAKE,
-                "Wake word entity loaded",
-                "pass",
-                detail=str(wake_entity),
+                "Wake word service available",
+                "info",
+                detail=(
+                    "Pipeline has no explicit wake word entity; "
+                    f"Home Assistant will fall back to an available service ({names})."
+                ),
             ))
 
     return out

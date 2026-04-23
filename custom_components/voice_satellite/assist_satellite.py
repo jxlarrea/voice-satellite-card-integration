@@ -233,9 +233,11 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         # owned by HA core's assist_satellite base class, so we read it
         # directly by its entity_id rather than via the registry suffix.
         pid = self.pipeline_entity_id
+        pipeline_name: str | None = None
         if pid:
             s = self.hass.states.get(pid)
             if s and s.state not in ("unknown", "unavailable"):
+                pipeline_name = s.state
                 attrs["pipeline"] = s.state
 
         # Expose the server-side integration version. The client reads

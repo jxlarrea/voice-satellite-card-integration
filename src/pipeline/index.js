@@ -103,6 +103,8 @@ export class PipelineManager {
   set suppressTTS(val) { this._suppressTTS = val; }
   get recoveryTimeout() { return this._recoveryTimeout; }
   set recoveryTimeout(val) { this._recoveryTimeout = val; }
+  get restartTimeout() { return this._restartTimeout; }
+  set restartTimeout(val) { this._restartTimeout = val; }
   get intentErrorBarTimeout() { return this._intentErrorBarTimeout; }
   set intentErrorBarTimeout(val) { this._intentErrorBarTimeout = val; }
   get askQuestionCallback() { return this._askQuestionCallback; }

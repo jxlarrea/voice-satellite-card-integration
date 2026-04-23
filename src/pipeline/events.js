@@ -259,6 +259,9 @@ export function handleIntentProgress(mgr, eventData) {
  * Build a toast category label for pipeline errors, including the
  * active pipeline's display name when known. The name comes from the
  * satellite entity's `pipeline` attribute, exposed by the integration.
+ * When the select is on the HA placeholder "preferred", fall back to
+ * the generic label so the user does not see the literal word in the
+ * toast.
  * @param {import('./index.js').PipelineManager} mgr
  */
 function pipelineCategory(mgr) {
@@ -267,7 +270,29 @@ function pipelineCategory(mgr) {
     mgr.card.config.satellite_entity,
     'pipeline',
   );
-  return name ? `Pipeline "${name}"` : 'Assist pipeline';
+  if (!name || name.toLowerCase() === 'preferred') return 'Assist pipeline';
+  return `Pipeline "${name}"`;
+}
+
+/**
+ * Match HA's "no wake word service is available" pipeline error.
+ * The error code has shifted across HA versions (wake-provider-missing,
+ * wake-engine-missing, no-wake-engine) and can also appear purely in
+ * the message, so we check both. Matching on this lets us suppress the
+ * auto-restart loop (the pipeline will keep throwing the same error
+ * until the user fixes their HA config).
+ */
+function isWakeEngineMissingError(errorCode, errorMessage) {
+  const code = (errorCode || '').toLowerCase();
+  if (code.includes('wake-provider-missing')
+    || code.includes('wake-engine-missing')
+    || code.includes('no-wake-word-engine')
+    || code.includes('no-wake-engine')) return true;
+  const msg = (errorMessage || '').toLowerCase();
+  return msg.includes('no wake word engine')
+    || msg.includes('no wake word provider')
+    || msg.includes('wake word provider missing')
+    || msg.includes('no wake word detection engine');
 }
 
 /** @param {import('./index.js').PipelineManager} mgr */
@@ -507,6 +532,37 @@ export function handleError(mgr, errorData) {
 
   if (wasInteracting && getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false) {
     mgr.card.tts.playChime('error');
+  }
+
+  // Fatal config errors: the server will fire the same error on every
+  // restart until the user fixes their HA config, so tear the engine
+  // down entirely (mic, pipeline subscription, wake word module) and
+  // leave it stopped. User must fix their HA config and re-enable the
+  // engine manually.
+  if (isWakeEngineMissingError(errorCode, errorMessage)) {
+    mgr.log.error('error', 'Wake word service missing - stopping engine');
+    mgr.card.toast?.show({
+      id: 'pipeline.no-wake-word-engine',
+      severity: 'error',
+      category: 'Wake word',
+      description: 'Wake word detection is set to Home Assistant, but no wake word service is available in HA. Install or start a wake word provider (openWakeWord, microWakeWord, etc.), or switch detection to On Device.',
+      action: { label: 'Open Diagnostics', type: 'diagnostics' },
+    });
+    // Cancel any pending restart queued by the caller path before
+    // teardown, so a leftover timer does not revive the engine.
+    if (mgr.restartTimeout) {
+      clearTimeout(mgr.restartTimeout);
+      mgr.restartTimeout = null;
+    }
+    mgr.card.chat.clear();
+    mgr.card.ui.hideBar();
+    mgr.card.ui.hideBlurOverlay(BlurReason.PIPELINE);
+    try { mgr.card.teardown(); } catch (e) {
+      mgr.log.error('error', `teardown failed: ${e?.message || e}`);
+    }
+    mgr.card.currentState = State.IDLE;
+    mgr.card.ui.showStartButton();
+    return;
   }
 
   mgr.card.toast?.show({
