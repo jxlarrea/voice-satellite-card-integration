@@ -36,6 +36,9 @@ export const CHIME_ANNOUNCE_URL = `${SOUNDS_BASE}/announce.mp3`;
 
 /** Cache of preloaded Audio elements keyed by URL */
 const _audioCache = new Map();
+/** URLs whose preload/load errored. Kept so runtime retries can report
+ *  the original failure and we don't re-fire a toast per chime. */
+const _failedUrls = new Set();
 
 /**
  * Get or create a cached Audio element for the given URL.
@@ -57,10 +60,28 @@ function getCachedAudio(url) {
  * Preload the most latency-sensitive chime sounds (wake + done) so the
  * first play has zero fetch delay. Other chimes (error, alert, announce)
  * are rare or preceded by network calls and load lazily on first use.
+ *
+ * Accepts the session so an individual chime fetch failure can be
+ * surfaced via the toast manager. Wrapped in best-effort error handling
+ * so a broken toast manager never breaks engine bootstrap.
  */
-export function preloadChimes() {
-  getCachedAudio(CHIME_WAKE.url);
-  getCachedAudio(CHIME_DONE.url);
+export function preloadChimes(session) {
+  for (const chime of [CHIME_WAKE, CHIME_DONE]) {
+    const audio = getCachedAudio(chime.url);
+    audio.addEventListener('error', () => {
+      const fullUrl = buildMediaUrl(chime.url);
+      if (_failedUrls.has(fullUrl)) return;
+      _failedUrls.add(fullUrl);
+      try {
+        session?.toast?.show({
+          id: 'audio.chime-preload-failed',
+          severity: 'warn',
+          category: 'Sounds',
+          description: 'One or more chime sounds could not be loaded from the server. Interaction sounds may not play.',
+        });
+      } catch (_) { /* best-effort */ }
+    }, { once: true });
+  }
 }
 
 /**

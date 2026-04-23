@@ -115,17 +115,6 @@
   animation: alexa-speak 1.5s ease-in-out infinite, alexa-shimmer 4s linear infinite;
 }
 
-#voice-satellite-ui .vs-rainbow-bar.error-mode {
-  background: #FF3B30;
-  filter: drop-shadow(0 0 12px rgba(255, 59, 48, 0.5));
-  animation: alexa-glow-red 1.5s ease-in-out infinite;
-  opacity: 1;
-}
-
-#voice-satellite-ui .vs-rainbow-bar.error-flash {
-  animation: alexa-error-flash 0.15s ease-in-out 3;
-}
-
 /* Reactive Bar - audio-driven glow, speed varies by state */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   overflow: visible;

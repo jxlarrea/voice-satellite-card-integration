@@ -337,15 +337,18 @@ export class UIManager {
 
   // ─── Rainbow Bar ──────────────────────────────────────────────────
 
-  showServiceError() {
-    if (!this._globalUI) return;
-    const bar = this._globalUI.querySelector('.vs-rainbow-bar');
-    bar.classList.remove('connecting', 'listening', 'processing', 'speaking');
-    bar.classList.add('visible', 'error-mode');
-  }
+  /**
+   * Legacy: the rainbow bar no longer has a dedicated "error" mode.
+   * Runtime errors now surface through the toast (see ../toast/). The
+   * accessors are kept as no-ops so existing call sites do not need to
+   * be audited atomically.
+   */
+  showServiceError() { /* no-op */ }
 
   clearServiceError() {
     if (!this._globalUI) return;
+    // Defensive cleanup for pages that may still have a stale error
+    // class from an older bundle version cached in the browser.
     const bar = this._globalUI.querySelector('.vs-rainbow-bar');
     bar.classList.remove('error-mode');
   }

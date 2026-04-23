@@ -182,18 +182,22 @@ export class AskQuestionManager {
       this._card.tts.playChime(matched ? 'done' : 'error');
 
       if (!matched) {
-        this._card.ui.showServiceError();
-        const bar = this._card.ui.element
-          ? this._card.ui.element.querySelector('.vs-rainbow-bar')
-          : null;
-        if (bar) {
-          bar.classList.add('error-flash');
-          bar.addEventListener('animationend', function handler() {
-            bar.classList.remove('error-flash');
-            bar.removeEventListener('animationend', handler);
-          });
-        }
+        this._card.toast?.show({
+          id: 'ask-question.unmatched',
+          severity: 'warn',
+          category: 'Question',
+          description: 'Your answer did not match any of the accepted options.',
+        });
       }
+    }).catch((e) => {
+      this._card.logger.error('ask-question', `sendAnswer failed: ${e?.message || e}`);
+      this._card.tts.playChime('error');
+      this._card.toast?.show({
+        id: 'ask-question.failed',
+        severity: 'warn',
+        category: 'Question',
+        description: `Could not deliver your answer to Home Assistant. ${e?.message || ''}`.trim(),
+      });
     });
   }
 

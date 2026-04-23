@@ -177,17 +177,6 @@
   animation: google-flow 2s linear infinite;
 }
 
-#voice-satellite-ui .vs-rainbow-bar.error-mode {
-  background: linear-gradient(90deg, #EA4335, #d93025, #EA4335, #d93025);
-  background-size: 200% 100%;
-  animation: google-flow 2s linear infinite;
-  opacity: 1;
-}
-
-#voice-satellite-ui .vs-rainbow-bar.error-flash {
-  animation: google-error-flash 0.15s ease-in-out 3;
-}
-
 /* Reactive Bar */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   transition: transform 0.05s linear;
@@ -247,11 +236,6 @@
 @keyframes google-flow-sync {
   0%   { --vs-gp: 0%; }
   100% { --vs-gp: 200%; }
-}
-
-@keyframes google-error-flash {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
 }
 
 /* ─── Chat ─────────────────────────────────────────────────────── */

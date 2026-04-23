@@ -311,13 +311,26 @@ export class WakeWordManager {
       this._log.log('wake-word', 'On-device wake word detection active');
 
     } catch (e) {
-      if (String(e?.message || e).includes('Out of memory')) {
-        this._log.error('wake-word', 'Wake-word runtime OOM — forcing full runtime reset');
+      const msg = e?.message || String(e);
+      const isOOM = msg.includes('Out of memory');
+      if (isOOM) {
+        this._log.error('wake-word', 'Wake-word runtime OOM - forcing full runtime reset');
         try {
           await this._recreateRuntime('OOM recovery');
         } catch (_) { /* ignore secondary failure */ }
       }
-      this._log.error('wake-word', `Failed to start: ${e.message || e}`);
+      this._log.error('wake-word', `Failed to start: ${msg}`);
+      // Surface to the user. Dedup id is stable across retries so a
+      // runtime reset loop doesn't flood the toast surface.
+      this._session.toast?.show({
+        id: 'wake-word.load-failed',
+        severity: 'error',
+        category: 'Wake word',
+        description: isOOM
+          ? 'On-device detection ran out of memory. The runtime is restarting; detection may be briefly unavailable.'
+          : 'On-device wake word detection could not start. Try a different model or switch to Home Assistant wake word detection.',
+        action: { label: 'Open Diagnostics', type: 'diagnostics' },
+      });
       throw e;
     }
   }

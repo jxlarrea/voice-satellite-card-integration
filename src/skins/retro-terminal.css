@@ -171,17 +171,6 @@
   animation: terminal-glow 1.5s ease-in-out infinite;
 }
 
-#voice-satellite-ui .vs-rainbow-bar.error-mode {
-  border-color: #ff3333;
-  filter: drop-shadow(0 0 8px rgba(255, 51, 51, 0.5));
-  animation: terminal-flicker 0.15s steps(2) infinite;
-  opacity: 1;
-}
-
-#voice-satellite-ui .vs-rainbow-bar.error-flash {
-  animation: terminal-error-flash 0.15s ease-in-out 3;
-}
-
 /* Reactive Bar - audio-driven glow intensity around the frame */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   overflow: visible;
@@ -227,11 +216,6 @@
   50% {
     filter: drop-shadow(0 0 16px rgba(51, 255, 51, 0.7));
   }
-}
-
-@keyframes terminal-error-flash {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
 }
 
 /* Chat Container */

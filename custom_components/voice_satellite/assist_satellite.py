@@ -229,6 +229,20 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             if s and s.state not in ("unknown", "unavailable"):
                 attrs[attr_key] = s.state
 
+        # Expose the active pipeline display name. The pipeline select is
+        # owned by HA core's assist_satellite base class, so we read it
+        # directly by its entity_id rather than via the registry suffix.
+        pid = self.pipeline_entity_id
+        if pid:
+            s = self.hass.states.get(pid)
+            if s and s.state not in ("unknown", "unavailable"):
+                attrs["pipeline"] = s.state
+
+        # Expose the server-side integration version. The client reads
+        # this to detect stale bundles (browser cached an older version)
+        # and surface an "update available" notice at runtime.
+        attrs["integration_version"] = INTEGRATION_VERSION
+
         return attrs
 
     # --- Public accessors for __init__.py WebSocket handlers ---

@@ -136,17 +136,6 @@
   animation: ha-flow 2s linear infinite;
 }
 
-#voice-satellite-ui .vs-rainbow-bar.error-mode {
-  background: linear-gradient(90deg, var(--error-color, #db4437), #d93025, var(--error-color, #db4437), #d93025);
-  background-size: 200% 100%;
-  animation: ha-flow 2s linear infinite;
-  opacity: 1;
-}
-
-#voice-satellite-ui .vs-rainbow-bar.error-flash {
-  animation: ha-error-flash 0.15s ease-in-out 3;
-}
-
 /* Reactive Bar — audio-driven height scaling + synced glow bloom */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   transition: transform 0.05s linear;
@@ -804,11 +793,6 @@
 @keyframes ha-flow-sync {
   0%   { --vs-gp: 0%; }
   100% { --vs-gp: 200%; }
-}
-
-@keyframes ha-error-flash {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
 }
 
 @keyframes ha-fade-in {

@@ -145,17 +145,6 @@
   animation: siri-rotate 2s linear infinite;
 }
 
-#voice-satellite-ui .vs-rainbow-bar.error-mode {
-  border-image: conic-gradient(from var(--siri-angle), #EF4444, #F87171, #EF4444) 1;
-  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.8)) drop-shadow(0 0 3px rgba(239, 68, 68, 0.5));
-  animation: siri-rotate 2s linear infinite;
-  opacity: 1;
-}
-
-#voice-satellite-ui .vs-rainbow-bar.error-flash {
-  animation: siri-error-flash 0.15s ease-in-out 3;
-}
-
 /* Reactive Bar - audio-driven glow intensity around the frame */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   overflow: visible;
@@ -195,10 +184,6 @@
   100% { --siri-angle: 360deg; }
 }
 
-@keyframes siri-error-flash {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
 
 @keyframes siri-fade-in {
   0% {

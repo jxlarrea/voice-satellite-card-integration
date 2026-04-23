@@ -539,13 +539,14 @@ export class MiniUIManager {
     }
   }
 
-  showServiceError() {
-    this.updateForState(this._card.currentState, true, this._card.tts?.isPlaying);
-  }
-
-  clearServiceError() {
-  }
-
+  /**
+   * Legacy: mini card no longer has an error state paint on its own
+   * activity indicator. Runtime errors surface through the inline toast
+   * strip at the top of the card (see ../toast/mini-strip.js). Kept as
+   * a no-op so existing call sites keep working.
+   */
+  showServiceError() { /* no-op */ }
+  clearServiceError() { /* no-op */ }
   hideBar() {}
 
   getTtsLingerTimeoutMs() {

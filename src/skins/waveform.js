@@ -348,7 +348,10 @@ function setup() {
 
     // Derive mode from the bar's CSS classes
     const barVisible = barEl.classList.contains('visible');
-    const isError = barEl.classList.contains('error-mode');
+    // Bar no longer has a dedicated error mode; runtime errors surface
+    // through the toast. Keep the variable for downstream code paths
+    // that still reference it (always false now).
+    const isError = false;
     const isProcessing = barEl.classList.contains('processing');
     const isActive = barVisible && !isError && !isProcessing;
 

@@ -177,17 +177,6 @@
   animation: vs-gradient-flow 2s linear infinite;
 }
 
-#voice-satellite-ui .vs-rainbow-bar.error-mode {
-  background: linear-gradient(90deg, #ff4444, #ff6666, #cc2222, #ff4444, #ff6666, #cc2222, #ff4444);
-  background-size: 200% 100%;
-  animation: vs-gradient-flow 2s linear infinite;
-  opacity: 1;
-}
-
-#voice-satellite-ui .vs-rainbow-bar.error-flash {
-  animation: vs-error-flash 0.15s ease-in-out 3;
-}
-
 /* Reactive Bar */
 #voice-satellite-ui .vs-rainbow-bar.reactive {
   transition: transform 0.05s linear;

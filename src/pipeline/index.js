@@ -354,9 +354,14 @@ export class PipelineManager {
           const msg = e?.message || JSON.stringify(e);
           this._log.error('pipeline', `Restart failed: ${msg}`);
           if (!this._serviceUnavailable) {
-            this._card.ui.showServiceError();
             this._serviceUnavailable = true;
           }
+          this._card.toast?.show({
+            id: 'pipeline.connection-lost',
+            severity: 'error',
+            category: 'Connection',
+            description: 'Lost connection to Home Assistant. Reconnecting automatically...',
+          });
           this.restart(this.calculateRetryDelay());
         });
       }, delay || 0);
@@ -397,7 +402,20 @@ export class PipelineManager {
         startOpts.extra_system_prompt = opts.extra_system_prompt;
       }
       this.start(startOpts).catch((e) => {
-        this._log.error('pipeline', `Continue conversation failed: ${e?.message || JSON.stringify(e)}`);
+        const msg = e?.message || JSON.stringify(e);
+        this._log.error('pipeline', `Continue conversation failed: ${msg}`);
+        // Both start_conversation and ask_question drive STT via this
+        // path, as does a follow-up turn after a continue-conversation
+        // response. If start() rejects there is nothing for the user to
+        // retry automatically; surface it so they know the follow-up
+        // ended early.
+        const category = this._askQuestionCallback ? 'Question' : 'Conversation';
+        this._card.toast?.show({
+          id: 'pipeline.continue-failed',
+          severity: 'warn',
+          category,
+          description: `Could not start the follow-up turn. ${msg}`.trim(),
+        });
         this._askQuestionCallback = null;
         this._card.chat.clear();
         this._card.ui.hideBlurOverlay(BlurReason.PIPELINE);

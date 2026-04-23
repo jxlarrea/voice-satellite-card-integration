@@ -1444,6 +1444,25 @@ class VoiceSatellitePanel extends HTMLElement {
     rerun?.addEventListener('click', () => this._runDiagnostics());
     copy?.addEventListener('click', () => this._copyDiagnosticsReport());
     // No auto-run. The user triggers the first run with the button.
+
+    // If the panel was navigated to with #diagnostics (e.g. via a toast
+    // action), scroll the card into view and auto-run once. Also watch
+    // for same-URL hash changes so a second toast click still works.
+    this._maybeHandleDiagnosticsHash();
+    window.addEventListener('hashchange', () => this._maybeHandleDiagnosticsHash());
+  }
+
+  _maybeHandleDiagnosticsHash() {
+    if (window.location.hash !== '#diagnostics') return;
+    const card = this.querySelector(`.${P}-diag-card`);
+    if (!card) return;
+    // Give the layout a frame to settle before scrolling.
+    requestAnimationFrame(() => {
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (!this._diagnosticsRunning && !this._lastDiagnosticsReport) {
+        this._runDiagnostics();
+      }
+    });
   }
 
   async _runDiagnostics() {

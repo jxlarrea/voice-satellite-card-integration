@@ -5,7 +5,7 @@
  */
 
 import { State, INTERACTING_STATES, EXPECTED_ERRORS, BlurReason, Timing } from '../constants.js';
-import { getSwitchState } from '../shared/satellite-state.js';
+import { getSwitchState, getSatelliteAttr } from '../shared/satellite-state.js';
 import { CHIME_WAKE, getChimeDuration } from '../audio/chime.js';
 import { onTTSComplete } from '../session/events.js';
 import { humanizeToolName } from '../shared/tool-name.js';
@@ -17,6 +17,25 @@ import { humanizeToolName } from '../shared/tool-name.js';
  * @param {import('./index.js').PipelineManager} mgr
  */
 export function handleRunStart(mgr, eventData) {
+  // Pipeline answered with a fresh run. If we were flagged as
+  // serviceUnavailable from a previous error, clear the flag and
+  // dismiss any sticky error toasts. This is the universal recovery
+  // signal: wake_word-start / wake_word-end only fire for server-side
+  // wake word mode; run-start fires in every mode (including on-device
+  // where the pipeline is invoked with start_stage: 'stt').
+  if (mgr.serviceUnavailable) {
+    mgr.log.log('recovery', 'Pipeline responsive on run-start, clearing serviceUnavailable');
+    if (mgr.recoveryTimeout) {
+      clearTimeout(mgr.recoveryTimeout);
+      mgr.recoveryTimeout = null;
+    }
+    mgr.serviceUnavailable = false;
+    mgr.retryCount = 0;
+    mgr.card.toast?.dismiss('pipeline.connection-lost');
+    mgr.card.toast?.dismiss('pipeline.unexpected-error');
+    mgr.card.toast?.dismiss('pipeline.start-failed');
+  }
+
   // Store streaming TTS URL (tts_output is at the top level)
   mgr.card.tts.storeStreamingUrl(eventData);
 
@@ -53,7 +72,9 @@ export function handleWakeWordStart(mgr) {
         mgr.log.log('recovery', 'Wake word service recovered');
         mgr.serviceUnavailable = false;
         mgr.retryCount = 0;
-        mgr.card.ui.clearServiceError();
+        mgr.card.toast?.dismiss('pipeline.connection-lost');
+        mgr.card.toast?.dismiss('pipeline.unexpected-error');
+        mgr.card.toast?.dismiss('pipeline.start-failed');
         mgr.card.ui.hideBar();
       }
     }, Timing.RECONNECT_DELAY);
@@ -234,6 +255,21 @@ export function handleIntentProgress(mgr, eventData) {
   chat.updateResponse(chat.streamedResponse);
 }
 
+/**
+ * Build a toast category label for pipeline errors, including the
+ * active pipeline's display name when known. The name comes from the
+ * satellite entity's `pipeline` attribute, exposed by the integration.
+ * @param {import('./index.js').PipelineManager} mgr
+ */
+function pipelineCategory(mgr) {
+  const name = getSatelliteAttr(
+    mgr.card.hass,
+    mgr.card.config.satellite_entity,
+    'pipeline',
+  );
+  return name ? `Pipeline "${name}"` : 'Assist pipeline';
+}
+
 /** @param {import('./index.js').PipelineManager} mgr */
 export function handleIntentEnd(mgr, eventData) {
   const responseType = eventData?.intent_output?.response?.response_type;
@@ -242,19 +278,20 @@ export function handleIntentEnd(mgr, eventData) {
     const errorText = extractResponseText(eventData) || 'An error occurred';
     mgr.log.error('error', `Intent error: ${errorText}`);
 
-    mgr.card.ui.showServiceError();
     if (getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false) {
       mgr.card.tts.playChime('error');
     }
 
-    mgr.suppressTTS = true;
+    mgr.card.toast?.show({
+      id: 'pipeline.intent-error',
+      severity: 'warn',
+      category: pipelineCategory(mgr),
+      description: errorText,
+      action: { label: 'Open Diagnostics', type: 'diagnostics' },
+    });
 
-    if (mgr.intentErrorBarTimeout) clearTimeout(mgr.intentErrorBarTimeout);
-    mgr.intentErrorBarTimeout = setTimeout(() => {
-      mgr.intentErrorBarTimeout = null;
-      mgr.card.ui.clearServiceError();
-      mgr.card.ui.hideBar();
-    }, Timing.INTENT_ERROR_DISPLAY);
+    mgr.suppressTTS = true;
+    mgr.card.ui.hideBar();
 
     mgr.card.chat.removeThinking();
     mgr.card.chat.streamedResponse = '';
@@ -471,9 +508,18 @@ export function handleError(mgr, errorData) {
   if (wasInteracting && getSwitchState(mgr.card.hass, mgr.card.config.satellite_entity, 'wake_sound') !== false) {
     mgr.card.tts.playChime('error');
   }
-  mgr.card.ui.showServiceError();
+
+  mgr.card.toast?.show({
+    id: 'pipeline.unexpected-error',
+    severity: 'error',
+    category: pipelineCategory(mgr),
+    description: errorMessage || 'An unexpected pipeline error occurred.',
+    action: { label: 'Open Diagnostics', type: 'diagnostics' },
+  });
+
   mgr.serviceUnavailable = true;
   mgr.card.chat.clear();
+  mgr.card.ui.hideBar();
   mgr.card.ui.hideBlurOverlay(BlurReason.PIPELINE);
 
   mgr.restart(mgr.calculateRetryDelay());

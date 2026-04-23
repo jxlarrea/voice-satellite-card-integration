@@ -147,6 +147,18 @@ export class TtsManager {
         return;
       }
 
+      // Both the initial and the fallback URL failed. Surface it as a
+      // toast; the most common cause is a mixed-content TTS URL when
+      // HA's internal_url is http and the page is https, which the
+      // Diagnostics panel will call out.
+      this._card.toast?.show({
+        id: 'tts.playback-failed',
+        severity: 'error',
+        category: 'Text-to-speech',
+        description: 'Audio could not be played. Often caused by mixed-content TTS URLs or autoplay being blocked.',
+        action: { label: 'Open Diagnostics', type: 'diagnostics' },
+      });
+
       this._onComplete(true);
     };
 

@@ -14,6 +14,7 @@ import { VoiceSatelliteSession } from '../session';
 import { resolveEntity } from '../shared/entity-picker.js';
 import { preloadChimes } from '../audio/chime.js';
 import { startDiagnostics } from '../memory-sampler.js';
+import { mountOverlayToast } from '../toast/overlay-ui.js';
 
 const ENGINE_KEY = '__vsEngine';
 const CONFIG_KEY = 'vs-panel-config';
@@ -69,8 +70,14 @@ async function bootstrapEngine() {
   const ha = await waitForHass();
   const session = VoiceSatelliteSession.getInstance();
 
-  // Preload chime sound files so the first play has zero fetch latency
-  preloadChimes();
+  // Mount the runtime toast on document.body. Runs in bootstrap (not in
+  // the overlay UI code) so it covers mini-card-only setups too.
+  mountOverlayToast(session);
+
+  // Preload chime sound files so the first play has zero fetch latency.
+  // Pass the session so a failed fetch can surface a toast (which depends
+  // on mountOverlayToast having already registered its subscriber).
+  preloadChimes(session);
 
   // Start memory diagnostics if enabled (?vs_diag=true)
   startDiagnostics(session);
@@ -193,11 +200,35 @@ function startHassObserver(ha, session) {
     lastHass = ha.hass;
 
     session.updateHass(lastHass);
+    checkVersionDrift(session);
 
     // Re-attempt start if entity wasn't available before
     if (!session.config.satellite_entity || !session.isStarted) {
       attemptStart(lastHass, session);
     }
   }, 1000);
+}
+
+/**
+ * One-shot check for a bundle/integration version mismatch. The server
+ * exposes its installed version as the `integration_version` attribute
+ * on the satellite entity; if it differs from the JS bundle the browser
+ * is running, the cache is stale and a hard-refresh is needed.
+ */
+function checkVersionDrift(session) {
+  if (session._versionDriftChecked) return;
+  const entityId = session.config?.satellite_entity;
+  if (!entityId) return;
+  const state = session.hass?.states?.[entityId];
+  const serverVersion = state?.attributes?.integration_version;
+  if (!serverVersion) return;
+  session._versionDriftChecked = true;
+  if (serverVersion === VERSION) return;
+  session.toast.show({
+    id: 'version.drift',
+    severity: 'info',
+    category: 'Update available',
+    description: `Server has v${serverVersion} installed; this browser is running v${VERSION}. Hard-refresh to load the newer bundle.`,
+  });
 }
 

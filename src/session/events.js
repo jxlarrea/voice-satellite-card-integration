@@ -11,7 +11,7 @@
 import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
 import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shared/satellite-subscription.js';
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
-import { getSwitchState, getSelectState, getNumberState } from '../shared/satellite-state.js';
+import { getSwitchState, getSelectState, getNumberState, getSatelliteAttr } from '../shared/satellite-state.js';
 import { setChimeDurationOverrides } from '../audio/chime.js';
 
 const WAKE_MODE_HA = 'home-assistant';
@@ -281,8 +281,28 @@ export async function startListening(session) {
 
     setState(session, State.IDLE);
     if (reason !== 'error') {
+      // Microphone acquisition failed. The start button is already
+      // shown with a reason-specific title ("Tap to enable microphone",
+      // "No microphone found", etc.), which is the right call-to-action
+      // here; a redundant toast on top would just add noise.
       session.ui.showStartButton(reason);
     } else {
+      // Error #4: generic pipeline start failure (missing connection,
+      // missing entity, misconfigured pipeline, etc). Surface it before
+      // scheduling the retry so the user knows the retry loop is running.
+      const pipelineName = getSatelliteAttr(
+        session.hass,
+        session.config.satellite_entity,
+        'pipeline',
+      );
+      const startCategory = pipelineName ? `Pipeline "${pipelineName}"` : 'Assist pipeline';
+      session.toast.show({
+        id: 'pipeline.start-failed',
+        severity: 'error',
+        category: startCategory,
+        description: `Could not start. ${msg}`,
+        action: { label: 'Open Diagnostics', type: 'diagnostics' },
+      });
       session.pipeline.restart(session.pipeline.calculateRetryDelay());
     }
   } finally {
@@ -426,10 +446,21 @@ export function handlePipelineMessage(session, message) {
     case 'error': session.pipeline.handleError(eventData); break;
     case 'displaced':
       session.logger.error('pipeline', 'Pipeline displaced - another browser is using this satellite entity');
+      session.toast.show({
+        id: 'session.displaced',
+        severity: 'warn',
+        category: 'Session',
+        description: 'Another browser took over this satellite. This device has stopped listening.',
+      });
       session.teardown();
       session.chat.clear();
       session.ui.hideBlurOverlay(BlurReason.PIPELINE);
       session.ui.hideBlurOverlay(BlurReason.ANNOUNCEMENT);
+      // The wake-word event that preceded displace left the rainbow bar
+      // in 'listening' / 'speaking' mode. teardown() stops the pipeline
+      // but does not touch DOM; drop the bar explicitly so nothing stays
+      // painted on screen when the overlay is gone.
+      session.ui.hideBar();
       session.currentState = State.IDLE;
       session.ui.showStartButton();
       break;
