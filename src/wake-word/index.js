@@ -128,7 +128,7 @@ export class WakeWordManager {
   }
 
   /**
-   * Get the primary wake word model name.
+   * Get the slot 1 wake word model name.
    * @returns {string}
    */
   getModelName() {
@@ -141,14 +141,41 @@ export class WakeWordManager {
   }
 
   /**
-   * Get the active model names. Always a single-element array now —
-   * the dual wake word feature was removed because the second model
-   * never reliably detected (the shared micro_frontend produces one
-   * stream of features that can only be quantized for one model).
+   * Get the slot 2 wake word model name, or null when slot 2 is disabled
+   * or is set to the same model as slot 1 (silent dedupe).
+   * @returns {string|null}
+   */
+  getModel2Name() {
+    const raw = getSelectState(
+      this._session.hass,
+      this._session.config.satellite_entity,
+      'wake_word_model_2',
+      'Disabled',
+    );
+    if (!raw || raw === 'Disabled') return null;
+    if (raw === this.getModelName()) return null;
+    return raw;
+  }
+
+  /**
+   * Map a detected model name back to its slot (1 or 2). Slot 1 wins ties
+   * (same model in both slots always routes to Pipeline 1).
+   * @param {string} modelName
+   * @returns {1|2}
+   */
+  getSlotForModel(modelName) {
+    return modelName === this.getModel2Name() ? 2 : 1;
+  }
+
+  /**
+   * Get the active model names: slot 1 always, slot 2 when enabled and
+   * distinct. The inference engine runs all returned models in parallel.
    * @returns {string[]}
    */
   getActiveModels() {
-    return [this.getModelName()];
+    const primary = this.getModelName();
+    const secondary = this.getModel2Name();
+    return secondary ? [primary, secondary] : [primary];
   }
 
   /**
@@ -576,6 +603,7 @@ export class WakeWordManager {
       .start({
         start_stage: 'stt',
         wake_word_phrase: this.getWakeWordPhrase(modelName),
+        wake_word_slot: this.getSlotForModel(modelName),
         defer_audio_start: true,
       })
       .catch((e) => {
@@ -982,6 +1010,7 @@ export class WakeWordManager {
 
     const enabled = this.isEnabled();
     const model = this.getModelName();
+    const model2 = this.getModel2Name();
     const threshold = this.getThreshold();
     const noiseGate = this._isNoiseGateEnabled();
     const stopWord = this.isStopWordEnabled();
@@ -990,6 +1019,7 @@ export class WakeWordManager {
     if (this._cachedEnabled === undefined) {
       this._cachedEnabled = enabled;
       this._cachedModel = model;
+      this._cachedModel2 = model2;
       this._cachedThreshold = threshold;
       this._cachedNoiseGate = noiseGate;
       this._cachedStopWord = stopWord;
@@ -998,13 +1028,15 @@ export class WakeWordManager {
 
     const enabledChanged = enabled !== this._cachedEnabled;
     const modelChanged = model !== this._cachedModel;
+    const model2Changed = model2 !== this._cachedModel2;
     const thresholdChanged = threshold !== this._cachedThreshold;
     const noiseGateChanged = noiseGate !== this._cachedNoiseGate;
     const stopWordChanged = stopWord !== this._cachedStopWord;
 
-    if (!enabledChanged && !modelChanged && !thresholdChanged && !noiseGateChanged && !stopWordChanged) return;
+    if (!enabledChanged && !modelChanged && !model2Changed && !thresholdChanged && !noiseGateChanged && !stopWordChanged) return;
 
     // Always update caches
+    this._cachedModel2 = model2;
     this._cachedThreshold = threshold;
     this._cachedNoiseGate = noiseGate;
     this._cachedStopWord = stopWord;
@@ -1033,8 +1065,9 @@ export class WakeWordManager {
       this._log.log('stop-word', 'Disabled in satellite settings');
     }
 
-    // Mode or model change requires switching
-    if (enabledChanged || modelChanged) {
+    // Mode or model change requires switching (slot 2 changes are
+    // treated as a model change since the active-models set shifts).
+    if (enabledChanged || modelChanged || model2Changed) {
       this._applyModeOrModelChange(enabled, model, enabledChanged);
     }
   }

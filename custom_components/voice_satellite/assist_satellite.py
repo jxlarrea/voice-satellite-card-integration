@@ -118,6 +118,11 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._conversation_id: str | None = None
         self._conversation_last_activity: float = 0.0  # monotonic timestamp
 
+        # Which wake word slot triggered the active run (1 or 2). Read by
+        # the pipeline_entity_id property to redirect slot 2 detections at
+        # the Pipeline 2 select. Reset to 1 between runs.
+        self._active_wake_word_slot: int = 1
+
         # Satellite event subscription (Phase 2 - direct push to card)
         self._satellite_subscribers: list[tuple[Any, int]] = []
 
@@ -146,8 +151,28 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
 
     @property
     def pipeline_entity_id(self) -> str | None:
-        """Entity ID of the pipeline select entity."""
+        """Entity ID of the pipeline select entity.
+
+        Returns the Pipeline 2 select's entity_id when the current run was
+        triggered by slot 2 and that select resolves to a real pipeline name
+        (not "Preferred"). Otherwise returns the framework-backed Pipeline 1
+        entity. This lets HA core's internal pipeline resolution pick the
+        right pipeline without us bypassing async_accept_pipeline_from_satellite.
+        """
         registry = er.async_get(self.hass)
+        if getattr(self, "_active_wake_word_slot", 1) == 2:
+            slot2_eid = registry.async_get_entity_id(
+                "select", DOMAIN, f"{self._entry.entry_id}_pipeline_2"
+            )
+            if slot2_eid:
+                state = self.hass.states.get(slot2_eid)
+                # "Preferred" means fall back to the slot 1 pipeline below.
+                from .select import PIPELINE_2_PREFERRED
+                if (
+                    state
+                    and state.state not in ("unknown", "unavailable", PIPELINE_2_PREFERRED)
+                ):
+                    return slot2_eid
         return registry.async_get_entity_id(
             "select", DOMAIN, f"{self._entry.entry_id}-pipeline"
         )
@@ -219,11 +244,13 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             except (ValueError, TypeError):
                 pass
 
-        # Expose wake word detection mode and model for the card
+        # Expose wake word detection mode and both slot models for the card
         for suffix, attr_key in (
             ("_wake_word_detection", "wake_word_detection"),
             ("_wake_word_model", "wake_word_model"),
+            ("_wake_word_model_2", "wake_word_model_2"),
             ("_wake_word_sensitivity", "wake_word_sensitivity"),
+            ("_pipeline_2", "pipeline_2"),
         ):
             s = self._get_child_state(registry, "select", suffix)
             if s and s.state not in ("unknown", "unavailable"):
@@ -886,11 +913,16 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         conversation_id: str | None = None,
         extra_system_prompt: str | None = None,
         wake_word_phrase: str | None = None,
+        wake_word_slot: int | None = None,
     ) -> None:
         """Run a bridged pipeline - relay events back to the card via WS.
 
         Called by the ws_run_pipeline handler. Audio comes in via the queue,
         pipeline events go back through connection.send_event().
+
+        wake_word_slot (1 or 2) controls which pipeline is used: slot 2
+        reroutes the framework's pipeline resolution to the Pipeline 2
+        select via the dynamic pipeline_entity_id property.
         """
         self._pipeline_gen += 1
         my_gen = self._pipeline_gen
@@ -898,6 +930,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         self._pipeline_msg_id = msg_id
         self._pipeline_audio_queue = audio_queue
         self._pipeline_run_started = False
+        self._active_wake_word_slot = 2 if wake_word_slot == 2 else 1
 
         # Set conversation_id for continue conversation support.
         # When a session duration is configured and the elapsed time exceeds
@@ -975,6 +1008,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 self._pipeline_connection = None
                 self._pipeline_msg_id = None
                 self._pipeline_audio_queue = None
+                self._active_wake_word_slot = 1
 
     @callback
     def on_pipeline_event(self, event) -> None:

@@ -181,6 +181,10 @@ export class PipelineManager {
       runConfig.wake_word_phrase = opts.wake_word_phrase;
     }
 
+    if (opts.wake_word_slot === 1 || opts.wake_word_slot === 2) {
+      runConfig.wake_word_slot = opts.wake_word_slot;
+    }
+
     // Reset run-start tracking - used to detect stale run-end events
     this._runStartReceived = false;
     this._startStage = runConfig.start_stage;

@@ -15,7 +15,7 @@
  * the cutoff threshold.
  */
 
-import { createJsMicroFrontend } from './micro-frontend-js/index.js';
+import { createJsMicroFrontend, roundBankers } from './micro-frontend-js/index.js';
 
 const COOLDOWN_MS = 2000;
 // Ignore the first N feature frames after init/reset (~1s warmup)
@@ -123,12 +123,17 @@ export class MicroWakeWordInference {
       }
     } catch (_) { /* use fallback */ }
 
-    // Push this keyword's input quantization params to the shared frontend.
-    // We extract scale + zero_point ourselves by parsing the .tflite
-    // flatbuffer in tflite-quant-reader.js when the model is fetched.
-    if (typeof cfg.inputScale === 'number' && typeof cfg.inputZeroPoint === 'number') {
-      this._frontend.setQuantization(cfg.inputScale, cfg.inputZeroPoint);
-    }
+    // Quantization params are stored per-keyword. The shared frontend now
+    // emits pre-quantization float features (see micro-frontend-js); each
+    // keyword applies its own (scale, zero_point) when writing features into
+    // its model input tensor. This lets two wake word models with different
+    // quantization parameters share one feature stream.
+    const inputScale = typeof cfg.inputScale === 'number' && cfg.inputScale > 0
+      ? cfg.inputScale
+      : 0.10196078568696976;
+    const inputZeroPoint = typeof cfg.inputZeroPoint === 'number'
+      ? cfg.inputZeroPoint
+      : -128;
 
     return {
       runner: cfg.runner,
@@ -136,8 +141,8 @@ export class MicroWakeWordInference {
       cutoff: cfg.cutoff,
       slidingWindow: cfg.slidingWindow,
       stepSize: cfg.stepSize || 1,
-      inputScale: cfg.inputScale,
-      inputZeroPoint: cfg.inputZeroPoint,
+      inputScale,
+      inputZeroPoint,
       framesPerInfer,
       // Cached output TypedArray view from the model runner
       outputView: null,
@@ -371,6 +376,12 @@ export class MicroWakeWordInference {
 
   /**
    * Runner path: uses getInputs()/getOutputs() wrappers.
+   *
+   * Features come in as pre-quantization Float32Array frames (see
+   * micro-frontend-js). We apply this keyword's own (scale, zero_point)
+   * on the way into the model's int8 input tensor, matching the reference
+   * Python/numpy quantization path bit-exactly:
+   *   q = np.round(f / scale + zp).clip(-128, 127).astype(np.int8)
    */
   _runModelRunner(kw) {
     const inputs = kw.runner.getInputs();
@@ -379,10 +390,21 @@ export class MicroWakeWordInference {
     const inputTensor = inputs[0];
     const inputBuffer = inputTensor.data();
 
+    const scaleF32 = Math.fround(kw.inputScale);
+    const zpF32 = Math.fround(kw.inputZeroPoint);
     let offset = 0;
     for (let i = 0; i < kw.featureAccumLen; i++) {
-      inputBuffer.set(kw.featureAccum[i], offset);
-      offset += kw.featureAccum[i].length;
+      const frame = kw.featureAccum[i];
+      const frameLen = frame.length;
+      for (let j = 0; j < frameLen; j++) {
+        const divided = Math.fround(frame[j] / scaleF32);
+        const shifted = Math.fround(divided + zpF32);
+        let quantized = roundBankers(shifted);
+        if (quantized < -128) quantized = -128;
+        else if (quantized > 127) quantized = 127;
+        inputBuffer[offset + j] = quantized;
+      }
+      offset += frameLen;
     }
 
     inputTensor.delete();

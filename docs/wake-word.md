@@ -8,6 +8,7 @@ Voice Satellite includes built-in wake word detection that runs entirely in the 
 - [Built-in Wake Words](#built-in-wake-words)
 - [Custom Wake Words](#custom-wake-words)
 - [Configuration](#configuration)
+- [Dual Wake Words and Pipelines](#dual-wake-words-and-pipelines)
 - [Disabled Mode](#disabled-mode)
 
 ## How It Works
@@ -30,6 +31,7 @@ On-device detection uses [microWakeWord](https://github.com/kahrendt/microWakeWo
 | **hey_mycroft** | "Hey Mycroft" |
 | **hey_home_assistant** | "Hey Home Assistant" |
 | **hey_luna** | "Hey Luna" |
+| **hey_baby** | "Hey Baby" |
 | **okay_computer** | "Okay Computer" |
 
 ## Custom Wake Words
@@ -52,11 +54,40 @@ The filename (without `.tflite`) becomes the option name in the dropdown. For ex
 All wake word settings are configured per-device on the satellite's device page (**Settings -> Devices & Services -> Voice Satellite -> [device]**):
 
 - **Wake word detection** - "On Device" (default), "Home Assistant" (server-side), or "Disabled" (no automatic listening)
-- **Wake word** - select the wake word to listen for
+- **Wake word 1** - primary wake word (always active in On Device mode)
+- **Wake word 2** - optional second wake word with its own pipeline, defaults to "Disabled". See [Dual Wake Words and Pipelines](#dual-wake-words-and-pipelines)
+- **Pipeline 1** - Assist pipeline used when Wake word 1 fires (this is the device's default pipeline)
+- **Pipeline 2** - Assist pipeline used when Wake word 2 fires, only shown when Wake word 2 is enabled
 - **Stop word interruption** - optional on-device `stop` keyword that can cancel timer alerts, TTS, and announcement playback. Disabled by default
-- **Wake word sensitivity** - "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive"
+- **Wake word sensitivity** - "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive" (shared by both slots)
 
-To use server-side detection instead, set "Wake word detection" to "Home Assistant". This requires a wake word service (openWakeWord or microWakeWord) configured in your Assist pipeline.
+To use server-side detection instead, set "Wake word detection" to "Home Assistant". This requires a wake word service (openWakeWord or microWakeWord) configured in your Assist pipeline. Server-side detection is single-slot only - dual wake words require On Device mode.
+
+## Dual Wake Words and Pipelines
+
+Voice Satellite can listen for two wake words at the same time and route each to its own Assist pipeline. Common use cases:
+
+- **Dual language** - "Okay Nabu" runs an English pipeline, "Hey Jarvis" runs a Spanish one
+- **Local + cloud** - one wake word hits a fully-local Speech-to-Phrase + Piper pipeline, the other routes to an LLM-backed cloud pipeline for harder questions
+- **Per-character personalities** - pair each wake word with its own conversation agent and Piper voice to switch between characters (e.g. "Hey Jarvis" vs. "Hey Bender") without a sentence trigger and without bouncing through an LLM
+
+### How to configure
+
+1. Set **Wake word detection** to "On Device".
+2. Pick a primary model in **Wake word 1** and the pipeline you want it to route to in **Pipeline 1**.
+3. Pick a different model in **Wake word 2** - the select defaults to "Disabled".
+4. Pick the target pipeline for slot 2 in **Pipeline 2**. "Preferred" falls back to Pipeline 1, effectively making slot 2 inert.
+
+The runtime loads both TFLite models into a single shared feature extractor and runs both classifiers in parallel. Per-keyword quantization is applied at the model input, so the two models can have different training parameters without interfering.
+
+### Details and edge cases
+
+- **Single-slot quantization:** this is a real change to the feature pipeline used by every satellite, single-slot included. Detection accuracy should be identical to before; if you see a regression file an issue with the model name and wake word sensitivity.
+- **Same model in both slots:** silently deduped - only one copy loads and every detection routes to Pipeline 1. The diagnostics panel surfaces a warning so you know Pipeline 2 is inert until you pick a different model.
+- **Sensitivity is shared:** one sensitivity slider controls both slots. File an issue if per-slot sensitivity would help your setup.
+- **Chime is shared:** both wake words use the same wake chime.
+- **CPU cost:** running two models roughly doubles inference work. Modern desktops, Galaxy Tab S8, and Fire HD 10 (2021+) handle it without trouble. On older or low-powered devices, stick to one slot or enable the "Wake word noise gate" switch to pause inference during silence.
+- **No limit escape hatch:** the cap is two, matching Home Assistant Voice PE. There is no hidden setting for three or more.
 
 ## Disabled Mode
 

@@ -28,6 +28,7 @@ Voice Satellite runs as a **global engine** that loads on every page of Home Ass
 
 - **Turns your browser into a real satellite** - registered as a proper `assist_satellite` device in HA with full feature parity with physical voice assistants
 - **On-device wake word detection** - runs microWakeWord locally in pure JavaScript with custom model support and optional voice-activated stop interruption. Falls back to server-side detection when preferred
+- **Dual wake words / dual pipelines** - load two wake words simultaneously (e.g. "Okay Nabu" and "Hey Jarvis") and route each to its own Assist pipeline, so a household can mix languages, mix a local-only pipeline with a cloud/LLM one, or give each character its own conversation agent and voice
 - **Timers, announcements, conversations** - voice-activated timers with countdown pills, `assist_satellite.announce` / `start_conversation` / `ask_question` from automations
 - **Media player entity** - volume control, `tts.speak` targeting, and `media_player.play_media` from automations. TTS can route to browser or a remote speaker
 - **Skins** - 7 built-in skins (Default, Alexa, Google Home, Home Assistant, Retro Terminal, Siri, Waveform) with CSS overrides. Reactive audio-level animation on the activity bar
@@ -118,9 +119,9 @@ See the [Usage & Services reference](docs/usage.md) for the full interaction flo
 
 ## Wake Word Detection
 
-On-device detection runs [microWakeWord](https://github.com/kahrendt/microWakeWord) TFLite models in pure JavaScript, so audio is only streamed to Home Assistant after the wake word fires - no server-side wake word add-on required. Seven built-in wake words ship out of the box, custom `.tflite` models are auto-discovered, and "Disabled" mode keeps the mic completely off for automation-driven setups.
+On-device detection runs [microWakeWord](https://github.com/kahrendt/microWakeWord) TFLite models in pure JavaScript, so audio is only streamed to Home Assistant after the wake word fires - no server-side wake word add-on required. Eight built-in wake words ship out of the box, custom `.tflite` models are auto-discovered, and "Disabled" mode keeps the mic completely off for automation-driven setups. Up to two wake words can run in parallel, each routed to its own Assist pipeline.
 
-See the [Wake Word reference](docs/wake-word.md) for built-in models, custom model loading, configuration, and disabled mode.
+See the [Wake Word reference](docs/wake-word.md) for built-in models, custom model loading, dual wake words / pipelines, and disabled mode.
 
 ## Skins & Customization
 

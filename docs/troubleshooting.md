@@ -20,9 +20,9 @@ Checks cover the common failure modes:
 
 - **Browser environment:** secure context (HTTPS/localhost), `navigator.mediaDevices` availability, `Permissions-Policy` for microphone and autoplay, microphone permission state, at least one audio input device, `localStorage` writeability.
 - **Voice Satellite bundle:** overlay bundle loaded on this page, Lovelace resource registered exactly once (no duplicates from the archived standalone card).
-- **Satellite configuration:** an entity is selected, the entity exists in Home Assistant, the Assist pipeline is resolvable, the pipeline has STT / TTS / conversation engines configured, those provider entities are loaded.
+- **Satellite configuration:** an entity is selected, the entity exists in Home Assistant, Pipeline 1 is resolvable, the pipeline has STT / TTS / conversation engines configured, those provider entities are loaded. When a second wake word is enabled, Pipeline 2 gets the same battery of checks independently and surfaces warnings when both slots point at the same model (slot 2 inert) or when Pipeline 2 is set to "Preferred" (slot 2 routes to Pipeline 1 anyway).
 - **URLs and TTS:** Home Assistant `internal_url` and `external_url` match the page protocol. A mismatch here is the single most common cause of "text shows but TTS is silent" for `assist_satellite.announce`.
-- **Wake word:** current detection mode (On Device / Home Assistant / Disabled). In Home Assistant mode, a wake word entity is configured on the pipeline and loaded.
+- **Wake word:** current detection mode (On Device / Home Assistant / Disabled). In Home Assistant mode, a wake word entity is configured on the pipeline and loaded. When Wake word 2 is enabled, its selected model is also reported.
 - **Audio:** page-load autoplay probe reporting whether media element playback and `AudioContext` capture will start without a user tap. Remediation text is tailored to the current host (HA Companion App, Fully Kiosk, or a plain browser).
 - **Platform:** detects Fully Kiosk, Companion App, ChromeOS, iOS, and other hosts so remediation instructions match the actual settings path.
 
@@ -39,10 +39,11 @@ Failures and warnings render at the top of the panel with specific remediation f
 
 **On-device mode (default):**
 
-1. **Check the device settings:** Go to the satellite's device page and verify "Wake word detection" is set to "On Device" and a wake word model is selected.
-2. **Try adjusting sensitivity:** Change "Wake word sensitivity" to "Very sensitive" to see if detection improves.
-3. **Check browser compatibility:** On-device detection runs in pure JavaScript with `AudioWorklet` and `Float32Array` - both are supported in every current browser, but very old versions may not qualify.
-4. Enable **Debug logging** in the sidebar panel to see wake word scores in the browser console (F12).
+1. **Check the device settings:** Go to the satellite's device page and verify "Wake word detection" is set to "On Device" and at least "Wake word 1" has a model selected.
+2. **Try adjusting sensitivity:** Change "Wake word sensitivity" to "Very sensitive" to see if detection improves. This setting is shared across both wake word slots.
+3. **If you configured two wake words and one never fires:** open the diagnostics panel and look for the "Wake word 1 and 2 are distinct" warning. If both slots point at the same model the runtime dedupes to one copy and routes every detection to Pipeline 1, so slot 2 never activates. Pick a different model for slot 2 or set it to "Disabled".
+4. **Check browser compatibility:** On-device detection runs in pure JavaScript with `AudioWorklet` and `Float32Array` - both are supported in every current browser, but very old versions may not qualify.
+5. Enable **Debug logging** in the sidebar panel to see wake word scores in the browser console (F12). Scores are reported per model name, so dual-slot setups show one line per keyword.
 
 **Server-side mode ("Home Assistant"):**
 

@@ -19,10 +19,13 @@
   "entity": {
     "select": {
       "pipeline": {
-        "name": "Assistant",
+        "name": "Pipeline 1",
         "state": {
           "preferred": "Preferred"
         }
+      },
+      "pipeline_2": {
+        "name": "Pipeline 2"
       },
       "vad_sensitivity": {
         "name": "Finished speaking detection",
@@ -39,7 +42,10 @@
         "name": "Wake word detection"
       },
       "wake_word_model": {
-        "name": "Wake word"
+        "name": "Wake word 1"
+      },
+      "wake_word_model_2": {
+        "name": "Wake word 2"
       },
       "wake_word_sensitivity": {
         "name": "Wake word sensitivity"

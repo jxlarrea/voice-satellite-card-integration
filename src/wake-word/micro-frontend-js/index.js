@@ -52,8 +52,10 @@ export async function createJsMicroFrontend() {
 class JsMicroFrontend {
   constructor(shared) {
     this._shared = shared;
-    this._inputScale = 0.10196078568696976;
-    this._inputZeroPoint = -128;
+    // Pre-quantization float feature frames (length = FEATURE_SIZE).
+    // Quantization is now done per-keyword inside the inference engine so
+    // two wake word models with different (scale, zero_point) params can
+    // share one feature stream. See micro-inference.js _runModelRunner.
     this._featurePool = [];
     this._featurePoolMax = 32;
 
@@ -74,14 +76,11 @@ class JsMicroFrontend {
     this._noiseEstimate = new Uint32Array(FEATURE_SIZE);
   }
 
-  setQuantization(scale, zeroPoint) {
-    if (typeof scale === 'number' && Number.isFinite(scale) && scale > 0) {
-      this._inputScale = scale;
-    }
-    if (typeof zeroPoint === 'number' && Number.isFinite(zeroPoint)) {
-      this._inputZeroPoint = zeroPoint;
-    }
-  }
+  /**
+   * Deprecated no-op. Quantization is now per-keyword inside the inference
+   * engine. Kept so old callers do not throw during the transition.
+   */
+  setQuantization(_scale, _zeroPoint) { /* moved to inference engine */ }
 
   feed(samples) {
     if (!samples?.length) return [];
@@ -195,24 +194,16 @@ class JsMicroFrontend {
     this._applyNoiseReduction(signal);
     this._applyPcan(signal, gainLut);
 
-    const feature = this._featurePool.pop() || new Int8Array(FEATURE_SIZE);
-    // Match the reference Python/numpy quantization path bit-exactly:
-    //   features = np.array(fo.values * FLOAT32_SCALE, dtype=np.float32)
-    //   q = np.round(features / scale + zp).clip(-128, 127).astype(np.int8)
-    // Everything in float32; banker's rounding (round-half-to-even).
-    const scaleF32 = Math.fround(this._inputScale);
-    const zpF32 = Math.fround(this._inputZeroPoint);
+    // Emit pre-quantization float features. Each downstream keyword
+    // applies its own (scale, zero_point) on the way into the model input
+    // tensor (see micro-inference.js _quantizeFeatureTo). This lets two
+    // models with different quantization params share one feature stream.
+    const feature = this._featurePool.pop() || new Float32Array(FEATURE_SIZE);
     for (let i = 0; i < FEATURE_SIZE; i++) {
       const corrected = signal[i] * (1 << INPUT_CORRECTION_BITS);
       const logged = corrected > 1 ? logScale(corrected) : 0;
       const clamped = logged < 0xFFFF ? logged : 0xFFFF;
-      const featureF32 = Math.fround(clamped * FLOAT32_SCALE);
-      const divided = Math.fround(featureF32 / scaleF32);
-      const shifted = Math.fround(divided + zpF32);
-      let quantized = roundBankers(shifted);
-      if (quantized < -128) quantized = -128;
-      else if (quantized > 127) quantized = 127;
-      feature[i] = quantized;
+      feature[i] = Math.fround(clamped * FLOAT32_SCALE);
     }
 
     return feature;
@@ -739,7 +730,7 @@ function log2FractionPart(x, log2x) {
 
 // Banker's rounding (round half to even) — matches numpy's np.round.
 // JS's Math.round rounds half-up, which is off by 1 at x.5 values.
-function roundBankers(x) {
+export function roundBankers(x) {
   const r = Math.round(x);
   // If x is exactly half-integer, Math.round returned x+0.5. Adjust
   // down by 1 when the result is odd (round to even instead).

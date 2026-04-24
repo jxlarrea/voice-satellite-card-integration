@@ -252,37 +252,145 @@ async def _check_entity_and_pipeline(
         "pass", detail=entity_id,
     ))
 
-    # Resolve the configured pipeline via HA's assist_pipeline API
+    # Resolve Pipeline 1 (always checked — it's the default route)
     pipeline = await _resolve_pipeline(hass, entity)
     if pipeline is None:
         out.append(_result(
             "srv.pipeline.exists",
             CAT_PIPELINE,
-            "Pipeline resolvable",
+            "Pipeline 1 resolvable",
             "fail",
-            detail="Could not resolve the Assist pipeline configured for this satellite.",
-            remediation="Open the satellite's device page and choose a pipeline in the Pipeline select.",
+            detail="Could not resolve the Assist pipeline configured for Pipeline 1.",
+            remediation="Open the satellite's device page and choose a pipeline in the Pipeline 1 select.",
         ))
         return out
     out.append(_result(
-        "srv.pipeline.exists", CAT_PIPELINE, "Pipeline resolvable",
+        "srv.pipeline.exists", CAT_PIPELINE, "Pipeline 1 resolvable",
         "pass", detail=f"Using pipeline '{pipeline.name}'.",
     ))
-
-    # STT / TTS / conversation engines configured
-    out.append(_stage_result("srv.pipeline.stt", "Speech-to-Text engine configured",
+    out.append(_stage_result("srv.pipeline.stt", "Pipeline 1 Speech-to-Text engine configured",
                              pipeline.stt_engine))
-    out.append(_stage_result("srv.pipeline.tts", "Text-to-Speech engine configured",
+    out.append(_stage_result("srv.pipeline.tts", "Pipeline 1 Text-to-Speech engine configured",
                              pipeline.tts_engine))
-    out.append(_stage_result("srv.pipeline.conversation", "Conversation agent configured",
+    out.append(_stage_result("srv.pipeline.conversation", "Pipeline 1 Conversation agent configured",
                              pipeline.conversation_engine))
+    out.extend(_entity_available_checks(hass, pipeline, slot=1))
 
-    # Availability of the STT / TTS entity states
-    out.extend(_entity_available_checks(hass, pipeline))
+    # Pipeline 2 is only relevant when slot 2 wake word is not Disabled
+    out.extend(await _check_pipeline_2(hass, entity, pipeline))
 
     # Wake word checks vary by the satellite's detection mode
     out.extend(_check_wake_word_mode(hass, entity, pipeline))
 
+    return out
+
+
+async def _check_pipeline_2(hass: HomeAssistant, entity, pipeline_1) -> list[dict[str, Any]]:
+    """Validate the slot 2 pipeline when the slot 2 wake word is enabled.
+
+    Mirrors the Pipeline 1 checks so dual-wake-word setups are just as
+    discoverable in the diagnostics panel. Skipped entirely when slot 2 is
+    Disabled — the common single-wake-word case does not generate noise.
+    """
+    from homeassistant.helpers import entity_registry as er
+    from .select import PIPELINE_2_PREFERRED, WAKE_WORD_2_DISABLED
+
+    out: list[dict[str, Any]] = []
+    registry = er.async_get(hass)
+
+    ww2_eid = registry.async_get_entity_id(
+        "select", DOMAIN, f"{entity._entry.entry_id}_wake_word_model_2"
+    )
+    if not ww2_eid:
+        return out
+    ww2_state = hass.states.get(ww2_eid)
+    if ww2_state is None or ww2_state.state in ("unknown", "unavailable", WAKE_WORD_2_DISABLED):
+        return out
+
+    out.append(_result(
+        "srv.wake.slot2_model",
+        CAT_WAKE,
+        "Wake word 2 model selected",
+        "info",
+        detail=ww2_state.state,
+    ))
+
+    # Warn if the two slots point at the same model. The JS runtime silently
+    # dedupes and routes everything to Pipeline 1, which makes Pipeline 2
+    # inert — surface that so users who wired it on purpose know why.
+    ww1_eid = registry.async_get_entity_id(
+        "select", DOMAIN, f"{entity._entry.entry_id}_wake_word_model"
+    )
+    if ww1_eid:
+        ww1_state = hass.states.get(ww1_eid)
+        if ww1_state is not None and ww1_state.state == ww2_state.state:
+            out.append(_result(
+                "srv.wake.slot2_dedup",
+                CAT_WAKE,
+                "Wake word 1 and 2 are distinct",
+                "warn",
+                detail=(
+                    f"Both slots are set to '{ww1_state.state}'. The satellite will load one "
+                    "copy and route every detection to Pipeline 1 — Pipeline 2 is effectively "
+                    "inactive until slot 2 is changed to a different model."
+                ),
+                remediation="Pick a different model for Wake word 2, or set it to Disabled.",
+            ))
+
+    # Resolve Pipeline 2. "Preferred" means slot 2 just falls back to the
+    # Pipeline 1 resolution — valid but usually not what the user intended.
+    p2_eid = registry.async_get_entity_id(
+        "select", DOMAIN, f"{entity._entry.entry_id}_pipeline_2"
+    )
+    p2_state = hass.states.get(p2_eid) if p2_eid else None
+    p2_name = p2_state.state if p2_state else None
+
+    if not p2_name or p2_name in ("unknown", "unavailable", PIPELINE_2_PREFERRED):
+        out.append(_result(
+            "srv.pipeline2.exists",
+            CAT_PIPELINE,
+            "Pipeline 2 resolvable",
+            "info",
+            detail=(
+                "Pipeline 2 is set to Preferred — slot 2 wake word detections will use "
+                f"Pipeline 1 ('{pipeline_1.name}')."
+            ),
+            remediation="Pick a different pipeline for Pipeline 2 if you want slot 2 to route elsewhere.",
+        ))
+        return out
+
+    pipeline_2 = None
+    try:
+        from homeassistant.components.assist_pipeline import async_get_pipelines
+        for p in async_get_pipelines(hass):
+            if p.name == p2_name:
+                pipeline_2 = p
+                break
+    except Exception:  # noqa: BLE001
+        pass
+
+    if pipeline_2 is None:
+        out.append(_result(
+            "srv.pipeline2.exists",
+            CAT_PIPELINE,
+            "Pipeline 2 resolvable",
+            "fail",
+            detail=f"No Assist pipeline named '{p2_name}' exists.",
+            remediation="Pick an existing pipeline in the Pipeline 2 select, or create one in Settings → Voice assistants.",
+        ))
+        return out
+
+    out.append(_result(
+        "srv.pipeline2.exists", CAT_PIPELINE, "Pipeline 2 resolvable",
+        "pass", detail=f"Using pipeline '{pipeline_2.name}'.",
+    ))
+    out.append(_stage_result("srv.pipeline2.stt", "Pipeline 2 Speech-to-Text engine configured",
+                             pipeline_2.stt_engine))
+    out.append(_stage_result("srv.pipeline2.tts", "Pipeline 2 Text-to-Speech engine configured",
+                             pipeline_2.tts_engine))
+    out.append(_stage_result("srv.pipeline2.conversation", "Pipeline 2 Conversation agent configured",
+                             pipeline_2.conversation_engine))
+    out.extend(_entity_available_checks(hass, pipeline_2, slot=2))
     return out
 
 
@@ -447,17 +555,22 @@ def _stage_result(check_id: str, title: str, engine_value) -> dict[str, Any]:
     )
 
 
-def _entity_available_checks(hass: HomeAssistant, pipeline) -> list[dict[str, Any]]:
+def _entity_available_checks(hass: HomeAssistant, pipeline, slot: int = 1) -> list[dict[str, Any]]:
     """Check that pipeline STT/TTS entities are loaded and not 'unavailable'.
 
     STT and TTS providers typically don't expose a meaningful entity state.
     Most sit in the 'unknown' state as their normal resting value. Only
     'unavailable' (provider unloaded / add-on stopped) is a real problem.
+
+    `slot` is included in result IDs/labels so the Pipeline 1 and Pipeline
+    2 availability checks don't collide in the diagnostics panel.
     """
+    suffix = "" if slot == 1 else "2"
+    prefix = f"Pipeline {slot}"
     out = []
     for check_id, label, engine in (
-        ("srv.pipeline.stt_available", "STT entity loaded", pipeline.stt_engine),
-        ("srv.pipeline.tts_available", "TTS entity loaded", pipeline.tts_engine),
+        (f"srv.pipeline{suffix}.stt_available", f"{prefix} STT entity loaded", pipeline.stt_engine),
+        (f"srv.pipeline{suffix}.tts_available", f"{prefix} TTS entity loaded", pipeline.tts_engine),
     ):
         # Pipeline engine identifiers are entity_ids when entity-backed
         # (stt.xxx / tts.xxx). Legacy string engines (e.g. "google_translate")

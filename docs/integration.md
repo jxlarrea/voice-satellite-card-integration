@@ -20,7 +20,8 @@ Each satellite device exposes configuration entities on its device page (**Setti
 | Entity | Type | Description |
 |--------|------|-------------|
 | **Announcement display duration** | Number | How long (1-60 seconds) to show the announcement text on screen after playback completes |
-| **Assist pipeline** | Select | Choose which Assist pipeline to use for this satellite |
+| **Pipeline 1** | Select | Assist pipeline used when Wake word 1 fires. This is the device's default pipeline and the one used by every non-wake-word entry point (announcements, `start_conversation`, `voice_satellite.wake`) |
+| **Pipeline 2** | Select | Assist pipeline used when Wake word 2 fires. Only shown when Wake word 2 is enabled (not "Disabled"). "Preferred" falls back to Pipeline 1 |
 | **Finish delay** | Number | How long (0-15 seconds) to keep the overlay visible after TTS finishes so you can continue reading the response. 0 dismisses immediately (default) |
 | **Finished speaking detection** | Select | VAD sensitivity - how aggressively to detect end of speech |
 | **Session duration** | Select | Controls how long conversation context is retained between wake word activations. After the selected duration elapses without interaction, the next wake word starts a fresh conversation. Options: "Persistent" (default - never expires, matching physical Voice PE satellite behavior), 5 minutes, 10 minutes, 15 minutes, 30 minutes, 1 hour, 3 hours, 6 hours, or "Isolated" (every wake word activation starts completely fresh). Multi-turn exchanges within a single session always share context regardless of this setting |
@@ -29,10 +30,11 @@ Each satellite device exposes configuration entities on its device page (**Setti
 | **TTS Output** | Select | Where to play TTS audio: "Browser" (default) plays audio locally, or select any `media_player` entity to route TTS to an external speaker |
 | **Wake sound** | Switch | Enable/disable chime sounds (wake, done, error) |
 | **Stop word interruption** | Switch | Opt-in on-device `stop` keyword detection for interruptible states such as timer alerts, TTS playback, and announcements. Disabled by default to avoid extra CPU/memory use on slower devices |
-| **Wake word** | Select | Wake word to listen for when using on-device detection. Built-in models: ok_nabu, hey_jarvis, alexa, hey_mycroft, hey_home_assistant, hey_luna, okay_computer. Custom `.tflite` models are auto-discovered from the `models/` directory |
-| **Wake word detection** | Select | "On Device" (default) runs wake word inference locally in the browser. "Home Assistant" uses server-side detection via the pipeline's configured wake word engine |
+| **Wake word 1** | Select | Primary wake word model. Built-in models: ok_nabu, hey_jarvis, alexa, hey_mycroft, hey_home_assistant, hey_luna, hey_baby, okay_computer. Custom `.tflite` models are auto-discovered from the `models/` directory |
+| **Wake word 2** | Select | Optional second wake word model, routed to Pipeline 2. Defaults to "Disabled". When a non-"Disabled" model is picked, both models run in parallel on the shared feature extractor. See [dual wake words](wake-word.md#dual-wake-words-and-pipelines) |
+| **Wake word detection** | Select | "On Device" (default) runs wake word inference locally in the browser. "Home Assistant" uses server-side detection via the pipeline's configured wake word engine. Server-side detection is single-slot only |
 | **Wake word noise gate** | Switch | When enabled, wake word inference is paused during silence and resumes when sound is detected. Reduces CPU usage but may miss soft-spoken wake words. Disabled by default |
-| **Wake word sensitivity** | Select | Detection sensitivity for on-device wake word: "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive" |
+| **Wake word sensitivity** | Select | Detection sensitivity for on-device wake word: "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive". Shared across both wake word slots |
 
 All settings persist across restarts.
 
@@ -76,7 +78,10 @@ The satellite entity exposes the following attributes for use in templates and a
 | `tts_target` | string | Entity ID of the selected TTS output media player (empty string when set to "Browser") |
 | `announcement_display_duration` | integer | Configured announcement display duration in seconds |
 | `wake_word_detection` | string | Current wake word detection mode: "On Device" or "Home Assistant" |
-| `wake_word_model` | string | Selected primary on-device wake word model name (e.g., "ok_nabu") |
+| `wake_word_model` | string | Wake word 1 model name (e.g., `ok_nabu`) |
+| `wake_word_model_2` | string | Wake word 2 model name, or `Disabled` when slot 2 is off |
+| `pipeline` | string | Pipeline 1 display name |
+| `pipeline_2` | string | Pipeline 2 display name, or `Preferred` when slot 2 is set to fall back to Pipeline 1 |
 
 Example template to check for active timers:
 

@@ -43,13 +43,18 @@ async def async_setup_entry(
     """Set up select entities from a config entry."""
     wake_word_models = await hass.async_add_executor_job(discover_wake_word_models)
     detection_select = VoiceSatelliteWakeWordDetectionSelect(hass, entry)
+    wake_word_2_select = VoiceSatelliteWakeWordModel2Select(
+        hass, entry, wake_word_models, detection_select,
+    )
     entities = [
         VoiceSatellitePipelineSelect(hass, entry),
+        VoiceSatellitePipeline2Select(hass, entry, wake_word_2_select),
         VoiceSatelliteVadSensitivitySelect(hass, entry),
         VoiceSatelliteTTSOutputSelect(hass, entry),
         VoiceSatelliteSessionDurationSelect(hass, entry),
         detection_select,
         VoiceSatelliteWakeWordModelSelect(hass, entry, wake_word_models, detection_select),
+        wake_word_2_select,
         VoiceSatelliteWakeWordSensitivitySelect(hass, entry, detection_select),
     ]
     async_add_entities(entities)
@@ -394,7 +399,7 @@ class VoiceSatelliteWakeWordDetectionSelect(SelectEntity, RestoreEntity):
 
 
 class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
-    """Select entity for choosing the on-device wake word model."""
+    """Select entity for choosing the primary (slot 1) on-device wake word model."""
 
     _attr_entity_category = EntityCategory.CONFIG
     _attr_has_entity_name = True
@@ -402,7 +407,7 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
     _attr_icon = "mdi:microphone-message"
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, models: list[str], detection_select: VoiceSatelliteWakeWordDetectionSelect) -> None:
-        """Initialize the wake word model select entity."""
+        """Initialize the slot 1 wake word model select entity."""
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_wake_word_model"
         self._options = models
@@ -512,3 +517,202 @@ class VoiceSatelliteWakeWordSensitivitySelect(SelectEntity, RestoreEntity):
             self.async_write_ha_state()
 
 
+WAKE_WORD_2_DISABLED = "Disabled"
+
+
+class VoiceSatelliteWakeWordModel2Select(SelectEntity, RestoreEntity):
+    """Select entity for the secondary (slot 2) on-device wake word model.
+
+    Adds a "Disabled" option (the default) so users can opt out of the
+    second wake word slot entirely. When this select is "Disabled" the
+    paired Pipeline 2 select also reports unavailable.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "wake_word_model_2"
+    _attr_icon = "mdi:microphone-message"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        models: list[str],
+        detection_select: VoiceSatelliteWakeWordDetectionSelect,
+    ) -> None:
+        """Initialize the slot 2 wake word model select entity."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_wake_word_model_2"
+        self._models = models
+        self._selected_option: str = WAKE_WORD_2_DISABLED
+        self._detection_select = detection_select
+        self._dependents: list[SelectEntity] = []
+        detection_select.register_dependent(self)
+
+    def register_dependent(self, entity: SelectEntity) -> None:
+        """Register an entity that depends on this slot's state."""
+        self._dependents.append(entity)
+
+    @property
+    def available(self) -> bool:
+        """Only available when wake word detection is on-device."""
+        return self._detection_select.current_option == WAKE_WORD_DETECTION_LOCAL
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    @property
+    def options(self) -> list[str]:
+        """Return available options (Disabled + discovered models)."""
+        return [WAKE_WORD_2_DISABLED, *self._models]
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the currently selected option."""
+        return self._selected_option
+
+    @property
+    def is_enabled(self) -> bool:
+        """True when slot 2 is configured to a real model."""
+        return self._selected_option != WAKE_WORD_2_DISABLED
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous selection on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        allowed = self.options
+        if last_state and last_state.state in allowed:
+            self._selected_option = last_state.state
+        elif self._selected_option not in allowed:
+            self._selected_option = WAKE_WORD_2_DISABLED
+        # Force a state write so `options` reflects the current model list —
+        # without this, HA's cached state from a previous run can show
+        # stale/removed models in the frontend.
+        self.async_write_ha_state()
+
+    async def async_select_option(self, option: str) -> None:
+        """Handle option selection."""
+        if option in self.options:
+            self._selected_option = option
+            self.async_write_ha_state()
+            for dep in self._dependents:
+                dep.async_write_ha_state()
+
+
+PIPELINE_2_PREFERRED = "Preferred"
+
+
+class VoiceSatellitePipeline2Select(SelectEntity, RestoreEntity):
+    """Select entity for the pipeline routed to by slot 2 wake word detections.
+
+    Holds a pipeline display name (matching the framework's pipeline select).
+    Resolution to a pipeline_id happens at pipeline-start time in
+    assist_satellite.py by looking up the name in assist_pipeline's registry.
+    "Preferred" falls back to the slot 1 / device-default pipeline.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "pipeline_2"
+    _attr_icon = "mdi:assistant"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        wake_word_2_select: VoiceSatelliteWakeWordModel2Select,
+    ) -> None:
+        """Initialize the slot 2 pipeline select entity."""
+        self._hass = hass
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_pipeline_2"
+        self._selected_option: str = PIPELINE_2_PREFERRED
+        self._wake_word_2_select = wake_word_2_select
+        # Pipeline 2 availability depends on both the slot 2 model choice
+        # and the detection mode, so register with each so every relevant
+        # change redraws us.
+        wake_word_2_select.register_dependent(self)
+        wake_word_2_select._detection_select.register_dependent(self)
+
+    @property
+    def available(self) -> bool:
+        """Only available when slot 2 is usable.
+
+        Requires both (a) the detection mode to be On Device (so the slot 2
+        select itself is available) and (b) the slot 2 model to not be
+        "Disabled".
+        """
+        return (
+            self._wake_word_2_select.available
+            and self._wake_word_2_select.is_enabled
+        )
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    @property
+    def options(self) -> list[str]:
+        """Return available options (Preferred + pipeline names)."""
+        names: list[str] = []
+        try:
+            from homeassistant.components.assist_pipeline import (
+                async_get_pipelines,
+            )
+            for pipeline in async_get_pipelines(self._hass):
+                if pipeline.name and pipeline.name not in names:
+                    names.append(pipeline.name)
+        except Exception:  # noqa: BLE001
+            pass
+        names.sort(key=str.casefold)
+        return [PIPELINE_2_PREFERRED, *names]
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the currently selected option."""
+        return self._selected_option
+
+    def resolve_pipeline_id(self) -> str | None:
+        """Resolve the selected pipeline name to a pipeline_id.
+
+        Returns None when the selection is "Preferred" (caller should fall
+        back to the device's slot 1 pipeline) or when the name cannot be
+        matched to a known pipeline.
+        """
+        if self._selected_option == PIPELINE_2_PREFERRED:
+            return None
+        try:
+            from homeassistant.components.assist_pipeline import (
+                async_get_pipelines,
+            )
+            for pipeline in async_get_pipelines(self._hass):
+                if pipeline.name == self._selected_option:
+                    return pipeline.id
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous selection on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state and last_state.state not in (
+            "unknown", "unavailable",
+        ):
+            self._selected_option = last_state.state
+        # Force a state write so `options` reflects the current pipeline
+        # list rather than a cached one from a prior run.
+        self.async_write_ha_state()
+
+    async def async_select_option(self, option: str) -> None:
+        """Handle option selection."""
+        if option in self.options:
+            self._selected_option = option
+            self.async_write_ha_state()
