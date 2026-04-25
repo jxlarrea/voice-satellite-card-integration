@@ -35,4 +35,4 @@ Please confirm:
 
 ## Additional context
 
-<!-- HA logs, entity state/attributes, automation YAML, screenshots, etc. -->
+<!-- Debug logs, entity state/attributes, automation YAML, screenshots, etc. -->

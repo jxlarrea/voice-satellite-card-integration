@@ -69,11 +69,3 @@ body:
       render: markdown
     validations:
       required: true
-
-  - type: textarea
-    id: entity-state
-    attributes:
-      label: Entity state and attributes
-      description: |
-        Go to Developer Tools > States, find your `assist_satellite.*` entity, and paste its state and attributes here. This helps diagnose state sync, timer, and configuration issues.
-      render: yaml
