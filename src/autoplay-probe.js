@@ -2,24 +2,22 @@
  * Autoplay Policy Probe
  *
  * Runs once at bundle load, before any user interaction on this page.
- * Probes TWO independent autoplay surfaces because they don't always
- * agree:
+ * Probes the HTMLAudioElement playback path with an actual `play()` call
+ * on a silent WAV — only the play() return value tells us the real
+ * policy verdict (state-based AudioContext checks misreport in Chrome
+ * because a fresh AudioContext is suspended-by-default until the first
+ * gesture, even on sites where audio is fully allowed).
  *
- *   - AudioContext: used by the wake-word capture path. A 'running'
- *     initial state means the browser lets capture start without a tap.
- *
- *   - HTMLAudioElement: used by the TTS and chime playback path. Some
- *     WebViews (notably the HA Companion App with "Autoplay videos"
- *     disabled) allow AudioContext to start but still block media
- *     element playback, causing silent TTS even though the mic works.
- *     Only an actual play() call tells us the real policy.
- *
- * Overall result is the weaker of the two: if either is blocked, audio
- * output will be broken from the user's perspective.
+ * Wake-word capture is intentionally NOT probed: it runs through
+ * `MediaStreamSourceNode → AudioWorkletNode` with no connection to
+ * `ctx.destination`, so it's not subject to autoplay restrictions and
+ * works fine at page load when mic permission is granted. The original
+ * AudioContext probe was conflating "can audio be played" with "can mic
+ * be processed" and producing misleading results.
  *
  * Stored on window.__vsAutoplayProbe so the diagnostics panel (separate
- * bundle) can read it after a user click without the click itself biasing
- * the result.
+ * bundle) can read it after a user click without the click itself
+ * biasing the result.
  */
 
 const WINDOW_KEY = '__vsAutoplayProbe';
@@ -31,38 +29,21 @@ const SILENT_WAV = 'data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBIAAAABAAEAQB8AAE
 export function probeAutoplay() {
   if (window[WINDOW_KEY]) return;
 
-  const audioContext = _probeAudioContext();
   window[WINDOW_KEY] = {
-    audioContext,
     mediaElement: 'probing',
     result: 'probing',
     probedAt: Date.now(),
   };
 
-  // Media element probe is async, kick it off and reconcile once it lands.
   _probeMediaElement().then((mediaElement) => {
     const record = window[WINDOW_KEY] || {};
     record.mediaElement = mediaElement;
-    record.result = _combine(audioContext, mediaElement);
+    record.result = mediaElement === 'allowed' ? 'allowed'
+      : mediaElement === 'disallowed' ? 'disallowed'
+      : mediaElement === 'error' ? 'error'
+      : 'unknown';
     window[WINDOW_KEY] = record;
   });
-}
-
-function _probeAudioContext() {
-  const Ctor = window.AudioContext || window.webkitAudioContext;
-  if (!Ctor) return 'unsupported';
-  let ctx;
-  try {
-    ctx = new Ctor();
-  } catch (_) {
-    return 'error';
-  }
-  const result = ctx.state === 'running' ? 'allowed' : 'disallowed';
-  try {
-    const closeP = ctx.close();
-    if (closeP?.catch) closeP.catch(() => { /* best-effort */ });
-  } catch (_) { /* best-effort */ }
-  return result;
 }
 
 async function _probeMediaElement() {
@@ -86,12 +67,4 @@ async function _probeMediaElement() {
   } catch (_) {
     return 'disallowed';
   }
-}
-
-function _combine(ac, me) {
-  if (ac === 'error' || me === 'error') return 'error';
-  if (ac === 'unsupported') return 'unsupported';
-  if (ac === 'disallowed' || me === 'disallowed') return 'disallowed';
-  if (me === 'probing') return 'probing';
-  return 'allowed';
 }

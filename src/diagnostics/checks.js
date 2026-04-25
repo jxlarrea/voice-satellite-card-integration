@@ -296,56 +296,48 @@ export const CLIENT_CHECKS = [
     category: CATEGORY.AUDIO,
     title: 'Audio can play without a user tap',
     run: async () => {
-      // Read the page-load probe (autoplay-probe.js). It exercised two
-      // surfaces: AudioContext (wake-word capture) and HTMLAudioElement
-      // (TTS and chime playback). Both must be 'allowed' for a truly
-      // gesture-free experience. The HA Companion App is known to allow
-      // AudioContext while blocking media element playback.
+      // Read the page-load probe (autoplay-probe.js). It tested
+      // HTMLAudioElement playback with a real `play()` call, which is
+      // the only path actually subject to the browser's autoplay policy
+      // for sound output (TTS responses + chimes).
+      //
+      // Wake-word capture is NOT probed because it runs through
+      // MediaStreamSourceNode + AudioWorkletNode with no connection to
+      // ctx.destination, so it's not subject to autoplay restrictions
+      // and works at page load when mic permission is granted.
+      //
+      // The probe MUST come from page-load — the question is whether
+      // audio works without a gesture, so re-probing here would be
+      // self-defeating (the diagnostics click is itself a gesture).
       const probe = window.__vsAutoplayProbe;
-      const allowedDetail = 'Audio starts immediately. Users do not need to tap on each page load.';
+      const allowedDetail = 'TTS and chimes start immediately. Users do not need to tap on each page load.';
       const remediation = fixFor('audio');
 
-      // Probe may still be in flight (async media-element play). Wait up
-      // to a few hundred ms for it to settle before giving up.
       const resolved = await _awaitProbe(probe);
 
       if (!resolved || resolved.result === 'probing') {
         return { status: 'skip', detail: 'Autoplay probe did not complete.' };
       }
 
-      if (resolved.result === 'allowed') {
+      if (resolved.mediaElement === 'allowed') {
         return { status: 'pass', detail: allowedDetail };
       }
 
-      if (resolved.result === 'disallowed') {
-        const blocked = [];
-        if (resolved.audioContext === 'disallowed') blocked.push('wake-word audio capture (AudioContext)');
-        if (resolved.mediaElement === 'disallowed') blocked.push('TTS and chime playback (media element)');
-        const what = blocked.length
-          ? blocked.join(' and ')
-          : 'audio playback';
+      if (resolved.mediaElement === 'disallowed') {
         return {
           status: 'warn',
-          detail: `At page load, ${what} was blocked. Users must tap the start button once per page load for the overlay to work.`,
+          detail: 'At page load, TTS and chime playback was blocked by the browser autoplay policy. Users must tap the start button once per page load for chimes and TTS responses to play.',
           remediation,
         };
       }
 
-      if (resolved.result === 'unsupported') {
+      if (resolved.mediaElement === 'error') {
         return {
           status: 'fail',
-          detail: 'This browser does not expose Web Audio. Voice capture cannot work here.',
+          detail: 'The browser could not create an Audio element. TTS playback will not work here.',
         };
       }
 
-      // Probe errored, last-ditch fallback to the policy API
-      if (typeof navigator.getAutoplayPolicy === 'function') {
-        try {
-          const policy = navigator.getAutoplayPolicy('mediaelement');
-          if (policy === 'allowed') return { status: 'pass', detail: allowedDetail };
-          return { status: 'warn', detail: `Media autoplay policy is "${policy}".`, remediation };
-        } catch (_) { /* fall through */ }
-      }
       return { status: 'skip', detail: 'Autoplay state could not be determined in this browser.' };
     },
   },
