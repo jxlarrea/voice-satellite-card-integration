@@ -1181,6 +1181,31 @@ class VoiceSatellitePanel extends HTMLElement {
         /* Wake-word DSP warning — the actual warning element gets
            inline-styled because it's injected into ha-form-expandable's
            shadow root, which light-DOM CSS can't penetrate. */
+        .${P}-footer {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: center;
+          gap: 8px 16px;
+          padding: 16px 8px 24px;
+          font-size: 14px;
+          color: var(--secondary-text-color);
+        }
+        .${P}-footer a {
+          color: var(--secondary-text-color);
+          text-decoration: none;
+          border-bottom: 1px dotted var(--divider-color);
+        }
+        .${P}-footer a:hover {
+          color: var(--primary-text-color);
+          border-bottom-color: var(--primary-text-color);
+        }
+        .${P}-footer-heart {
+          color: #e25555;
+        }
+        .${P}-footer-sep {
+          opacity: 0.4;
+        }
       </style>
 
       <div class="${P}-toolbar">
@@ -1346,6 +1371,14 @@ class VoiceSatellitePanel extends HTMLElement {
           The probability curve should cross the dashed threshold line —
           when it does, the engine would have triggered a detection.
         </div>
+      </div>
+
+      <div class="${P}-footer">
+        <span>Made with <span class="${P}-footer-heart">&#9829;</span> by
+          <a href="https://github.com/jxlarrea" target="_blank" rel="noopener noreferrer">Xavier Larrea</a>
+        </span>
+        <span class="${P}-footer-sep">·</span>
+        <a href="https://buymeacoffee.com/jxlarrea" target="_blank" rel="noopener noreferrer">&#9749; Buy me a coffee</a>
       </div>
 
       </div>
