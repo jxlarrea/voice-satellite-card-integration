@@ -53,7 +53,6 @@ const STOP_SENSITIVITY_FACTORS = {
 function buildPanelSchema(_cfg) {
   return [
     ...behaviorSchema,
-    ...autoStartSchema,
     ...skinSchema,
     ...timersSchema,
     ...microphoneSchema,
@@ -293,6 +292,8 @@ class VoiceSatellitePanel extends HTMLElement {
     if (menuBtn) menuBtn.hass = this._hass;
     const entityForm = this.querySelector(`.${P}-entity-container ha-form`);
     if (entityForm) entityForm.hass = this._hass;
+    const autostartForm = this.querySelector(`.${P}-autostart-container ha-form`);
+    if (autostartForm) autostartForm.hass = this._hass;
     const form = this.querySelector(`.${P}-form-container ha-form`);
     if (form) form.hass = this._hass;
     const ssPreForm = this.querySelector(`.${P}-ss-pre-container ha-form`);
@@ -391,6 +392,10 @@ class VoiceSatellitePanel extends HTMLElement {
     // Sync main settings form
     const settingsForm = this.querySelector(`.${P}-form-container ha-form`);
     if (settingsForm) settingsForm.data = Object.assign({}, this._config);
+
+    // Sync the auto-start toggle in the Settings card
+    const autostartForm = this.querySelector(`.${P}-autostart-container ha-form`);
+    if (autostartForm) autostartForm.data = Object.assign({}, this._config);
 
     // Sync Screensaver sub-forms — rebuild schemas if enabled or type
     // changed so the relevant fields show or hide.
@@ -670,6 +675,9 @@ class VoiceSatellitePanel extends HTMLElement {
           color: var(--secondary-text-color, #999);
           margin-top: 8px;
           line-height: 1.5;
+        }
+        .${P}-autostart-container {
+          margin-top: 24px;
         }
         .${P}-preview-host {
           display: block;
@@ -1242,23 +1250,13 @@ class VoiceSatellitePanel extends HTMLElement {
       </div>
 
       <div class="${P}-card">
-        <div class="${P}-card-title">Satellite entity</div>
+        <div class="${P}-card-title">Settings</div>
         <div class="${P}-card-subtitle">Assign the Voice Satellite device that this browser will use.</div>
         <div class="${P}-entity-container">
           <div class="${P}-form-loading">Loading...</div>
         </div>
         <div class="${P}-entity-hint">Add a satellite device first via Settings → Devices &amp; Services → Voice Satellite.</div>
-      </div>
-
-      <div class="${P}-card ${P}-diag-card">
-        <div class="${P}-card-title">Diagnostics &amp; troubleshooting</div>
-        <div class="${P}-card-subtitle">Check for the most common setup problems: secure context, microphone permission, pipeline configuration, and mixed-content TTS.</div>
-        <div class="${P}-diag-summary is-idle"><span>Diagnostics have not been run yet.</span></div>
-        <div class="${P}-diag-results is-collapsed"></div>
-        <div class="${P}-diag-actions">
-          <button type="button" class="${P}-diag-rerun">Run diagnostics</button>
-          <button type="button" class="${P}-diag-copy" disabled>Copy report</button>
-        </div>
+        <div class="${P}-autostart-container"></div>
       </div>
 
       <div class="${P}-card">
@@ -1267,7 +1265,7 @@ class VoiceSatellitePanel extends HTMLElement {
       </div>
 
       <div class="${P}-card">
-        <div class="${P}-card-title">Settings</div>
+        <div class="${P}-card-title">Advanced</div>
         <div class="${P}-form-container">
           <div class="${P}-form-loading">Loading settings...</div>
         </div>
@@ -1303,6 +1301,17 @@ class VoiceSatellitePanel extends HTMLElement {
             <div class="${P}-ss-fk-form"></div>
           </div>
         </details>
+      </div>
+
+      <div class="${P}-card ${P}-diag-card">
+        <div class="${P}-card-title">Diagnostics &amp; troubleshooting</div>
+        <div class="${P}-card-subtitle">Check for the most common setup problems: secure context, microphone permission, pipeline configuration, and mixed-content TTS.</div>
+        <div class="${P}-diag-summary is-idle"><span>Diagnostics have not been run yet.</span></div>
+        <div class="${P}-diag-results is-collapsed"></div>
+        <div class="${P}-diag-actions">
+          <button type="button" class="${P}-diag-rerun">Run diagnostics</button>
+          <button type="button" class="${P}-diag-copy" disabled>Copy report</button>
+        </div>
       </div>
 
       <div class="${P}-card ${P}-tester-card">
@@ -2189,6 +2198,23 @@ class VoiceSatellitePanel extends HTMLElement {
         this._onEntityChange(e.detail.value);
       });
       entityContainer.appendChild(entityForm);
+    }
+
+    // Auto start toggle — sits in the same Settings card, below the
+    // entity picker. Routed through the same change handler as the lower
+    // Advanced form so propagation to the running session is identical.
+    const autostartContainer = this.querySelector(`.${P}-autostart-container`);
+    if (autostartContainer) {
+      autostartContainer.innerHTML = '';
+      const autostartForm = document.createElement('ha-form');
+      autostartForm.hass = this._hass;
+      autostartForm.data = Object.assign({}, this._config);
+      autostartForm.schema = autoStartSchema;
+      autostartForm.computeLabel = (s) => allLabels[s.name] || '';
+      autostartForm.computeHelper = (s) => allHelpers[s.name] || '';
+      autostartForm.addEventListener('value-changed', (e) => this._onSettingsChange(e.detail.value));
+      autostartContainer.appendChild(autostartForm);
+      this._autostartForm = autostartForm;
     }
 
     // Settings form

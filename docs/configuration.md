@@ -8,10 +8,10 @@ Per-device behavior (pipeline, wake word, TTS output, etc.) is configured on the
 
 - [Sidebar Panel](#sidebar-panel)
   - [Engine Status](#engine-status)
-  - [Satellite Entity](#satellite-entity)
   - [Settings](#settings)
-  - [Screensaver](#screensaver)
   - [Preview](#preview)
+  - [Advanced](#advanced)
+  - [Screensaver](#screensaver)
 - [Mini Card](#mini-card)
   - [Modes](#modes)
   - [Mini Card Features](#mini-card-features)
@@ -30,23 +30,33 @@ The sidebar panel is the central configuration hub for Voice Satellite.
 
 The top of the panel shows the current engine state (running/dormant) and pipeline status (idle, listening, processing, etc.). **Start** and **Stop** buttons let you manually control the engine.
 
-### Satellite Entity
-
-Select which satellite device this browser should use. Each browser must explicitly select a satellite entity before the engine will start. Create one entity per device in **Settings -> Devices & Services -> Voice Satellite**.
-
 ### Settings
 
-All settings are stored per-browser in local storage and persist across sessions:
+The primary settings for this browser. Pick the satellite device this browser should drive, and toggle whether the engine should start automatically on page load.
 
 | Setting | Description |
 |---------|-------------|
+| **Satellite entity** | The Voice Satellite device this browser will use. Each browser must explicitly select an entity before the engine will start. Create one entity per device in **Settings -> Devices & Services -> Voice Satellite** |
 | **Auto start** | Start the engine automatically on page load. When off, use the Start button to activate manually |
+
+### Preview
+
+A live preview of the selected skin updates as you change appearance settings.
+
+### Advanced
+
+Per-browser overlay appearance, microphone processing, timer behavior, and debug logging. Stored in local storage and persists across sessions.
+
+| Setting | Description |
+|---------|-------------|
 | **Skin** | Select a built-in skin for the overlay UI |
 | **Text Scale** | Scale all text 50-200% |
 | **Background Opacity** | Override the skin's default overlay opacity (0-100%) |
 | **Reactive activity bar** | Bar animates in response to mic and audio levels. Disable on slow devices |
 | **Reactive bar update interval** | Controls animation smoothness (default 33ms / ~30fps) |
 | **Custom CSS** | Advanced CSS overrides applied on top of the selected skin |
+| **Hide on-screen countdown** *(Timers)* | Suppresses the countdown pill while a timer is running. The timer still fires and the alert still plays at zero |
+| **Hide timer name on alert** *(Timers)* | Hides the timer name shown below the alert when a timer finishes |
 | **Noise suppression** | Browser-level noise suppression on the microphone input |
 | **Echo cancellation** | Browser-level echo cancellation |
 | **Auto gain control** | Browser-level automatic gain control |
@@ -69,10 +79,6 @@ A browser overlay that kicks in after an idle timeout. Configured per-browser in
 | **External screensaver** *(screensaver disabled only)* | A `switch` or `input_boolean` that's forced off for the duration of each voice interaction, then left alone so its owner (typically Fully Kiosk) can resume its own idle timer. Useful to keep Fully Kiosk's screensaver from covering the voice UI mid-conversation |
 | **Fully Kiosk Integration -> Screen brightness while active** | Hardware backlight level (0-100%) while the screensaver is showing. The previous brightness is restored on dismiss. 0% = fully dark, 100% = leave the backlight untouched (default) |
 | **Fully Kiosk Integration -> Dismiss on motion** | Dismiss the screensaver when Fully Kiosk's camera-based motion detection fires. Requires Motion Detection to be enabled in the Fully Kiosk settings. Default off |
-
-### Preview
-
-A live preview of the selected skin updates as you change appearance settings.
 
 ## Mini Card
 
@@ -111,7 +117,7 @@ custom_css: ''                     # CSS overrides inside the mini card shadow D
 
 ### Timers
 
-Per-browser toggles that control the on-screen behavior of timers without affecting how they actually run. Both default off, both take effect live without restarting the engine. See the [Timers reference](timers.md) for the full picture.
+Per-browser toggles that control the on-screen behavior of timers without affecting how they actually run. Live in the **Advanced** card under the **Timers** expandable. Both default off and take effect live without restarting the engine. See the [Timers reference](timers.md) for the full picture.
 
 | Setting | Description |
 |---------|-------------|

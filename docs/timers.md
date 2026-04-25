@@ -108,7 +108,7 @@ Example template, true when the kitchen tablet has at least one running timer:
 
 ## Side panel options
 
-Two per-browser toggles under **Voice Satellite > Timers** in the sidebar panel:
+Two per-browser toggles under **Advanced > Timers** in the sidebar panel:
 
 | Setting | Default | Effect |
 |---------|---------|--------|
