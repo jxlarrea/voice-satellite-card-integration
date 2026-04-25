@@ -327,11 +327,15 @@ export function onTTSComplete(session, playbackFailed) {
   if (!playbackFailed && session.pipeline.shouldContinue && session.pipeline.continueConversationId) {
     session.logger.log('pipeline', 'Continuing conversation - skipping wake word');
     const conversationId = session.pipeline.continueConversationId;
+    // Capture the wake word slot before clearContinueState so the follow-
+    // up turn stays on the same Pipeline N (otherwise slot 2 conversations
+    // flip back to Pipeline 1's voice / agent on the second turn).
+    const slot = session.pipeline.activeWakeWordSlot;
     session.pipeline.clearContinueState();
     session.chat.streamEl = null;
 
     // Keep blur, bar, and chat visible
-    session.pipeline.restartContinue(conversationId);
+    session.pipeline.restartContinue(conversationId, { wake_word_slot: slot });
     return;
   }
 

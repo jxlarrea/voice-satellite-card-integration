@@ -44,6 +44,10 @@ export class PipelineManager {
     this._continueConversationId = null;
     this._shouldContinue = false;
     this._continueMode = false;
+    // Wake word slot (1 or 2) of the current conversation chain. Set when
+    // a wake word fires with a slot, read by restartContinue() so follow-
+    // up turns route through the same Pipeline N as the original turn.
+    this._activeWakeWordSlot = null;
     this._isStreaming = false;
     this._askQuestionCallback = null;
     this._askQuestionHandled = false;
@@ -93,6 +97,7 @@ export class PipelineManager {
   set shouldContinue(val) { this._shouldContinue = val; }
   get continueConversationId() { return this._continueConversationId; }
   set continueConversationId(val) { this._continueConversationId = val; }
+  get activeWakeWordSlot() { return this._activeWakeWordSlot; }
   get continueMode() { return this._continueMode; }
   set continueMode(val) { this._continueMode = val; }
   get retryCount() { return this._retryCount; }
@@ -183,6 +188,11 @@ export class PipelineManager {
 
     if (opts.wake_word_slot === 1 || opts.wake_word_slot === 2) {
       runConfig.wake_word_slot = opts.wake_word_slot;
+      // Remember the slot so a subsequent restartContinue() can route the
+      // follow-up turn through the same Pipeline N (otherwise the Python
+      // side defaults to slot 1 and the second turn flips back to
+      // Pipeline 1's TTS voice / agent).
+      this._activeWakeWordSlot = opts.wake_word_slot;
     }
 
     // Reset run-start tracking - used to detect stale run-end events
@@ -406,6 +416,15 @@ export class PipelineManager {
       };
       if (opts.extra_system_prompt) {
         startOpts.extra_system_prompt = opts.extra_system_prompt;
+      }
+      // Carry the slot from the original wake-word-triggered turn so the
+      // follow-up routes through the same Pipeline N (TTS voice + agent).
+      // Caller passes it explicitly; the wake-word continue path supplies
+      // this from `pipeline.activeWakeWordSlot`. Automation paths
+      // (start_conversation, ask_question) don't pass it so the framework
+      // defaults to Pipeline 1.
+      if (opts.wake_word_slot === 1 || opts.wake_word_slot === 2) {
+        startOpts.wake_word_slot = opts.wake_word_slot;
       }
       this.start(startOpts).catch((e) => {
         const msg = e?.message || JSON.stringify(e);
