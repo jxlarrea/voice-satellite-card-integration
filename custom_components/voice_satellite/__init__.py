@@ -226,6 +226,66 @@ async def _async_handle_wake_service(call: ServiceCall) -> None:
         entity._push_satellite_event("wake", {})
 
 
+async def _async_handle_start_timer_service(call: ServiceCall) -> None:
+    """Handle voice_satellite.start_timer - create a named timer on a satellite.
+
+    Goes through HA's TimerManager so the timer behaves identically to a
+    voice-created one: countdown pill on the overlay, alert tone on finish,
+    `active_timers` attribute updates, and cancel via the existing card UI
+    or `voice_satellite/cancel_timer` WS command.
+    """
+    from homeassistant.components.intent import TimerManager
+    from homeassistant.components.intent.const import TIMER_DATA
+
+    hass = call.hass
+    entity_ids = call.data["entity_id"]
+    name = call.data["name"]
+    hours = call.data.get("hours") or 0
+    minutes = call.data.get("minutes") or 0
+    seconds = call.data.get("seconds") or 0
+
+    if (hours + minutes + seconds) <= 0:
+        raise vol.Invalid(
+            "Timer duration must be at least one second "
+            "(set hours, minutes, or seconds)"
+        )
+
+    timer_manager: TimerManager | None = hass.data.get(TIMER_DATA)
+    if timer_manager is None:
+        _LOGGER.warning("voice_satellite.start_timer: TimerManager not ready")
+        return
+
+    language = hass.config.language or "en"
+
+    for entity_id in entity_ids:
+        entity = _find_entity(hass, entity_id)
+        if entity is None:
+            _LOGGER.warning(
+                "voice_satellite.start_timer: entity %s not found", entity_id
+            )
+            continue
+        if entity.device_entry is None:
+            _LOGGER.warning(
+                "voice_satellite.start_timer: %s has no device entry", entity_id
+            )
+            continue
+        try:
+            timer_manager.start_timer(
+                device_id=entity.device_entry.id,
+                hours=hours or None,
+                minutes=minutes or None,
+                seconds=seconds or None,
+                language=language,
+                name=name,
+            )
+        except Exception as err:  # noqa: BLE001 - surface as a warning
+            _LOGGER.warning(
+                "voice_satellite.start_timer: failed for %s: %s",
+                entity_id,
+                err,
+            )
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up integration-wide resources: frontend JS + WebSocket commands."""
     # Sync custom wake word models and custom sounds with persistent storage
@@ -256,6 +316,21 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         schema=vol.Schema(
             {
                 vol.Required("entity_id"): cv.entity_ids,
+            }
+        ),
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "start_timer",
+        _async_handle_start_timer_service,
+        schema=vol.Schema(
+            {
+                vol.Required("entity_id"): cv.entity_ids,
+                vol.Required("name"): vol.All(cv.string, vol.Length(min=1)),
+                vol.Optional("hours"): vol.All(vol.Coerce(int), vol.Range(min=0, max=24)),
+                vol.Optional("minutes"): vol.All(vol.Coerce(int), vol.Range(min=0, max=59)),
+                vol.Optional("seconds"): vol.All(vol.Coerce(int), vol.Range(min=0, max=59)),
             }
         ),
     )

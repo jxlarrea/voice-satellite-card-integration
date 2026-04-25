@@ -875,3 +875,19 @@
   color: rgba(51, 255, 51, 0.5);
   padding: 4px 4px;
 }
+
+.vs-timer-name-label {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, calc(-50% + 80px));
+  z-index: 10002;
+  text-align: center;
+  max-width: 80vw;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  color: #33ff33;
+  font-size: calc(48px * var(--vs-text-scale, 1));
+  font-weight: bold;
+}

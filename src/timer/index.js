@@ -178,7 +178,12 @@ export class TimerManager {
     }
   }
   syncDOM() { syncDOM(this); }
-  showAlert() { showAlert(this); }
+  /**
+   * @param {string[]} [names] - Names of the timers that just finished, used
+   *   to label the alert overlay. Empty/missing = generic alert (legacy
+   *   voice-created timers without a name).
+   */
+  showAlert(names) { showAlert(this, names); }
   clearAlert() { clearAlert(this); }
   removePill(timerId) { removePill(this, timerId); }
   cancelTimer(timerId) {

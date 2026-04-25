@@ -16,6 +16,7 @@ Per-device behavior (pipeline, wake word, TTS output, etc.) is configured on the
   - [Modes](#modes)
   - [Mini Card Features](#mini-card-features)
   - [Mini Card Configuration Reference](#mini-card-configuration-reference)
+  - [Timers](#timers)
 
 ## Sidebar Panel
 
@@ -107,3 +108,12 @@ custom_css: ''                     # CSS overrides inside the mini card shadow D
 ```
 
 > **Note:** Entity selection, microphone settings, and debug logging are configured globally in the sidebar panel - not in the mini card editor.
+
+### Timers
+
+Per-browser toggles that control the on-screen behavior of timers without affecting how they actually run. Both default off, both take effect live without restarting the engine. See the [Timers reference](timers.md) for the full picture.
+
+| Setting | Description |
+|---------|-------------|
+| **Hide on-screen countdown** | Suppresses the countdown pill while a timer is running. The timer still fires and the alert still plays at zero. Useful when a tablet doubles as a wall display where pills feel intrusive |
+| **Hide timer name on alert** | When a timer finishes, hides the timer name shown below the alert. The icon, time, and chime still appear |

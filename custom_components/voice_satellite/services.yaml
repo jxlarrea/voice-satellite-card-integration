@@ -8,3 +8,55 @@ wake:
     entity:
       integration: voice_satellite
       domain: assist_satellite
+
+start_timer:
+  name: Start timer
+  description: >-
+    Create a named timer on a satellite from an automation or script. The
+    timer behaves identically to a voice-created one: countdown pill on the
+    overlay, alert tone when it fires, and cancel from the card UI.
+  target:
+    entity:
+      integration: voice_satellite
+      domain: assist_satellite
+  fields:
+    name:
+      name: Name
+      description: Label shown on the countdown pill (e.g. "Stir the sauce").
+      required: true
+      example: Stir the sauce
+      selector:
+        text:
+    hours:
+      name: Hours
+      description: Hours portion of the duration. Combine with minutes/seconds.
+      example: 0
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 24
+          mode: box
+          unit_of_measurement: h
+    minutes:
+      name: Minutes
+      description: Minutes portion of the duration.
+      example: 5
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 59
+          mode: box
+          unit_of_measurement: min
+    seconds:
+      name: Seconds
+      description: Seconds portion of the duration.
+      example: 0
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 59
+          mode: box
+          unit_of_measurement: s

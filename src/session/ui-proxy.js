@@ -223,12 +223,12 @@ export class UIBroadcastProxy {
     for (const c of this._cards) c.ui.expireTimerPill(timerId, animationMs);
   }
 
-  showTimerAlert(onDoubleTap) {
+  showTimerAlert(onDoubleTap, names) {
     for (const c of this._cards) {
       // Skip full card alerts when suppressed — they render in document.body
       // outside #voice-satellite-ui and would be visible despite suppression.
       if (this._session._fullCardSuppressed && c.cardType === 'full') continue;
-      c.ui.showTimerAlert(onDoubleTap);
+      c.ui.showTimerAlert(onDoubleTap, names);
     }
   }
 

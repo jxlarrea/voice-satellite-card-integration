@@ -89,6 +89,10 @@ export const DEFAULT_CONFIG = {
   stt_auto_gain_control: true,
   stt_voice_isolation: false,
 
+  // Timers
+  hide_timer_pills: false,
+  hide_timer_name_on_alert: false,
+
   // Skin
   skin: 'default',
   theme_mode: 'auto',

@@ -1110,19 +1110,40 @@ export class UIManager {
   /**
    * Show the full-screen timer finished alert.
    * @param {Function} onDoubleTap - Callback to dismiss
+   * @param {string[]} [names] - Names of the timers that just finished.
+   *   Rendered as a separate label below the pill so the pill itself
+   *   stays clean and the label can adopt the skin's assistant text style.
    */
-  showTimerAlert(onDoubleTap) {
+  showTimerAlert(onDoubleTap, names) {
     this._timerAlertEl = document.createElement('div');
     this._timerAlertEl.className = 'vs-timer-alert';
 
-    this._timerAlertEl.innerHTML =
-      '<span class="vs-timer-icon">⏱</span>' +
-      '<span class="vs-timer-time">00:00:00</span>';
+    const icon = document.createElement('span');
+    icon.className = 'vs-timer-icon';
+    icon.textContent = '⏱';
+    this._timerAlertEl.appendChild(icon);
+
+    const time = document.createElement('span');
+    time.className = 'vs-timer-time';
+    time.textContent = '00:00:00';
+    this._timerAlertEl.appendChild(time);
 
     document.body.appendChild(this._timerAlertEl);
 
     if (onDoubleTap) {
       attachDoubleTap(this._timerAlertEl, onDoubleTap);
+    }
+
+    // Separate label below the pill, rendered inside #voice-satellite-ui so
+    // it inherits the skin's CSS variables (text color, etc.) and matches
+    // the assistant chat text appearance per skin.
+    if (Array.isArray(names) && names.length > 0) {
+      const labelEl = document.createElement('div');
+      labelEl.className = 'vs-timer-name-label';
+      labelEl.textContent = names.join(', ');
+      const overlay = this._globalUI || document.getElementById('voice-satellite-ui');
+      (overlay || document.body).appendChild(labelEl);
+      this._timerNameLabelEl = labelEl;
     }
   }
 
@@ -1134,6 +1155,10 @@ export class UIManager {
       el.parentNode?.removeChild(el);
     }
     this._timerAlertEl = null;
+    for (const el of document.querySelectorAll('.vs-timer-name-label')) {
+      el.parentNode?.removeChild(el);
+    }
+    this._timerNameLabelEl = null;
   }
 
   // No-ops — mini card implements these; full card doesn't need them

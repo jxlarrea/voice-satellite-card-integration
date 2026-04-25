@@ -21,7 +21,7 @@ import {
 import { DEFAULT_CONFIG, State, VERSION } from '../constants.js';
 import { renderPreview } from '../editor/preview.js';
 import {
-  behaviorSchema, entitySchema, autoStartSchema, microphoneSchema, debugSchema,
+  behaviorSchema, entitySchema, autoStartSchema, microphoneSchema, debugSchema, timersSchema,
   behaviorLabels, behaviorHelpers,
 } from '../editor/behavior.js';
 import { skinSchema, skinLabels, skinHelpers } from '../editor/skin.js';
@@ -55,6 +55,7 @@ function buildPanelSchema(_cfg) {
     ...behaviorSchema,
     ...autoStartSchema,
     ...skinSchema,
+    ...timersSchema,
     ...microphoneSchema,
     ...debugSchema,
   ];

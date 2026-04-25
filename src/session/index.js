@@ -339,6 +339,7 @@ export class VoiceSatelliteSession {
       'satellite_entity', 'debug',
       ...micKeys,
       'reactive_bar', 'reactive_bar_update_interval_ms',
+      'hide_timer_pills', 'hide_timer_name_on_alert',
       'screensaver_enabled', 'screensaver_timer_s', 'screensaver_dim_percent', 'screensaver_type',
       'screensaver_media_id', 'screensaver_media_interval_s', 'screensaver_media_shuffle',
       'screensaver_website_url',

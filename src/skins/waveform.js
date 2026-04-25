@@ -730,7 +730,12 @@ export const waveformSkin = {
   name: 'Waveform',
   css,
   reactiveBar: true,
-  overlayColor: null,
-  defaultOpacity: 0.90,
+  // Solid overlay so the dashboard underneath never bleeds through the
+  // animated waveform. Slider in the side panel (Background Opacity) tunes
+  // the alpha — leave it unset for fully opaque.
+  overlayColor: [240, 240, 240],
+  darkOverlayColor: [0, 0, 0],
+  defaultOpacity: 1,
+  darkDefaultOpacity: 1,
   previewCSS,
 };

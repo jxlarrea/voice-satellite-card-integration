@@ -97,7 +97,9 @@
 #voice-satellite-ui .vs-blur-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: var(--wf-overlay) !important;
+  /* Theme-default solid color before JS sets an inline rgba() based on the
+     Background Opacity slider. No !important so the JS override wins. */
+  background: var(--wf-overlay);
   opacity: 0;
   transition: opacity 0.3s ease;
   z-index: 9999;
@@ -428,7 +430,6 @@
 
 .vs-timer-alert .vs-timer-icon { font-size: 1.5em; }
 .vs-timer-alert .vs-timer-time { font-size: 1.2em; }
-
 @keyframes wf-timer-fade-in {
   0% { opacity: 0; transform: translateY(8px); }
   100% { opacity: 1; transform: translateY(0); }
@@ -717,4 +718,20 @@
 
 #voice-satellite-ui .vs-financial-rate {
   font-size: calc(20px * var(--vs-text-scale, 1)); color: var(--wf-text-muted); padding: 4px 4px;
+}
+
+.vs-timer-name-label {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, calc(-50% + 80px));
+  z-index: 10002;
+  text-align: center;
+  max-width: 80vw;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  color: var(--wf-text);
+  font-size: calc(36px * var(--vs-text-scale, 1));
+  font-weight: 400;
 }

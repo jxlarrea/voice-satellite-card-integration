@@ -64,10 +64,25 @@ export const debugSchema = [
   { name: 'debug', selector: { boolean: {} } },
 ];
 
+export const timersSchema = [
+  {
+    type: 'expandable',
+    name: '',
+    title: t(null, 'editor.behavior.timers', 'Timers'),
+    flatten: true,
+    schema: [
+      { name: 'hide_timer_pills', default: false, selector: { boolean: {} } },
+      { name: 'hide_timer_name_on_alert', default: false, selector: { boolean: {} } },
+    ],
+  },
+];
+
 export const behaviorLabels = {
   satellite_entity: t(null, 'editor.behavior.satellite_entity', 'Satellite entity'),
   auto_start: t(null, 'editor.behavior.auto_start', 'Auto start'),
   debug: t(null, 'editor.behavior.debug', 'Debug logging'),
+  hide_timer_pills: t(null, 'editor.behavior.hide_timer_pills', 'Hide on-screen countdown'),
+  hide_timer_name_on_alert: t(null, 'editor.behavior.hide_timer_name_on_alert', 'Hide timer name on alert'),
   // Wake-word group
   wake_word_noise_suppression: t(null, 'editor.behavior.noise_suppression', 'Noise suppression'),
   wake_word_echo_cancellation: t(null, 'editor.behavior.echo_cancellation', 'Echo cancellation'),
@@ -85,4 +100,6 @@ export const behaviorHelpers = {
   auto_start: t(null, 'editor.behavior.helper_auto_start', 'Automatically start the voice engine when the page loads. When off, use the Start button to activate manually.'),
   wake_word_voice_isolation: t(null, 'editor.behavior.helper_voice_isolation', 'AI-based voice isolation, currently only available in Chrome'),
   stt_voice_isolation: t(null, 'editor.behavior.helper_voice_isolation', 'AI-based voice isolation, currently only available in Chrome'),
+  hide_timer_pills: t(null, 'editor.behavior.helper_hide_timer_pills', 'Hide the countdown pill on screen. Timers still run and the alert still fires when they finish.'),
+  hide_timer_name_on_alert: t(null, 'editor.behavior.helper_hide_timer_name_on_alert', 'When a timer finishes, hide the timer name shown below the alert.'),
 };

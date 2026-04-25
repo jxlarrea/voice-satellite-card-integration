@@ -728,12 +728,18 @@ export class MiniUIManager {
     if (pill) pill.remove();
   }
 
-  showTimerAlert(onDoubleTap) {
+  showTimerAlert(onDoubleTap, names) {
     this.clearTimerAlert();
     if (!this._root) return;
     const alert = document.createElement('div');
     alert.className = 'vs-mini-timer-alert';
-    alert.innerHTML = `<div class="vs-mini-timer-alert-text">⏱ ${this._t('mini.timer.finished', 'Timer finished')}</div>`;
+    const text = document.createElement('div');
+    text.className = 'vs-mini-timer-alert-text';
+    const baseLabel = this._t('mini.timer.finished', 'Timer finished');
+    text.textContent = (Array.isArray(names) && names.length > 0)
+      ? `⏱ ${baseLabel}: ${names.join(', ')}`
+      : `⏱ ${baseLabel}`;
+    alert.appendChild(text);
     if (onDoubleTap) attachDoubleTap(alert, onDoubleTap);
     alert.addEventListener('click', () => onDoubleTap?.());
     this._root.appendChild(alert);

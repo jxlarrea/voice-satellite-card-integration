@@ -24,6 +24,14 @@ export function removePill(mgr, timerId) {
 
 /** @param {import('./index.js').TimerManager} mgr */
 export function syncDOM(mgr) {
+  if (mgr.card.config?.hide_timer_pills) {
+    // Pills suppressed via the side-panel toggle. Tear down anything that
+    // may already be on screen so flipping the flag mid-run hides existing
+    // pills too. The countdown still ticks internally and the alert still
+    // fires when timers finish.
+    mgr.card.ui.removeTimerContainer();
+    return;
+  }
   mgr.card.ui.syncTimerPills(
     mgr.timers,
     (timerId) => () => mgr.cancelTimer(timerId),
@@ -40,18 +48,28 @@ export function tick(mgr) {
     t.secondsLeft = left;
   }
 
+  if (mgr.card.config?.hide_timer_pills) {
+    // Toggling the flag mid-run should hide existing pills, not just stop
+    // updating them. Idempotent when no container exists.
+    mgr.card.ui.removeTimerContainer();
+    return;
+  }
   mgr.card.ui.tickTimerPills(mgr.timers);
 }
 
-/** @param {import('./index.js').TimerManager} mgr */
-export function showAlert(mgr) {
+/**
+ * @param {import('./index.js').TimerManager} mgr
+ * @param {string[]} [names] - Names of timers that just finished, shown as
+ *   the alert label.
+ */
+export function showAlert(mgr, names) {
   if (mgr.alertActive) {
     mgr.log.log('timer', 'Alert already active, skipping duplicate');
     return;
   }
 
   mgr.alertActive = true;
-  mgr.log.log('timer', 'Showing finished alert');
+  mgr.log.log('timer', `Showing finished alert${names?.length ? `: ${names.join(', ')}` : ''}`);
 
   const wakeWord = mgr.card.wakeWord;
   if (wakeWord?.active && wakeWord._inference) {
@@ -60,7 +78,8 @@ export function showAlert(mgr) {
 
   mgr.card.ui.showBlurOverlay(BlurReason.TIMER);
 
-  mgr.card.ui.showTimerAlert(() => mgr.clearAlert());
+  const labelNames = mgr.card.config?.hide_timer_name_on_alert ? [] : names;
+  mgr.card.ui.showTimerAlert(() => mgr.clearAlert(), labelNames);
 
   // Play chime immediately then loop
   playAlertChime(mgr);

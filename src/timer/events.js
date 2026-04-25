@@ -38,6 +38,12 @@ export function processStateChange(mgr, attrs) {
 
   // If timers were removed and the last event was "finished", show alert
   if (removedIds.length > 0 && lastEvent === 'finished') {
+    // Capture names BEFORE removing the timers from mgr.timers, so the
+    // alert overlay can show what just fired (e.g. "Stir the sauce").
+    const removedNames = removedIds
+      .map((id) => mgr.timers.find((t) => t.id === id)?.name)
+      .filter((n) => typeof n === 'string' && n.trim());
+
     // Check if any removed timer still has visual time remaining (deferred start)
     let maxRemainingMs = 0;
     for (const id of removedIds) {
@@ -59,7 +65,7 @@ export function processStateChange(mgr, attrs) {
           mgr.removePill(id);
         }
         mgr.timers = mgr.timers.filter((t) => !removedIds.includes(t.id));
-        if (!mgr.alertActive) mgr.showAlert();
+        if (!mgr.alertActive) mgr.showAlert(removedNames);
       }, maxRemainingMs);
     } else {
       mgr.log.log('timer', `Timer(s) finished: ${removedIds.join(', ')}`);
@@ -67,7 +73,7 @@ export function processStateChange(mgr, attrs) {
         mgr.removePill(id);
       }
       if (!mgr.alertActive) {
-        mgr.showAlert();
+        mgr.showAlert(removedNames);
       }
     }
   } else {
