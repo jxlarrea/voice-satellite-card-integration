@@ -407,7 +407,6 @@ export class MediaPlayerManager {
   }
 
   _screensaverKeepalivePing() {
-    this._log.log('media-player', 'Screensaver keepalive ping');
     this._card.screensaver?.notifyActivity();
     if (typeof window !== 'undefined' && window.fully
         && typeof window.fully.stopScreensaver === 'function') {
@@ -623,9 +622,28 @@ export class MediaPlayerManager {
       hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
         this._log.log(
           'media-player',
-          `HLS manifest parsed: levels=${data.levels?.length ?? '?'}`,
+          `HLS manifest parsed: levels=${data.levels?.length ?? '?'} configuredLowLatency=${hls.config.lowLatencyMode}`,
         );
         video.play().then(() => onStart?.()).catch(onError);
+      });
+
+      // Confirm whether the server is actually serving LL-HLS parts (the
+      // `lowLatencyMode` config is just our request - the level details
+      // tell us what HA is delivering). Log once on first level load.
+      let levelLoadedLogged = false;
+      hls.on(Hls.Events.LEVEL_LOADED, (_e, data) => {
+        if (levelLoadedLogged) return;
+        levelLoadedLogged = true;
+        const d = data?.details;
+        const partCount = d?.partList?.length ?? 0;
+        const llHlsActive = partCount > 0;
+        this._log.log(
+          'media-player',
+          `HLS level loaded: live=${!!d?.live} ll-hls-active=${llHlsActive}`
+            + ` partCount=${partCount} partTarget=${d?.partTarget ?? 'n/a'}s`
+            + ` targetduration=${d?.targetduration ?? '?'}s`
+            + ` totalduration=${d?.totalduration?.toFixed(2) ?? '?'}s`,
+        );
       });
       this._log.log('media-player', `hls.loadSource: ${url}`);
       hls.loadSource(url);
