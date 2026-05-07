@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from homeassistant.components.media_player import (
+    MediaPlayerDeviceClass,
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaPlayerState,
@@ -77,6 +78,7 @@ class VoiceSatelliteMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     _attr_has_entity_name = True
     _attr_translation_key = "media_player"
+    _attr_device_class = MediaPlayerDeviceClass.TV
     _attr_supported_features = (
         MediaPlayerEntityFeature.PLAY_MEDIA
         | MediaPlayerEntityFeature.MEDIA_ANNOUNCE
@@ -159,11 +161,29 @@ class VoiceSatelliteMediaPlayer(MediaPlayerEntity, RestoreEntity):
         media_content_type: MediaType | str | None = None,
         media_content_id: str | None = None,
     ):
-        """Delegate media browsing to media_source, filtered to audio only."""
+        """Delegate media browsing to media_source, filtered to playable types.
+
+        Accepts audio, video, HLS streams (cameras with STREAM support), and
+        MJPEG / snapshot cameras. HA's camera media source emits HLS for
+        cameras that support streaming, and falls back to camera.content_type
+        (image/jpeg or multipart/x-mixed-replace) for the rest, served as a
+        continuous MJPEG via /api/camera_proxy_stream.
+        """
+        def _is_playable(item) -> bool:
+            ct = (item.media_content_type or "").lower()
+            return (
+                ct.startswith("audio/")
+                or ct.startswith("video/")
+                or ct.startswith("image/")
+                or ct.startswith("multipart/x-mixed-replace")
+                or ct == "application/vnd.apple.mpegurl"
+                or ct == "application/x-mpegurl"
+            )
+
         return await ms_browse(
             self.hass,
             media_content_id,
-            content_filter=lambda item: item.media_content_type.startswith("audio/"),
+            content_filter=_is_playable,
         )
 
     async def async_play_media(

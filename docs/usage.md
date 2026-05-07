@@ -214,13 +214,15 @@ After dismissal the satellite plays a "done" chime, resumes any media that was p
 
 ## Media Player
 
-Each satellite automatically exposes a `media_player` entity in Home Assistant. This entity:
+Each satellite automatically exposes a `media_player` entity in Home Assistant, registered with `device_class: tv` so it can be targeted for both audio and video. The entity:
 
 - **Controls volume** for all satellite audio (chimes, TTS, announcements) via the HA volume slider
 - **Reflects playback state** - shows "Playing" whenever any sound is active on the satellite
 - **Supports `tts.speak`** - target the satellite as a TTS device in automations
-- **Supports `media_player.play_media`** - play arbitrary audio files on the satellite
-- **Supports browsing** the HA media library
+- **Supports `media_player.play_media`** for audio, local video files, and live camera streams
+- **Supports browsing** the HA media library, including the Cameras source
+
+### Audio
 
 ```yaml
 # Play audio on the satellite
@@ -240,4 +242,40 @@ data:
   message: "The laundry is done!"
 ```
 
-The entity supports play, pause, resume, stop, volume set, and volume mute - all controllable from the HA UI or automations.
+### Video and camera streams
+
+When a video file or camera stream is sent to the satellite, the browser renders a full-screen overlay over the entire UI:
+
+- **Local video files** (`.mp4`, `.webm`, etc.) play in a `<video>` element with the browser's native playback controls (play/pause/seek/volume)
+- **Cameras with the Stream integration** are delivered as HLS (`application/vnd.apple.mpegurl`). Playback uses [hls.js](https://github.com/video-dev/hls.js), which is lazy-loaded on first use, so audio-only setups don't pay the bundle cost. Safari falls through to native HLS automatically
+- **Cameras without Stream support** (snapshot or MJPEG) are served via `/api/camera_proxy_stream/<entity>` and rendered in an `<img>` element. No native controls (browsers don't provide any for `multipart/x-mixed-replace`); use double-tap or "stop" to dismiss
+
+```yaml
+# Play a video file
+action: media_player.play_media
+target:
+  entity_id: media_player.kitchen_tablet_media_player
+data:
+  media_content_id: media-source://media_source/local/recipe.mp4
+  media_content_type: video/mp4
+
+# Show a live camera feed
+action: media_player.play_media
+target:
+  entity_id: media_player.kitchen_tablet_media_player
+data:
+  media_content_id: media-source://camera/camera.front_door
+  media_content_type: application/vnd.apple.mpegurl
+```
+
+**Dismissal:**
+
+- **Double-tap** anywhere on the overlay (outside the video controls)
+- **"Stop"** wake-word, when stop-word interruption is enabled on the satellite
+- **`media_player.media_stop`** action from automations
+
+**Wake-word interaction:**
+
+While a video or camera stream is playing, saying the satellite's wake word hides the overlay and runs the voice flow as usual. When the flow finishes, the overlay reappears and playback resumes. For HLS streams the player automatically jumps to the live edge on resume, so you don't watch buffered footage from before the interruption.
+
+The entity supports play, pause, resume, stop, volume set, and volume mute (volume is a no-op for MJPEG streams, which carry no audio). All commands work from the HA UI, automations, and `media_player.*` services.

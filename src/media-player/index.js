@@ -11,6 +11,7 @@
  */
 
 import { buildMediaUrl, playMediaUrl } from '../audio/media-playback.js';
+import { attachDoubleTap } from '../shared/double-tap.js';
 import { Timing } from '../constants.js';
 
 export class MediaPlayerManager {
@@ -19,6 +20,8 @@ export class MediaPlayerManager {
     this._log = card.logger;
 
     this._audio = null;
+    this._videoOverlay = null;
+    this._isLive = false;
     this._playing = false;
     this._paused = false;
     this._volume = 1.0;
@@ -120,6 +123,7 @@ export class MediaPlayerManager {
     if (!this._audio || !this._playing) return;
     this._log.log('media-player', 'Interrupted (paused for resume)');
     this._audio.pause();
+    if (this._videoOverlay) this._videoOverlay.style.display = 'none';
     this._playing = false;
     this._paused = true;
     this._interruptedForResume = true;
@@ -141,9 +145,11 @@ export class MediaPlayerManager {
     this._interruptedForResume = false;
     if (!this._audio || !this._paused) return;
     this._log.log('media-player', 'Resuming after interrupt');
+    if (this._videoOverlay) this._videoOverlay.style.display = 'flex';
     this._playing = true;
     this._paused = false;
     this._audio.play().then(() => {
+      if (this._isLive) this._seekToLive();
       this._reportState('playing');
       this._armStopWord();
     }).catch((e) => {
@@ -153,6 +159,27 @@ export class MediaPlayerManager {
         this._reportState('idle');
       }
     });
+  }
+
+  /**
+   * Jump an HLS stream to the current live edge. hls.js exposes a
+   * `liveSyncPosition` for streams it knows are live; for native HLS
+   * (Safari fallback), the seekable range's end is the closest equivalent.
+   */
+  _seekToLive() {
+    const v = this._audio;
+    if (!v) return;
+    if (this._hls && typeof this._hls.liveSyncPosition === 'number') {
+      const target = this._hls.liveSyncPosition;
+      this._log.log('media-player', `HLS seek to liveSyncPosition=${target.toFixed(2)}`);
+      v.currentTime = target;
+      return;
+    }
+    if (v.seekable && v.seekable.length > 0) {
+      const target = v.seekable.end(v.seekable.length - 1);
+      this._log.log('media-player', `HLS seek to seekable end=${target.toFixed(2)}`);
+      v.currentTime = target;
+    }
   }
   /**
    * Public stop entry point so the wake-word "stop" handler can stop
@@ -232,17 +259,43 @@ export class MediaPlayerManager {
     this._cleanup();
     this._interruptedForResume = false;
 
-    const { media_id, volume } = data;
+    const { media_id, media_type, volume, announce } = data;
+    this._log.log(
+      'media-player',
+      `_play received: media_id=${media_id} media_type=${media_type} volume=${volume} announce=${announce}`,
+    );
+
     if (volume !== undefined && volume !== null) {
       this._volume = volume;
     }
 
     this._mediaId = media_id;
 
-    // Sign relative URLs - HA media endpoints require authentication
+    const mt = typeof media_type === 'string' ? media_type.toLowerCase() : '';
+    const isHls = mt === 'application/vnd.apple.mpegurl'
+      || mt === 'application/x-mpegurl'
+      || (typeof media_id === 'string' && media_id.toLowerCase().split('?')[0].endsWith('.m3u8'));
+    // Cameras without HLS support fall through to image/jpeg or
+    // multipart/x-mixed-replace served via /api/camera_proxy_stream as
+    // continuous MJPEG. Render those in <img>; <video> won't accept them.
+    const isImage = mt.startsWith('image/') || mt.startsWith('multipart/x-mixed-replace');
+    const isVideo = mt.startsWith('video/') || mt === 'video' || isHls;
+    this._log.log(
+      'media-player',
+      `Detection: isVideo=${isVideo} isHls=${isHls} isImage=${isImage} (mime="${mt}")`,
+    );
+
+    // Sign relative URLs - HA media endpoints require authentication.
+    // HLS stream URLs from HA's stream integration are already path-token
+    // signed by `_async_stream_endpoint_url`, so signing them again would
+    // either be redundant or rewrite the path. Use them directly.
     let url;
     if (media_id.startsWith('http://') || media_id.startsWith('https://')) {
       url = media_id;
+      this._log.log('media-player', `URL path: absolute (no signing). url=${url}`);
+    } else if (isHls) {
+      url = buildMediaUrl(media_id);
+      this._log.log('media-player', `URL path: HLS direct (skip signing). url=${url}`);
     } else {
       const conn = this._card.connection;
       if (conn) {
@@ -253,21 +306,25 @@ export class MediaPlayerManager {
             expires: Timing.AUTH_SIGN_EXPIRES,
           });
           url = buildMediaUrl(result.path);
+          this._log.log('media-player', `URL path: signed. url=${url}`);
         } catch (e) {
           this._log.error('media-player', `Failed to sign URL: ${e}`);
           url = buildMediaUrl(media_id);
+          this._log.log('media-player', `URL path: sign failed, falling back. url=${url}`);
         }
       } else {
         url = buildMediaUrl(media_id);
+        this._log.log('media-player', `URL path: no connection, raw build. url=${url}`);
       }
     }
 
     this._playing = true;
     this._paused = false;
 
-    this._audio = playMediaUrl(url, this._effectiveVolume(), {
+    const callbacks = {
       onEnd: () => {
         this._log.log('media-player', 'Playback complete');
+        this._removeVideoOverlay();
         this._playing = false;
         this._paused = false;
         this._audio = null;
@@ -278,6 +335,7 @@ export class MediaPlayerManager {
       },
       onError: (e) => {
         this._log.error('media-player', `Playback error: ${e}`);
+        this._removeVideoOverlay();
         this._playing = false;
         this._paused = false;
         this._audio = null;
@@ -291,14 +349,241 @@ export class MediaPlayerManager {
         this._reportState('playing');
         this._armStopWord();
       },
-    });
+    };
+
+    // HLS camera streams buffer ahead, so resume after a wake-word
+    // interrupt should jump to the live edge - otherwise the user watches
+    // tens of seconds of stale footage. MJPEG doesn't buffer (each
+    // reconnect shows the live frame) so it doesn't need this.
+    this._isLive = isHls;
+
+    const dispatch = isImage ? 'image overlay' : (isVideo ? 'video overlay' : 'audio element');
+    this._log.log(
+      'media-player',
+      `Dispatch: ${dispatch} (effectiveVolume=${this._effectiveVolume().toFixed(3)})`,
+    );
+    if (isImage) {
+      this._audio = this._playImage(url, callbacks);
+    } else if (isVideo) {
+      this._audio = this._playVideo(url, this._effectiveVolume(), callbacks, { isHls });
+    } else {
+      this._audio = playMediaUrl(url, this._effectiveVolume(), callbacks);
+    }
+  }
+
+  /**
+   * Render a fullscreen video overlay and start playback.
+   * Double-tap dismisses (mirroring the rest of the card's cancel UX).
+   * Returns the <video> element so the existing pause/resume/volume
+   * paths in this manager work unchanged (HTMLVideoElement shares the
+   * Audio API surface they touch).
+   *
+   * For HLS streams, hls.js is dynamically imported and attached so
+   * Chromium-based browsers (which lack native HLS) can play camera
+   * feeds. Safari/iOS use native HLS via direct src.
+   */
+  _playVideo(url, volume, { onEnd, onError, onStart }, { isHls = false } = {}) {
+    const overlay = document.createElement('div');
+    overlay.className = 'vs-video-overlay';
+    overlay.style.cssText = [
+      'position: fixed;',
+      'inset: 0;',
+      'background: #000;',
+      'z-index: 99999;',
+      'display: flex;',
+      'align-items: center;',
+      'justify-content: center;',
+    ].join(' ');
+
+    const video = document.createElement('video');
+    video.controls = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.style.cssText = 'max-width: 100%; max-height: 100%; width: 100%; height: 100%; object-fit: contain;';
+    video.volume = volume;
+
+    video.onended = () => onEnd();
+    video.onerror = (e) => onError(e);
+
+    // Double-tap on the overlay (but not the video controls) stops playback.
+    // Listening on the overlay container lets the native controls bar still
+    // receive single taps for play/pause/seek/etc.
+    attachDoubleTap(overlay, () => this._stop());
+
+    overlay.appendChild(video);
+    document.body.appendChild(overlay);
+    this._videoOverlay = overlay;
+
+    this._log.log(
+      'media-player',
+      `Video overlay created. claims_native_hls=${!!video.canPlayType('application/vnd.apple.mpegurl')}`,
+    );
+
+    if (isHls) {
+      // Prefer hls.js for HLS — Chromium browsers (including Fully Kiosk
+      // on Android) often claim native HLS support via canPlayType but
+      // fail at runtime with NotSupportedError. hls.js handles this
+      // reliably on any browser with MSE. Safari falls through to native
+      // inside _attachHls when MSE isn't available.
+      this._log.log('media-player', `Routing HLS via hls.js. url=${url}`);
+      this._attachHls(video, url, onStart, onError);
+    } else {
+      this._log.log('media-player', `Routing video via native <video>. url=${url}`);
+      video.src = url;
+      video.play().then(() => {
+        onStart?.();
+      }).catch((e) => {
+        onError(e);
+      });
+    }
+
+    return video;
+  }
+
+  /**
+   * Render a fullscreen image overlay for MJPEG / snapshot cameras.
+   * Browsers display multipart/x-mixed-replace responses natively as a
+   * continuously updating <img>; <video> won't accept them.
+   *
+   * Returns a small shim object that mimics the HTMLMediaElement API the
+   * rest of this manager touches (pause/play/volume/src/onerror) so the
+   * existing pause / resume / cleanup paths keep working uniformly.
+   * pause() actually clears the img src to release the connection so
+   * wake-word interrupts don't keep the stream open in the background.
+   */
+  _playImage(url, { onEnd: _onEnd, onError, onStart }) {
+    const overlay = document.createElement('div');
+    overlay.className = 'vs-video-overlay';
+    overlay.style.cssText = [
+      'position: fixed;',
+      'inset: 0;',
+      'background: #000;',
+      'z-index: 99999;',
+      'display: flex;',
+      'align-items: center;',
+      'justify-content: center;',
+    ].join(' ');
+
+    const img = document.createElement('img');
+    img.style.cssText = 'max-width: 100%; max-height: 100%; width: 100%; height: 100%; object-fit: contain;';
+    img.alt = '';
+
+    img.onload = () => {
+      onStart?.();
+    };
+    img.onerror = (e) => {
+      onError(e);
+    };
+
+    attachDoubleTap(overlay, () => this._stop());
+
+    overlay.appendChild(img);
+    document.body.appendChild(overlay);
+    this._videoOverlay = overlay;
+
+    img.src = url;
+
+    let savedUrl = url;
+    let isPaused = false;
+    return {
+      pause() {
+        if (!isPaused && img.src) {
+          savedUrl = img.src;
+          img.src = '';
+          isPaused = true;
+        }
+      },
+      play() {
+        if (isPaused) {
+          img.src = savedUrl;
+          isPaused = false;
+        }
+        return Promise.resolve();
+      },
+      get volume() { return 0; },
+      set volume(_v) { /* no audio for MJPEG */ },
+      get src() { return img.src; },
+      set src(v) { savedUrl = v; img.src = v; },
+      set onerror(fn) { img.onerror = fn; },
+      set onended(_fn) { /* MJPEG never ends */ },
+    };
+  }
+
+  async _attachHls(video, url, onStart, onError) {
+    const t0 = performance.now();
+    try {
+      const { default: Hls } = await import(
+        /* webpackChunkName: "hls" */ 'hls.js/dist/hls.light.min.js'
+      );
+      const supported = Hls.isSupported();
+      this._log.log(
+        'media-player',
+        `hls.js loaded in ${(performance.now() - t0).toFixed(0)}ms (version=${Hls.version}, supported=${supported})`,
+      );
+
+      if (!supported) {
+        // No MSE - the only path left is native HLS (Safari).
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          this._log.log('media-player', `MSE unavailable, using native HLS. url=${url}`);
+          video.src = url;
+          video.play().then(() => onStart?.()).catch(onError);
+        } else {
+          const err = new Error('Browser supports neither MSE nor native HLS');
+          this._log.error('media-player', err.message);
+          onError(err);
+        }
+        return;
+      }
+
+      const hls = new Hls();
+      this._hls = hls;
+      hls.on(Hls.Events.ERROR, (_e, data) => {
+        const level = data.fatal ? 'error' : 'log';
+        this._log[level](
+          'media-player',
+          `HLS ${data.fatal ? 'fatal' : 'non-fatal'} error: type=${data.type} details=${data.details}`,
+        );
+        if (data.fatal) onError(data);
+      });
+      hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
+        this._log.log(
+          'media-player',
+          `HLS manifest parsed: levels=${data.levels?.length ?? '?'}`,
+        );
+        video.play().then(() => onStart?.()).catch(onError);
+      });
+      this._log.log('media-player', `hls.loadSource: ${url}`);
+      hls.loadSource(url);
+      hls.attachMedia(video);
+    } catch (e) {
+      this._log.error('media-player', `Failed to load hls.js: ${e}`);
+      onError(e);
+    }
+  }
+
+  _destroyHls() {
+    if (this._hls) {
+      this._log.log('media-player', 'Destroying hls.js instance');
+      try { this._hls.destroy(); } catch (_e) { /* best effort */ }
+      this._hls = null;
+    }
+  }
+
+  _removeVideoOverlay() {
+    this._destroyHls();
+    if (this._videoOverlay) {
+      this._videoOverlay.remove();
+      this._videoOverlay = null;
+    }
   }
 
   _pause() {
     if (!this._audio || !this._playing) {
+      this._log.log('media-player', `_pause no-op (audio=${!!this._audio} playing=${this._playing})`);
       this._reportState('idle');
       return;
     }
+    this._log.log('media-player', `_pause (mediaId=${this._mediaId})`);
     this._audio.pause();
     this._playing = false;
     this._paused = true;
@@ -309,9 +594,11 @@ export class MediaPlayerManager {
 
   _resume() {
     if (!this._audio || !this._paused) {
+      this._log.log('media-player', `_resume no-op (audio=${!!this._audio} paused=${this._paused})`);
       this._reportState('idle');
       return;
     }
+    this._log.log('media-player', `_resume (mediaId=${this._mediaId})`);
     this._interruptedForResume = false;
     this._audio.play().then(() => {
       this._armStopWord();
@@ -326,6 +613,7 @@ export class MediaPlayerManager {
   }
 
   _stop() {
+    this._log.log('media-player', `_stop (mediaId=${this._mediaId})`);
     this._interruptedForResume = false;
     if (!this._audio) return;
     this._cleanup();
@@ -337,6 +625,10 @@ export class MediaPlayerManager {
   _setVolume(volume) {
     this._volume = volume;
     const effective = this._effectiveVolume();
+    this._log.log(
+      'media-player',
+      `_setVolume raw=${volume} effective=${effective.toFixed(3)} muted=${this._muted}`,
+    );
     if (this._audio) {
       this._audio.volume = effective;
     }
@@ -350,6 +642,7 @@ export class MediaPlayerManager {
   _setMute(mute) {
     this._muted = mute;
     const effective = this._effectiveVolume();
+    this._log.log('media-player', `_setMute=${mute} effectiveVolume=${effective.toFixed(3)}`);
     if (this._audio) {
       this._audio.volume = effective;
     }
@@ -368,10 +661,18 @@ export class MediaPlayerManager {
   }
 
   _cleanup() {
+    this._log.log(
+      'media-player',
+      `_cleanup (audio=${!!this._audio} hls=${!!this._hls} overlay=${!!this._videoOverlay} mediaId=${this._mediaId})`,
+    );
     if (this._idleDebounce) {
       clearTimeout(this._idleDebounce);
       this._idleDebounce = null;
     }
+    // Tear down hls.js BEFORE clearing the video element's src - hls owns
+    // the MSE buffers and calling destroy() detaches them cleanly. Doing
+    // it the other way around can throw or leak buffers.
+    this._destroyHls();
     if (this._audio) {
       this._audio.onended = null;
       this._audio.onerror = null;
@@ -379,6 +680,11 @@ export class MediaPlayerManager {
       this._audio.src = '';
       this._audio = null;
     }
+    if (this._videoOverlay) {
+      this._videoOverlay.remove();
+      this._videoOverlay = null;
+    }
+    this._isLive = false;
     this._playing = false;
     this._paused = false;
     this._disarmStopWord();

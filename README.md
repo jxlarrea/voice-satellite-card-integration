@@ -30,7 +30,7 @@ Voice Satellite runs as a **global engine** that loads on every page of Home Ass
 - **On-device wake word detection** - runs microWakeWord locally in pure JavaScript with custom model support and optional voice-activated stop interruption. Falls back to server-side detection when preferred
 - **Dual wake words / dual pipelines** - load two wake words simultaneously (e.g. "Okay Nabu" and "Hey Jarvis") and route each to its own Assist pipeline, so a household can mix languages, mix a local-only pipeline with a cloud/LLM one, or give each character its own conversation agent and voice
 - **Timers, announcements, conversations** - voice-activated timers with countdown pills, `assist_satellite.announce` / `start_conversation` / `ask_question` from automations
-- **Media player entity** - volume control, `tts.speak` targeting, and `media_player.play_media` from automations. TTS can route to browser or a remote speaker
+- **Media player entity** - exposed as a TV-class device. Plays audio, local video files, and HLS / MJPEG camera streams full-screen on the satellite, with volume control, `tts.speak` targeting, `media_player.play_media` from automations, and Media Browser support. TTS can route to browser or a remote speaker
 - **Skins** - 8 built-in skins (Default, Alexa, Google Home, Home Assistant, Lens Flares, Retro Terminal, Siri, Waveform) with CSS overrides. Reactive audio-level animation on the activity bar
 - **Screensaver** - black overlay, image/video/folder from the HA media library, or live camera feed. Cross-fades between folder items; integrates with Fully Kiosk backlight dimming and motion-dismiss
 - **Mini card** - optional `voice-satellite-mini-card` for in-dashboard text display without the fullscreen overlay
