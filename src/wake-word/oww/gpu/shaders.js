@@ -486,6 +486,37 @@ export function batchMatmulShader(M, K, N, batchCount) {
   `;
 }
 
+/**
+ * Maintain the embedding model's 76-frame mel input window on the GPU.
+ * The mel model emits 8 frames per chunk; openWakeWord then applies
+ * x / 10 + 2 before appending those frames to the rolling window.
+ */
+export function melWindowUpdateShader(windowElements, appendElements) {
+  const keepElements = windowElements - appendElements;
+  return /* wgsl */`
+    @group(0) @binding(0) var<storage, read> oldWindow: array<f32>;
+    @group(0) @binding(1) var<storage, read> melOut: array<f32>;
+    @group(0) @binding(2) var<storage, read_write> newWindow: array<f32>;
+
+    const WINDOW_ELEMENTS: u32 = ${windowElements}u;
+    const KEEP_ELEMENTS: u32 = ${keepElements}u;
+
+    @compute @workgroup_size(${ELEMENTWISE_WORKGROUP})
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let i: u32 = gid.x;
+      if (i >= WINDOW_ELEMENTS) { return; }
+
+      if (i < KEEP_ELEMENTS) {
+        newWindow[i] = oldWindow[i + ${appendElements}u];
+        return;
+      }
+
+      let melIdx: u32 = i - KEEP_ELEMENTS;
+      newWindow[i] = melOut[melIdx] * 0.1 + 2.0;
+    }
+  `;
+}
+
 function stridesOf(shape) {
   const out = new Array(shape.length);
   let s = 1;

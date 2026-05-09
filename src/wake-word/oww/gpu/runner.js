@@ -1,11 +1,10 @@
 /**
- * GPU-accelerated runner for the openWakeWord embedding model.
+ * GPU-accelerated runner for openWakeWord float32 TFLite subgraphs.
  *
  * Takes a CompiledModel from `model-runner.js` (which already parsed
  * the .tflite into op + tensor lists) and replays it on the GPU.
- * Mel spec and the classifiers stay on the CPU runner - only the
- * embedding model goes through here, because that's the only place
- * where pure-JS CPU loops are too slow for slow tablets.
+ * The mel spec and embedding models go through here; classifiers stay
+ * on CPU because they are already tiny.
  *
  * Pipeline (records once at init, replays per chunk):
  *
@@ -155,6 +154,65 @@ export class GpuModelRunner {
 
   _bufferFor(tensorId) {
     return this._constantBuffers.get(tensorId) || this._activationBuffers.get(tensorId);
+  }
+
+  get device() {
+    return this._device;
+  }
+
+  get inputBuffer() {
+    return this._activationBuffers.get(this._inputId);
+  }
+
+  get outputBuffer() {
+    return this._activationBuffers.get(this._outputId);
+  }
+
+  get outputSize() {
+    return this._outputSize;
+  }
+
+  writeInput(input) {
+    if (input.length !== this._inputSize) {
+      throw new Error(`Input length mismatch: expected ${this._inputSize}, got ${input.length}`);
+    }
+    this._device.queue.writeBuffer(this.inputBuffer, 0, input.buffer, input.byteOffset, input.byteLength);
+  }
+
+  encode(enc) {
+    let pass = null;
+    const ensurePass = () => {
+      if (!pass) pass = enc.beginComputePass();
+    };
+    const endPass = () => {
+      if (pass) { pass.end(); pass = null; }
+    };
+    for (const step of this._steps) {
+      if (step.kind === 'copy') {
+        // Buffer-to-buffer copy isn't a compute op; needs the pass
+        // closed before encoding.  EXPAND_DIMS / SQUEEZE land here.
+        endPass();
+        enc.copyBufferToBuffer(step.srcBuf, 0, step.dstBuf, 0, step.byteCount);
+        continue;
+      }
+      ensurePass();
+      pass.setPipeline(step.pipeline);
+      pass.setBindGroup(0, step.bindGroup);
+      pass.dispatchWorkgroups(step.dispatchX, step.dispatchY, step.dispatchZ);
+    }
+    endPass();
+  }
+
+  encodeOutputReadback(enc) {
+    enc.copyBufferToBuffer(this.outputBuffer, 0, this._readBuffer, 0, this._outputSize * 4);
+  }
+
+  async readOutput() {
+    await this._readBuffer.mapAsync(GPUMapMode.READ);
+    const view = new Float32Array(this._readBuffer.getMappedRange());
+    this._outputView.set(view);
+    this._readBuffer.unmap();
+    return this._outputView;
   }
 
   async _buildStep(op, tensors) {
@@ -521,44 +579,13 @@ export class GpuModelRunner {
    * @returns {Promise<Float32Array>}
    */
   async invoke(input) {
-    if (input.length !== this._inputSize) {
-      throw new Error(`Input length mismatch: expected ${this._inputSize}, got ${input.length}`);
-    }
-    // Upload input to its GPU buffer.
-    const inputBuf = this._activationBuffers.get(this._inputId);
-    this._device.queue.writeBuffer(inputBuf, 0, input.buffer, input.byteOffset, input.byteLength);
-
+    this.writeInput(input);
     const enc = this._device.createCommandEncoder();
-    let pass = null;
-    const ensurePass = () => {
-      if (!pass) pass = enc.beginComputePass();
-    };
-    const endPass = () => {
-      if (pass) { pass.end(); pass = null; }
-    };
-    for (const step of this._steps) {
-      if (step.kind === 'copy') {
-        // Buffer-to-buffer copy isn't a compute op; needs the pass
-        // closed before encoding.  EXPAND_DIMS / SQUEEZE land here.
-        endPass();
-        enc.copyBufferToBuffer(step.srcBuf, 0, step.dstBuf, 0, step.byteCount);
-        continue;
-      }
-      ensurePass();
-      pass.setPipeline(step.pipeline);
-      pass.setBindGroup(0, step.bindGroup);
-      pass.dispatchWorkgroups(step.dispatchX, step.dispatchY, step.dispatchZ);
-    }
-    endPass();
-    const outputBuf = this._activationBuffers.get(this._outputId);
-    enc.copyBufferToBuffer(outputBuf, 0, this._readBuffer, 0, this._outputSize * 4);
+    this.encode(enc);
+    this.encodeOutputReadback(enc);
     this._device.queue.submit([enc.finish()]);
 
-    await this._readBuffer.mapAsync(GPUMapMode.READ);
-    const view = new Float32Array(this._readBuffer.getMappedRange());
-    this._outputView.set(view);
-    this._readBuffer.unmap();
-    return this._outputView;
+    return this.readOutput();
   }
 
   destroy() {

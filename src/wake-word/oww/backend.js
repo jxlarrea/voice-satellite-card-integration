@@ -548,6 +548,7 @@ export class OwwBackend {
 
   /** Free references so GC can reclaim the inference state. */
   destroy() {
+    this._inference?.destroy?.();
     this._inference = null;
   }
 

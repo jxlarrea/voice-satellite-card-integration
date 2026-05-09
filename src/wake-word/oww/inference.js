@@ -15,7 +15,7 @@
  *   2. Apply mel transform: x/10 + 2.
  *   3. Append all new mel frames to the rolling mel buffer.
  *   4. Take the latest 76 mel frames → embedding model → 96-dim vector.
- *   5. Append embedding to feature buffer (cap 120).
+ *   5. Append embedding to the rolling classifier window.
  *   6. Run classifier on the latest 16 embeddings → wake-word probability.
  */
 
@@ -24,6 +24,7 @@ import {
   MELSPECTROGRAM_SHAPES_1280,
   MELSPECTROGRAM_SHAPES_1760,
 } from './melspectrogram-shapes.js';
+import { FusedOwwGpuFrontend } from './gpu/fused-frontend.js';
 
 export const CHUNK_SAMPLES = 1280;
 export const MEL_BINS = 32;
@@ -32,7 +33,6 @@ export const EMBEDDING_DIM = 96;
 export const EMBEDDING_WINDOW = 16;
 const MEL_PREFIX_SAMPLES = 160 * 3;
 const MEL_BUFFER_MAX = 970;
-const FEATURE_BUFFER_MAX = 120;
 
 /**
  * Compile a model from raw .tflite bytes.  Mel spec needs the 1760-sample
@@ -94,6 +94,14 @@ export class OwwInference {
     // (already <1 ms each).
     this._embeddingGpuRunner = embeddingGpuRunner || null;
     this._melGpuRunner = melspectrogramGpuRunner || null;
+    this._fusedGpuFrontend = null;
+    if (this._melGpuRunner && this._embeddingGpuRunner) {
+      try {
+        this._fusedGpuFrontend = new FusedOwwGpuFrontend(this._melGpuRunner, this._embeddingGpuRunner);
+      } catch (err) {
+        console.warn('openWakeWord fused GPU frontend unavailable; falling back to unfused GPU path', err);
+      }
+    }
     if (!classifiers && classifier) classifiers = { default: classifier };
     if (!classifiers || Object.keys(classifiers).length === 0) {
       throw new Error('OwwInference: must provide at least one classifier');
@@ -119,7 +127,9 @@ export class OwwInference {
     for (const [name, model] of this._classifierEntries) {
       this._classifierStates[name] = model.createState();
     }
-    // Reusable input buffer for the classifier stage.
+    // Reusable rolling input buffer for the classifier stage. It always
+    // holds the latest 16 embeddings in chronological order, so we do not
+    // rebuild a classifier window from a larger feature history per chunk.
     this._classifierInput = new Float32Array(EMBEDDING_WINDOW * EMBEDDING_DIM);
 
     // Rolling buffers - sized just shy of the upper bounds we'll trim to.
@@ -129,14 +139,6 @@ export class OwwInference {
     // and old ones drop off when we exceed MEL_BUFFER_MAX.
     this._melBuffer = new Float32Array(MEL_BUFFER_MAX * MEL_BINS);
     this._melBufferLen = 0;
-    // Embedding ring: fixed slots and newest write position. Avoid
-    // Array.shift() on every steady-state chunk.
-    this._featureBuffer = [];
-    for (let i = 0; i < FEATURE_BUFFER_MAX; i++) {
-      this._featureBuffer.push(new Float32Array(EMBEDDING_DIM));
-    }
-    this._featureWrite = 0;
-
     // Initialize mel buffer with ones (76 × 32) - openWakeWord upstream.
     this._initMelBuffer();
     // Warmup is now async-capable so it can drive the GPU embedding
@@ -185,23 +187,14 @@ export class OwwInference {
       input.set(audio.subarray(c * CHUNK_SAMPLES, (c + 1) * CHUNK_SAMPLES), MEL_PREFIX_SAMPLES);
       history.set(audio.subarray((c + 1) * CHUNK_SAMPLES - MEL_PREFIX_SAMPLES, (c + 1) * CHUNK_SAMPLES));
 
-      const melOut = this._melGpuRunner
-        ? await this._melGpuRunner.invoke(input)
-        : this.melspec.invoke(input, { state: this._melState });
-      this._appendMelFrames(melOut);
-
-      const embIn = this._latestMelWindow();
-      const emb = this._embeddingGpuRunner
-        ? await this._embeddingGpuRunner.invoke(embIn)
-        : this.embedding.invoke(embIn, { state: this._embeddingState });
+      const emb = await this._runFrontend(input);
       this._appendEmbedding(emb);
     }
   }
 
   _appendEmbedding(emb) {
-    const slot = this._featureBuffer[this._featureWrite];
-    slot.set(emb);
-    this._featureWrite = (this._featureWrite + 1) % FEATURE_BUFFER_MAX;
+    this._classifierInput.copyWithin(0, EMBEDDING_DIM);
+    this._classifierInput.set(emb, (EMBEDDING_WINDOW - 1) * EMBEDDING_DIM);
   }
 
   /**
@@ -213,7 +206,7 @@ export class OwwInference {
    * 0.95+ on what the model thinks is still "ok nabu" history.
    *
    * Cheap (no model invocations): zeros out audio history + mel buffer,
-   * recreates per-model TFLite state, fills the feature ring with
+   * recreates per-model TFLite state, fills the classifier window with
    * zero-embeddings.  Recall: ok_nabu(zeros) ≈ 1e-3 in our offline tests,
    * so an all-zero classifier window produces near-zero score until real
    * audio embeddings replace the reset state.
@@ -223,14 +216,36 @@ export class OwwInference {
     this._initMelBuffer();
     this._melState = this.melspec.createState();
     this._embeddingState = this.embedding.createState();
+    if (this._fusedGpuFrontend) this._fusedGpuFrontend.reset();
     for (const [name, model] of this._classifierEntries) {
       this._classifierStates[name] = model.createState();
     }
-    this._featureWrite = 0;
-    for (let i = 0; i < EMBEDDING_WINDOW; i++) {
-      this._featureBuffer[i].fill(0);
-      this._featureWrite++;
+    this._classifierInput.fill(0);
+  }
+
+  destroy() {
+    this._fusedGpuFrontend?.destroy?.();
+    this._fusedGpuFrontend = null;
+    this._melGpuRunner?.destroy?.();
+    this._embeddingGpuRunner?.destroy?.();
+    this._melGpuRunner = null;
+    this._embeddingGpuRunner = null;
+  }
+
+  async _runFrontend(melInput) {
+    if (this._fusedGpuFrontend) {
+      return this._fusedGpuFrontend.invoke(melInput);
     }
+
+    const melOut = this._melGpuRunner
+      ? await this._melGpuRunner.invoke(melInput)
+      : this.melspec.invoke(melInput, { state: this._melState });
+    this._appendMelFrames(melOut);
+
+    const embIn = this._latestMelWindow();
+    return this._embeddingGpuRunner
+      ? this._embeddingGpuRunner.invoke(embIn)
+      : this.embedding.invoke(embIn, { state: this._embeddingState });
   }
 
   /**
@@ -295,30 +310,16 @@ export class OwwInference {
     // Save the trailing 480 samples as the next call's history.
     this._audioHistory.set(chunk.subarray(CHUNK_SAMPLES - MEL_PREFIX_SAMPLES));
 
-    const melOut = this._melGpuRunner
-      ? await this._melGpuRunner.invoke(this._melInput)
-      : this.melspec.invoke(this._melInput, { state: this._melState });
-    this._appendMelFrames(melOut);
-
     // Stage 2: one embedding from the latest 76 mel frames (shared across
-    // all classifiers).  Recycle a pooled Float32Array - never alloc.
-    // GPU path when available - embedding is the heavy stage (~80 ms
-    // CPU JS on a Pixel tablet, target <5 ms on GPU).
-    const embIn = this._latestMelWindow();
-    const emb = this._embeddingGpuRunner
-      ? await this._embeddingGpuRunner.invoke(embIn)
-      : this.embedding.invoke(embIn, { state: this._embeddingState });
+    // all classifiers).  When both WebGPU runners are available, the mel
+    // output stays on the GPU and feeds the embedding input without a JS
+    // readback/upload in between.
+    const emb = await this._runFrontend(this._melInput);
     this._appendEmbedding(emb);
 
     // Stage 3: classify the latest 16 embeddings - only for active
     // classifiers.  Inactive ones are skipped entirely (no inference
     // run), matching microWakeWord's addKeyword/removeKeyword behavior.
-    for (let i = 0; i < EMBEDDING_WINDOW; i++) {
-      const idx = (
-        this._featureWrite - EMBEDDING_WINDOW + i + FEATURE_BUFFER_MAX
-      ) % FEATURE_BUFFER_MAX;
-      this._classifierInput.set(this._featureBuffer[idx], i * EMBEDDING_DIM);
-    }
     const probs = this._probOutput;
     for (let i = 0; i < this._classifierEntries.length; i++) {
       delete probs[this._classifierEntries[i][0]];
