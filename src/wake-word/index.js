@@ -10,10 +10,7 @@
 import { State, BlurReason, INTERACTING_STATES } from '../constants.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 import { CHIME_WAKE, getChimeDuration } from '../audio/chime.js';
-import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, resetRuntime } from './micro-models.js';
-import { MicroWakeWordInference } from './micro-inference.js';
-import { OwwBackend } from './oww/backend.js';
-import { releaseUnusedOwwClassifiers } from './oww/models.js';
+import { loadTFLite, getMicroModelParams, resetRuntime } from './micro-models.js';
 import { WorkerProxyBackend } from './worker/proxy-backend.js';
 import { clearNotificationUI } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
@@ -1027,9 +1024,6 @@ export class WakeWordManager {
 
     try {
       const isOww = this.getEngine() === 'oww';
-      // MWW path needs the TFLite runtime loaded; OWW path uses its own
-      // pre-compiled classifier from the constructor in start().
-      if (!isOww && !this._tfweb) return;
 
       if (!this._stopMicroConfig) {
         if (isOww) {
@@ -1042,7 +1036,6 @@ export class WakeWordManager {
           return;
         }
         this._log.log('stop-word', 'Loading stop model...');
-        const runner = await loadMicroModel(this._tfweb, 'stop');
         const params = getMicroModelParams('stop');
         const effectiveCutoff = this.getThresholdForModel('stop');
         this._log.log(
@@ -1050,7 +1043,6 @@ export class WakeWordManager {
           `stop: baseCutoff=${params.cutoff} effective=${effectiveCutoff.toFixed(3)} (${this._getSensitivityLabel()}, margin ×${STOP_SENSITIVITY_FACTORS[this._getSensitivityLabel()]}) slidingWindow=${params.slidingWindow} stepSize=${params.stepSize} (${params._source || 'hardcoded'})`,
         );
         this._stopMicroConfig = {
-          runner,
           name: 'stop',
           cutoff: effectiveCutoff,
           slidingWindow: params.slidingWindow,
