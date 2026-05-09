@@ -109,6 +109,7 @@ export class OwwInference {
     this.classifiers = classifiers;
     this._classifierEntries = Object.entries(classifiers);
     this._probOutput = {};
+    this._lastTimings = null;
 
     // Audio history: last 480 samples, prepended to each new chunk so
     // the mel CNN can produce continuous STFT frames across the chunk
@@ -232,20 +233,45 @@ export class OwwInference {
     this._embeddingGpuRunner = null;
   }
 
-  async _runFrontend(melInput) {
+  consumeLastTimings() {
+    const out = this._lastTimings;
+    this._lastTimings = null;
+    return out;
+  }
+
+  async _runFrontend(melInput, timings = null) {
     if (this._fusedGpuFrontend) {
-      return this._fusedGpuFrontend.invoke(melInput);
+      const t0 = timings ? nowMs() : 0;
+      const emb = await this._fusedGpuFrontend.invoke(melInput);
+      if (timings) {
+        timings.frontendMs = nowMs() - t0;
+        timings.fusedFrontend = true;
+      }
+      return emb;
     }
 
+    const melStart = timings ? nowMs() : 0;
     const melOut = this._melGpuRunner
       ? await this._melGpuRunner.invoke(melInput)
       : this.melspec.invoke(melInput, { state: this._melState });
+    if (timings) timings.melMs = nowMs() - melStart;
+
+    const appendStart = timings ? nowMs() : 0;
     this._appendMelFrames(melOut);
+    if (timings) timings.melAppendMs = nowMs() - appendStart;
 
     const embIn = this._latestMelWindow();
-    return this._embeddingGpuRunner
+    const embeddingStart = timings ? nowMs() : 0;
+    const emb = this._embeddingGpuRunner
       ? this._embeddingGpuRunner.invoke(embIn)
       : this.embedding.invoke(embIn, { state: this._embeddingState });
+    const resolved = await emb;
+    if (timings) {
+      timings.embeddingMs = nowMs() - embeddingStart;
+      timings.frontendMs = (timings.melMs || 0) + (timings.melAppendMs || 0) + timings.embeddingMs;
+      timings.fusedFrontend = false;
+    }
+    return resolved;
   }
 
   /**
@@ -303,18 +329,25 @@ export class OwwInference {
       throw new Error(`Chunk must be exactly ${CHUNK_SAMPLES} samples, got ${chunk.length}`);
     }
     const activeKeywords = opts.activeKeywords || null;
+    const timings = opts.collectTimings ? {
+      engine: 'oww',
+      fusedFrontend: !!this._fusedGpuFrontend,
+    } : null;
+    const totalStart = timings ? nowMs() : 0;
 
     // Stage 1: build [history(480) || chunk(1280)] and run mel spec.
+    const prepareStart = timings ? totalStart : 0;
     this._melInput.set(this._audioHistory, 0);
     this._melInput.set(chunk, MEL_PREFIX_SAMPLES);
     // Save the trailing 480 samples as the next call's history.
     this._audioHistory.set(chunk.subarray(CHUNK_SAMPLES - MEL_PREFIX_SAMPLES));
+    if (timings) timings.prepareMs = nowMs() - prepareStart;
 
     // Stage 2: one embedding from the latest 76 mel frames (shared across
     // all classifiers).  When both WebGPU runners are available, the mel
     // output stays on the GPU and feeds the embedding input without a JS
     // readback/upload in between.
-    const emb = await this._runFrontend(this._melInput);
+    const emb = await this._runFrontend(this._melInput, timings);
     this._appendEmbedding(emb);
 
     // Stage 3: classify the latest 16 embeddings - only for active
@@ -324,12 +357,24 @@ export class OwwInference {
     for (let i = 0; i < this._classifierEntries.length; i++) {
       delete probs[this._classifierEntries[i][0]];
     }
+    const classifyStart = timings ? nowMs() : 0;
     for (const [name, model] of this._classifierEntries) {
       if (activeKeywords && !activeKeywords.has(name)) continue;
       const out = model.invoke(this._classifierInput, { state: this._classifierStates[name] });
       probs[name] = out[0];
     }
+    if (timings) {
+      timings.classifyMs = nowMs() - classifyStart;
+      timings.inferenceTotalMs = nowMs() - totalStart;
+      this._lastTimings = timings;
+    }
 
     return { probs };
   }
+}
+
+function nowMs() {
+  return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? performance.now()
+    : Date.now();
 }

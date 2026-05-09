@@ -53,16 +53,24 @@ const SLEEP_BUFFER_CHUNKS = 8; // ~640 ms
 // chunk's score grazes cutoff before fading.
 const BORDERLINE_CONFIRM_MARGIN = 0.03;
 const BORDERLINE_CONFIRM_WINDOW_MS = 750;
+
+function nowMs() {
+  return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? performance.now()
+    : Date.now();
+}
+
 export class OwwBackend {
   /**
    * @param {OwwInference} inference
    * @param {object} log - logger with .log(category, message)
    * @param {object<string, number>} cutoffs - per-keyword threshold map
    */
-  constructor(inference, log, cutoffs, energyGateEnabled = true, sensitivityLabel = 'Moderately sensitive') {
+  constructor(inference, log, cutoffs, energyGateEnabled = true, sensitivityLabel = 'Moderately sensitive', enableTimings = false) {
     this._inference = inference;
     this._log = log;
     this._cutoffs = { ...cutoffs };
+    this._enableTimings = enableTimings === true;
     this._latestRms = 0;
     // Wired to the user-facing "Wake word noise gate" switch.  When off,
     // we run inference on every chunk regardless of RMS - matches the
@@ -113,7 +121,7 @@ export class OwwBackend {
    * @param {Array<{name: string, cutoff: number}>} keywordConfigs
    * @param {object} log
    */
-  static async create(keywordConfigs, log, energyGateEnabled = true, sensitivityLabel = 'Moderately sensitive') {
+  static async create(keywordConfigs, log, energyGateEnabled = true, sensitivityLabel = 'Moderately sensitive', enableTimings = false) {
     if (!keywordConfigs?.length) {
       throw new Error('OwwBackend.create needs at least one keyword');
     }
@@ -164,7 +172,7 @@ export class OwwBackend {
       + `(energy gate ${energyGateEnabled ? 'on' : 'off'}, `
       + `sensitivity=${sensitivityLabel}, sleep=${energy.sleep} wake=${energy.wake})`,
     );
-    return new OwwBackend(inference, log, cutoffs, energyGateEnabled, sensitivityLabel);
+    return new OwwBackend(inference, log, cutoffs, energyGateEnabled, sensitivityLabel, enableTimings);
   }
 
   /** Build a fresh per-keyword sliding-window + pending-confirm record. */
@@ -285,6 +293,8 @@ export class OwwBackend {
   }
 
   async _processInferenceChunk(samples, rms) {
+    const totalStart = this._enableTimings ? nowMs() : 0;
+    const scaleStart = totalStart;
     // Scale ±1 float32 to int16 range for the OWW pipeline.  Use a
     // pre-allocated scratch buffer so we don't churn the GC every chunk.
     if (!this._scaledChunk) this._scaledChunk = new Float32Array(CHUNK_SAMPLES);
@@ -301,10 +311,13 @@ export class OwwBackend {
     } else {
       for (let i = 0; i < CHUNK_SAMPLES; i++) scaled[i] = samples[i] * 32768;
     }
+    const scaleMs = this._enableTimings ? nowMs() - scaleStart : 0;
 
     const { probs } = await this._inference.processChunk(scaled, {
       activeKeywords: this._activeKeywords,
+      collectTimings: this._enableTimings,
     });
+    const inferenceTimings = this._enableTimings ? this._inference.consumeLastTimings?.() : null;
     this._latestScores = probs;
 
     // Two passes over the active keywords on their current frame scores:
@@ -350,7 +363,7 @@ export class OwwBackend {
       if (detected) this._lastTriggerAt = now;
     }
 
-    return {
+    const result = {
       detected,
       score: triggerName ? triggerScore : leaderScore,
       vadScore: 0,
@@ -363,6 +376,15 @@ export class OwwBackend {
       // detection, unlike MWW where the model's own sliding mean is used.
       perModelScores: probs,
     };
+    if (this._enableTimings) {
+      result.timings = {
+        engine: 'oww',
+        backendTotalMs: nowMs() - totalStart,
+        scaleMs,
+        ...(inferenceTimings || {}),
+      };
+    }
+    return result;
   }
 
   /**

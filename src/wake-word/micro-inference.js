@@ -208,7 +208,7 @@ export class MicroWakeWordInference {
         this._sleepBufHead = (this._sleepBufHead + 1) % this._sleepBufCap;
         if (this._sleepBufLen < this._sleepBufCap) this._sleepBufLen++;
       }
-      return { detected: false, score: 0, vadScore: 0, model: null, perModelScores: this._perModelScores() };
+      return { detected: false, score: 0, vadScore: 0, model: null, rms, perModelScores: this._perModelScores() };
     }
 
     // Drain ring buffer on wake - oldest-first order for correct replay
@@ -228,7 +228,7 @@ export class MicroWakeWordInference {
     }
 
     if (allFeatures.length === 0) {
-      return { detected: false, score: 0, vadScore: 0, model: null, perModelScores: this._perModelScores() };
+      return { detected: false, score: 0, vadScore: 0, model: null, rms, perModelScores: this._perModelScores() };
     }
 
     const now = Date.now();
@@ -315,7 +315,7 @@ export class MicroWakeWordInference {
       }
     }
 
-    return { detected: false, score: 0, vadScore: 0, model: null, perModelScores: this._perModelScores() };
+    return { detected: false, score: 0, vadScore: 0, model: null, rms, perModelScores: this._perModelScores() };
   }
 
   /**

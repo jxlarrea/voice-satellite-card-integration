@@ -88,6 +88,7 @@ export class GpuModelRunner {
     const sg = this._compiled.subgraphs[this._compiled.primaryIndex];
     const tensors = sg.tensors;
     const ops = sg.ops;
+    this._tensorUseCounts = countTensorUses(ops);
 
     // Allocate buffers.  Constant tensors get pre-uploaded, everything
     // else gets a fresh activation buffer sized to its shape.
@@ -108,6 +109,12 @@ export class GpuModelRunner {
     // Walk ops in declared order; build a pipeline + bind group per step.
     for (let i = 0; i < ops.length; i++) {
       const op = ops[i];
+      const fused = this._tryBuildFusedConvActivation(ops, i, tensors);
+      if (fused) {
+        this._steps.push(fused);
+        i += 2;
+        continue;
+      }
       const step = await this._buildStep(op, tensors);
       if (step) this._steps.push(step);
     }
@@ -235,6 +242,63 @@ export class GpuModelRunner {
     throw new Error(`GpuModelRunner: unsupported op ${op.opName}`);
   }
 
+  _tryBuildFusedConvActivation(ops, i, tensors) {
+    const conv = ops[i];
+    const leaky = ops[i + 1];
+    const maximum = ops[i + 2];
+    if (!conv || !leaky || !maximum) return null;
+    if (conv.opName !== 'CONV_2D' || leaky.opName !== 'LEAKY_RELU' || maximum.opName !== 'MAXIMUM') {
+      return null;
+    }
+    if (
+      conv.outputs.length !== 1
+      || leaky.inputs[0] !== conv.outputs[0]
+      || leaky.outputs.length !== 1
+      || maximum.outputs.length !== 1
+    ) {
+      return null;
+    }
+    const leakyOut = leaky.outputs[0];
+    if (
+      this._tensorUseCounts.get(conv.outputs[0]) !== 1
+      || this._tensorUseCounts.get(leakyOut) !== 1
+    ) {
+      return null;
+    }
+    let scalarMeta = null;
+    if (maximum.inputs[0] === leakyOut) {
+      scalarMeta = tensors[maximum.inputs[1]];
+    } else if (maximum.inputs[1] === leakyOut) {
+      scalarMeta = tensors[maximum.inputs[0]];
+    } else {
+      return null;
+    }
+    if (!scalarMeta?.constant || shapeSize(scalarMeta.shape) !== 1) return null;
+
+    const convOutMeta = tensors[conv.outputs[0]];
+    const leakyOutMeta = tensors[leakyOut];
+    const maxOutMeta = tensors[maximum.outputs[0]];
+    if (
+      !sameShape(leakyOutMeta.shape, convOutMeta.shape)
+      || !sameShape(maxOutMeta.shape, convOutMeta.shape)
+    ) {
+      return null;
+    }
+
+    const alpha = readLeakyReluAlpha(leaky);
+    const maxScalar = scalarMeta.constant[0];
+    if (!Number.isFinite(alpha) || !Number.isFinite(maxScalar)) return null;
+
+    return this._buildConv(conv, tensors, {
+      outputId: maximum.outputs[0],
+      activation: {
+        kind: 'leakyReluThenMax',
+        alpha,
+        maxScalar,
+      },
+    });
+  }
+
   // The following helpers each:
   //   1. Read op options (padding, stride, kernel size, etc.) from the
   //      flatbuffer the same way the CPU runner does.  We ferry the
@@ -246,17 +310,21 @@ export class GpuModelRunner {
   //   4. Return a closure that records `pass.setPipeline`, `pass.setBindGroup`,
   //      and `pass.dispatchWorkgroups` for invoke()'s command pass.
 
-  _buildConv(op, tensors) {
+  _buildConv(op, tensors, fused = null) {
     // Conv options live in the model file.  CPU runner reads them via
     // its own helpers; here we read identically.  We do it eagerly at
     // build time because shape constants need to be baked into shader
     // source.
     const {
-      padding, strideH, strideW, dilationH, dilationW,
+      padding, strideH, strideW, dilationH, dilationW, fusedActivation,
     } = readConv2dOptions(op);
+    if (fusedActivation !== ACT_NONE) {
+      throw new Error(`GpuModelRunner: CONV_2D fused activation ${fusedActivation} not supported`);
+    }
     const inMeta = tensors[op.inputs[0]];
     const wMeta = tensors[op.inputs[1]];
-    const outMeta = tensors[op.outputs[0]];
+    const outId = fused?.outputId ?? op.outputs[0];
+    const outMeta = tensors[outId];
     const [, inH, inW] = inMeta.shape;
     const [, outH, outW] = outMeta.shape;
     const [, kernelH, kernelW] = wMeta.shape;
@@ -269,6 +337,7 @@ export class GpuModelRunner {
       strideH, strideW, dilationH, dilationW,
       padTop: pad.top,
       padLeft: pad.left,
+      activation: fused?.activation,
     });
     const pipeline = this._device.createComputePipeline({
       layout: 'auto',
@@ -277,7 +346,7 @@ export class GpuModelRunner {
     const inputBuf = this._bufferFor(op.inputs[0]);
     const weightsBuf = this._bufferFor(op.inputs[1]);
     const biasBuf = this._bufferFor(op.inputs[2]);
-    const outputBuf = this._bufferFor(op.outputs[0]);
+    const outputBuf = this._bufferFor(outId);
     const bindGroup = this._device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
       entries: [
@@ -499,7 +568,10 @@ export class GpuModelRunner {
   }
 
   _buildMaxPool(op, tensors) {
-    const { padding, strideH, strideW, filterH, filterW } = readPool2dOptions(op);
+    const { padding, strideH, strideW, filterH, filterW, fusedActivation } = readPool2dOptions(op);
+    if (fusedActivation !== ACT_NONE) {
+      throw new Error(`GpuModelRunner: MAX_POOL_2D fused activation ${fusedActivation} not supported`);
+    }
     const inMeta = tensors[op.inputs[0]];
     const outMeta = tensors[op.outputs[0]];
     const [, inH, inW] = inMeta.shape;
@@ -683,6 +755,24 @@ function shapeSize(shape) {
   return s;
 }
 
+function sameShape(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function countTensorUses(ops) {
+  const counts = new Map();
+  for (const op of ops) {
+    for (const tensorId of op.inputs) {
+      counts.set(tensorId, (counts.get(tensorId) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
 /** WebGPU buffer sizes must be multiples of 4. */
 function alignedSize(bytes) {
   return Math.max(4, (bytes + 3) & ~3);
@@ -695,6 +785,7 @@ function alignedSize(bytes) {
 const FIELD_CONV2D_PADDING = 0;
 const FIELD_CONV2D_STRIDE_W = 1;
 const FIELD_CONV2D_STRIDE_H = 2;
+const FIELD_CONV2D_FUSED_ACTIVATION = 3;
 const FIELD_CONV2D_DILATION_W = 4;
 const FIELD_CONV2D_DILATION_H = 5;
 const FIELD_POOL_PADDING = 0;
@@ -702,7 +793,9 @@ const FIELD_POOL_STRIDE_W = 1;
 const FIELD_POOL_STRIDE_H = 2;
 const FIELD_POOL_FILTER_W = 3;
 const FIELD_POOL_FILTER_H = 4;
+const FIELD_POOL_FUSED_ACTIVATION = 5;
 const FIELD_LEAKY_RELU_ALPHA = 0;
+const ACT_NONE = 0;
 const PADDING_SAME = 0;
 const PADDING_VALID = 1;
 
@@ -727,6 +820,7 @@ function readConv2dOptions(op) {
     padding: readU8(op.fb, op.optionsOff, FIELD_CONV2D_PADDING, PADDING_SAME),
     strideW: readU32(op.fb, op.optionsOff, FIELD_CONV2D_STRIDE_W, 1),
     strideH: readU32(op.fb, op.optionsOff, FIELD_CONV2D_STRIDE_H, 1),
+    fusedActivation: readU8(op.fb, op.optionsOff, FIELD_CONV2D_FUSED_ACTIVATION, ACT_NONE),
     dilationW: readU32(op.fb, op.optionsOff, FIELD_CONV2D_DILATION_W, 1),
     dilationH: readU32(op.fb, op.optionsOff, FIELD_CONV2D_DILATION_H, 1),
   };
@@ -738,6 +832,7 @@ function readPool2dOptions(op) {
     strideH: readU32(op.fb, op.optionsOff, FIELD_POOL_STRIDE_H, 1),
     filterW: readU32(op.fb, op.optionsOff, FIELD_POOL_FILTER_W, 1),
     filterH: readU32(op.fb, op.optionsOff, FIELD_POOL_FILTER_H, 1),
+    fusedActivation: readU8(op.fb, op.optionsOff, FIELD_POOL_FUSED_ACTIVATION, ACT_NONE),
   };
 }
 function readLeakyReluAlpha(op) {

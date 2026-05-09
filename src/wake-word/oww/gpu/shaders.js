@@ -61,6 +61,10 @@ export function conv2dShader(cfg) {
   const wKwStride = inC;
   const wKhStride = kW * wKwStride;
   const wOcStride = kH * wKhStride;
+  let activation = 'acc';
+  if (cfg.activation?.kind === 'leakyReluThenMax') {
+    activation = `max(select(acc * ${formatFloat(cfg.activation.alpha)}, acc, acc >= 0.0), ${formatFloat(cfg.activation.maxScalar)})`;
+  }
 
   return /* wgsl */`
     @group(0) @binding(0) var<storage, read> inputBuf: array<f32>;
@@ -118,7 +122,7 @@ export function conv2dShader(cfg) {
       }
 
       let outIdx: u32 = (oh * OUT_W + ow) * OUT_C + oc;
-      outputBuf[outIdx] = acc;
+      outputBuf[outIdx] = ${activation};
     }
   `;
 }

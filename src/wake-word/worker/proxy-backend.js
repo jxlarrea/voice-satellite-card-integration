@@ -44,6 +44,7 @@ export class WorkerProxyBackend {
     // for every animation frame.  Updated whenever processChunk
     // resolves.
     this._latestSmoothed = {};
+    this._latestRms = 0;
     // Active keyword set + cutoffs cached on the main side so the
     // synchronous `_keywords` getter works for MWW's stop-only-mode
     // suspend/restore flow without round-tripping the worker.  Stays
@@ -65,6 +66,7 @@ export class WorkerProxyBackend {
    * @param {object<string, number>} [options.cutoffs] - per-keyword cutoff override
    * @param {boolean} [options.energyGateEnabled=true]
    * @param {string} [options.sensitivityLabel='Moderately sensitive']
+   * @param {boolean} [options.enableTimings=false] - tester-only diagnostics
    * @param {object} [options.log] - logger (forwarded for unsolicited worker logs)
    * @returns {Promise<WorkerProxyBackend>}
    */
@@ -95,6 +97,7 @@ export class WorkerProxyBackend {
       cutoffs: options.cutoffs || {},
       energyGateEnabled: options.energyGateEnabled !== false,
       sensitivityLabel: options.sensitivityLabel || 'Moderately sensitive',
+      enableTimings: options.enableTimings === true,
     }, INIT_TIMEOUT_MS);
     return proxy;
   }
@@ -136,6 +139,9 @@ export class WorkerProxyBackend {
       const result = data.result;
       if (result && typeof result === 'object' && result.perModelScores) {
         this._latestSmoothed = result.perModelScores;
+      }
+      if (result && typeof result.rms === 'number') {
+        this._latestRms = result.rms;
       }
       entry.resolve(result);
     } else {
@@ -212,6 +218,10 @@ export class WorkerProxyBackend {
       return best;
     }
     return this._latestSmoothed?.[keywordName] ?? 0;
+  }
+
+  get latestRms() {
+    return this._latestRms;
   }
 
   /**

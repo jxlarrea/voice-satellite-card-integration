@@ -28,7 +28,12 @@ export class FusedOwwGpuFrontend {
     this._windowElements = MEL_WINDOW_ELEMENTS;
     this._appendElements = melRunner.outputSize;
 
-    if (this._appendElements <= 0 || this._appendElements >= this._windowElements) {
+    if (
+      this._appendElements <= 0
+      || this._appendElements >= this._windowElements
+      || this._appendElements % MEL_BINS !== 0
+      || this._windowElements % MEL_BINS !== 0
+    ) {
       throw new Error(`Unexpected mel output size for fused OWW path: ${this._appendElements}`);
     }
 

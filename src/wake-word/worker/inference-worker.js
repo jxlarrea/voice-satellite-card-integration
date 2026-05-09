@@ -95,6 +95,7 @@ async function init({
   cutoffs,
   energyGateEnabled,
   sensitivityLabel,
+  enableTimings,
 }) {
   if (backend) {
     try { backend.destroy(); } catch (_) { /* ignore */ }
@@ -115,6 +116,7 @@ async function init({
       workerLogger,
       energyGateEnabled,
       sensitivityLabel,
+      enableTimings === true,
     );
     for (const name of models) {
       if (!active.has(name)) backend.removeKeyword(name);

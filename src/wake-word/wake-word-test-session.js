@@ -73,10 +73,14 @@ export class WakeWordTestSession {
     // log pane shows it.
     this._perfTimes = [];           // ring of recent ms readings
     this._perfRingSize = 200;       // last ~16 s at 80 ms/chunk
+    this._perfTimingRows = new Array(this._perfRingSize);
     this._perfRingHead = 0;
     this._perfRingFilled = 0;
     this._perfReportEvery = 25;     // 25 chunks ≈ 2 s
     this._perfChunksSinceReport = 0;
+    this._rmsHistory = new Float32Array(25); // ~2 s at 80 ms/chunk
+    this._rmsHistoryHead = 0;
+    this._rmsHistoryFilled = 0;
   }
 
   /**
@@ -386,6 +390,7 @@ export class WakeWordTestSession {
       cutoffs: { [this._modelName]: cutoff },
       energyGateEnabled: this._energyGateEnabled,
       sensitivityLabel: this._sensitivityLabel,
+      enableTimings: true,
       log: this._instanceLog,
     });
   }
@@ -443,7 +448,8 @@ export class WakeWordTestSession {
           const t0 = performance.now();
           const result = await this._inference.processChunk(frame);
           const dt = performance.now() - t0;
-          this._recordPerfSample(dt);
+          this._recordPerfSample(dt, result?.timings || null);
+          this._recordRmsSample(result?.rms);
           if (result?.detected) {
             this._detectionSeq++;
             this._lastDetectionAt =
@@ -456,7 +462,9 @@ export class WakeWordTestSession {
             const cutoff = typeof result.cutoff === 'number' ? result.cutoff.toFixed(2) : '?';
             this._emitLog(
               'trigger',
-              `DETECTED "${model}" mean=${mean} cutoff=${cutoff} rms=${(result.rms ?? 0).toFixed(3)}`,
+              `DETECTED "${model}" mean=${mean} cutoff=${cutoff} `
+              + `rms_now=${(result.rms ?? 0).toFixed(4)} `
+              + `rms_peak_1s=${this._getRecentRmsPeak(13).toFixed(4)}`,
             );
           }
         } catch (_) { /* swallow - the tester is best-effort */ }
@@ -492,10 +500,12 @@ export class WakeWordTestSession {
    * select, restart the tester, and the log pane prints avg/p50/p95 over
    * the most recent ~16 s of audio (200 chunks).
    */
-  _recordPerfSample(ms) {
+  _recordPerfSample(ms, timings = null) {
     if (!Number.isFinite(ms)) return;
-    this._perfTimes[this._perfRingHead] = ms;
-    this._perfRingHead = (this._perfRingHead + 1) % this._perfRingSize;
+    const idx = this._perfRingHead;
+    this._perfTimes[idx] = ms;
+    this._perfTimingRows[idx] = timings && typeof timings === 'object' ? { ...timings } : null;
+    this._perfRingHead = (idx + 1) % this._perfRingSize;
     if (this._perfRingFilled < this._perfRingSize) this._perfRingFilled++;
     this._perfChunksSinceReport++;
     if (this._perfChunksSinceReport < this._perfReportEvery) return;
@@ -519,6 +529,32 @@ export class WakeWordTestSession {
       p50: samples[Math.floor(n * 0.50)],
       p95: samples[Math.min(n - 1, Math.floor(n * 0.95))],
       p99: samples[Math.min(n - 1, Math.floor(n * 0.99))],
+      stages: this._getPerfStageStats(),
+    };
+  }
+
+  _getPerfStageStats() {
+    const sums = {};
+    const counts = {};
+    let fusedSamples = 0;
+    let unfusedSamples = 0;
+    for (let i = 0; i < this._perfRingFilled; i++) {
+      const row = this._perfTimingRows[i];
+      if (!row) continue;
+      if (row.fusedFrontend === true) fusedSamples++;
+      else if (row.fusedFrontend === false) unfusedSamples++;
+      for (const [key, value] of Object.entries(row)) {
+        if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+        sums[key] = (sums[key] || 0) + value;
+        counts[key] = (counts[key] || 0) + 1;
+      }
+    }
+    const avg = {};
+    for (const key of Object.keys(sums)) avg[key] = sums[key] / counts[key];
+    return {
+      avg,
+      fusedFrontend: fusedSamples > 0 && fusedSamples >= unfusedSamples,
+      count: Math.max(fusedSamples, unfusedSamples),
     };
   }
 
@@ -532,6 +568,20 @@ export class WakeWordTestSession {
       + `avg=${fmt(s.avg)}ms min=${fmt(s.min)}ms p50=${fmt(s.p50)}ms `
       + `p95=${fmt(s.p95)}ms p99=${fmt(s.p99)}ms max=${fmt(s.max)}ms (budget=80ms)`,
     );
+    const st = s.stages?.avg;
+    if (st && Object.keys(st).length) {
+      const frontendLabel = s.stages.fusedFrontend ? 'frontend(fused)' : 'frontend';
+      const parts = [];
+      if (st.scaleMs !== undefined) parts.push(`scale=${fmt(st.scaleMs)}ms`);
+      if (st.prepareMs !== undefined) parts.push(`prep=${fmt(st.prepareMs)}ms`);
+      if (st.frontendMs !== undefined) parts.push(`${frontendLabel}=${fmt(st.frontendMs)}ms`);
+      if (st.melMs !== undefined) parts.push(`mel=${fmt(st.melMs)}ms`);
+      if (st.embeddingMs !== undefined) parts.push(`embed=${fmt(st.embeddingMs)}ms`);
+      if (st.classifyMs !== undefined) parts.push(`classify=${fmt(st.classifyMs)}ms`);
+      if (st.inferenceTotalMs !== undefined) parts.push(`oww=${fmt(st.inferenceTotalMs)}ms`);
+      if (st.backendTotalMs !== undefined) parts.push(`worker=${fmt(st.backendTotalMs)}ms`);
+      this._emitLog('diag', `perf stages avg: ${parts.join(' ')}`);
+    }
   }
 
   _resetPerfStats() {
@@ -539,6 +589,28 @@ export class WakeWordTestSession {
     this._perfRingFilled = 0;
     this._perfChunksSinceReport = 0;
     this._perfTimes.length = 0;
+    this._perfTimingRows = new Array(this._perfRingSize);
+    this._rmsHistory.fill(0);
+    this._rmsHistoryHead = 0;
+    this._rmsHistoryFilled = 0;
+  }
+
+  _recordRmsSample(rms) {
+    if (!Number.isFinite(rms)) return;
+    this._rmsHistory[this._rmsHistoryHead] = Math.max(0, rms);
+    this._rmsHistoryHead = (this._rmsHistoryHead + 1) % this._rmsHistory.length;
+    if (this._rmsHistoryFilled < this._rmsHistory.length) this._rmsHistoryFilled++;
+  }
+
+  _getRecentRmsPeak(maxChunks = this._rmsHistory.length) {
+    const n = Math.min(this._rmsHistoryFilled, maxChunks);
+    let peak = 0;
+    for (let i = 0; i < n; i++) {
+      const idx = (this._rmsHistoryHead - 1 - i + this._rmsHistory.length) % this._rmsHistory.length;
+      const v = this._rmsHistory[idx];
+      if (v > peak) peak = v;
+    }
+    return peak;
   }
 
   _resample(input, fromRate, toRate) {
