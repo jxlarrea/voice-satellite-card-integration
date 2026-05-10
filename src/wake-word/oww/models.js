@@ -4,23 +4,23 @@
  * The mel spectrogram and embedding models are SHARED across every OWW
  * wake word, so we cache them at module level and load them exactly once
  * for the lifetime of the page.  Per-wake-word classifiers are also
- * cached so switching wake words doesn't refetch the .tflite file.
+ * cached so switching wake words doesn't refetch the model file.
  *
- * Files live at /voice_satellite/models/openwakeword/<name>.tflite.  The
+ * Files live at /voice_satellite/models/openwakeword/<name>.onnx.  The
  * Python integration's _load_user_custom_models pulls user-added models
  * from /config/voice_satellite/models/openwakeword/ into that path on
  * startup (one-way; we never write back to the persistent folder).
  */
 
-import { compileModel } from './inference.js';
+import { compileOwwOnnxModel } from './onnx-runner.js';
 
 function getModelsBase() {
   return globalThis.__VS_OWW_MODELS_BASE || '/voice_satellite/models/openwakeword';
 }
 
 const SHARED_MODEL_FILES = {
-  melspectrogram: 'melspectrogram.tflite',
-  embedding: 'embedding_model.tflite',
+  melspectrogram: 'melspectrogram.onnx',
+  embedding: 'embedding_model.onnx',
 };
 
 let _sharedPromise = null;
@@ -33,7 +33,13 @@ async function _fetchAndCompile(filename, kind) {
     throw new Error(`OWW model fetch failed: ${url} (HTTP ${resp.status})`);
   }
   const buffer = await resp.arrayBuffer();
-  return compileModel(buffer, kind);
+  if (kind === 'melspectrogram') {
+    return compileOwwOnnxModel(buffer, { inputShape: [1, 1760] });
+  }
+  if (kind === 'embedding') {
+    return compileOwwOnnxModel(buffer, { inputShape: [1, 76, 32, 1] });
+  }
+  return compileOwwOnnxModel(buffer, { inputShape: [1, 16, 96] });
 }
 
 /**
@@ -63,8 +69,8 @@ export async function loadOwwSharedModels() {
  */
 export async function loadOwwClassifier(modelName) {
   if (_classifierCache.has(modelName)) return _classifierCache.get(modelName);
-  const filename = `${modelName}.tflite`;
-  const compiled = await _fetchAndCompile(filename, 'classifier');
+  const compiled = await _fetchAndCompile(`${modelName}.onnx`, 'classifier');
+  compiled.format = 'onnx';
   _classifierCache.set(modelName, compiled);
   return compiled;
 }

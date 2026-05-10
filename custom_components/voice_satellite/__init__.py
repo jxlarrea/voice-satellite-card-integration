@@ -88,7 +88,8 @@ _OWW_SUBDIR = "openwakeword"
 def _load_user_openwakeword_models(persistent_root: Path, integration_root: Path) -> None:
     """Copy user-supplied OWW classifiers from the persistent drop folder
     (/config/voice_satellite/models/openwakeword/) into the integration's
-    models dir.  One-way only: this function never creates or writes to
+    models dir.  Supports .onnx classifiers.  One-way only:
+    this function never creates or writes to
     the persistent folder, so the user is in full control of what lives
     there.  Files already present in the integration dir are left alone."""
     persistent_oww = persistent_root / _OWW_SUBDIR
@@ -96,7 +97,9 @@ def _load_user_openwakeword_models(persistent_root: Path, integration_root: Path
     if not persistent_oww.is_dir() or not integration_oww.is_dir():
         return
 
-    for src in persistent_oww.glob("*.tflite"):
+    for src in sorted(persistent_oww.glob("*.onnx")):
+        if src.stem in {"melspectrogram", "embedding_model"}:
+            continue
         dest = integration_oww / src.name
         if not dest.exists():
             shutil.copy2(src, dest)

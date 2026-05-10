@@ -33,6 +33,9 @@ const baseConfig = {
   // static path as the main card JS (/voice_satellite/).
   output: {
     publicPath: '/voice_satellite/',
+    clean: {
+      keep: /^fonts\//,
+    },
   },
 };
 

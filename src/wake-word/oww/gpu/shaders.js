@@ -127,6 +127,95 @@ export function conv2dShader(cfg) {
   `;
 }
 
+export function conv1dNcwShader(cfg) {
+  const [, inC, inW] = cfg.inShape;
+  const [, outC, outW] = cfg.outShape;
+  const [, , kW] = cfg.weightShape;
+  return /* wgsl */`
+    @group(0) @binding(0) var<storage, read> inputBuf: array<f32>;
+    @group(0) @binding(1) var<storage, read> weightsBuf: array<f32>;
+    @group(0) @binding(2) var<storage, read> biasBuf: array<f32>;
+    @group(0) @binding(3) var<storage, read_write> outputBuf: array<f32>;
+
+    const IN_C: u32 = ${inC}u;
+    const IN_W: i32 = ${inW};
+    const OUT_C: u32 = ${outC}u;
+    const OUT_W: u32 = ${outW}u;
+    const K_W: u32 = ${kW}u;
+    const STRIDE_W: i32 = ${cfg.strideW};
+    const DIL_W: i32 = ${cfg.dilationW};
+    const PAD_LEFT: i32 = ${cfg.padLeft};
+
+    @compute @workgroup_size(${CONV_WG_W}, ${CONV_WG_H}, 1)
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let ow: u32 = gid.x;
+      let oc: u32 = gid.y;
+      if (ow >= OUT_W || oc >= OUT_C) { return; }
+
+      var acc: f32 = biasBuf[oc];
+      for (var ic: u32 = 0u; ic < IN_C; ic = ic + 1u) {
+        for (var kw: u32 = 0u; kw < K_W; kw = kw + 1u) {
+          let iw: i32 = i32(ow) * STRIDE_W + i32(kw) * DIL_W - PAD_LEFT;
+          if (iw < 0 || iw >= IN_W) { continue; }
+          acc = acc + inputBuf[ic * u32(IN_W) + u32(iw)] * weightsBuf[(oc * IN_C + ic) * K_W + kw];
+        }
+      }
+      outputBuf[oc * OUT_W + ow] = acc;
+    }
+  `;
+}
+
+export function conv2dNchwShader(cfg) {
+  const [, inC, inH, inW] = cfg.inShape;
+  const [, outC, outH, outW] = cfg.outShape;
+  const [, , kH, kW] = cfg.weightShape;
+  return /* wgsl */`
+    @group(0) @binding(0) var<storage, read> inputBuf: array<f32>;
+    @group(0) @binding(1) var<storage, read> weightsBuf: array<f32>;
+    @group(0) @binding(2) var<storage, read> biasBuf: array<f32>;
+    @group(0) @binding(3) var<storage, read_write> outputBuf: array<f32>;
+
+    const IN_C: u32 = ${inC}u;
+    const IN_H: i32 = ${inH};
+    const IN_W: i32 = ${inW};
+    const OUT_C: u32 = ${outC}u;
+    const OUT_H: u32 = ${outH}u;
+    const OUT_W: u32 = ${outW}u;
+    const K_H: u32 = ${kH}u;
+    const K_W: u32 = ${kW}u;
+    const STRIDE_H: i32 = ${cfg.strideH};
+    const STRIDE_W: i32 = ${cfg.strideW};
+    const DIL_H: i32 = ${cfg.dilationH};
+    const DIL_W: i32 = ${cfg.dilationW};
+    const PAD_TOP: i32 = ${cfg.padTop};
+    const PAD_LEFT: i32 = ${cfg.padLeft};
+
+    @compute @workgroup_size(${CONV_WG_W}, ${CONV_WG_H}, ${CONV_WG_C})
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let ow: u32 = gid.x;
+      let oh: u32 = gid.y;
+      let oc: u32 = gid.z;
+      if (ow >= OUT_W || oh >= OUT_H || oc >= OUT_C) { return; }
+
+      var acc: f32 = biasBuf[oc];
+      for (var ic: u32 = 0u; ic < IN_C; ic = ic + 1u) {
+        for (var kh: u32 = 0u; kh < K_H; kh = kh + 1u) {
+          let ih: i32 = i32(oh) * STRIDE_H + i32(kh) * DIL_H - PAD_TOP;
+          if (ih < 0 || ih >= IN_H) { continue; }
+          for (var kw: u32 = 0u; kw < K_W; kw = kw + 1u) {
+            let iw: i32 = i32(ow) * STRIDE_W + i32(kw) * DIL_W - PAD_LEFT;
+            if (iw < 0 || iw >= IN_W) { continue; }
+            let inIdx: u32 = (ic * u32(IN_H) + u32(ih)) * u32(IN_W) + u32(iw);
+            let wIdx: u32 = ((oc * IN_C + ic) * K_H + kh) * K_W + kw;
+            acc = acc + inputBuf[inIdx] * weightsBuf[wIdx];
+          }
+        }
+      }
+      outputBuf[(oc * OUT_H + oh) * OUT_W + ow] = acc;
+    }
+  `;
+}
+
 /** Workgroup sizes for CONV_2D dispatch - main thread uses these to
  *  compute the workgroup count from output dims. */
 export const CONV_DISPATCH_WORKGROUP = [CONV_WG_W, CONV_WG_H, CONV_WG_C];
@@ -486,6 +575,46 @@ export function batchMatmulShader(M, K, N, batchCount) {
         acc = acc + aBuf[aBase + k] * bBuf[k * N + n];
       }
       outputBuf[bi * M * N + m * N + n] = acc;
+    }
+  `;
+}
+
+export function maxPool2dNchwShader(cfg) {
+  const [, inC, inH, inW] = cfg.inShape;
+  const [, , outH, outW] = cfg.outShape;
+  return /* wgsl */`
+    @group(0) @binding(0) var<storage, read> inputBuf: array<f32>;
+    @group(0) @binding(1) var<storage, read_write> outputBuf: array<f32>;
+
+    const IN_C: u32 = ${inC}u;
+    const IN_H: i32 = ${inH};
+    const IN_W: i32 = ${inW};
+    const OUT_H: u32 = ${outH}u;
+    const OUT_W: u32 = ${outW}u;
+    const FILTER_H: u32 = ${cfg.filterH}u;
+    const FILTER_W: u32 = ${cfg.filterW}u;
+    const STRIDE_H: i32 = ${cfg.strideH};
+    const STRIDE_W: i32 = ${cfg.strideW};
+    const PAD_TOP: i32 = ${cfg.padTop};
+    const PAD_LEFT: i32 = ${cfg.padLeft};
+
+    @compute @workgroup_size(${CONV_WG_W}, ${CONV_WG_H}, ${CONV_WG_C})
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let ow: u32 = gid.x;
+      let oh: u32 = gid.y;
+      let c: u32 = gid.z;
+      if (ow >= OUT_W || oh >= OUT_H || c >= IN_C) { return; }
+      var mx: f32 = -1.0e30;
+      for (var kh: u32 = 0u; kh < FILTER_H; kh = kh + 1u) {
+        let ih: i32 = i32(oh) * STRIDE_H + i32(kh) - PAD_TOP;
+        if (ih < 0 || ih >= IN_H) { continue; }
+        for (var kw: u32 = 0u; kw < FILTER_W; kw = kw + 1u) {
+          let iw: i32 = i32(ow) * STRIDE_W + i32(kw) - PAD_LEFT;
+          if (iw < 0 || iw >= IN_W) { continue; }
+          mx = max(mx, inputBuf[(c * u32(IN_H) + u32(ih)) * u32(IN_W) + u32(iw)]);
+        }
+      }
+      outputBuf[(c * OUT_H + oh) * OUT_W + ow] = select(mx, 0.0, mx == -1.0e30);
     }
   `;
 }

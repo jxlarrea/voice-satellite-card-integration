@@ -373,7 +373,7 @@ def discover_microwakeword_models() -> list[str]:
 
 
 def discover_openwakeword_models() -> list[str]:
-    """Scan models/openwakeword/ for openWakeWord classifier TFLite files.
+    """Scan models/openwakeword/ for openWakeWord ONNX classifier files.
 
     Excludes the shared melspec + embedding models (they're loaded
     automatically alongside any classifier).  Returns an empty list if
@@ -385,7 +385,7 @@ def discover_openwakeword_models() -> list[str]:
         return []
 
     options: list[str] = []
-    for f in sorted(models_dir.glob("*.tflite")):
+    for f in sorted(models_dir.glob("*.onnx")):
         stem = f.stem
         if stem in _OWW_RESERVED_MODELS or stem in _COMMON_MODELS:
             continue

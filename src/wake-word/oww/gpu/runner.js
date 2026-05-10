@@ -32,10 +32,13 @@
 
 import {
   conv2dShader,
+  conv1dNcwShader,
+  conv2dNchwShader,
   CONV_DISPATCH_WORKGROUP,
   leakyReluShader,
   maximumScalarShader,
   maxPool2dShader,
+  maxPool2dNchwShader,
   padShader,
   ELEMENTWISE_WG,
   binaryElementwiseShader,
@@ -71,6 +74,7 @@ export class GpuModelRunner {
     this._compiled = compiled;
     // Map<tensorId, GPUBuffer> for constants (weights/biases) loaded once.
     this._constantBuffers = new Map();
+    this._zeroBuffers = new Map();
     // Map<tensorId, GPUBuffer> for activation intermediates re-used per call.
     this._activationBuffers = new Map();
     // Recorded compute pipelines + bind groups in op order.
@@ -163,6 +167,20 @@ export class GpuModelRunner {
     return this._constantBuffers.get(tensorId) || this._activationBuffers.get(tensorId);
   }
 
+  _zeroFloatBuffer(elements) {
+    const key = elements;
+    if (!this._zeroBuffers.has(key)) {
+      const data = new Float32Array(elements);
+      const buf = this._device.createBuffer({
+        size: alignedSize(data.byteLength),
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      this._device.queue.writeBuffer(buf, 0, data.buffer, 0, data.byteLength);
+      this._zeroBuffers.set(key, buf);
+    }
+    return this._zeroBuffers.get(key);
+  }
+
   get device() {
     return this._device;
   }
@@ -223,21 +241,39 @@ export class GpuModelRunner {
   }
 
   async _buildStep(op, tensors) {
+    if (op.opName === 'Constant') return null;
     if (op.opName === 'CONV_2D') return this._buildConv(op, tensors);
+    if (op.opName === 'Conv') return this._buildOnnxConv(op, tensors);
     if (op.opName === 'LEAKY_RELU') return this._buildLeakyRelu(op, tensors);
+    if (op.opName === 'LeakyRelu') return this._buildLeakyRelu(op, tensors);
     if (op.opName === 'MAXIMUM') return this._buildBinaryWithBroadcast(op, tensors, 'MAXIMUM');
+    if (op.opName === 'Max') return this._buildBinaryWithBroadcast(op, tensors, 'MAXIMUM');
     if (op.opName === 'MINIMUM') return this._buildBinaryWithBroadcast(op, tensors, 'MINIMUM');
     if (op.opName === 'MUL') return this._buildBinaryWithBroadcast(op, tensors, 'MUL');
+    if (op.opName === 'Mul') return this._buildBinaryWithBroadcast(op, tensors, 'MUL');
     if (op.opName === 'ADD') return this._buildBinaryWithBroadcast(op, tensors, 'ADD');
+    if (op.opName === 'Add') return this._buildBinaryWithBroadcast(op, tensors, 'ADD');
     if (op.opName === 'SUB') return this._buildBinaryWithBroadcast(op, tensors, 'SUB');
+    if (op.opName === 'Sub') return this._buildBinaryWithBroadcast(op, tensors, 'SUB');
+    if (op.opName === 'Div') return this._buildBinaryWithBroadcast(op, tensors, 'DIV');
+    if (op.opName === 'Pow') return this._buildBinaryWithBroadcast(op, tensors, 'POW');
     if (op.opName === 'LOG') return this._buildUnary(op, tensors, 'log(v)');
+    if (op.opName === 'Log') return this._buildUnary(op, tensors, 'log(v)');
+    if (op.opName === 'Clip') return this._buildClip(op, tensors);
     if (op.opName === 'TRANSPOSE') return this._buildTranspose(op, tensors);
+    if (op.opName === 'Transpose') return this._buildTranspose(op, tensors);
     if (op.opName === 'REDUCE_MAX') return this._buildReduceMax(op, tensors);
+    if (op.opName === 'ReduceMax') return this._buildReduceMax(op, tensors);
     if (op.opName === 'BATCH_MATMUL') return this._buildBatchMatmul(op, tensors);
+    if (op.opName === 'MatMul') return this._buildBatchMatmul(op, tensors);
     if (op.opName === 'EXPAND_DIMS' || op.opName === 'SQUEEZE') {
       return this._buildReshape(op, tensors);
     }
+    if (op.opName === 'Unsqueeze' || op.opName === 'Reshape' || op.opName === 'Cast') {
+      return this._buildReshape(op, tensors);
+    }
     if (op.opName === 'MAX_POOL_2D') return this._buildMaxPool(op, tensors);
+    if (op.opName === 'MaxPool') return this._buildOnnxMaxPool(op, tensors);
     if (op.opName === 'PAD') return this._buildPad(op, tensors);
     throw new Error(`GpuModelRunner: unsupported op ${op.opName}`);
   }
@@ -364,6 +400,67 @@ export class GpuModelRunner {
     return { kind: 'conv', pipeline, bindGroup, dispatchX, dispatchY, dispatchZ };
   }
 
+  _buildOnnxConv(op, tensors) {
+    const inMeta = tensors[op.inputs[0]];
+    const wMeta = tensors[op.inputs[1]];
+    const outMeta = tensors[op.outputs[0]];
+    const strides = onnxIntsAttr(op, 'strides') || new Array(inMeta.shape.length - 2).fill(1);
+    const pads = onnxIntsAttr(op, 'pads') || new Array((inMeta.shape.length - 2) * 2).fill(0);
+    const dilations = onnxIntsAttr(op, 'dilations') || new Array(inMeta.shape.length - 2).fill(1);
+    let wgsl;
+    let dispatchX;
+    let dispatchY;
+    let dispatchZ;
+    if (inMeta.shape.length === 3) {
+      wgsl = conv1dNcwShader({
+        inShape: inMeta.shape,
+        outShape: outMeta.shape,
+        weightShape: wMeta.shape,
+        strideW: strides[0],
+        dilationW: dilations[0],
+        padLeft: pads[0],
+      });
+      dispatchX = Math.ceil(outMeta.shape[2] / CONV_DISPATCH_WORKGROUP[0]);
+      dispatchY = Math.ceil(outMeta.shape[1] / CONV_DISPATCH_WORKGROUP[1]);
+      dispatchZ = 1;
+    } else {
+      wgsl = conv2dNchwShader({
+        inShape: inMeta.shape,
+        outShape: outMeta.shape,
+        weightShape: wMeta.shape,
+        strideH: strides[0],
+        strideW: strides[1],
+        dilationH: dilations[0],
+        dilationW: dilations[1],
+        padTop: pads[0],
+        padLeft: pads[1],
+      });
+      dispatchX = Math.ceil(outMeta.shape[3] / CONV_DISPATCH_WORKGROUP[0]);
+      dispatchY = Math.ceil(outMeta.shape[2] / CONV_DISPATCH_WORKGROUP[1]);
+      dispatchZ = Math.ceil(outMeta.shape[1] / CONV_DISPATCH_WORKGROUP[2]);
+    }
+    const pipeline = this._device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: this._device.createShaderModule({ code: wgsl }), entryPoint: 'main' },
+    });
+    const inputBuf = this._bufferFor(op.inputs[0]);
+    const weightsBuf = this._bufferFor(op.inputs[1]);
+    const biasBuf = op.inputs[2] !== undefined
+      ? this._bufferFor(op.inputs[2])
+      : this._zeroFloatBuffer(outMeta.shape[1]);
+    const outputBuf = this._bufferFor(op.outputs[0]);
+    const bindGroup = this._device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: inputBuf } },
+        { binding: 1, resource: { buffer: weightsBuf } },
+        { binding: 2, resource: { buffer: biasBuf } },
+        { binding: 3, resource: { buffer: outputBuf } },
+      ],
+    });
+    return { kind: 'conv', pipeline, bindGroup, dispatchX, dispatchY, dispatchZ };
+  }
+
   _buildLeakyRelu(op, tensors) {
     const inMeta = tensors[op.inputs[0]];
     const elementCount = shapeSize(inMeta.shape);
@@ -375,6 +472,54 @@ export class GpuModelRunner {
   _buildUnary(op, tensors, fnExpr) {
     const elementCount = shapeSize(tensors[op.inputs[0]].shape);
     const wgsl = unaryShader(elementCount, fnExpr);
+    return this._build1InElementwiseStep(op, wgsl, elementCount);
+  }
+
+  _buildClip(op, tensors) {
+    const elementCount = shapeSize(tensors[op.inputs[0]].shape);
+    const minMeta = tensors[op.inputs[1]];
+    const maxMeta = tensors[op.inputs[2]];
+    const maxValue = maxMeta?.constant?.[0] ?? Infinity;
+    if (minMeta && !minMeta.constant) {
+      const wgsl = /* wgsl */`
+        @group(0) @binding(0) var<storage, read> inputBuf: array<f32>;
+        @group(0) @binding(1) var<storage, read> minBuf: array<f32>;
+        @group(0) @binding(2) var<storage, read_write> outputBuf: array<f32>;
+        const N: u32 = ${elementCount}u;
+        const MAX_V: f32 = ${formatF(maxValue)};
+        @compute @workgroup_size(${ELEMENTWISE_WG})
+        fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+          let i: u32 = gid.x;
+          if (i >= N) { return; }
+          outputBuf[i] = min(max(inputBuf[i], minBuf[0]), MAX_V);
+        }
+      `;
+      const pipeline = this._device.createComputePipeline({
+        layout: 'auto',
+        compute: { module: this._device.createShaderModule({ code: wgsl }), entryPoint: 'main' },
+      });
+      const bindGroup = this._device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this._bufferFor(op.inputs[0]) } },
+          { binding: 1, resource: { buffer: this._bufferFor(op.inputs[1]) } },
+          { binding: 2, resource: { buffer: this._bufferFor(op.outputs[0]) } },
+        ],
+      });
+      return {
+        kind: 'clip',
+        pipeline,
+        bindGroup,
+        dispatchX: Math.ceil(elementCount / ELEMENTWISE_WG),
+        dispatchY: 1,
+        dispatchZ: 1,
+      };
+    }
+    const minValue = minMeta?.constant?.[0] ?? -Infinity;
+    const wgsl = unaryShader(
+      elementCount,
+      `min(max(v, ${formatF(minValue)}), ${formatF(maxValue)})`,
+    );
     return this._build1InElementwiseStep(op, wgsl, elementCount);
   }
 
@@ -484,12 +629,12 @@ export class GpuModelRunner {
 
   _buildTranspose(op, tensors) {
     const inMeta = tensors[op.inputs[0]];
-    const permMeta = tensors[op.inputs[1]];
     const outMeta = tensors[op.outputs[0]];
-    if (!permMeta.constant) {
-      throw new Error('GpuModelRunner: TRANSPOSE with dynamic perm not supported');
-    }
-    const perm = Array.from(permMeta.constant);
+    const permMeta = tensors[op.inputs[1]];
+    const perm = op.opName === 'Transpose'
+      ? onnxIntsAttr(op, 'perm')
+      : (permMeta?.constant ? Array.from(permMeta.constant) : null);
+    if (!perm) throw new Error('GpuModelRunner: TRANSPOSE with dynamic perm not supported');
     const wgsl = transposeShader(inMeta.shape, outMeta.shape, perm);
     const elementCount = shapeSize(outMeta.shape);
     return this._build1InElementwiseStep(op, wgsl, elementCount);
@@ -642,6 +787,41 @@ export class GpuModelRunner {
     return { kind: 'pad', pipeline, bindGroup, dispatchX, dispatchY, dispatchZ };
   }
 
+  _buildOnnxMaxPool(op, tensors) {
+    const inMeta = tensors[op.inputs[0]];
+    const outMeta = tensors[op.outputs[0]];
+    const kernel = onnxIntsAttr(op, 'kernel_shape') || [1, 1];
+    const strides = onnxIntsAttr(op, 'strides') || kernel;
+    const pads = onnxIntsAttr(op, 'pads') || [0, 0, 0, 0];
+    const wgsl = maxPool2dNchwShader({
+      inShape: inMeta.shape,
+      outShape: outMeta.shape,
+      filterH: kernel[0],
+      filterW: kernel[1],
+      strideH: strides[0],
+      strideW: strides[1],
+      padTop: pads[0],
+      padLeft: pads[1],
+    });
+    const pipeline = this._device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: this._device.createShaderModule({ code: wgsl }), entryPoint: 'main' },
+    });
+    const inputBuf = this._bufferFor(op.inputs[0]);
+    const outputBuf = this._bufferFor(op.outputs[0]);
+    const bindGroup = this._device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: inputBuf } },
+        { binding: 1, resource: { buffer: outputBuf } },
+      ],
+    });
+    const dispatchX = Math.ceil(outMeta.shape[3] / CONV_DISPATCH_WORKGROUP[0]);
+    const dispatchY = Math.ceil(outMeta.shape[2] / CONV_DISPATCH_WORKGROUP[1]);
+    const dispatchZ = Math.ceil(outMeta.shape[1] / CONV_DISPATCH_WORKGROUP[2]);
+    return { kind: 'pool', pipeline, bindGroup, dispatchX, dispatchY, dispatchZ };
+  }
+
   /**
    * Run the GPU pipeline over the supplied input data.  Returns a
    * Promise<Float32Array> of the output tensor; the same view is
@@ -662,9 +842,11 @@ export class GpuModelRunner {
 
   destroy() {
     for (const b of this._constantBuffers.values()) b.destroy();
+    for (const b of this._zeroBuffers.values()) b.destroy();
     for (const b of this._activationBuffers.values()) b.destroy();
     if (this._readBuffer) this._readBuffer.destroy();
     this._constantBuffers.clear();
+    this._zeroBuffers.clear();
     this._activationBuffers.clear();
     this._steps = [];
   }
@@ -682,6 +864,36 @@ const WGSL_BINARY_OP = {
   MUL: { infix: '*', commutative: true },
   ADD: { infix: '+', commutative: true },
   SUB: { infix: '-', commutative: false },
+  DIV: { infix: '/', commutative: false },
+  POW: {
+    infix: 'pow',
+    commutative: false,
+    elementwise: (n) => /* wgsl */`
+      @group(0) @binding(0) var<storage, read> aBuf: array<f32>;
+      @group(0) @binding(1) var<storage, read> bBuf: array<f32>;
+      @group(0) @binding(2) var<storage, read_write> outputBuf: array<f32>;
+      const N: u32 = ${n}u;
+      @compute @workgroup_size(64)
+      fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+        let i: u32 = gid.x;
+        if (i >= N) { return; }
+        outputBuf[i] = pow(aBuf[i], bBuf[i]);
+      }
+    `,
+    scalarConst: (n, s) => /* wgsl */`
+      @group(0) @binding(0) var<storage, read> aBuf: array<f32>;
+      @group(0) @binding(1) var<storage, read_write> outputBuf: array<f32>;
+      const N: u32 = ${n}u;
+      const S: f32 = ${formatF(s)};
+      @compute @workgroup_size(64)
+      fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+        let i: u32 = gid.x;
+        if (i >= N) { return; }
+        outputBuf[i] = pow(aBuf[i], S);
+      }
+    `,
+    runtimeFnExpr: 'pow(a, s)',
+  },
   MAXIMUM: {
     infix: 'max',
     commutative: true,
@@ -836,7 +1048,23 @@ function readPool2dOptions(op) {
   };
 }
 function readLeakyReluAlpha(op) {
+  const onnxAlpha = onnxFloatAttr(op, 'alpha');
+  if (typeof onnxAlpha === 'number') return onnxAlpha;
   return readF32(op.fb, op.optionsOff, FIELD_LEAKY_RELU_ALPHA, 0.01);
+}
+
+function onnxAttr(op, name) {
+  return op.node?.attrs?.get?.(name) || null;
+}
+
+function onnxIntsAttr(op, name) {
+  const a = onnxAttr(op, name);
+  return a?.ints?.length ? a.ints.slice() : null;
+}
+
+function onnxFloatAttr(op, name) {
+  const a = onnxAttr(op, name);
+  return a ? a.f : null;
 }
 function computePadding(paddingType, inH, inW, kernelH, kernelW, strideH, strideW, dilationH, dilationW, outH, outW) {
   if (paddingType === PADDING_VALID) return { top: 0, left: 0 };
