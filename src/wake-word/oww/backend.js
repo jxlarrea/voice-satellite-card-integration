@@ -47,15 +47,33 @@ const COOLDOWN_MS = 2000;
 const SLEEP_BUFFER_CHUNKS = 16; // ~1.28 s
 // Confirmation gate. For wake words, any score above cutoff must repeat
 // within the confirmation window; this filters one-frame TV/noise spikes.
-// The confirming wake hit must also be delayed enough to let the rest of
-// the phrase arrive; otherwise a strong prefix like "hey ja" can confirm on
-// the very next 80 ms frame before "arvis" is spoken.
-// The stop model keeps the old immediate high-score behavior for latency.
-// Scores in the narrow (cutoff, cutoff + margin] band always require
-// confirmation.
+// Two latency knobs here, both tunable independently of the kill-switch:
+//
+//  - WAKE_CONFIRM_MIN_FRAMES: the minimum number of inference frames
+//    between the first hit (parked) and the second hit (confirming).
+//    This is intentionally frame-based instead of wall-clock based: if
+//    replay/catch-up processing runs faster than real time, the adjacent
+//    audio evidence should still count.
+//
+//  - BORDERLINE_CONFIRM_WINDOW_FRAMES: the maximum number of inference
+//    frames the second hit can arrive in. Each OWW chunk is about 80 ms,
+//    so 8 frames is about 640 ms.
 const BORDERLINE_CONFIRM_MARGIN = 0.03;
-const WAKE_CONFIRM_MIN_DELAY_MS = 320;
-const BORDERLINE_CONFIRM_WINDOW_MS = 750;
+const WAKE_CONFIRM_MIN_FRAMES = 1;
+const BORDERLINE_CONFIRM_WINDOW_FRAMES = 8;
+// High-confidence bypass: scores at or above (cutoff + this margin)
+// trigger immediately on the first frame, skipping the two-frame
+// confirmation entirely. Disabled (null) because ok_nabu_v22 produces
+// 0.85+ raw spikes on unrelated TV/household speech, and those need to
+// go through the confirmation gate to be filtered. Only enable when the
+// model has been measured to keep single-frame FP peaks well below the
+// chosen bypass threshold on real ambient audio.
+const HIGH_CONFIDENCE_BYPASS_MARGIN = null;
+// Master switch for the borderline confirmation gate entirely. Leave
+// true unless the model has been measured to produce no single-frame
+// FP spikes above the cutoff on real ambient audio (TV / household
+// noise / coughs / multi-syllable "no no no" / repeated "ok X").
+const BORDERLINE_CONFIRM_ENABLED = true;
 // Training TODO: add prefix-only hard negatives for OWW wake words too
 // (for example "hey ja", "hey jar", "ok na") so partial phrases are rejected
 // by the model itself instead of relying only on runtime confirmation.
@@ -106,6 +124,7 @@ export class OwwBackend {
     // Last accepted-trigger timestamp (any keyword).  Used to enforce
     // COOLDOWN_MS so a single utterance can't fire repeatedly.
     this._lastTriggerAt = 0;
+    this._confirmFrameIndex = 0;
     // Energy-gate state.  Default to "sleeping" so the first burst of
     // real audio takes the wake path (cheap on/off transition logged
     // once).  _silentChunks counts consecutive low-RMS chunks; we sleep
@@ -186,6 +205,7 @@ export class OwwBackend {
     return {
       pendingConfirm: false,
       pendingConfirmAt: 0,
+      pendingConfirmFrame: -1,
       pendingConfirmScore: 0,
     };
   }
@@ -225,6 +245,7 @@ export class OwwBackend {
       if (!w) continue;
       w.pendingConfirm = false;
       w.pendingConfirmAt = 0;
+      w.pendingConfirmFrame = -1;
       w.pendingConfirmScore = 0;
     }
   }
@@ -342,6 +363,7 @@ export class OwwBackend {
     });
     const inferenceTimings = this._enableTimings ? this._inference.consumeLastTimings?.() : null;
     this._latestScores = probs;
+    const confirmFrame = ++this._confirmFrameIndex;
 
     // Two passes over the active keywords on their current frame scores:
     //   1. Track the leader (highest score) for display, even if no trigger
@@ -370,7 +392,7 @@ export class OwwBackend {
         leaderScore = p;
         leaderCutoff = cutoff;
       }
-      const tt = this._gateBorderline(w, p, cutoff, name, now);
+      const tt = this._gateBorderline(w, p, cutoff, name, now, confirmFrame);
       if (tt && p > triggerScore) {
         triggerName = name;
         triggerScore = p;
@@ -421,41 +443,76 @@ export class OwwBackend {
    *   - borderline + stale pending   → drop pending, no trigger
    * Mirrors microWakeWord (micro-inference.js _shouldTriggerKeyword).
    */
-  _gateBorderline(w, score, cutoff, name, now) {
+  _gateBorderline(w, score, cutoff, name, now, frameIndex) {
     if (score <= cutoff) {
       w.pendingConfirm = false;
       w.pendingConfirmAt = 0;
+      w.pendingConfirmFrame = -1;
       w.pendingConfirmScore = 0;
       return null;
+    }
+    // Confirmation disabled by the BORDERLINE_CONFIRM_ENABLED kill-switch:
+    // any score above cutoff triggers immediately on this frame. Removes
+    // the two-frame confirmation latency entirely. Only safe when the model
+    // separates wake-word and confusable speech cleanly enough that the
+    // cutoff alone is a sufficient gate.
+    if (!BORDERLINE_CONFIRM_ENABLED) {
+      w.pendingConfirm = false;
+      w.pendingConfirmAt = 0;
+      w.pendingConfirmFrame = -1;
+      w.pendingConfirmScore = 0;
+      return 'immediate';
+    }
+    // High-confidence bypass: a score well above the cutoff is treated as
+    // a clean wake-word utterance and triggers without waiting for a
+    // confirming second frame. Typical FPs (TV speech, coughs, confusable
+    // "ok X"/"hey X" phrases) rarely break cutoff + 0.30 on a single
+    // frame; clean close-mic wake-word utterances commonly exceed it.
+    if (
+      typeof HIGH_CONFIDENCE_BYPASS_MARGIN === 'number'
+      && score >= cutoff + HIGH_CONFIDENCE_BYPASS_MARGIN
+    ) {
+      w.pendingConfirm = false;
+      w.pendingConfirmAt = 0;
+      w.pendingConfirmFrame = -1;
+      w.pendingConfirmScore = 0;
+      return 'immediate';
     }
     const highConfidence = score >= cutoff + BORDERLINE_CONFIRM_MARGIN;
     if (name === 'stop' && highConfidence) {
       w.pendingConfirm = false;
       w.pendingConfirmAt = 0;
+      w.pendingConfirmFrame = -1;
       w.pendingConfirmScore = 0;
       return 'immediate';
     }
     // Wake-word scores and stop borderline scores require confirmation.
-    if (w.pendingConfirm && (now - w.pendingConfirmAt) <= BORDERLINE_CONFIRM_WINDOW_MS) {
+    if (w.pendingConfirm) {
+      const frameGap = frameIndex - w.pendingConfirmFrame;
       const ageMs = now - w.pendingConfirmAt;
-      if (name !== 'stop' && ageMs < WAKE_CONFIRM_MIN_DELAY_MS) {
+      if (frameGap >= 1 && frameGap <= BORDERLINE_CONFIRM_WINDOW_FRAMES) {
+        if (name !== 'stop' && frameGap < WAKE_CONFIRM_MIN_FRAMES) {
+          w.pendingConfirmScore = Math.max(w.pendingConfirmScore, score);
+          return null;
+        }
+        const firstScore = w.pendingConfirmScore;
+        w.pendingConfirm = false;
+        w.pendingConfirmAt = 0;
+        w.pendingConfirmFrame = -1;
+        w.pendingConfirmScore = 0;
+        this._log?.log?.(
+          'wake-word',
+          `OWW borderline confirm passed: ${name} first=${firstScore.toFixed(3)} second=${score.toFixed(3)} frames=${frameGap} age=${ageMs.toFixed(0)}ms cutoff=${cutoff.toFixed(3)}`,
+        );
+        return 'confirmed';
+      }
+      if (frameGap <= 0) {
         w.pendingConfirmScore = Math.max(w.pendingConfirmScore, score);
         return null;
       }
-      const firstScore = w.pendingConfirmScore;
-      w.pendingConfirm = false;
-      w.pendingConfirmAt = 0;
-      w.pendingConfirmScore = 0;
       this._log?.log?.(
         'wake-word',
-        `OWW borderline confirm passed: ${name} first=${firstScore.toFixed(3)} second=${score.toFixed(3)} age=${ageMs.toFixed(0)}ms cutoff=${cutoff.toFixed(3)}`,
-      );
-      return 'confirmed';
-    }
-    if (w.pendingConfirm) {
-      this._log?.log?.(
-        'wake-word',
-        `OWW confirm expired: ${name} second=${score.toFixed(3)} cutoff=${cutoff.toFixed(3)}`,
+        `OWW confirm expired: ${name} second=${score.toFixed(3)} frames=${frameGap} cutoff=${cutoff.toFixed(3)}`,
       );
     } else {
       this._log?.log?.(
@@ -465,6 +522,7 @@ export class OwwBackend {
     }
     w.pendingConfirm = true;
     w.pendingConfirmAt = now;
+    w.pendingConfirmFrame = frameIndex;
     w.pendingConfirmScore = score;
     return null;
   }
@@ -557,6 +615,7 @@ export class OwwBackend {
   }
   reset() {
     this._lastTriggerAt = 0;
+    this._confirmFrameIndex = 0;
     this._resetStreamState();
     // Reset gate to sleeping so the next chunk has to cross the wake
     // threshold before inference resumes - prevents post-pause stale
