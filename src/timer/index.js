@@ -44,6 +44,7 @@ export class TimerManager {
     // Alert state
     this._alertActive = false;
     this._alertEl = null;
+    this._lastFinishedTimers = [];
   }
   update() {
     if (this._subscribed) return;
@@ -83,6 +84,7 @@ export class TimerManager {
       this._deferredAlertTimeout = null;
     }
     this._deferredFinishIds = [];
+    this._lastFinishedTimers = [];
     removeContainer(this);
     this.clearAlert();
     this._timers = [];
@@ -135,6 +137,7 @@ export class TimerManager {
           existing.startHours = raw.start_hours || 0;
           existing.startMinutes = raw.start_minutes || 0;
           existing.startSeconds = raw.start_seconds || 0;
+          existing.pipelineId = raw.pipeline_id || existing.pipelineId || '';
         }
         newTimers.push(existing);
       } else {
@@ -157,6 +160,7 @@ export class TimerManager {
           startHours: raw.start_hours || 0,
           startMinutes: raw.start_minutes || 0,
           startSeconds: raw.start_seconds || 0,
+          pipelineId: raw.pipeline_id || '',
           el: null,
         });
       }

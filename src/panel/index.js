@@ -21,7 +21,7 @@ import {
 import { DEFAULT_CONFIG, State, VERSION } from '../constants.js';
 import { renderPreview } from '../editor/preview.js';
 import {
-  behaviorSchema, entitySchema, buildAutoStartSchema, microphoneSchema, debugSchema, timersSchema,
+  behaviorSchema, entitySchema, buildAutoStartSchema, microphoneSchema, debugSchema, buildTimersSchema,
   behaviorLabels, behaviorHelpers,
 } from '../editor/behavior.js';
 import { skinSchema, skinLabels, skinHelpers } from '../editor/skin.js';
@@ -68,7 +68,7 @@ function buildPanelSchema(_cfg) {
   return [
     ...behaviorSchema,
     ...skinSchema,
-    ...timersSchema,
+    ...buildTimersSchema(_cfg),
     ...microphoneSchema,
     ...debugSchema,
   ];
@@ -402,6 +402,7 @@ class VoiceSatellitePanel extends HTMLElement {
   _onSettingsChange(newData) {
     const prevScreensaverType = this._config.screensaver_type;
     const prevScreensaverEnabled = this._config.screensaver_enabled;
+    const prevTimerTtsEnabled = this._config.timer_tts_enabled;
     if (Object.prototype.hasOwnProperty.call(newData, 'microphone_device_id')
         && !newData.microphone_device_id) {
       newData.microphone_device_id = 'default';
@@ -417,7 +418,12 @@ class VoiceSatellitePanel extends HTMLElement {
 
     // Sync main settings form
     const settingsForm = this.querySelector(`.${P}-form-container ha-form`);
-    if (settingsForm) settingsForm.data = Object.assign({}, this._config);
+    if (settingsForm) {
+      settingsForm.data = Object.assign({}, this._config);
+      if (this._config.timer_tts_enabled !== prevTimerTtsEnabled) {
+        settingsForm.schema = buildPanelSchema(this._config);
+      }
+    }
 
     // Sync the auto-start toggle in the Settings card
     const autostartForm = this.querySelector(`.${P}-autostart-container ha-form`);

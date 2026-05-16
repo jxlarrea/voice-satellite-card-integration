@@ -57,6 +57,7 @@ Per-browser overlay appearance, microphone processing, timer behavior, and debug
 | **Custom CSS** | Advanced CSS overrides applied on top of the selected skin |
 | **Hide on-screen countdown** *(Timers)* | Suppresses the countdown pill while a timer is running. The timer still fires and the alert still plays at zero |
 | **Hide timer name on alert** *(Timers)* | Hides the timer name shown below the alert when a timer finishes |
+| **Speak timer alert phrase** *(Timers)* | Adds a configurable spoken phrase after every two alert chimes. The next chime pair starts shortly after the phrase ends. Uses the same Assist pipeline that created the timer |
 | **Noise suppression** *(Wake Word / STT)* | Browser-level noise suppression on the microphone input. Configurable independently for each capture phase |
 | **Echo cancellation** *(Wake Word / STT)* | Browser-level echo cancellation. Configurable independently for each capture phase |
 | **Auto gain control** *(Wake Word / STT)* | Browser-level automatic gain control. Configurable independently for each capture phase |
@@ -119,9 +120,12 @@ custom_css: ''                     # CSS overrides inside the mini card shadow D
 
 ### Timers
 
-Per-browser toggles that control the on-screen behavior of timers without affecting how they actually run. Live in the **Advanced** card under the **Timers** expandable. Both default off and take effect live without restarting the engine. See the [Timers reference](timers.md) for the full picture.
+Per-browser options that control the on-screen and spoken behavior of timers without affecting how they actually run. Live in the **Advanced** card under the **Timers** expandable and take effect live without restarting the engine. See the [Timers reference](timers.md) for the full picture.
 
 | Setting | Description |
 |---------|-------------|
 | **Hide on-screen countdown** | Suppresses the countdown pill while a timer is running. The timer still fires and the alert still plays at zero. Useful when a tablet doubles as a wall display where pills feel intrusive |
 | **Hide timer name on alert** | When a timer finishes, hides the timer name shown below the alert. The icon, time, and chime still appear |
+| **Speak timer alert phrase** | Adds a spoken phrase after every two alert chimes. When enabled, the timer alert repeats as `chime -> chime -> phrase -> short pause` until dismissed |
+| **Timer alert phrase** | Phrase for unnamed timers. Default: `Your timer is up.` |
+| **Named timer alert phrase** | Phrase for named timers. Default: `Your %%TIMER_NAME%% timer is up.` Use `%%TIMER_NAME%%` where the runtime timer name should be inserted |

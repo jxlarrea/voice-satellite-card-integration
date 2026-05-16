@@ -18,7 +18,8 @@ What you see on the satellite:
 
 1. **Countdown pill** appears at the top of the overlay as soon as the timer is created. The pill shows the remaining time and animates a progress bar. Multiple timers stack independently.
 2. **Alert** fires when the timer reaches zero: a centered alert pill flashes, the alert chime loops, and the timer name (if any) is shown below the pill in the skin's assistant text style. The wake-word stop interrupter is enabled while the alert is active so you can say "stop" to dismiss it.
-3. **Cleanup** happens only when dismissed (double-tap or "stop" word). Timer alerts do not auto-dismiss; the alert chime keeps looping until you dismiss it.
+3. **Optional spoken alert phrase** can be enabled from the side panel. When enabled, the alert repeats as `chime -> chime -> phrase -> short pause` until dismissed. The next chime pair starts about 500 ms after the phrase ends. The phrase is synthesized with the same Assist pipeline that created the timer, so dual-pipeline setups keep the expected language and voice.
+4. **Cleanup** happens only when dismissed (double-tap or "stop" word). Timer alerts do not auto-dismiss; the alert chime keeps looping until you dismiss it.
 
 Pill appearance is controlled by the active skin. Both pill rendering and the timer-name label can be hidden in the side panel without affecting timer behavior, see [Side panel options](#side-panel-options).
 
@@ -97,7 +98,7 @@ The satellite entity exposes timer state for templates and triggers:
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `active_timers` | list | Active timer objects, each with `id`, `name`, `total_seconds`, `started_at` |
+| `active_timers` | list | Active timer objects, each with `id`, `name`, `total_seconds`, `started_at`, and `pipeline_id` |
 | `last_timer_event` | string | Last event type: `started`, `updated`, `cancelled`, or `finished` |
 
 Example template, true when the kitchen tablet has at least one running timer:
@@ -115,5 +116,8 @@ Per-browser toggles under **Advanced > Timers** in the sidebar panel:
 | **Hide on-screen countdown** | Off | Suppresses the countdown pill while the timer is running. The timer still fires and the alert still plays at zero. Useful for tablets that double as a wall display where pills feel intrusive |
 | **Show timer name inside pill** | On | Renders the timer name alongside the countdown, e.g. `⏱ Stir the sauce \| 15:30`. Names longer than 25 characters are truncated with `...`. Unnamed timers always render as time-only |
 | **Hide timer name on alert** | Off | When a timer finishes, hides the timer name shown below the alert. The icon, time, and chime still appear |
+| **Speak timer alert phrase** | Off | Adds a spoken phrase after every two alert chimes, then starts the next chime pair after a short pause. Enabling this reveals the phrase fields below |
+| **Timer alert phrase** | `Your timer is up.` | Phrase for unnamed timers. Translate this to the language you use with this satellite |
+| **Named timer alert phrase** | `Your %%TIMER_NAME%% timer is up.` | Phrase for named timers. `%%TIMER_NAME%%` is replaced with the timer name when the alert fires |
 
-All three are stored per-browser in localStorage. Toggling them takes effect live without restarting the engine.
+These settings are stored per-browser in localStorage. Toggling them takes effect live without restarting the engine.

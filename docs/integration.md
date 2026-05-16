@@ -70,7 +70,7 @@ The satellite entity exposes the following attributes for use in templates and a
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `active_timers` | list | Active timer objects, each with `id`, `name`, `total_seconds`, `started_at` |
+| `active_timers` | list | Active timer objects, each with `id`, `name`, `total_seconds`, `started_at`, and `pipeline_id` |
 | `last_timer_event` | string | Last timer event type: `started`, `updated`, `cancelled`, or `finished` |
 | `muted` | boolean | Current mute switch state |
 | `wake_sound` | boolean | Current wake sound switch state |

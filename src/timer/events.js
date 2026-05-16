@@ -38,10 +38,19 @@ export function processStateChange(mgr, attrs) {
 
   // If timers were removed and the last event was "finished", show alert
   if (removedIds.length > 0 && lastEvent === 'finished') {
+    const removedTimers = removedIds
+      .map((id) => mgr.timers.find((t) => t.id === id))
+      .filter(Boolean);
+    mgr._lastFinishedTimers = removedTimers.map((t) => ({
+      id: t.id,
+      name: t.name || '',
+      pipelineId: t.pipelineId || '',
+    }));
+
     // Capture names BEFORE removing the timers from mgr.timers, so the
     // alert overlay can show what just fired (e.g. "Stir the sauce").
-    const removedNames = removedIds
-      .map((id) => mgr.timers.find((t) => t.id === id)?.name)
+    const removedNames = removedTimers
+      .map((t) => t?.name)
       .filter((n) => typeof n === 'string' && n.trim());
 
     // Check if any removed timer still has visual time remaining (deferred start)

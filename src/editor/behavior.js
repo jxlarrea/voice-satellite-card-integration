@@ -105,19 +105,34 @@ export const debugSchema = [
   { name: 'debug', selector: { boolean: {} } },
 ];
 
-export const timersSchema = [
-  {
-    type: 'expandable',
-    name: '',
-    title: t(null, 'editor.behavior.timers', 'Timers'),
-    flatten: true,
-    schema: [
-      { name: 'hide_timer_pills', default: false, selector: { boolean: {} } },
-      { name: 'show_timer_name_in_pill', default: true, selector: { boolean: {} } },
-      { name: 'hide_timer_name_on_alert', default: false, selector: { boolean: {} } },
-    ],
-  },
-];
+export function buildTimersSchema(cfg) {
+  const timerTtsEnabled = cfg?.timer_tts_enabled === true;
+  const schema = [
+    { name: 'hide_timer_pills', default: false, selector: { boolean: {} } },
+    { name: 'show_timer_name_in_pill', default: true, selector: { boolean: {} } },
+    { name: 'hide_timer_name_on_alert', default: false, selector: { boolean: {} } },
+    { name: 'timer_tts_enabled', default: false, selector: { boolean: {} } },
+  ];
+
+  if (timerTtsEnabled) {
+    schema.push(
+      { name: 'timer_tts_text', default: 'Your timer is up.', selector: { text: {} } },
+      { name: 'timer_named_tts_text', default: 'Your %%TIMER_NAME%% timer is up.', selector: { text: {} } },
+    );
+  }
+
+  return [
+    {
+      type: 'expandable',
+      name: '',
+      title: t(null, 'editor.behavior.timers', 'Timers'),
+      flatten: true,
+      schema,
+    },
+  ];
+}
+
+export const timersSchema = buildTimersSchema();
 
 export const behaviorLabels = {
   satellite_entity: t(null, 'editor.behavior.satellite_entity', 'Satellite entity'),
@@ -127,6 +142,9 @@ export const behaviorLabels = {
   hide_timer_pills: t(null, 'editor.behavior.hide_timer_pills', 'Hide on-screen countdown'),
   show_timer_name_in_pill: t(null, 'editor.behavior.show_timer_name_in_pill', 'Show timer name inside pill'),
   hide_timer_name_on_alert: t(null, 'editor.behavior.hide_timer_name_on_alert', 'Hide timer name on alert'),
+  timer_tts_enabled: t(null, 'editor.behavior.timer_tts_enabled', 'Speak timer alert phrase'),
+  timer_tts_text: t(null, 'editor.behavior.timer_tts_text', 'Timer alert phrase'),
+  timer_named_tts_text: t(null, 'editor.behavior.timer_named_tts_text', 'Named timer alert phrase'),
   // Wake-word group
   wake_word_noise_suppression: t(null, 'editor.behavior.noise_suppression', 'Noise suppression'),
   wake_word_echo_cancellation: t(null, 'editor.behavior.echo_cancellation', 'Echo cancellation'),
@@ -150,6 +168,9 @@ export const behaviorHelpers = {
   hide_timer_pills: t(null, 'editor.behavior.helper_hide_timer_pills', 'Hide the countdown pill on screen. Timers still run and the alert still fires when they finish.'),
   show_timer_name_in_pill: t(null, 'editor.behavior.helper_show_timer_name_in_pill', 'Display the timer name alongside the countdown in the pill (e.g. "Stir the sauce | 15:30"). Names longer than 25 characters are truncated.'),
   hide_timer_name_on_alert: t(null, 'editor.behavior.helper_hide_timer_name_on_alert', 'When a timer finishes, hide the timer name shown below the alert.'),
+  timer_tts_enabled: t(null, 'editor.behavior.helper_timer_tts_enabled', 'Speak a configurable phrase between timer alert chimes. The phrase is synthesized with the Assist pipeline that created the timer.'),
+  timer_tts_text: t(null, 'editor.behavior.helper_timer_tts_text', 'Phrase for unnamed timers. Translate this for the language you use with this satellite.'),
+  timer_named_tts_text: t(null, 'editor.behavior.helper_timer_named_tts_text', 'Phrase for named timers. Use %%TIMER_NAME%% where the timer name should be inserted.'),
   stt_followup_delay_ms: t(null, 'editor.behavior.helper_stt_followup_delay_ms', 'Pause between the assistant finishing speaking and the mic listening again on follow-up turns. Use this if the tail of the response (last word or two) is being captured into your next reply. Common on tablets without hardware echo cancellation, especially with synthesized voices like Piper. Try 300-500 ms; leave at 0 if follow-ups already work cleanly.'),
   stt_followup_chime: t(null, 'editor.behavior.helper_stt_followup_chime', 'Play the wake chime when the mic starts listening for a follow-up turn, so you have an audible "speak now" cue. Pairs naturally with a non-zero follow-up listen delay.'),
 };

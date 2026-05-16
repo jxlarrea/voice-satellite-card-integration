@@ -103,6 +103,9 @@ export const DEFAULT_CONFIG = {
   hide_timer_pills: false,
   hide_timer_name_on_alert: false,
   show_timer_name_in_pill: true,
+  timer_tts_enabled: false,
+  timer_tts_text: 'Your timer is up.',
+  timer_named_tts_text: 'Your %%TIMER_NAME%% timer is up.',
 
   // Skin
   skin: 'default',

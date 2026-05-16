@@ -48,7 +48,7 @@ When **Reactive activity bar** is enabled, the bar also responds to real-time mi
 
 ## Timers
 
-Voice-activated timers work out of the box: "Set a 5 minute timer", "Set a pizza timer for 10 minutes", "Cancel the timer". Pills appear on the overlay with a live countdown, an alert chime fires on completion, and double-tap dismisses.
+Voice-activated timers work out of the box: "Set a 5 minute timer", "Set a pizza timer for 10 minutes", "Cancel the timer". Pills appear on the overlay with a live countdown, an alert chime fires on completion, and double-tap dismisses. The sidebar panel can also enable a configurable spoken phrase that repeats after every two alert chimes, with only a short pause before the next chime pair.
 
 Timers can also be started from automations via the `voice_satellite.start_timer` action, and the on-screen pill / alert label can be hidden via the side panel without changing how timers run.
 

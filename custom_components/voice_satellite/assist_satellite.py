@@ -1553,6 +1553,10 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             m = timer_info.start_minutes or 0
             s = timer_info.start_seconds or 0
             total = h * 3600 + m * 60 + s
+            try:
+                pipeline_id = self._resolve_pipeline()
+            except Exception:  # noqa: BLE001 - timer should still start
+                pipeline_id = None
             # Create a new list (not append) so HA detects the attribute change.
             # In-place mutation would also modify the previously written state's
             # reference to the same list, making old == new and suppressing
@@ -1565,6 +1569,7 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
                 "start_hours": h,
                 "start_minutes": m,
                 "start_seconds": s,
+                "pipeline_id": pipeline_id or "",
             }]
             _LOGGER.debug(
                 "Timer started on '%s': %s (%ds)",

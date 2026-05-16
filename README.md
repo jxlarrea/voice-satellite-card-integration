@@ -140,7 +140,7 @@ See the [Skins & Customization reference](docs/customization.md) for the skin li
 
 ## Timers
 
-Voice timers ("Set a 5 minute timer", "Cancel the pizza timer") work out of the box, with countdown pills on the overlay and an alert chime on completion. Timers can also be started from automations via the `voice_satellite.start_timer` action, and the on-screen pill or alert label can be hidden via the side panel without changing how timers run.
+Voice timers ("Set a 5 minute timer", "Cancel the pizza timer") work out of the box, with countdown pills on the overlay and an alert chime on completion. Timers can also be started from automations via the `voice_satellite.start_timer` action. The side panel can hide the on-screen pill or alert label, and can optionally speak a configurable alert phrase after every two chimes, with only a short pause before the next chime pair.
 
 See the [Timers reference](docs/timers.md) for voice sentences, the action schema, automation examples, side-panel toggles, and entity attributes.
 
