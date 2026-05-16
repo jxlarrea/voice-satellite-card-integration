@@ -10,7 +10,7 @@
  * 3. HA state_changed -> active_timers entry removed + last_timer_event
  *    - "finished" -> show alert (blur + chime + 0:00 display)
  *    - "cancelled" -> silently remove pill
- * 4. Alert dismissed by double-tap or auto-dismiss timeout
+ * 4. Alert dismissed by double-tap or stop word
  */
 
 import { subscribeToEntity, unsubscribeEntity } from '../shared/entity-subscription.js';

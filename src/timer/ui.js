@@ -3,7 +3,6 @@
 import { playChime, CHIME_ALERT } from '../audio/chime.js';
 
 let _chimeInterval = null;
-let _dismissTimeout = null;
 // Screensaver keepalive: while the alert is on screen we ping the
 // in-app idle timer (notifyActivity) AND Fully Kiosk's native screensaver
 // every 4 s so neither covers the alert UI before the user sees it.
@@ -80,8 +79,7 @@ export function showAlert(mgr, names) {
   // Dismiss the in-app screensaver and keep both it and Fully Kiosk's
   // native one suppressed for the duration of the alert.  Otherwise the
   // chime fires unattended behind whichever screensaver re-activates on
-  // its idle timeout (in-app default is 10 s - well under the alert's
-  // 60 s auto-dismiss).  Mirrors the media-player video/image keepalive.
+  // its idle timeout.  Mirrors the media-player video/image keepalive.
   startScreensaverKeepalive(mgr);
 
   const wakeWord = mgr.card.wakeWord;
@@ -98,13 +96,6 @@ export function showAlert(mgr, names) {
   playAlertChime(mgr);
   if (_chimeInterval) clearInterval(_chimeInterval);
   _chimeInterval = setInterval(() => playAlertChime(mgr), Timing.TIMER_CHIME_INTERVAL);
-
-  // Auto-dismiss after 60 seconds
-  const duration = 60;
-  if (duration > 0) {
-    if (_dismissTimeout) clearTimeout(_dismissTimeout);
-    _dismissTimeout = setTimeout(() => mgr.clearAlert(), duration * 1000);
-  }
 }
 
 /** @param {import('./index.js').TimerManager} mgr */
@@ -122,12 +113,6 @@ export function clearAlert(mgr) {
   if (_chimeInterval) {
     clearInterval(_chimeInterval);
     _chimeInterval = null;
-  }
-
-  // Cancel auto-dismiss
-  if (_dismissTimeout) {
-    clearTimeout(_dismissTimeout);
-    _dismissTimeout = null;
   }
 
   mgr.card.ui.clearTimerAlert();

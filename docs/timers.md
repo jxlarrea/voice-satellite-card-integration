@@ -18,7 +18,7 @@ What you see on the satellite:
 
 1. **Countdown pill** appears at the top of the overlay as soon as the timer is created. The pill shows the remaining time and animates a progress bar. Multiple timers stack independently.
 2. **Alert** fires when the timer reaches zero: a centered alert pill flashes, the alert chime loops, and the timer name (if any) is shown below the pill in the skin's assistant text style. The wake-word stop interrupter is enabled while the alert is active so you can say "stop" to dismiss it.
-3. **Cleanup** happens on dismiss (double-tap, "stop" word, or 60-second auto-dismiss).
+3. **Cleanup** happens only when dismissed (double-tap or "stop" word). Timer alerts do not auto-dismiss; the alert chime keeps looping until you dismiss it.
 
 Pill appearance is controlled by the active skin. Both pill rendering and the timer-name label can be hidden in the side panel without affecting timer behavior, see [Side panel options](#side-panel-options).
 
