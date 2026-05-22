@@ -255,7 +255,7 @@ export function handleIntentProgress(mgr, eventData) {
     return;
   }
 
-  const chunk = eventData.chat_log_delta.content;
+  const chunk = fixTextEncoding(eventData.chat_log_delta.content);
   if (typeof chunk !== 'string') return;
 
   const { chat } = mgr.card;
@@ -641,6 +641,26 @@ export function handleError(mgr, errorData) {
 }
 
 /**
+ * Normalize a string to NFC composed form, ensuring umlauts (ä, ö, ü, etc.)
+ * and other accented characters are represented as single code points rather
+ * than decomposed base+combining-mark sequences. This avoids display issues
+ * when the HA pipeline returns text in NFD or with encoding artefacts.
+ * @param {string|null} text
+ * @returns {string|null}
+ */
+function fixTextEncoding(text) {
+  if (typeof text !== 'string') return text;
+  // NFC normalisation + forced re-encoding round-trip to flush any
+  // malformed UTF-16 surrogates or encoding artefacts from the pipeline.
+  try {
+    return new TextDecoder().decode(new TextEncoder().encode(text)).normalize('NFC');
+  } catch {
+    // Fallback: NFC only (safe in all modern browsers)
+    return text.normalize('NFC');
+  }
+}
+
+/**
  * Extract response text from intent_output, trying multiple HA response formats.
  * @param {object} eventData
  * @returns {string|null}
@@ -653,5 +673,5 @@ function extractResponseText(eventData) {
     || response?.speech?.speech
     || (typeof response?.plain === 'string' ? response.plain : null)
     || (typeof response === 'string' ? response : null);
-  return result;
+  return fixTextEncoding(result);
 }
