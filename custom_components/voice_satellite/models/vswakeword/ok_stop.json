@@ -1,0 +1,163 @@
+{
+  "name": "ok_stop",
+  "format": "vs-wake-word-ctc-v1",
+  "recommended_threshold": 0.5,
+  "input": {
+    "name": "input",
+    "shape": [
+      1,
+      128,
+      40
+    ],
+    "dtype": "float32",
+    "feature": "log_mel"
+  },
+  "output": {
+    "name": "log_probs",
+    "shape": [
+      1,
+      49,
+      52
+    ],
+    "dtype": "float32",
+    "meaning": "frame_level_phoneme_log_probabilities"
+  },
+  "feature_config": {
+    "sample_rate": 16000,
+    "window_ms": 1300,
+    "frame_ms": 25,
+    "hop_ms": 10,
+    "n_fft": 512,
+    "n_mels": 40,
+    "f_min": 80.0,
+    "f_max": 7600.0,
+    "log_floor": 1e-06,
+    "window_samples": 20800,
+    "frame_samples": 400,
+    "hop_samples": 160,
+    "frames": 128
+  },
+  "ctc": {
+    "vocab_size": 52,
+    "blank_id": 1,
+    "pad_id": 0,
+    "word_sep_id": 2,
+    "inventory": [
+      "<pad>",
+      "<blank>",
+      " ",
+      "\u02d0",
+      "a",
+      "\u0251",
+      "\u0250",
+      "\u0254",
+      "\u00e6",
+      "e",
+      "\u025b",
+      "\u025c",
+      "\u0259",
+      "\u025a",
+      "i",
+      "\u026a",
+      "\u0268",
+      "\u1d7b",
+      "o",
+      "\u0252",
+      "u",
+      "\u028a",
+      "\u028c",
+      "b",
+      "d",
+      "f",
+      "\u0261",
+      "h",
+      "j",
+      "k",
+      "l",
+      "m",
+      "n",
+      "\u014b",
+      "p",
+      "r",
+      "\u0279",
+      "\u027e",
+      "s",
+      "\u0283",
+      "t",
+      "v",
+      "w",
+      "z",
+      "\u0292",
+      "\u00f0",
+      "\u03b8",
+      "\u0294",
+      "t\u0283",
+      "d\u0292",
+      "x",
+      "\u02b2"
+    ],
+    "wake_word_targets": [
+      [
+        18,
+        21,
+        29,
+        9,
+        15,
+        2,
+        38,
+        40,
+        5,
+        3,
+        34
+      ]
+    ],
+    "wake_word_target_phonemes": [
+      [
+        "o",
+        "\u028a",
+        "k",
+        "e",
+        "\u026a",
+        " ",
+        "s",
+        "t",
+        "\u0251",
+        "\u02d0",
+        "p"
+      ]
+    ],
+    "wake_word_target_anchors": [
+      [
+        6,
+        7
+      ]
+    ],
+    "max_edit_distance": 1,
+    "wake_word_trail_tolerance": 3,
+    "min_matched_confidence": 2.0
+  },
+  "runtime": {
+    "required_hits": 2,
+    "hit_mode": "consecutive",
+    "cooldown_ms": 2000,
+    "high_confidence_bypass": 3.0
+  },
+  "best_epoch": 91,
+  "best_val": {
+    "loss": 1.0062302708625794,
+    "exact_decode_acc": 0.5092,
+    "wake_detect_rate": 0.7783540802213001,
+    "wake_fp_rate": 0.0023719165085388993,
+    "wake_pos_total": 2892,
+    "wake_fp_total": 2108,
+    "silence_nonblank_rate": 0.03669724770642202,
+    "silence_nonblank_total": 436,
+    "silence_nonblank_hits": 16,
+    "utterance_wake_recall": 0.8047658862876255,
+    "utterance_fp_rate": 0.0028702640642939152,
+    "utterance_pos_total": 2392,
+    "utterance_fp_total": 1742
+  },
+  "deployed_from": "data/runs/ok_stop_v5/checkpoints/ok_stop-ctc-best-ep091.pt",
+  "stop_classifier": true
+}
