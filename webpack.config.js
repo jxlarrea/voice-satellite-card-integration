@@ -37,6 +37,16 @@ const baseConfig = {
       keep: /^fonts\//,
     },
   },
+  // Pin chunk names to the file path (e.g. src_wake-word_worker_inference-worker_js)
+  // in BOTH dev and prod. Webpack defaults to 'named' in dev and 'deterministic'
+  // (numeric like '803') in prod, which produces different chunk URLs between
+  // the two modes. A user who locally ran `npm run dev` and then upgraded to a
+  // production release would have the dev bundle's chunk URLs cached and get
+  // 404s for chunks that the prod bundle renamed. Keeping the names stable
+  // also makes production chunks debuggable.
+  optimization: {
+    chunkIds: 'named',
+  },
 };
 
 module.exports = (env, argv) => {
@@ -51,6 +61,7 @@ module.exports = (env, argv) => {
         path: frontendDir,
       },
       optimization: {
+        ...baseConfig.optimization,
         minimize: false,
       },
       devtool: 'source-map',
@@ -66,6 +77,7 @@ module.exports = (env, argv) => {
       path: frontendDir,
     },
     optimization: {
+      ...baseConfig.optimization,
       minimize: true,
     },
   };
