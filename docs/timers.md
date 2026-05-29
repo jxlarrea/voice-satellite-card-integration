@@ -17,9 +17,9 @@ Each satellite registers itself with Home Assistant's timer manager when it load
 What you see on the satellite:
 
 1. **Countdown pill** appears at the top of the overlay as soon as the timer is created. The pill shows the remaining time and animates a progress bar. Multiple timers stack independently.
-2. **Alert** fires when the timer reaches zero: a centered alert pill flashes, the alert chime loops, and the timer name (if any) is shown below the pill in the skin's assistant text style. The wake-word stop interrupter is enabled while the alert is active so you can say "stop" to dismiss it.
+2. **Alert** fires when the timer reaches zero: a centered alert pill flashes, the alert chime loops, and the timer name (if any) is shown below the pill in the skin's assistant text style. The wake-word stop interrupter is enabled while the alert is active so you can say the stop keyword to dismiss it (`"stop"` on microWakeWord and openWakeWord, `"ok stop"` on vsWakeWord - see [Stop Word Interruption](wake-word.md#stop-word-interruption)).
 3. **Optional spoken alert phrase** can be enabled from the side panel. When enabled, the alert repeats as `chime -> chime -> phrase -> short pause` until dismissed. The next chime pair starts about 500 ms after the phrase ends. The phrase is synthesized with the same Assist pipeline that created the timer, so dual-pipeline setups keep the expected language and voice.
-4. **Cleanup** happens only when dismissed (double-tap or "stop" word). Timer alerts do not auto-dismiss; the alert chime keeps looping until you dismiss it.
+4. **Cleanup** happens only when dismissed (double-tap or the stop keyword). Timer alerts do not auto-dismiss; the alert chime keeps looping until you dismiss it.
 
 Pill appearance is controlled by the active skin. Both pill rendering and the timer-name label can be hidden in the side panel without affecting timer behavior, see [Side panel options](#side-panel-options).
 
@@ -36,7 +36,7 @@ These all work out of the box with the built-in Home Assistant conversation agen
 | "Add 5 minutes to the pizza timer" | Extends the timer |
 | "Cancel the pizza timer" | Cancels by name |
 | "Cancel all timers" | Clears every active timer |
-| "stop" (during alert) | Dismisses the alert (requires Stop word interruption switch on the device) |
+| "stop" or "ok stop" (during alert) | Dismisses the alert (requires Stop word interruption switch on the device). The exact phrase depends on the active wake-word engine - see [Stop Word Interruption](wake-word.md#stop-word-interruption) |
 
 ## Starting a timer from an automation
 

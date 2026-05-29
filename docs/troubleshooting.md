@@ -22,7 +22,7 @@ Checks cover the common failure modes:
 - **Voice Satellite bundle:** overlay bundle loaded on this page, Lovelace resource registered exactly once (no duplicates from the archived standalone card).
 - **Satellite configuration:** an entity is selected, the entity exists in Home Assistant, Pipeline 1 is resolvable, the pipeline has STT / TTS / conversation engines configured, those provider entities are loaded. When a second wake word is enabled, Pipeline 2 gets the same battery of checks independently and surfaces warnings when both slots point at the same model (slot 2 inert) or when Pipeline 2 is set to "Preferred" (slot 2 routes to Pipeline 1 anyway).
 - **URLs and TTS:** Home Assistant `internal_url` and `external_url` match the page protocol. A mismatch here is the single most common cause of "text shows but TTS is silent" for `assist_satellite.announce`.
-- **Wake word:** current detection mode (On Device microWakeWord / On Device openWakeWord / Home Assistant / Disabled). In Home Assistant mode, a wake word entity is configured on the pipeline and loaded. In On Device (openWakeWord) mode, the device must support WebGPU - diagnostics flags devices that don't. When Wake word 2 is enabled, its selected model is also reported.
+- **Wake word:** current detection mode (On Device microWakeWord / On Device openWakeWord / On Device vsWakeWord / Home Assistant / Disabled). In Home Assistant mode, a wake word entity is configured on the pipeline and loaded. In On Device (openWakeWord) and On Device (vsWakeWord) modes, the device must support WebGPU - diagnostics flags devices that don't. When Wake word 2 is enabled, its selected model is also reported.
 - **Audio:** page-load autoplay probe reporting whether media element playback and `AudioContext` capture will start without a user tap. Remediation text is tailored to the current host (HA Companion App, Fully Kiosk, or a plain browser).
 - **Platform:** detects Fully Kiosk, Companion App, ChromeOS, iOS, and other hosts so remediation instructions match the actual settings path.
 
@@ -39,11 +39,11 @@ Failures and warnings render at the top of the panel with specific remediation f
 
 **On-device mode (default):**
 
-1. **Check the device settings:** Go to the satellite's device page and verify "Wake word detection" is set to either "On Device (microWakeWord)" or "On Device (openWakeWord)", and at least "Wake word 1" has a model selected.
-2. **If you're on openWakeWord and detection won't start at all:** the engine requires WebGPU. The satellite shows an error toast on devices that don't support it. Switch to "On Device (microWakeWord)" - the GPU requirement isn't a soft fall-back, it's enforced.
+1. **Check the device settings:** Go to the satellite's device page and verify "Wake word detection" is set to one of the On Device modes ("On Device (vsWakeWord)", "On Device (microWakeWord)", or "On Device (openWakeWord)"), and at least "Wake word 1" has a model selected.
+2. **If you're on vsWakeWord or openWakeWord and detection won't start at all:** both engines require WebGPU. The satellite shows an error toast on devices that don't support it. Switch to "On Device (microWakeWord)" - the GPU requirement isn't a soft fall-back, it's enforced.
 3. **Try adjusting sensitivity:** Change "Wake word sensitivity" to "Very sensitive" to see if detection improves. This setting is shared across both wake word slots.
 4. **If you configured two wake words and one never fires:** open the diagnostics panel and look for the "Wake word 1 and 2 are distinct" warning. If both slots point at the same model the runtime dedupes to one copy and routes every detection to Pipeline 1, so slot 2 never activates. Pick a different model for slot 2 or set it to "Disabled".
-5. **Check browser compatibility:** On-device detection runs in pure JavaScript with `AudioWorklet` and `Float32Array` (both supported in every current browser). openWakeWord additionally requires WebGPU support.
+5. **Check browser compatibility:** On-device detection runs in pure JavaScript with `AudioWorklet` and `Float32Array` (both supported in every current browser). vsWakeWord and openWakeWord additionally require WebGPU support.
 6. Enable **Debug logging** in the sidebar panel to see wake word scores in the browser console (F12). Scores are reported per model name, so dual-slot setups show one line per keyword.
 
 **Server-side mode ("Home Assistant"):**

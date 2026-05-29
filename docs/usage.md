@@ -123,7 +123,7 @@ The engine provides audio and visual feedback: a done chime on successful match,
 
 ## Voice Satellite Wake Action
 
-Trigger the satellite as if a wake word were detected. Skips wake-word listening and goes directly to STT. Works regardless of the configured wake-word detection mode (On Device microWakeWord, On Device openWakeWord, Home Assistant, or Disabled), and is the primary way to drive interactions in [Disabled mode](wake-word.md#disabled-mode).
+Trigger the satellite as if a wake word were detected. Skips wake-word listening and goes directly to STT. Works regardless of the configured wake-word detection mode (On Device vsWakeWord, On Device microWakeWord, On Device openWakeWord, Home Assistant, or Disabled), and is the primary way to drive interactions in [Disabled mode](wake-word.md#disabled-mode).
 
 ```yaml
 action: voice_satellite.wake
@@ -198,7 +198,7 @@ action:
 
 While a show bubble is on screen the activity bar is pinned to a calm "listening" gradient (no mic-driven reactivity). Three ways to dismiss:
 
-- **Stop word** - say "stop" (requires *Stop word interruption* enabled in the side panel)
+- **Stop word** - say the engine-specific stop keyword (`"stop"` on microWakeWord and openWakeWord, `"ok stop"` on vsWakeWord). Requires *Stop word interruption* enabled on the device. See [Stop Word Interruption](wake-word.md#stop-word-interruption)
 - **Double-tap** anywhere on the screen, or press **Escape**
 - **Duration timer** - if `duration > 0`, the bubble auto-dismisses after that many seconds
 
@@ -311,7 +311,7 @@ When a video file or camera stream is sent to the satellite, the browser renders
 
 - **Local video files** (`.mp4`, `.webm`, etc.) play in a `<video>` element with the browser's native playback controls (play/pause/seek/volume)
 - **Cameras with the Stream integration** are delivered as HLS (`application/vnd.apple.mpegurl`). Playback uses [hls.js](https://github.com/video-dev/hls.js), which is lazy-loaded on first use, so audio-only setups don't pay the bundle cost. Safari falls through to native HLS automatically
-- **Cameras without Stream support** (snapshot or MJPEG) are served via `/api/camera_proxy_stream/<entity>` and rendered in an `<img>` element. No native controls (browsers don't provide any for `multipart/x-mixed-replace`); use double-tap or "stop" to dismiss
+- **Cameras without Stream support** (snapshot or MJPEG) are served via `/api/camera_proxy_stream/<entity>` and rendered in an `<img>` element. No native controls (browsers don't provide any for `multipart/x-mixed-replace`); use double-tap or the stop keyword to dismiss
 
 ```yaml
 # Play a video file
@@ -334,7 +334,7 @@ data:
 **Dismissal:**
 
 - **Double-tap** anywhere on the overlay (outside the video controls)
-- **"Stop"** wake-word, when stop-word interruption is enabled on the satellite
+- **Stop keyword** (`"stop"` on MWW/OWW, `"ok stop"` on vsWakeWord) when stop-word interruption is enabled on the satellite
 - **`media_player.media_stop`** action from automations
 
 **Wake-word interaction:**

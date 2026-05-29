@@ -12,6 +12,27 @@
 import { getSelectState } from '../shared/satellite-state.js';
 
 const WAKE_WORD_DETECTION_OWW = 'On Device (openWakeWord)';
+const WAKE_WORD_DETECTION_VWW = 'On Device (vsWakeWord)';
+
+/**
+ * Probe WebGPU availability for diagnostics checks. Returns a normalized
+ * shape so engine-specific checks can produce their own messaging without
+ * re-implementing the detection logic.
+ *
+ * @returns {Promise<{ok: true, desc: string} | {ok: false, reason: 'missing'|'no-adapter'|'probe-error', error?: any}>}
+ */
+async function probeWebGpu() {
+  if (!('gpu' in navigator)) return { ok: false, reason: 'missing' };
+  try {
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) return { ok: false, reason: 'no-adapter' };
+    const info = adapter.info || {};
+    const desc = [info.vendor, info.architecture].filter(Boolean).join(' / ') || 'adapter available';
+    return { ok: true, desc };
+  } catch (err) {
+    return { ok: false, reason: 'probe-error', error: err };
+  }
+}
 
 const CATEGORY = {
   ENVIRONMENT: 'Browser environment',
@@ -309,32 +330,66 @@ export const CLIENT_CHECKS = [
       if (mode !== WAKE_WORD_DETECTION_OWW) {
         return { status: 'skip', detail: `Wake word detection is "${mode || 'unknown'}" — WebGPU is only required for openWakeWord.` };
       }
-      if (!('gpu' in navigator)) {
+      const probe = await probeWebGpu();
+      if (probe.ok) return { status: 'pass', detail: `WebGPU adapter present (${probe.desc}).` };
+      if (probe.reason === 'missing') {
         return {
           status: 'fail',
           detail: 'navigator.gpu is not exposed on this device. openWakeWord cannot start without WebGPU.',
           remediation: 'Switch "Wake word detection" to "On Device (microWakeWord)" on the satellite\'s device page. microWakeWord runs on CPU and works without WebGPU.',
         };
       }
-      try {
-        const adapter = await navigator.gpu.requestAdapter();
-        if (!adapter) {
-          return {
-            status: 'fail',
-            detail: 'navigator.gpu is exposed but requestAdapter() returned null — the system has no usable GPU adapter for WebGPU.',
-            remediation: 'Switch "Wake word detection" to "On Device (microWakeWord)". On Android, ensure the WebView is up to date; on Linux, WebGPU requires a recent Chromium build with hardware acceleration enabled.',
-          };
-        }
-        const info = adapter.info || {};
-        const desc = [info.vendor, info.architecture].filter(Boolean).join(' / ') || 'adapter available';
-        return { status: 'pass', detail: `WebGPU adapter present (${desc}).` };
-      } catch (err) {
+      if (probe.reason === 'no-adapter') {
         return {
-          status: 'warn',
-          detail: `WebGPU adapter probe failed: ${err?.message || err}. openWakeWord may fail to start.`,
-          remediation: 'Switch to "On Device (microWakeWord)" if openWakeWord does not start when the satellite is loaded.',
+          status: 'fail',
+          detail: 'navigator.gpu is exposed but requestAdapter() returned null — the system has no usable GPU adapter for WebGPU.',
+          remediation: 'Switch "Wake word detection" to "On Device (microWakeWord)". On Android, ensure the WebView is up to date; on Linux, WebGPU requires a recent Chromium build with hardware acceleration enabled.',
         };
       }
+      return {
+        status: 'warn',
+        detail: `WebGPU adapter probe failed: ${probe.error?.message || probe.error}. openWakeWord may fail to start.`,
+        remediation: 'Switch to "On Device (microWakeWord)" if openWakeWord does not start when the satellite is loaded.',
+      };
+    },
+  },
+  {
+    // Conditional check: only runs when the satellite is set to On Device
+    // (vsWakeWord).  VWW's phoneme decoder runs as a WebGPU CNN; same
+    // hard requirement as OWW - on a device without `navigator.gpu` the
+    // engine refuses to start.  Surface it in diagnostics so users running
+    // VWW (the recommended engine on WebGPU-capable tablets) can see the
+    // cause before hitting it live.
+    id: 'sat.vswakeword-webgpu',
+    category: CATEGORY.SATELLITE,
+    title: 'vsWakeWord can use WebGPU on this device',
+    run: async ({ hass, entityId }) => {
+      if (!entityId) return { status: 'skip' };
+      const mode = getSelectState(hass, entityId, 'wake_word_detection', '');
+      if (mode !== WAKE_WORD_DETECTION_VWW) {
+        return { status: 'skip', detail: `Wake word detection is "${mode || 'unknown'}" — WebGPU is only required for vsWakeWord.` };
+      }
+      const probe = await probeWebGpu();
+      if (probe.ok) return { status: 'pass', detail: `WebGPU adapter present (${probe.desc}).` };
+      if (probe.reason === 'missing') {
+        return {
+          status: 'fail',
+          detail: 'navigator.gpu is not exposed on this device. vsWakeWord cannot start without WebGPU.',
+          remediation: 'Switch "Wake word detection" to "On Device (microWakeWord)" on the satellite\'s device page. microWakeWord runs on CPU and works without WebGPU.',
+        };
+      }
+      if (probe.reason === 'no-adapter') {
+        return {
+          status: 'fail',
+          detail: 'navigator.gpu is exposed but requestAdapter() returned null — the system has no usable GPU adapter for WebGPU.',
+          remediation: 'Switch "Wake word detection" to "On Device (microWakeWord)". On Android, ensure the WebView is up to date; on Linux, WebGPU requires a recent Chromium build with hardware acceleration enabled.',
+        };
+      }
+      return {
+        status: 'warn',
+        detail: `WebGPU adapter probe failed: ${probe.error?.message || probe.error}. vsWakeWord may fail to start.`,
+        remediation: 'Switch to "On Device (microWakeWord)" if vsWakeWord does not start when the satellite is loaded.',
+      };
     },
   },
 
