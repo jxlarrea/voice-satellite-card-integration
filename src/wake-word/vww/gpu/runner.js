@@ -54,7 +54,7 @@ import {
   sliceShader,
   concatInputShader,
 } from './shaders.js';
-import { clearVwwStartupBreadcrumb, checkpointVwwStartup, yieldToBrowser } from '../startup-breadcrumb.js';
+import { clearVwwStartupBreadcrumb, checkpointVwwStartup } from '../startup-breadcrumb.js';
 
 const TT_FLOAT32 = 0;
 
@@ -157,22 +157,34 @@ export class GpuModelRunner {
   }
 
   async _createComputePipeline(wgsl, label) {
-    await checkpointVwwStartup('pipeline:create', {
+    const detail = {
       label,
       opIndex: this._buildOpIndex,
       opName: this._buildOpName,
-    });
+    };
+    await checkpointVwwStartup('pipeline:module:start', detail);
+    const module = this._device.createShaderModule({ code: wgsl });
+    await checkpointVwwStartup('pipeline:module:created', detail);
+
+    const createAsync = typeof this._device.createComputePipelineAsync === 'function';
     const descriptor = {
       layout: 'auto',
       compute: {
-        module: this._device.createShaderModule({ code: wgsl }),
+        module,
         entryPoint: 'main',
       },
     };
-    const pipeline = typeof this._device.createComputePipelineAsync === 'function'
+    await checkpointVwwStartup('pipeline:create:start', {
+      ...detail,
+      method: createAsync ? 'async' : 'sync',
+    });
+    const pipeline = createAsync
       ? await this._device.createComputePipelineAsync(descriptor)
       : this._device.createComputePipeline(descriptor);
-    await yieldToBrowser();
+    await checkpointVwwStartup('pipeline:create:returned', {
+      ...detail,
+      method: createAsync ? 'async' : 'sync',
+    });
     return pipeline;
   }
 

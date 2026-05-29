@@ -409,6 +409,7 @@ export const CLIENT_CHECKS = [
         if (d.model) parts.push(`model=${d.model}`);
         if (d.opIndex !== undefined) parts.push(`op=${d.opIndex}:${d.opName || '?'}`);
         if (d.label) parts.push(`label=${d.label}`);
+        if (d.method) parts.push(`method=${d.method}`);
         return {
           status: 'warn',
           detail: `The previous vsWakeWord startup did not clear its checkpoint (${parts.join(' ')}). If Fully Kiosk crashed, this is the last recorded step before the crash.`,
