@@ -10,6 +10,7 @@ and appears in the Voice Assistants device list.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from pathlib import Path
@@ -413,10 +414,14 @@ def discover_vswakeword_models() -> list[str]:
     """Scan models/vswakeword/ for vsWakeWord ONNX classifier files.
 
     Each VWW model is self-contained (one .onnx + companion .json
-    manifest), so we don't filter shared-infrastructure stems the way
-    discover_openwakeword_models does.  Returns an empty list if the
-    vswakeword/ directory is missing; callers should treat empty as
-    "VWW unavailable".
+    manifest).  Models whose manifest declares ``stop_classifier: true``
+    are session-scoped stop classifiers (e.g. ok_stop_v5) and are
+    excluded from the user-selectable wake-word list - they fire only
+    while an assist session is active, not as fresh activations.
+    Legacy name-based filtering via _COMMON_MODELS is also kept for
+    parity with OWW/MWW where "stop" is filtered by filename.
+    Returns an empty list if the vswakeword/ directory is missing;
+    callers should treat empty as "VWW unavailable".
     """
     models_dir = Path(__file__).parent / "models" / "vswakeword"
     if not models_dir.is_dir():
@@ -427,6 +432,15 @@ def discover_vswakeword_models() -> list[str]:
         stem = f.stem
         if stem in _VWW_RESERVED_MODELS or stem in _COMMON_MODELS:
             continue
+        manifest_path = f.with_suffix(".json")
+        if manifest_path.is_file():
+            try:
+                with manifest_path.open(encoding="utf-8") as mf:
+                    manifest = json.load(mf)
+                if manifest.get("stop_classifier") is True:
+                    continue
+            except (OSError, json.JSONDecodeError):
+                pass
         if stem not in options:
             options.append(stem)
 

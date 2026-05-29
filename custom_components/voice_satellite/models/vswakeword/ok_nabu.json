@@ -525,9 +525,9 @@
     "min_matched_confidence": 3.0
   },
   "runtime": {
-    "required_hits": 2,
+    "required_hits": 3,
     "hit_mode": "consecutive",
-    "high_confidence_bypass": 5.8,
+    "high_confidence_bypass": 6.0,
     "cooldown_ms": 2000
   },
   "best_epoch": 124,
