@@ -28,6 +28,7 @@
 import { loadTFLite, loadMicroModels, loadMicroModel, getMicroModelParams, releaseUnusedMicroModels, resetRuntime } from '../micro-models.js';
 import { MicroWakeWordInference } from '../micro-inference.js';
 import { OwwBackend } from '../oww/backend.js';
+import { VwwBackend } from '../vww/backend.js';
 
 // The actual backend (MicroWakeWordInference | OwwBackend).  Same shape
 // of methods so dispatch is uniform.
@@ -126,6 +127,21 @@ async function init({
       cutoff: cutoffs?.[name],
     }));
     backend = await OwwBackend.create(
+      keywordConfigs,
+      workerLogger,
+      energyGateEnabled,
+      sensitivityLabel,
+      enableTimings === true,
+    );
+    for (const name of models) {
+      if (!active.has(name)) backend.removeKeyword(name);
+    }
+  } else if (engine === 'vww') {
+    keywordConfigs = models.map((name) => ({
+      name,
+      cutoff: cutoffs?.[name],
+    }));
+    backend = await VwwBackend.create(
       keywordConfigs,
       workerLogger,
       energyGateEnabled,

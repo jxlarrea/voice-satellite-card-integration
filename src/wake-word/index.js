@@ -11,6 +11,7 @@ import { State, BlurReason, INTERACTING_STATES } from '../constants.js';
 import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
 import { CHIME_WAKE, getChimeDuration } from '../audio/chime.js';
 import { loadTFLite, getMicroModelParams, resetRuntime } from './micro-models.js';
+import { getVwwModelParams, loadVwwModelParams } from './vww/manifest-cache.js';
 import { WorkerProxyBackend } from './worker/proxy-backend.js';
 import { clearNotificationUI } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
@@ -20,9 +21,55 @@ import { sendAck } from '../shared/notification-comms.js';
 const DETECTION_MODE_LEGACY_LOCAL = 'On Device';
 const DETECTION_MODE_LOCAL_MWW = 'On Device (microWakeWord)';
 const DETECTION_MODE_LOCAL_OWW = 'On Device (openWakeWord)';
+const DETECTION_MODE_LOCAL_VWW = 'On Device (vsWakeWord)';
 
 const CHUNK_SIZE = 1280; // 80ms @ 16kHz
 const MAX_POOL = 20;    // cap recycled frame pool (20 * 5KB = 100KB max)
+
+// Detect constrained WebView (Fully Kiosk, Android WebView) - load
+// delay applied at the start of wake-word.start() to avoid OOM during
+// dashboard load on memory-tight tablets.  Moved here from
+// session/events.js so it applies regardless of which call path invoked
+// start() (startListening, _checkWakeWordActivation, settings change).
+function isConstrainedWebView() {
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+  return /Fully Kiosk/i.test(ua) || /\bwv\b/i.test(ua);
+}
+
+// Per-engine stop-classifier model name.  OWW/MWW use the hardcoded
+// name 'stop' (their stop classifier ships under that exact filename).
+// VWW uses 'ok_stop' since each VWW model is a self-contained ONNX
+// named after its wake phrase; the stop-classifier ONNX is
+// vswakeword/ok_stop.onnx and the manifest carries stop_classifier:
+// true so the VWW backend gives it the same immediate-fire treatment
+// as OWW's 'stop'.
+const VWW_STOP_NAME = 'ok_stop';
+function getStopName(engine) {
+  return engine === 'vww' ? VWW_STOP_NAME : 'stop';
+}
+// True for any classifier name that the runtime treats as the
+// stop-word slot: 'stop' (OWW/MWW) or 'ok_stop' (VWW).  Used for
+// per-name special-casing (threshold table, sensitivity factor table,
+// detection-result routing) without needing manifest access at those
+// sites.  Keep in sync with VWW backend's manifest.stop_classifier
+// detection - they're two views of the same concept.
+function isStopModelName(name) {
+  return name === 'stop' || name === VWW_STOP_NAME;
+}
+
+function formatWakeRuntimeStatus(result) {
+  const status = result?.runtime?.[result.model];
+  if (!status || status.mode !== 'counter') return [];
+  const bits = [];
+  if (Number.isFinite(status.hits) && Number.isFinite(status.requiredHits)) {
+    bits.push(`runtime_hits=${status.hits}/${status.requiredHits}`);
+  }
+  if (typeof status.highConfidenceBypass === 'number' && Number.isFinite(status.highConfidenceBypass)) {
+    bits.push(`runtime_bypass=${status.highConfidenceBypass.toFixed(2)}`);
+  }
+  if (status.bypassed === true) bits.push('runtime_bypassed=true');
+  return bits;
+}
 
 // Window between local wake word detection and the wake chime firing.
 // We keep the chime pending for this long so HA has a chance to send
@@ -170,11 +217,12 @@ export class WakeWordManager {
   /**
    * Resolve the wake-word engine.  Returns null for HA / Disabled so
    * callers can early-out without engine-specific logic.
-   * @returns {'mww'|'oww'|null}
+   * @returns {'mww'|'oww'|'vww'|null}
    */
   getEngine() {
     const mode = this._wakeMode();
     if (mode === DETECTION_MODE_LOCAL_OWW) return 'oww';
+    if (mode === DETECTION_MODE_LOCAL_VWW) return 'vww';
     if (mode === DETECTION_MODE_LOCAL_MWW || mode === DETECTION_MODE_LEGACY_LOCAL) return 'mww';
     return null;
   }
@@ -326,7 +374,8 @@ export class WakeWordManager {
    */
   getThresholdForModel(modelName) {
     const label = this._getSensitivityLabel();
-    if (this.getEngine() === 'oww') {
+    const engine = this.getEngine();
+    if (engine === 'oww') {
       // OWW: absolute offset from the calibrated upstream cutoff.  Wake
       // words sit at 0.5 (matches `rhasspy/pyopen-wakeword` and the HA
       // OWW addon); stop is bumped to 0.65 because the community stop
@@ -335,6 +384,20 @@ export class WakeWordManager {
       // saturating to the [0.1, 0.99] clamp on the extreme settings.
       const base = modelName === 'stop' ? 0.65 : 0.5;
       const offsets = modelName === 'stop'
+        ? OWW_STOP_SENSITIVITY_OFFSETS
+        : OWW_WAKE_SENSITIVITY_OFFSETS;
+      const offset = offsets[label] ?? 0;
+      return Math.max(0.1, Math.min(base + offset, 0.99));
+    }
+    if (engine === 'vww') {
+      // VWW: per-model base cutoff from the .json manifest emitted by
+      // wakeword_train.py.  Sensitivity is an absolute offset.  Stop
+      // classifier ('ok_stop') uses the OWW_STOP offset table since
+      // it shares the "fire fast, tolerate slightly more FP" behavior
+      // pattern.  loadVwwModelParams populates the cache asynchronously;
+      // until it resolves we fall back to the trainer's 0.6 default.
+      const base = getVwwModelParams(modelName).cutoff ?? 0.6;
+      const offsets = isStopModelName(modelName)
         ? OWW_STOP_SENSITIVITY_OFFSETS
         : OWW_WAKE_SENSITIVITY_OFFSETS;
       const offset = offsets[label] ?? 0;
@@ -399,10 +462,39 @@ export class WakeWordManager {
    */
   async start() {
     if (this._active || this._resetting) return;
+    // Async re-entrancy guard: if start() is already running, return the
+    // existing in-flight promise instead of spawning a second worker.
+    // The _active flag is only set at the END of the body (after all
+    // awaits), so concurrent callers in the same microtask tick all pass
+    // the guard above and race to spawn duplicate workers - one wins
+    // _inference, the other becomes an orphaned leak.  Caching the
+    // promise lets all callers await the same start.
+    if (this._startInflight) return this._startInflight;
     if (!this.needsLocalInference()) {
       this._log.log('wake-word', 'Local inference not needed - skipping start');
       return;
     }
+    this._startInflight = this._startBody().finally(() => {
+      this._startInflight = null;
+    });
+    return this._startInflight;
+  }
+
+  async _startBody() {
+    // Constrained-WebView gate: on Fully Kiosk / Android WebView, the
+    // dashboard's HACS cards are still being parsed/registered when this
+    // function gets called.  Spawning workers + compiling ONNX/TFLite
+    // models in parallel with that competition for the JS thread and
+    // GPU memory frequently triggers transient OOM on lower-end Android
+    // tablets.  Wait 3 s so the dashboard initial render finishes first.
+    // Only the FIRST start() call per session pays the cost; subsequent
+    // start() calls (settings change, mode swap, etc.) skip it via
+    // _settledOnce.
+    if (!this._settledOnce && isConstrainedWebView()) {
+      this._log.log('wake-word', 'Constrained WebView detected - delaying initial wake-word startup');
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    this._settledOnce = true;
 
     const onDevice = this.isOnDeviceWakeEnabled();
     const engine = this.getEngine();  // 'mww' | 'oww' | null
@@ -462,6 +554,45 @@ export class WakeWordManager {
           this._log.log(
             'wake-word',
             `OWW worker ready - active: ${wakeModels.join(', ')}${stopEnabled ? ' (stop loaded, inactive)' : ''}`,
+          );
+        } else if (engine === 'vww') {
+          // vsWakeWord path: one self-contained ONNX per wake word.
+          // When stop-word is enabled we ALSO load the VWW stop
+          // classifier (ok_stop.onnx) alongside, marked INACTIVE.
+          // enableStopModel() / disableStopModel() flip its active flag
+          // during interruptible states (TTS playback, timers, etc.) -
+          // same lifecycle as OWW's stop classifier.  Pre-warm the
+          // main-thread manifest cache so threshold / sensitivity math
+          // uses each model's real recommended cutoff.
+          const stopEnabled = this.isStopWordEnabled();
+          const vwwStopName = VWW_STOP_NAME;
+          const allClassifiers = stopEnabled
+            ? [...wakeModels, vwwStopName]
+            : wakeModels;
+          await Promise.all(allClassifiers.map((name) => loadVwwModelParams(name).catch(() => null)));
+          const cutoffs = {};
+          for (const name of allClassifiers) cutoffs[name] = this.getThresholdForModel(name);
+          this._log.log('wake-word', `Spawning VWW worker for: ${allClassifiers.join(', ')}`);
+          this._inference = await WorkerProxyBackend.create({
+            engine: 'vww',
+            models: allClassifiers,
+            // Stop is loaded but dormant; enableStopModel flips it on.
+            activeKeywords: wakeModels,
+            cutoffs,
+            energyGateEnabled: this._isNoiseGateEnabled(),
+            sensitivityLabel: this._getSensitivityLabel(),
+            log: this._log,
+          });
+          if (stopEnabled) {
+            this._stopMicroConfig = {
+              name: vwwStopName,
+              cutoff: this.getThresholdForModel(vwwStopName),
+            };
+          }
+          this._loadedModelsKey = modelsKey;
+          this._log.log(
+            'wake-word',
+            `VWW worker ready - active: ${wakeModels.join(', ')}${stopEnabled ? ` (${vwwStopName} loaded, inactive)` : ''}`,
           );
         } else {
           // microWakeWord path (also covers stop-word-only standby).
@@ -541,7 +672,8 @@ export class WakeWordManager {
       if (isOOM) {
         description = 'On-device detection ran out of memory. The runtime is restarting; detection may be briefly unavailable.';
       } else if (isNoWebGpu) {
-        description = 'openWakeWord requires WebGPU, which this device does not support. Switch the wake word engine to "On Device (microWakeWord)" instead - it works on every device without needing a GPU.';
+        const engineLabel = this.getEngine() === 'vww' ? 'vsWakeWord' : 'openWakeWord';
+        description = `${engineLabel} requires WebGPU, which this device does not support. Switch the wake word engine to "On Device (microWakeWord)" instead - it works on every device without needing a GPU.`;
       } else {
         description = 'On-device wake word detection could not start. Try a different model or switch to Home Assistant wake word detection.';
       }
@@ -679,13 +811,14 @@ export class WakeWordManager {
         if (result.detected) {
           const triggerBits = [];
           if (result.triggerType) triggerBits.push(`type=${result.triggerType}`);
+          triggerBits.push(...formatWakeRuntimeStatus(result));
           if (typeof result.cutoff === 'number') triggerBits.push(`cutoff=${result.cutoff.toFixed(3)}`);
           if (typeof result.rms === 'number') triggerBits.push(`rms=${result.rms.toFixed(4)}`);
           if (typeof result.immediateMargin === 'number') triggerBits.push(`margin=${result.immediateMargin.toFixed(3)}`);
           const triggerMeta = triggerBits.length ? `, ${triggerBits.join(', ')}` : '';
           this._log.log('wake-word', `Detected: ${result.model} (score=${result.score.toFixed(3)}${triggerMeta})`);
           this._frameQueue.length = 0;
-          if (result.model === 'stop') {
+          if (isStopModelName(result.model)) {
             await this._onStopDetection();
           } else {
             await this._onDetection(result.model);
@@ -1039,6 +1172,67 @@ export class WakeWordManager {
 
     try {
       const isOww = this.getEngine() === 'oww';
+      const isVww = this.getEngine() === 'vww';
+      const stopName = getStopName(this.getEngine());
+
+      // POLICY: all interruptible interactions force stop-only mode,
+      // regardless of what the caller (media-player, timer, tts, etc.)
+      // passed.  Reasoning:
+      //   - During an interaction the Voice Satellite UI runs heavy
+      //     animations; freeing GPU cycles for those is the user's
+      //     priority.
+      //   - For VWW each wake-word model is a full self-contained ONNX
+      //     (~111K-436K params), so running both wake + stop saturates
+      //     WebGPU and causes inference queue overflows / dropped
+      //     frames - "ok stop" was needing 4-5 retries in production.
+      //   - For OWW/MWW dual-run is technically cheap (shared
+      //     embedding / lightweight TFLite), but the UX rationale still
+      //     holds: the user just initiated an interaction, they're
+      //     unlikely to issue a fresh wake-word in the same window, and
+      //     the GPU savings benefit the UI either way.
+      // Wake-word inference resumes via disableStopModel() when the
+      // interruption ends.  _suspendedKeywords tracks them for restore.
+      if (!stopOnly) {
+        this._log.log(
+          'stop-word',
+          `Forcing stop-only mode for ${this.getEngine().toUpperCase()} `
+          + `(wake-word inference paused during interruption to free GPU)`,
+        );
+        stopOnly = true;
+      }
+
+      if (isVww) {
+        // VWW path: the stop classifier (ok_stop.onnx) was loaded at
+        // start() into the worker when stop-word was enabled, with
+        // activeKeywords excluding it.  Flip it active now by calling
+        // addKeyword - the VWW backend re-activates an already-loaded
+        // keyword (or lazily loads it if start() ran with stop-word
+        // off and the user enabled it mid-session).
+        if (!this._stopMicroConfig) {
+          this._stopMicroConfig = {
+            name: stopName,
+            cutoff: this.getThresholdForModel(stopName),
+          };
+          this._log.log(
+            'stop-word',
+            `VWW stop classifier registered: ${stopName}(c=${this._stopMicroConfig.cutoff.toFixed(3)})`,
+          );
+        }
+        this._inference.addKeyword(this._stopMicroConfig);
+        this._suspendedKeywords = this._inference._keywords
+          .filter((k) => k.name !== stopName)
+          .map((k) => ({ name: k.name, cutoff: k.cutoff }));
+        for (const kw of this._suspendedKeywords) {
+          this._inference.removeKeyword(kw.name);
+        }
+        this._stopOnlyMode = true;
+        this._inference.reset();
+        this._sampleBufLen = 0;
+        this._frameQueue.length = 0;
+        this._processing = false;
+        this._log.log('stop-word', 'Enabled (stop-only mode, VWW)');
+        return;
+      }
 
       if (!this._stopMicroConfig) {
         if (isOww) {
@@ -1075,32 +1269,30 @@ export class WakeWordManager {
 
       this._inference.addKeyword(this._stopMicroConfig);
 
-      if (stopOnly) {
-        this._suspendedKeywords = this._inference._keywords
-          .filter((k) => k.name !== 'stop')
-          .map((k) => ({
-            runner: k.runner,
-            name: k.name,
-            cutoff: k.cutoff,
-            slidingWindow: k.slidingWindow,
-            stepSize: k.stepSize,
-            inputScale: k.inputScale,
-            inputZeroPoint: k.inputZeroPoint,
-          }));
-        for (const kw of this._suspendedKeywords) {
-          this._inference.removeKeyword(kw.name);
-        }
-        this._stopOnlyMode = true;
-        this._inference.reset();
-        this._sampleBufLen = 0;
-        this._frameQueue.length = 0;
-        this._processing = false;
-        this._log.log('stop-word', 'Enabled (stop-only mode)');
-      } else {
-        this._log.log('stop-word', 'Enabled (alongside wake words)');
+      // stopOnly is always true here (forced above for all engines).
+      // Suspend every wake-word keyword so only the stop classifier
+      // runs during the interruption.  disableStopModel() restores
+      // them from _suspendedKeywords when the interruption ends.
+      this._suspendedKeywords = this._inference._keywords
+        .filter((k) => k.name !== 'stop')
+        .map((k) => ({
+          runner: k.runner,
+          name: k.name,
+          cutoff: k.cutoff,
+          slidingWindow: k.slidingWindow,
+          stepSize: k.stepSize,
+          inputScale: k.inputScale,
+          inputZeroPoint: k.inputZeroPoint,
+        }));
+      for (const kw of this._suspendedKeywords) {
+        this._inference.removeKeyword(kw.name);
       }
-
-      this._log.log('stop-word', `Inference active${stopOnly ? ' (stop-only)' : ' (shared)'}`);
+      this._stopOnlyMode = true;
+      this._inference.reset();
+      this._sampleBufLen = 0;
+      this._frameQueue.length = 0;
+      this._processing = false;
+      this._log.log('stop-word', 'Enabled (stop-only mode)');
     } catch (e) {
       this._log.error('stop-word', `Failed to enable: ${e.message || e}`);
     }
@@ -1112,7 +1304,9 @@ export class WakeWordManager {
   disableStopModel({ log = true } = {}) {
     if (!this._inference) return;
 
-    this._inference.removeKeyword('stop');
+    // Engine-specific stop classifier name: 'stop' for OWW/MWW (their
+    // baked-in convention), 'ok_stop' for VWW (its own ONNX file).
+    this._inference.removeKeyword(getStopName(this.getEngine()));
 
     if (this._stopOnlyMode) {
       this._stopOnlyMode = false;

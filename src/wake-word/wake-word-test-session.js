@@ -178,7 +178,9 @@ export class WakeWordTestSession {
     this._threshold = typeof opts.threshold === 'number' ? opts.threshold : null;
     // Engine selector: 'mww' (default) or 'oww'.  Determines which
     // inference backend the tester instantiates in _setupInference().
-    this._engine = opts.engine === 'oww' ? 'oww' : 'mww';
+    // Tester supports any of the three on-device engines.  Defaults to
+    // MWW (matches the panel's tester engine select default).
+    this._engine = ['oww', 'vww', 'mww'].includes(opts.engine) ? opts.engine : 'mww';
     // Mirror the live engine's noise-gate behavior so the tester gives
     // a faithful preview of what the user will experience at runtime.
     this._energyGateEnabled = opts.energyGateEnabled === true;
@@ -280,6 +282,11 @@ export class WakeWordTestSession {
       update.threshold = this._threshold;
     } else if (this._engine === 'oww') {
       update.threshold = 0.5;
+    } else if (this._engine === 'vww') {
+      // Worker resolves the actual cutoff from the model's manifest when
+      // no explicit threshold is provided.  Pass undefined so the cached
+      // recommended_threshold wins instead of clobbering it with 0.5.
+      delete update.threshold;
     }
     this._inference.updateThresholds([update]);
   }
@@ -413,8 +420,10 @@ export class WakeWordTestSession {
     } else if (this._engine === 'oww') {
       cutoffs[this._modelName] = 0.5;
     }
+    // For VWW with no explicit threshold, omit cutoffs so the worker
+    // pulls each model's recommended_threshold from its JSON manifest.
     this._inference = await WorkerProxyBackend.create({
-      engine: this._engine === 'oww' ? 'oww' : 'mww',
+      engine: ['oww', 'vww', 'mww'].includes(this._engine) ? this._engine : 'mww',
       models: [this._modelName],
       cutoffs,
       energyGateEnabled: this._energyGateEnabled,
@@ -497,13 +506,90 @@ export class WakeWordTestSession {
             const mean = typeof result.score === 'number' ? result.score.toFixed(3) : '?';
             const cutoff = typeof result.cutoff === 'number' ? result.cutoff.toFixed(2) : '?';
             const latencyBits = this._formatLatencyInfo(latencyInfo);
+            const runtimeBits = this._formatVwwRuntimeInfo(result, model, result.triggerType);
+            // CTC: include the decoded phoneme sequence + confidence
+            // metrics in the trigger log so the user can see WHY it
+            // fired (which target matched, exact vs ed=1 loose match,
+            // and how confident the model was - tunes the gate).
+            const ctcEntry = result.ctc?.[model];
+            let ctcBits = '';
+            if (ctcEntry && Array.isArray(ctcEntry.phonemes)) {
+              const ed = ctcEntry.minEditDistance;
+              const mc = (typeof ctcEntry.matchedConfidence === 'number')
+                ? ` conf=${ctcEntry.matchedConfidence.toFixed(2)}`
+                : '';
+              const tc = (typeof ctcEntry.totalConfidence === 'number')
+                ? ` total_conf=${ctcEntry.totalConfidence.toFixed(2)}`
+                : '';
+              const gt = (typeof ctcEntry.gateThreshold === 'number'
+                          && Number.isFinite(ctcEntry.gateThreshold))
+                ? ` gate=${ctcEntry.gateThreshold.toFixed(2)}`
+                : '';
+              ctcBits = ` decoded=[${ctcEntry.phonemes.join(' ')}] ed=${ed}${mc}${tc}${gt}`;
+            }
             this._emitLog(
               'trigger',
               `DETECTED "${model}" mean=${mean} cutoff=${cutoff} `
               + `${latencyBits ? `${latencyBits} ` : ''}`
+              + `${runtimeBits ? `${runtimeBits} ` : ''}`
               + `rms_now=${(result.rms ?? 0).toFixed(4)} `
-              + `rms_peak_1s=${this._getRecentRmsPeak(13).toFixed(4)}`,
+              + `rms_peak_1s=${this._getRecentRmsPeak(13).toFixed(4)}`
+              + ctcBits,
             );
+          } else if (result?.ctc) {
+            // CTC near-miss diagnostic: when the model decoded a non-
+            // trivial sequence, emit a 'diag' line so the user can see
+            // WHAT the model heard and WHY it didn't fire.  Thresholds
+            // are loose (any decode with >=3 phonemes and any ed) so
+            // off-axis / weak-signal cases that produce partial wake-
+            // shape are still visible in the log.  The `reason` field
+            // explicitly names which gate rejected the decode.
+            for (const [name, info] of Object.entries(result.ctc)) {
+              if (!info || !Array.isArray(info.phonemes)) continue;
+              // Skip silence/blank decodes - require at least 3 emitted
+              // phonemes to be worth logging.
+              if (info.phonemes.length < 3) continue;
+              const ed = info.minEditDistance;
+              // Loose ed filter: anything within 8 edits gives signal on
+              // weak/off-axis triggers.  Without this, off-axis decodes
+              // that produced ed=5+ partial wake-shape were invisible
+              // in the logs and made tuning impossible.
+              if (!Number.isFinite(ed) || ed > 8) continue;
+              const mc = (typeof info.matchedConfidence === 'number')
+                ? ` conf=${info.matchedConfidence.toFixed(2)}`
+                : '';
+              const tc = (typeof info.totalConfidence === 'number')
+                ? ` total_conf=${info.totalConfidence.toFixed(2)}`
+                : '';
+              const gateThreshold = info.gateThreshold;
+              const gt = (typeof gateThreshold === 'number' && Number.isFinite(gateThreshold))
+                ? ` gate=${gateThreshold.toFixed(2)}`
+                : '';
+              // Explicit reason: why didn't this near-miss fire?  Helps
+              // the user distinguish "model decoded wrong phonemes" from
+              // "model decoded right phonemes but gate rejected it".
+              // Order matters - report the FIRST gate that would reject.
+              const reasons = [];
+              const maxEd = (typeof info.maxEditDistance === 'number')
+                ? info.maxEditDistance : 1;
+              if (ed > maxEd) reasons.push(`ed>${maxEd}`);
+              if (typeof info.matchedConfidence === 'number'
+                  && typeof gateThreshold === 'number'
+                  && Number.isFinite(gateThreshold)
+                  && info.matchedConfidence < gateThreshold) {
+                reasons.push(`conf<gate`);
+              }
+              const runtimeReason = this._getVwwRuntimeRejectReason(result, name, info);
+              if (runtimeReason) reasons.push(runtimeReason);
+              const reason = reasons.length ? ` reason=${reasons.join('+')}` : ' reason=other';
+              const runtimeBits = this._formatVwwRuntimeInfo(result, name, null);
+              this._emitLog(
+                'diag',
+                `CTC near-miss "${name}" ed=${ed}${mc}${tc}${gt}`
+                + `${runtimeBits ? ` ${runtimeBits}` : ''}${reason} `
+                + `decoded=[${info.phonemes.join(' ')}]`,
+              );
+            }
           }
         } catch (_) { /* swallow - the tester is best-effort */ }
       }
@@ -524,8 +610,21 @@ export class WakeWordTestSession {
   }
 
   _emitLog(cat, msg) {
-    if (!msg || !this._logSubscribers.size) return;
+    if (!msg) return;
     const ts = Date.now();
+    // Mirror to browser console so the lines show up in DevTools next
+    // to production [VS][wake-word] logs, not only in the tester
+    // panel's embedded log pane.  Useful for debugging tester behavior
+    // against the live engine without having to switch contexts.
+    // Level mapping: warn -> console.warn, error -> console.error,
+    // everything else (diag/info/trigger) -> console.log.
+    try {
+      const formatted = `[VS][tester][${cat}] ${msg}`;
+      if (cat === 'warn') console.warn(formatted);
+      else if (cat === 'error') console.error(formatted);
+      else console.log(formatted);
+    } catch (_) { /* ignore */ }
+    if (!this._logSubscribers.size) return;
     for (const cb of this._logSubscribers) {
       try { cb(cat, msg, ts); } catch (_) { /* ignore */ }
     }
@@ -820,6 +919,46 @@ export class WakeWordTestSession {
     if (Number.isFinite(info.firstScore)) parts.push(`first=${info.firstScore.toFixed(3)}`);
     if (Number.isFinite(info.peakScore)) parts.push(`peak=${info.peakScore.toFixed(3)}`);
     return parts.join(' ');
+  }
+
+  _formatVwwRuntimeInfo(result, model, triggerType = null) {
+    const info = result?.runtime?.[model];
+    if (!info || info.mode !== 'counter') return '';
+    const parts = [];
+    if (triggerType) parts.push(`runtime_type=${triggerType}`);
+    if (Number.isFinite(info.hits) && Number.isFinite(info.requiredHits)) {
+      parts.push(`runtime_hits=${info.hits}/${info.requiredHits}`);
+    }
+    if (typeof info.highConfidenceBypass === 'number' && Number.isFinite(info.highConfidenceBypass)) {
+      parts.push(`runtime_bypass=${info.highConfidenceBypass.toFixed(2)}`);
+    }
+    if (info.bypassed === true) parts.push('runtime_bypassed=true');
+    return parts.join(' ');
+  }
+
+  _getVwwRuntimeRejectReason(result, model, ctcInfo) {
+    const runtime = result?.runtime?.[model];
+    if (!runtime || runtime.mode !== 'counter') return '';
+    if (!ctcInfo || !Number.isFinite(ctcInfo.minEditDistance)) return '';
+    const maxEd = typeof ctcInfo.maxEditDistance === 'number' ? ctcInfo.maxEditDistance : 1;
+    if (ctcInfo.minEditDistance > maxEd) return '';
+    const gate = ctcInfo.gateThreshold;
+    if (
+      typeof ctcInfo.matchedConfidence === 'number'
+      && typeof gate === 'number'
+      && Number.isFinite(gate)
+      && ctcInfo.matchedConfidence < gate
+    ) {
+      return '';
+    }
+    if (
+      Number.isFinite(runtime.hits)
+      && Number.isFinite(runtime.requiredHits)
+      && runtime.hits < runtime.requiredHits
+    ) {
+      return `runtime_hits<${runtime.requiredHits}`;
+    }
+    return '';
   }
 
   _startMicHealthProbe() {

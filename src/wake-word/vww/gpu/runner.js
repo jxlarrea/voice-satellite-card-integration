@@ -832,9 +832,11 @@ export class GpuModelRunner {
   }
 
   /**
-   * ReduceMean: only the contiguous-tail pattern (reduce the last K axes
-   * down to 1 each, keepdims=1) is supported - that's what vsWakeWord's
-   * adaptive-pool emits.  Anything else would need a different shader.
+   * ReduceMean: contiguous-tail pattern.  Supports both keepdims=1
+   * (output keeps reduced axes as size 1) and keepdims=0 (reduced
+   * axes are dropped).  The shader is identical for both - only the
+   * output shape's declared rank differs.  Anything other than
+   * contiguous trailing axes would need a different shader.
    */
   _buildReduceMean(op, tensors) {
     const inMeta = tensors[op.inputs[0]];
@@ -843,28 +845,46 @@ export class GpuModelRunner {
     const outShape = outMeta.shape;
     const rank = inShape.length;
     const keepdims = (onnxIntAttr(op, 'keepdims') ?? 1) !== 0;
-    if (!keepdims) {
-      throw new Error('GpuModelRunner: ReduceMean keepdims=0 not supported');
+    // For keepdims=0 the declared output shape has the reduced axes
+    // dropped; rebuild the "logical" output shape (= inShape with
+    // reduced axes set to 1) for trailing-tail detection below.
+    // Without an explicit `axes` attribute or input, ONNX defaults to
+    // reducing ALL axes.
+    let axes = onnxIntsAttr(op, 'axes');
+    if (axes && axes.length) {
+      axes = axes.map(a => (a < 0 ? rank + a : a)).sort((a, b) => a - b);
+    } else {
+      // All-axis reduction.
+      axes = Array.from({ length: rank }, (_, i) => i);
     }
-    if (outShape.length !== rank) {
+    const logicalOutShape = inShape.slice();
+    for (const a of axes) logicalOutShape[a] = 1;
+    // Validate declared output matches expected shape (rank changes
+    // when keepdims=0, dims stay 1 when keepdims=1).
+    const expectedOut = keepdims
+      ? logicalOutShape
+      : inShape.filter((_, i) => !axes.includes(i));
+    if (outShape.length !== expectedOut.length
+        || outShape.some((d, i) => d !== expectedOut[i])) {
       throw new Error(
-        `GpuModelRunner: ReduceMean output rank mismatch (in=${rank} out=${outShape.length})`,
+        `GpuModelRunner: ReduceMean output shape mismatch `
+        + `(in=${JSON.stringify(inShape)} declared=${JSON.stringify(outShape)} `
+        + `expected=${JSON.stringify(expectedOut)} keepdims=${keepdims ? 1 : 0})`,
       );
     }
-    // Identify trailing axes that are reduced (output dim is 1 while
-    // input dim is > 1).  Require them to be contiguous and trailing.
+    // Identify trailing axes that are reduced.  Must be contiguous + trailing.
     let firstReduced = rank;
     for (let i = 0; i < rank; i++) {
-      if (outShape[i] !== inShape[i]) {
-        if (outShape[i] !== 1) {
-          throw new Error('GpuModelRunner: ReduceMean output dim mismatch');
+      if (logicalOutShape[i] !== inShape[i]) {
+        if (logicalOutShape[i] !== 1) {
+          throw new Error('GpuModelRunner: ReduceMean logical output dim mismatch');
         }
         firstReduced = i;
         break;
       }
     }
     for (let i = firstReduced; i < rank; i++) {
-      if (outShape[i] !== 1) {
+      if (logicalOutShape[i] !== 1) {
         throw new Error('GpuModelRunner: ReduceMean non-trailing reduction not supported');
       }
     }

@@ -684,12 +684,14 @@ def _check_wake_word_assets(config_dir: str) -> list[dict[str, Any]]:
             detail=f"{persistent} does not exist yet. It will be created on next start.",
         )]
     tflite_count = len(list(persistent.glob("*.tflite")))
+    oww_count = len(list((persistent / "openwakeword").glob("*.onnx"))) if (persistent / "openwakeword").is_dir() else 0
+    vww_count = len(list((persistent / "vswakeword").glob("*.onnx"))) if (persistent / "vswakeword").is_dir() else 0
     return [_result(
         "srv.wake.persistent_dir",
         CAT_WAKE,
         "Persistent wake word models folder",
         "pass",
-        detail=f"{persistent} ({tflite_count} custom .tflite file(s))",
+        detail=f"{persistent} (MWW: {tflite_count} .tflite, OWW: {oww_count} .onnx, VWW: {vww_count} .onnx)",
     )]
 
 

@@ -30,6 +30,7 @@ import { openMediaPicker, deriveParentMediaId } from './media-picker-dialog.js';
 import { WakeWordTestSession } from '../wake-word/wake-word-test-session.js';
 import { resolveDspForMode } from '../audio/dsp-config.js';
 import { getMicroModelParams, loadMicroModelParams } from '../wake-word/micro-models.js';
+import { getVwwModelParams, loadVwwModelParams } from '../wake-word/vww/manifest-cache.js';
 import { getSelectOptions, getSelectAttribute, getSelectState, getSwitchState } from '../shared/satellite-state.js';
 import { DiagnosticsManager } from '../diagnostics';
 import { buildMarkdownReport } from '../diagnostics/report.js';
@@ -1375,6 +1376,7 @@ class VoiceSatellitePanel extends HTMLElement {
           <select class="${P}-tester-model" id="${P}-tester-engine">
             <option value="mww" selected>microWakeWord</option>
             <option value="oww">openWakeWord</option>
+            <option value="vww">vsWakeWord</option>
           </select>
         </div>
 
@@ -1848,6 +1850,8 @@ class VoiceSatellitePanel extends HTMLElement {
     );
     if (engineSelect && initialDetectionMode === 'On Device (openWakeWord)') {
       engineSelect.value = 'oww';
+    } else if (engineSelect && initialDetectionMode === 'On Device (vsWakeWord)') {
+      engineSelect.value = 'vww';
     }
 
     // Engine-aware model dropdown.  We read both catalogs from the
@@ -1859,7 +1863,9 @@ class VoiceSatellitePanel extends HTMLElement {
 
     const populate = () => {
       const engine = engineSelect?.value || 'mww';
-      const attrName = engine === 'oww' ? 'oww_models' : 'mww_models';
+      const attrName = engine === 'oww' ? 'oww_models'
+        : engine === 'vww' ? 'vww_models'
+        : 'mww_models';
       const fromEntity = getSelectAttribute(
         this._hass, this._config.satellite_entity, 'wake_word_model', attrName,
       );
@@ -1876,9 +1882,9 @@ class VoiceSatellitePanel extends HTMLElement {
       // interruption classifier, not a wake word), so it doesn't appear
       // in the engine-supplied model list.  Surface it here so the tester
       // can verify the stop classifier in isolation when interruptions
-      // aren't firing.  Both engines ship a stop.tflite alongside their
-      // wake words.
-      if (!all.includes('stop')) all.push('stop');
+      // aren't firing.  MWW + OWW ship a stop classifier; VWW doesn't
+      // have one yet, so don't surface it for VWW.
+      if (engine !== 'vww' && !all.includes('stop')) all.push('stop');
       const current = modelSelect.value;
       modelSelect.innerHTML = '';
       for (const name of all) {
@@ -1920,6 +1926,20 @@ class VoiceSatellitePanel extends HTMLElement {
           ? OWW_STOP_SENSITIVITY_OFFSETS
           : OWW_WAKE_SENSITIVITY_OFFSETS;
         const offset = offsets[sensitivity] ?? 0;
+        this._testerThreshold = Math.max(0.1, Math.min(base + offset, 0.99));
+      } else if (engine === 'vww') {
+        // VWW: base cutoff comes from the model's .json manifest emitted
+        // by wakeword_train.py.  Sensitivity is an absolute offset
+        // (same shape as OWW).  Async-load the manifest so the panel's
+        // base cutoff matches the runtime; until it resolves the
+        // fallback 0.6 keeps the chart line in the right ballpark.
+        let params = getVwwModelParams(name);
+        try {
+          params = await loadVwwModelParams(name);
+        } catch (_) { /* keep fallback */ }
+        if (seq !== thresholdUpdateSeq) return;
+        const base = params?.cutoff ?? 0.6;
+        const offset = OWW_WAKE_SENSITIVITY_OFFSETS[sensitivity] ?? 0;
         this._testerThreshold = Math.max(0.1, Math.min(base + offset, 0.99));
       } else {
         let params = getMicroModelParams(name);

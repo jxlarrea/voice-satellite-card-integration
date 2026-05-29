@@ -41,20 +41,25 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up select entities from a config entry."""
-    # Discover both engine catalogs in one executor pass.
-    def _discover_all() -> tuple[list[str], list[str]]:
-        return (discover_microwakeword_models(), discover_openwakeword_models())
+    # Discover all three engine catalogs in one executor pass.
+    def _discover_all() -> tuple[list[str], list[str], list[str]]:
+        return (
+            discover_microwakeword_models(),
+            discover_openwakeword_models(),
+            discover_vswakeword_models(),
+        )
 
-    mww_models, oww_models = await hass.async_add_executor_job(_discover_all)
+    mww_models, oww_models, vww_models = await hass.async_add_executor_job(_discover_all)
     _LOGGER.info(
-        "Wake word model catalogs: %d microWakeWord, %d openWakeWord",
+        "Wake word model catalogs: %d microWakeWord, %d openWakeWord, %d vsWakeWord",
         len(mww_models),
         len(oww_models),
+        len(vww_models),
     )
 
     detection_select = VoiceSatelliteWakeWordDetectionSelect(hass, entry)
     wake_word_2_select = VoiceSatelliteWakeWordModel2Select(
-        hass, entry, mww_models, oww_models, detection_select,
+        hass, entry, mww_models, oww_models, vww_models, detection_select,
     )
     entities = [
         VoiceSatellitePipelineSelect(hass, entry),
@@ -63,7 +68,7 @@ async def async_setup_entry(
         VoiceSatelliteTTSOutputSelect(hass, entry),
         VoiceSatelliteSessionDurationSelect(hass, entry),
         detection_select,
-        VoiceSatelliteWakeWordModelSelect(hass, entry, mww_models, oww_models, detection_select),
+        VoiceSatelliteWakeWordModelSelect(hass, entry, mww_models, oww_models, vww_models, detection_select),
         wake_word_2_select,
         VoiceSatelliteWakeWordSensitivitySelect(hass, entry, detection_select),
     ]
@@ -317,8 +322,11 @@ class VoiceSatelliteSessionDurationSelect(SelectEntity, RestoreEntity):
 WAKE_WORD_DETECTION_HA = "Home Assistant"
 # microWakeWord remains the default (smaller, faster).  openWakeWord is
 # offered as a higher-end alternative for more capable browsers.
+# vsWakeWord is a from-scratch CNN engine targeting wall-mounted tablets
+# with off-axis far-field capture (the original training driver).
 WAKE_WORD_DETECTION_LOCAL_MWW = "On Device (microWakeWord)"
 WAKE_WORD_DETECTION_LOCAL_OWW = "On Device (openWakeWord)"
+WAKE_WORD_DETECTION_LOCAL_VWW = "On Device (vsWakeWord)"
 WAKE_WORD_DETECTION_DISABLED = "Disabled"
 # Legacy value persisted by versions before the engine choice existed -
 # silently migrated to the new microWakeWord label on entity restore.
@@ -326,6 +334,7 @@ _LEGACY_WAKE_WORD_DETECTION_LOCAL = "On Device"
 WAKE_WORD_DETECTION_OPTIONS = [
     WAKE_WORD_DETECTION_LOCAL_MWW,
     WAKE_WORD_DETECTION_LOCAL_OWW,
+    WAKE_WORD_DETECTION_LOCAL_VWW,
     WAKE_WORD_DETECTION_HA,
     WAKE_WORD_DETECTION_DISABLED,
 ]
@@ -334,6 +343,7 @@ WAKE_WORD_DETECTION_OPTIONS = [
 _LOCAL_DETECTION_MODES = {
     WAKE_WORD_DETECTION_LOCAL_MWW,
     WAKE_WORD_DETECTION_LOCAL_OWW,
+    WAKE_WORD_DETECTION_LOCAL_VWW,
 }
 
 # Common infrastructure models (not keyword models).
@@ -342,6 +352,10 @@ _COMMON_MODELS = {"stop"}
 # in the same directory; they're shared infrastructure, not user-selectable
 # wake words.
 _OWW_RESERVED_MODELS = {"melspectrogram", "embedding_model"}
+# vsWakeWord models are self-contained; no shared infrastructure files
+# need to be excluded.  Reserved set is empty but kept here for parity
+# with the OWW path in case future model variants ship support files.
+_VWW_RESERVED_MODELS: set[str] = set()
 
 # Built-in microWakeWord keyword models (TFLite filenames without extension).
 _BUILTIN_MODELS = ["ok_nabu", "hey_jarvis", "alexa", "hey_mycroft", "hey_home_assistant", "hey_luna", "okay_computer"]
@@ -388,6 +402,30 @@ def discover_openwakeword_models() -> list[str]:
     for f in sorted(models_dir.glob("*.onnx")):
         stem = f.stem
         if stem in _OWW_RESERVED_MODELS or stem in _COMMON_MODELS:
+            continue
+        if stem not in options:
+            options.append(stem)
+
+    return options
+
+
+def discover_vswakeword_models() -> list[str]:
+    """Scan models/vswakeword/ for vsWakeWord ONNX classifier files.
+
+    Each VWW model is self-contained (one .onnx + companion .json
+    manifest), so we don't filter shared-infrastructure stems the way
+    discover_openwakeword_models does.  Returns an empty list if the
+    vswakeword/ directory is missing; callers should treat empty as
+    "VWW unavailable".
+    """
+    models_dir = Path(__file__).parent / "models" / "vswakeword"
+    if not models_dir.is_dir():
+        return []
+
+    options: list[str] = []
+    for f in sorted(models_dir.glob("*.onnx")):
+        stem = f.stem
+        if stem in _VWW_RESERVED_MODELS or stem in _COMMON_MODELS:
             continue
         if stem not in options:
             options.append(stem)
@@ -493,6 +531,7 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
         entry: ConfigEntry,
         mww_models: list[str],
         oww_models: list[str],
+        vww_models: list[str],
         detection_select: VoiceSatelliteWakeWordDetectionSelect,
     ) -> None:
         """Initialize the slot 1 wake word model select entity."""
@@ -500,6 +539,7 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
         self._attr_unique_id = f"{entry.entry_id}_wake_word_model"
         self._mww_models = mww_models
         self._oww_models = oww_models
+        self._vww_models = vww_models
         # Track the user's last pick *per engine* so flipping the
         # detection mode doesn't drop their selection.  HA reports
         # current_option/options engine-specifically; without per-engine
@@ -507,19 +547,26 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
         # would render as "unknown" the moment the user switched to OWW.
         self._selected_mww: str = mww_models[0] if mww_models else "ok_nabu"
         self._selected_oww: str = oww_models[0] if oww_models else ""
+        self._selected_vww: str = vww_models[0] if vww_models else ""
         self._detection_select = detection_select
         detection_select.register_dependent(self)
 
     def _models_for_current_engine(self) -> list[str]:
         """Return the list appropriate for the active detection mode."""
-        if self._detection_select.current_option == WAKE_WORD_DETECTION_LOCAL_OWW:
+        mode = self._detection_select.current_option
+        if mode == WAKE_WORD_DETECTION_LOCAL_OWW:
             return self._oww_models
+        if mode == WAKE_WORD_DETECTION_LOCAL_VWW:
+            return self._vww_models
         # MWW (default) and any unknown / non-on-device mode falls back here.
         return self._mww_models
 
     def _selected_for_current_engine(self) -> str:
-        if self._detection_select.current_option == WAKE_WORD_DETECTION_LOCAL_OWW:
+        mode = self._detection_select.current_option
+        if mode == WAKE_WORD_DETECTION_LOCAL_OWW:
             return self._selected_oww
+        if mode == WAKE_WORD_DETECTION_LOCAL_VWW:
+            return self._selected_vww
         return self._selected_mww
 
     @property
@@ -552,8 +599,10 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
         return {
             "mww_models": list(self._mww_models),
             "oww_models": list(self._oww_models),
+            "vww_models": list(self._vww_models),
             "mww_selection": self._selected_mww,
             "oww_selection": self._selected_oww,
+            "vww_selection": self._selected_vww,
         }
 
     @property
@@ -578,25 +627,33 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
             # Preferred: explicit per-engine attributes from the new schema.
             mww_attr = attrs.get("mww_selection")
             oww_attr = attrs.get("oww_selection")
+            vww_attr = attrs.get("vww_selection")
             if mww_attr in self._mww_models:
                 self._selected_mww = mww_attr
             if oww_attr in self._oww_models:
                 self._selected_oww = oww_attr
+            if vww_attr in self._vww_models:
+                self._selected_vww = vww_attr
             # Migration: pre-multi-engine sessions only stored a bare state
             # value.  Route it to whichever catalog it matches.  If the
-            # name happens to exist in both (e.g. "ok_nabu") we let it
-            # land on both sides so the user's choice carries forward.
+            # name happens to exist in multiple catalogs (e.g. "ok_nabu")
+            # we let it land on every side so the user's choice carries
+            # forward whichever engine they pick next.
             if last_state.state and last_state.state not in {"unknown", "unavailable"}:
                 if not mww_attr and last_state.state in self._mww_models:
                     self._selected_mww = last_state.state
                 if not oww_attr and last_state.state in self._oww_models:
                     self._selected_oww = last_state.state
-        # Defensive: if either side is empty/missing pick the first
+                if not vww_attr and last_state.state in self._vww_models:
+                    self._selected_vww = last_state.state
+        # Defensive: if any side is empty/missing pick the first
         # available so current_option always returns a valid value.
         if self._selected_mww not in self._mww_models:
             self._selected_mww = self._mww_models[0] if self._mww_models else "ok_nabu"
         if self._oww_models and self._selected_oww not in self._oww_models:
             self._selected_oww = self._oww_models[0]
+        if self._vww_models and self._selected_vww not in self._vww_models:
+            self._selected_vww = self._vww_models[0]
         # Force a state write so the options attribute reflects the freshly
         # discovered model list - without this, HA's cached state from the
         # previous run can show stale/removed models in the frontend.
@@ -604,9 +661,15 @@ class VoiceSatelliteWakeWordModelSelect(SelectEntity, RestoreEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Handle option selection - routes to the active engine's slot."""
-        if self._detection_select.current_option == WAKE_WORD_DETECTION_LOCAL_OWW:
+        mode = self._detection_select.current_option
+        if mode == WAKE_WORD_DETECTION_LOCAL_OWW:
             if option in self._oww_models:
                 self._selected_oww = option
+                self.async_write_ha_state()
+            return
+        if mode == WAKE_WORD_DETECTION_LOCAL_VWW:
+            if option in self._vww_models:
+                self._selected_vww = option
                 self.async_write_ha_state()
             return
         if option in self._mww_models:
@@ -695,6 +758,7 @@ class VoiceSatelliteWakeWordModel2Select(SelectEntity, RestoreEntity):
         entry: ConfigEntry,
         mww_models: list[str],
         oww_models: list[str],
+        vww_models: list[str],
         detection_select: VoiceSatelliteWakeWordDetectionSelect,
     ) -> None:
         """Initialize the slot 2 wake word model select entity."""
@@ -702,10 +766,12 @@ class VoiceSatelliteWakeWordModel2Select(SelectEntity, RestoreEntity):
         self._attr_unique_id = f"{entry.entry_id}_wake_word_model_2"
         self._mww_models = mww_models
         self._oww_models = oww_models
+        self._vww_models = vww_models
         # Per-engine selection - same reasoning as slot 1.  Defaults
-        # to Disabled on both sides since slot 2 is opt-in.
+        # to Disabled on each side since slot 2 is opt-in.
         self._selected_mww: str = WAKE_WORD_2_DISABLED
         self._selected_oww: str = WAKE_WORD_2_DISABLED
+        self._selected_vww: str = WAKE_WORD_2_DISABLED
         self._detection_select = detection_select
         self._dependents: list[SelectEntity] = []
         detection_select.register_dependent(self)
@@ -715,13 +781,19 @@ class VoiceSatelliteWakeWordModel2Select(SelectEntity, RestoreEntity):
         self._dependents.append(entity)
 
     def _models_for_current_engine(self) -> list[str]:
-        if self._detection_select.current_option == WAKE_WORD_DETECTION_LOCAL_OWW:
+        mode = self._detection_select.current_option
+        if mode == WAKE_WORD_DETECTION_LOCAL_OWW:
             return self._oww_models
+        if mode == WAKE_WORD_DETECTION_LOCAL_VWW:
+            return self._vww_models
         return self._mww_models
 
     def _selected_for_current_engine(self) -> str:
-        if self._detection_select.current_option == WAKE_WORD_DETECTION_LOCAL_OWW:
+        mode = self._detection_select.current_option
+        if mode == WAKE_WORD_DETECTION_LOCAL_OWW:
             return self._selected_oww
+        if mode == WAKE_WORD_DETECTION_LOCAL_VWW:
+            return self._selected_vww
         return self._selected_mww
 
     @property
@@ -748,6 +820,7 @@ class VoiceSatelliteWakeWordModel2Select(SelectEntity, RestoreEntity):
         return {
             "mww_selection": self._selected_mww,
             "oww_selection": self._selected_oww,
+            "vww_selection": self._selected_vww,
         }
 
     @property
@@ -774,10 +847,13 @@ class VoiceSatelliteWakeWordModel2Select(SelectEntity, RestoreEntity):
             attrs = last_state.attributes or {}
             mww_attr = attrs.get("mww_selection")
             oww_attr = attrs.get("oww_selection")
+            vww_attr = attrs.get("vww_selection")
             if mww_attr == WAKE_WORD_2_DISABLED or mww_attr in self._mww_models:
                 self._selected_mww = mww_attr
             if oww_attr == WAKE_WORD_2_DISABLED or oww_attr in self._oww_models:
                 self._selected_oww = oww_attr
+            if vww_attr == WAKE_WORD_2_DISABLED or vww_attr in self._vww_models:
+                self._selected_vww = vww_attr
             # Migration from the pre-multi-engine schema: bare state.
             state = last_state.state
             if state and state not in {"unknown", "unavailable"}:
@@ -787,19 +863,27 @@ class VoiceSatelliteWakeWordModel2Select(SelectEntity, RestoreEntity):
                 if not oww_attr:
                     if state == WAKE_WORD_2_DISABLED or state in self._oww_models:
                         self._selected_oww = state
+                if not vww_attr:
+                    if state == WAKE_WORD_2_DISABLED or state in self._vww_models:
+                        self._selected_vww = state
         # Defensive: invalid → Disabled.
         if self._selected_mww != WAKE_WORD_2_DISABLED and self._selected_mww not in self._mww_models:
             self._selected_mww = WAKE_WORD_2_DISABLED
         if self._selected_oww != WAKE_WORD_2_DISABLED and self._selected_oww not in self._oww_models:
             self._selected_oww = WAKE_WORD_2_DISABLED
+        if self._selected_vww != WAKE_WORD_2_DISABLED and self._selected_vww not in self._vww_models:
+            self._selected_vww = WAKE_WORD_2_DISABLED
         self.async_write_ha_state()
 
     async def async_select_option(self, option: str) -> None:
         """Handle option selection - routes to active engine's slot."""
         if option not in self.options:
             return
-        if self._detection_select.current_option == WAKE_WORD_DETECTION_LOCAL_OWW:
+        mode = self._detection_select.current_option
+        if mode == WAKE_WORD_DETECTION_LOCAL_OWW:
             self._selected_oww = option
+        elif mode == WAKE_WORD_DETECTION_LOCAL_VWW:
+            self._selected_vww = option
         else:
             self._selected_mww = option
         self.async_write_ha_state()

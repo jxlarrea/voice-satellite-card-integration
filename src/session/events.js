@@ -77,16 +77,12 @@ async function fetchChimeDurations(session) {
   }
 }
 
-function isConstrainedWebView() {
-  const ua = navigator.userAgent || '';
-  return /Fully Kiosk/i.test(ua) || /\bwv\b/i.test(ua);
-}
-
-async function settleBeforeWakeWordStart(session) {
-  if (!isConstrainedWebView()) return;
-  session.logger.log('wake-word', 'Constrained WebView detected - delaying initial wake-word startup');
-  await new Promise((resolve) => setTimeout(resolve, 3000));
-}
+// NOTE: isConstrainedWebView + settleBeforeWakeWordStart used to live here
+// and were called only from startListening below.  They're now inside
+// wake-word/index.js's start() method so EVERY caller benefits
+// (startListening, _checkWakeWordActivation, settings-change paths).
+// Kept this comment as a breadcrumb in case someone greps for the
+// constrained-WebView gate.
 
 /**
  * Sync pipeline state to the integration entity.
@@ -246,7 +242,8 @@ export async function startListening(session) {
     ) === true;
     if (mode === WAKE_MODE_LOCAL) {
       const ww = await session._loadWakeWordModule();
-      await settleBeforeWakeWordStart(session);
+      // Constrained-WebView delay moved inside ww.start() (wake-word/index.js)
+      // so all start paths benefit, not just this one.  No-op here.
       await ww.start();
     } else {
       await session.pipeline.start();

@@ -80,9 +80,12 @@ def _load_user_custom_models(config_dir: str) -> None:
 
     # openWakeWord lives in models/openwakeword/.  Same one-way load.
     _load_user_openwakeword_models(persistent, integration_models)
+    # vsWakeWord lives in models/vswakeword/.  Same pattern as OWW.
+    _load_user_vswakeword_models(persistent, integration_models)
 
 
 _OWW_SUBDIR = "openwakeword"
+_VWW_SUBDIR = "vswakeword"
 
 
 def _load_user_openwakeword_models(persistent_root: Path, integration_root: Path) -> None:
@@ -110,6 +113,30 @@ def _load_user_openwakeword_models(persistent_root: Path, integration_root: Path
             if not json_dest.exists():
                 shutil.copy2(json_src, json_dest)
                 _LOGGER.info("Loaded user OWW model manifest: %s", json_src.name)
+
+
+def _load_user_vswakeword_models(persistent_root: Path, integration_root: Path) -> None:
+    """Copy user-supplied vsWakeWord models from the persistent drop folder
+    (/config/voice_satellite/models/vswakeword/) into the integration's
+    models dir.  Each VWW model is a self-contained ONNX + companion
+    .json manifest (no shared mel/embedding stages).  One-way only;
+    files already present in the integration dir are left alone."""
+    persistent_vww = persistent_root / _VWW_SUBDIR
+    integration_vww = integration_root / _VWW_SUBDIR
+    if not persistent_vww.is_dir() or not integration_vww.is_dir():
+        return
+
+    for src in sorted(persistent_vww.glob("*.onnx")):
+        dest = integration_vww / src.name
+        if not dest.exists():
+            shutil.copy2(src, dest)
+            _LOGGER.info("Loaded user VWW model: %s", src.name)
+        json_src = src.with_suffix(".json")
+        if json_src.exists():
+            json_dest = integration_vww / json_src.name
+            if not json_dest.exists():
+                shutil.copy2(json_src, json_dest)
+                _LOGGER.info("Loaded user VWW model manifest: %s", json_src.name)
 
 
 _DURATIONS_FILENAME = "durations.json"

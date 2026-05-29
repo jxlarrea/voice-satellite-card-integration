@@ -61,6 +61,39 @@ export class Logger {
   }
 
   /**
+   * Debug-only log. No-op when debug mode is off (skips both the ring
+   * buffer AND the console).  Use for high-frequency diagnostics that
+   * would otherwise saturate the 500-entry buffer in seconds (e.g.
+   * per-chunk wake-word near-miss decodes at 12.5/s).
+   *
+   * Named `logDebug` (not `debug`) because the class already has a
+   * `set debug(val)` setter for the debug-mode flag, and a same-named
+   * method would override the setter (and break all .log() output).
+   *
+   * @param {string} category - Log tag (e.g. 'wake-word')
+   * @param {string} msg - Message
+   * @param {*} [data] - Optional data to log
+   */
+  logDebug(category, msg, data) {
+    if (!this._debug) return;
+    this._record('log', category, msg, data);
+    if (data !== undefined) {
+      console.log(`[VS][${category}] ${msg}`, data);
+    } else {
+      console.log(`[VS][${category}] ${msg}`);
+    }
+  }
+
+  /**
+   * Whether debug mode is currently enabled.  Callers can use this to
+   * skip expensive formatting work entirely when the resulting log
+   * wouldn't be emitted anyway.
+   */
+  get isDebug() {
+    return !!this._debug;
+  }
+
+  /**
    * @param {string} category
    * @param {string} msg
    * @param {*} [data]
