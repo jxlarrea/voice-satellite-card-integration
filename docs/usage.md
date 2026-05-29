@@ -212,6 +212,67 @@ After dismissal the satellite plays a "done" chime, resumes any media that was p
 - If the browser tab is hidden when the show fires, it's queued and runs the moment the tab becomes visible.
 - Pipeline errors (LLM unreachable, intent failure, etc.) dismiss the show automatically and surface through the standard error toast.
 
+## Voice Satellite Set Screensaver Action
+
+Change the satellite's screensaver type live from an automation. Useful for time-based scheduling such as a black overlay overnight to keep an always-on tablet cool, and a media or website screensaver during the day.
+
+```yaml
+action: voice_satellite.set_screensaver
+target:
+  entity_id: assist_satellite.kitchen_tablet
+data:
+  type: black
+```
+
+When fired, the new type is pushed to every browser subscribed to that satellite, persisted to the per-browser panel config (so it survives a page reload), and the screensaver re-renders immediately if it was already on screen. The media file/folder, website URL, idle timeout, brightness percentage, and other screensaver settings continue to come from the side panel.
+
+### Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `type` | `string` | (required) | One of `black`, `media`, or `website`. `black` is a solid dark overlay (combine with a low brightness percentage in the panel for the strongest thermal savings). `media` uses the image/video/folder selected in the panel. `website` embeds the URL configured in the panel. |
+
+### Examples
+
+Black overlay at 11 PM, media kiosk back at 7 AM:
+
+```yaml
+alias: Night-time screensaver
+triggers:
+  - trigger: time
+    at: "23:00:00"
+  - trigger: time
+    at: "07:00:00"
+actions:
+  - action: voice_satellite.set_screensaver
+    target:
+      entity_id: assist_satellite.kitchen_tablet
+    data:
+      type: "{{ 'black' if now().hour >= 23 else 'media' }}"
+```
+
+Switch a wall tablet to a dashboard website during dinner, back to a photo slideshow afterwards:
+
+```yaml
+alias: Dinner-time recipe screen
+triggers:
+  - trigger: state
+    entity_id: input_boolean.dinner_time
+actions:
+  - action: voice_satellite.set_screensaver
+    target:
+      entity_id: assist_satellite.kitchen_tablet
+    data:
+      type: "{{ 'website' if is_state('input_boolean.dinner_time', 'on') else 'media' }}"
+```
+
+### Behavior notes
+
+- The change applies to every browser currently connected to the targeted satellite. For the typical one-tablet-per-entity setup that is exactly the device you targeted.
+- If no browser is connected when the action fires (tablet off, app closed), the action is a no-op for that satellite. The change is not stored on the integration side and will not replay when the browser reconnects.
+- If the side panel happens to be open at the moment the action fires, its Screensaver Type dropdown will not live-update. The next time the panel opens it reads the new value from local storage and reflects it correctly.
+- The action only changes the type. To swap a tablet between "on" and "off" overnight, pair `type: black` with a low `Screen brightness while active` percentage in the panel (`0%` drives the Fully Kiosk backlight fully off).
+
 ## Media Player
 
 Each satellite automatically exposes a `media_player` entity in Home Assistant, registered with `device_class: tv` so it can be targeted for both audio and video. The entity:

@@ -317,6 +317,29 @@ async def _async_handle_start_timer_service(call: ServiceCall) -> None:
             )
 
 
+async def _async_handle_set_screensaver_service(call: ServiceCall) -> None:
+    """Handle voice_satellite.set_screensaver - update screensaver settings live.
+
+    Pushes a `set_screensaver` event to each subscribed browser. The browser
+    persists the change to its local panel config so it survives reloads,
+    then propagates to the running session so the screensaver re-renders.
+    Today only `type` is accepted; the schema is shaped so additional
+    fields can be added later without breaking existing automations.
+    """
+    hass = call.hass
+    entity_ids = call.data["entity_id"]
+    payload = {k: v for k, v in call.data.items() if k != "entity_id"}
+
+    for entity_id in entity_ids:
+        entity = _find_entity(hass, entity_id)
+        if entity is None:
+            _LOGGER.warning(
+                "voice_satellite.set_screensaver: entity %s not found", entity_id
+            )
+            continue
+        entity._push_satellite_event("set_screensaver", payload)
+
+
 async def _async_handle_show_service(call: ServiceCall) -> None:
     """Handle voice_satellite.show - run a prompt through the LLM and display the result.
 
@@ -405,6 +428,18 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 vol.Optional("duration", default=0): vol.All(
                     vol.Coerce(int), vol.Range(min=0, max=86400)
                 ),
+            }
+        ),
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "set_screensaver",
+        _async_handle_set_screensaver_service,
+        schema=vol.Schema(
+            {
+                vol.Required("entity_id"): cv.entity_ids,
+                vol.Required("type"): vol.In(["black", "media", "website"]),
             }
         ),
     )

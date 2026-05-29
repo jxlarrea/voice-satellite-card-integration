@@ -83,6 +83,28 @@ export function dispatchSatelliteEvent(card, event) {
     return;
   }
 
+  // voice_satellite.set_screensaver action. Updates the per-browser
+  // panel config and propagates to the running session so the screensaver
+  // re-renders with the new settings.
+  if (type === 'set_screensaver') {
+    const newType = data?.type;
+    if (!['black', 'media', 'website'].includes(newType)) {
+      card.logger.log('set-screensaver', `Ignoring invalid type=${newType}`);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem('vs-panel-config');
+      const stored = raw ? JSON.parse(raw) : {};
+      localStorage.setItem(
+        'vs-panel-config',
+        JSON.stringify({ ...stored, screensaver_type: newType }),
+      );
+    } catch (_) { /* private browsing */ }
+    card.updateConfig?.({ screensaver_type: newType });
+    card.logger.log('set-screensaver', `type=${newType}`);
+    return;
+  }
+
   if (!data || !data.id) return;
 
   // Queue events while the tab is hidden - audio can't play and UI state

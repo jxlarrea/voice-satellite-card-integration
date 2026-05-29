@@ -66,6 +66,36 @@ show:
           mode: box
           unit_of_measurement: s
 
+set_screensaver:
+  name: Set screensaver
+  description: >-
+    Update the satellite's screensaver settings live. The change is pushed
+    to each connected browser, persisted in its local panel config, and
+    applied immediately. Useful for scheduling different screensaver
+    behaviors from automations (e.g. black screen at night to reduce
+    tablet heat, media kiosk during the day).
+  target:
+    entity:
+      integration: voice_satellite
+      domain: assist_satellite
+  fields:
+    type:
+      name: Screensaver type
+      description: >-
+        Which screensaver to show after the idle timeout. "black" is a
+        solid dark overlay (combine with a low brightness percentage in
+        the panel for the strongest thermal savings). "media" uses the
+        image/video/folder selected in the panel. "website" embeds the
+        URL configured in the panel.
+      required: true
+      example: black
+      selector:
+        select:
+          options:
+            - black
+            - media
+            - website
+
 start_timer:
   name: Start timer
   description: >-
