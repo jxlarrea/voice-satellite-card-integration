@@ -35,6 +35,7 @@ import {
   conv1dNcwShader,
   conv2dNchwShader,
   CONV_DISPATCH_WORKGROUP,
+  MATMUL_DISPATCH_WORKGROUP,
   leakyReluShader,
   maximumScalarShader,
   maxPool2dShader,
@@ -725,8 +726,8 @@ export class GpuModelRunner {
     return {
       kind: 'matmul',
       pipeline, bindGroup,
-      dispatchX: Math.ceil(N / 8),
-      dispatchY: Math.ceil(M / 8),
+      dispatchX: Math.ceil(N / MATMUL_DISPATCH_WORKGROUP[0]),
+      dispatchY: Math.ceil(M / MATMUL_DISPATCH_WORKGROUP[1]),
       dispatchZ: batchCount,
     };
   }
@@ -827,8 +828,8 @@ export class GpuModelRunner {
     });
     return {
       kind: 'gemm', pipeline, bindGroup,
-      dispatchX: Math.ceil(N / 8),
-      dispatchY: Math.ceil(M / 8),
+      dispatchX: Math.ceil(N / MATMUL_DISPATCH_WORKGROUP[0]),
+      dispatchY: Math.ceil(M / MATMUL_DISPATCH_WORKGROUP[1]),
       dispatchZ: 1,
     };
   }

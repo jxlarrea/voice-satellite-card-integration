@@ -15,13 +15,16 @@
  *   For ops with three independent output dims (CONV_2D, MAX_POOL_2D)
  *   we dispatch a 3D grid of (ow, oh, oc) and pick a workgroup that
  *   keeps each thread doing ~1 output element.  Element-wise ops use
- *   a flat 1D dispatch with 64-thread workgroups.
+ *   a flat 1D dispatch with smaller workgroups to reduce per-dispatch
+ *   pressure on mobile/WebView GPU drivers.
  */
 
-const ELEMENTWISE_WORKGROUP = 64;
-const CONV_WG_W = 8;
-const CONV_WG_H = 8;
+const ELEMENTWISE_WORKGROUP = 32;
+const CONV_WG_W = 4;
+const CONV_WG_H = 4;
 const CONV_WG_C = 1;
+const MATMUL_WG_W = 4;
+const MATMUL_WG_H = 4;
 
 /**
  * CONV_2D shader for one specific layer.  Bakes the layer's input
@@ -219,6 +222,7 @@ export function conv2dNchwShader(cfg) {
 /** Workgroup sizes for CONV_2D dispatch - main thread uses these to
  *  compute the workgroup count from output dims. */
 export const CONV_DISPATCH_WORKGROUP = [CONV_WG_W, CONV_WG_H, CONV_WG_C];
+export const MATMUL_DISPATCH_WORKGROUP = [MATMUL_WG_W, MATMUL_WG_H, 1];
 
 /**
  * LEAKY_RELU element-wise:  out[i] = max(x, alpha * x)  - equivalent
@@ -562,7 +566,7 @@ export function batchMatmulShader(M, K, N, batchCount) {
     const N: u32 = ${N}u;
     const BATCH: u32 = ${batchCount}u;
 
-    @compute @workgroup_size(8, 8, 1)
+    @compute @workgroup_size(${MATMUL_WG_W}, ${MATMUL_WG_H}, 1)
     fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       let n: u32 = gid.x;
       let m: u32 = gid.y;
@@ -700,7 +704,7 @@ export function gemmShader(M, K, N, hasBias, alpha, beta, transB) {
     const K: u32 = ${K}u;
     const N: u32 = ${N}u;
 
-    @compute @workgroup_size(8, 8, 1)
+    @compute @workgroup_size(${MATMUL_WG_W}, ${MATMUL_WG_H}, 1)
     fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       let n: u32 = gid.x;
       let m: u32 = gid.y;
