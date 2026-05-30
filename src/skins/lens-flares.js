@@ -8,10 +8,8 @@
  * brightness of the flares; a slow horizontal drift keeps the scene
  * alive even at idle.
  *
- * Self-mounting: the wrapper + canvas are added to the DOM only
- * while the lens-flares CSS is the active skin. A MutationObserver
- * on the shared <style> element detects skin changes and mounts /
- * unmounts.
+ * Runtime is activated explicitly by the skin registry when selected.
+ * This keeps static bundling from starting unused skin observers/RAF loops.
  */
 
 import css from './lens-flares.css';
@@ -482,7 +480,8 @@ function setup() {
   return true;
 }
 
-if (!setup()) {
+export function ensureLensFlaresSkinRuntime() {
+  if (setup()) return;
   const bodyObs = new MutationObserver(() => {
     if (document.getElementById('voice-satellite-ui')) {
       bodyObs.disconnect();

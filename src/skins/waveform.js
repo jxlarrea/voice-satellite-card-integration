@@ -5,11 +5,8 @@
  * centered in the background. The waveform is always visible with a
  * subtle idle animation that intensifies when mic or TTS audio is active.
  *
- * Fully self-contained: mounts itself at module load time, reads mode
- * from the bar's CSS classes, and audio level from --vs-audio-level.
- * When another skin replaces the CSS, the canvas collapses to 0x0 and
- * draw() short-circuits. When waveform CSS returns, ResizeObserver
- * restores dimensions and drawing resumes.
+ * Runtime is activated explicitly by the skin registry when selected.
+ * This keeps static bundling from starting unused skin observers/RAF loops.
  */
 
 import css from './waveform.css';
@@ -711,9 +708,10 @@ function setup() {
   return true;
 }
 
-// Try setup immediately; if #voice-satellite-ui doesn't exist yet,
-// watch document.body for its creation.
-if (!setup()) {
+export function ensureWaveformSkinRuntime() {
+  // Try setup immediately; if #voice-satellite-ui doesn't exist yet,
+  // watch document.body for its creation.
+  if (setup()) return;
   const bodyObs = new MutationObserver(() => {
     if (document.getElementById('voice-satellite-ui')) {
       bodyObs.disconnect();

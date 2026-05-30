@@ -9,10 +9,10 @@ import { defaultSkin } from './default.js';
 import { alexaSkin } from './alexa.js';
 import { googleHomeSkin } from './google-home.js';
 import { homeAssistantSkin } from './home-assistant.js';
-import { lensFlaresSkin } from './lens-flares.js';
+import { ensureLensFlaresSkinRuntime, lensFlaresSkin } from './lens-flares.js';
 import { retroTerminalSkin } from './retro-terminal.js';
 import { siriSkin } from './siri.js';
-import { waveformSkin } from './waveform.js';
+import { ensureWaveformSkinRuntime, waveformSkin } from './waveform.js';
 
 /** Metadata for the editor dropdown (no CSS imported). */
 const SKIN_META = [
@@ -37,6 +37,11 @@ const SKINS = {
   waveform: waveformSkin,
 };
 
+const SKIN_ACTIVATORS = {
+  'lens-flares': ensureLensFlaresSkinRuntime,
+  waveform: ensureWaveformSkinRuntime,
+};
+
 /**
  * Synchronous skin lookup. Returns the cached skin or default as fallback.
  * @param {string} id
@@ -52,6 +57,7 @@ export function getSkin(id) {
  * @returns {Promise<object>} skin definition
  */
 export async function loadSkin(id) {
+  SKIN_ACTIVATORS[id]?.();
   return getSkin(id);
 }
 
