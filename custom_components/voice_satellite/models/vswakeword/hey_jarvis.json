@@ -217,6 +217,31 @@
         41,
         9,
         15
+      ],
+      [
+        27,
+        9,
+        15,
+        2,
+        24,
+        44,
+        5,
+        3,
+        41,
+        15,
+        38
+      ],
+      [
+        27,
+        9,
+        15,
+        2,
+        24,
+        44,
+        5,
+        3,
+        41,
+        15
       ]
     ],
     "wake_word_target_phonemes": [
@@ -340,6 +365,31 @@
         "v",
         "e",
         "\u026a"
+      ],
+      [
+        "h",
+        "e",
+        "\u026a",
+        " ",
+        "d",
+        "\u0292",
+        "\u0251",
+        "\u02d0",
+        "v",
+        "\u026a",
+        "s"
+      ],
+      [
+        "h",
+        "e",
+        "\u026a",
+        " ",
+        "d",
+        "\u0292",
+        "\u0251",
+        "\u02d0",
+        "v",
+        "\u026a"
       ]
     ],
     "wake_word_target_anchors": [
@@ -357,17 +407,25 @@
       [
         4,
         5
+      ],
+      [
+        4,
+        5
+      ],
+      [
+        4,
+        5
       ]
     ],
     "max_edit_distance": 1,
     "wake_word_trail_tolerance": 3,
-    "min_matched_confidence": 5.0
+    "min_matched_confidence": 4.0
   },
   "runtime": {
-    "required_hits": 4,
+    "required_hits": 2,
     "hit_mode": "consecutive",
     "cooldown_ms": 2000,
-    "high_confidence_bypass": 6.8
+    "high_confidence_bypass": 5.5
   },
   "best_epoch": 73,
   "best_val": {
