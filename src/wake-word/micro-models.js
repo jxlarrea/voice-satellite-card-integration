@@ -13,6 +13,7 @@ import {
   loadCustomWakeWordModel,
   releaseCustomWakeWordModels,
 } from './custom-model-runner.js';
+import { withWakeWordAssetVersion } from './versioned-url.js';
 
 const MODELS_BASE = '/voice_satellite/models';
 
@@ -53,7 +54,7 @@ export async function loadTFLite() {
 async function _loadModelManifest(filename) {
   if (filename in _jsonParamsCache) return _jsonParamsCache[filename];
   try {
-    const resp = await fetch(`${MODELS_BASE}/${filename}.json`);
+    const resp = await fetch(withWakeWordAssetVersion(`${MODELS_BASE}/${filename}.json`), { cache: 'no-store' });
     if (!resp.ok) {
       _jsonParamsCache[filename] = null;
       return null;
@@ -78,7 +79,7 @@ async function _fetchModelQuantization(filename) {
   let scale = DEFAULT_INPUT_SCALE;
   let zeroPoint = DEFAULT_INPUT_ZERO_POINT;
   try {
-    const resp = await fetch(`${MODELS_BASE}/${filename}.tflite`);
+    const resp = await fetch(withWakeWordAssetVersion(`${MODELS_BASE}/${filename}.tflite`), { cache: 'no-cache' });
     if (resp.ok) {
       const buffer = await resp.arrayBuffer();
       const quant = readInputQuantization(buffer);

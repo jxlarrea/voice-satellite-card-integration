@@ -13,6 +13,7 @@
  */
 
 import { compileOwwOnnxModel } from './onnx-runner.js';
+import { withWakeWordAssetVersion } from '../versioned-url.js';
 
 function getModelsBase() {
   return globalThis.__VS_OWW_MODELS_BASE || '/voice_satellite/models/openwakeword';
@@ -27,8 +28,8 @@ let _sharedPromise = null;
 const _classifierCache = new Map();
 
 async function _fetchAndCompile(filename, kind) {
-  const url = `${getModelsBase()}/${filename}`;
-  const resp = await fetch(url);
+  const url = withWakeWordAssetVersion(`${getModelsBase()}/${filename}`);
+  const resp = await fetch(url, { cache: 'no-cache' });
   if (!resp.ok) {
     throw new Error(`OWW model fetch failed: ${url} (HTTP ${resp.status})`);
   }

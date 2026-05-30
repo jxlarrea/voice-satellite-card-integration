@@ -23,6 +23,7 @@
 
 import { compileOwwOnnxModel } from './onnx-runner.js';
 import { checkpointVwwStartup } from './startup-breadcrumb.js';
+import { withWakeWordAssetVersion } from '../versioned-url.js';
 
 function getModelsBase() {
   return globalThis.__VS_VWW_MODELS_BASE || '/voice_satellite/models/vswakeword';
@@ -37,7 +38,7 @@ let _sharedEmbeddingPipeline = null;
 let _sharedEmbeddingInflight = null;
 
 async function _fetchManifest(name) {
-  const url = `${getModelsBase()}/${name}.json`;
+  const url = withWakeWordAssetVersion(`${getModelsBase()}/${name}.json`);
   await checkpointVwwStartup('model:fetch-manifest', { model: name, url });
   // `cache: 'no-store'` so manifest edits take effect on plain reload.
   const resp = await fetch(url, { cache: 'no-store' });
@@ -49,8 +50,8 @@ async function _fetchAndCompile(urlOrName, manifestForShape) {
   // urlOrName: either an absolute path (for upstream shared models) or
   // just a name (resolved against getModelsBase()).
   const url = urlOrName.startsWith('/') || urlOrName.includes('://')
-    ? urlOrName
-    : `${getModelsBase()}/${urlOrName}.onnx`;
+    ? withWakeWordAssetVersion(urlOrName)
+    : withWakeWordAssetVersion(`${getModelsBase()}/${urlOrName}.onnx`);
   await checkpointVwwStartup('model:fetch-onnx', { model: urlOrName, url });
   const resp = await fetch(url, { cache: 'no-cache' });
   if (!resp.ok) {
@@ -91,8 +92,8 @@ async function _loadSharedEmbeddingPipeline(embeddingBlock) {
   };
   const melName = fname(embeddingBlock?.melspectrogram_model, 'melspectrogram.onnx');
   const embName = fname(embeddingBlock?.embedding_model, 'embedding_model.onnx');
-  const melUrl = `${getModelsBase()}/${melName}`;
-  const embUrl = `${getModelsBase()}/${embName}`;
+  const melUrl = withWakeWordAssetVersion(`${getModelsBase()}/${melName}`);
+  const embUrl = withWakeWordAssetVersion(`${getModelsBase()}/${embName}`);
 
   // The shared melspec + embedding ONNX files have DYNAMIC input shapes
   // in their declared graphs (melspec: ['batch_size', 'samples'];

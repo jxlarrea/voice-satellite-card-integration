@@ -1,3 +1,5 @@
+import { withWakeWordAssetVersion } from './versioned-url.js';
+
 function getModelsBase() {
   return globalThis.__VS_MODELS_BASE || '/voice_satellite/models';
 }
@@ -104,8 +106,8 @@ const MODEL_CACHE = new Map();
 export async function loadCustomWakeWordModel(modelName) {
   if (MODEL_CACHE.has(modelName)) return MODEL_CACHE.get(modelName);
 
-  const url = `${getModelsBase()}/${modelName}.tflite`;
-  const response = await fetch(url);
+  const url = withWakeWordAssetVersion(`${getModelsBase()}/${modelName}.tflite`);
+  const response = await fetch(url, { cache: 'no-cache' });
   if (!response.ok) {
     throw new Error(`Failed to fetch wake word model: ${modelName} (HTTP ${response.status})`);
   }

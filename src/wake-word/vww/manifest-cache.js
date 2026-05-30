@@ -7,6 +7,8 @@
  * two are independent and only the JSON is duplicated.
  */
 
+import { withWakeWordAssetVersion } from '../versioned-url.js';
+
 const DEFAULT_PARAMS = {
   cutoff: 0.6,
   source: 'fallback',
@@ -40,7 +42,8 @@ export async function loadVwwModelParams(name) {
   const promise = (async () => {
     let manifest = null;
     try {
-      const resp = await fetch(`${getManifestBase()}/${name}.json`, { cache: 'no-store' });
+      const url = withWakeWordAssetVersion(`${getManifestBase()}/${name}.json`);
+      const resp = await fetch(url, { cache: 'no-store' });
       if (resp.ok) manifest = await resp.json();
     } catch (_) {
       // network / parse failure leaves us on the fallback - never throws
