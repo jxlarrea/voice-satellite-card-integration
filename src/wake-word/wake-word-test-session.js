@@ -940,6 +940,13 @@ export class WakeWordTestSession {
     if (typeof info.highConfidenceBypass === 'number' && Number.isFinite(info.highConfidenceBypass)) {
       parts.push(`runtime_bypass=${info.highConfidenceBypass.toFixed(2)}`);
     }
+    if (
+      Number.isFinite(info.highConfidenceBypassMinHits)
+      && Number.isFinite(info.hits)
+      && info.highConfidence === true
+    ) {
+      parts.push(`runtime_bypass_hits=${info.hits}/${info.highConfidenceBypassMinHits}`);
+    }
     if (info.bypassed === true) parts.push('runtime_bypassed=true');
     return parts.join(' ');
   }
@@ -958,6 +965,14 @@ export class WakeWordTestSession {
       && ctcInfo.matchedConfidence < gate
     ) {
       return '';
+    }
+    if (
+      runtime.highConfidence === true
+      && Number.isFinite(runtime.highConfidenceBypassMinHits)
+      && Number.isFinite(runtime.hits)
+      && runtime.hits < runtime.highConfidenceBypassMinHits
+    ) {
+      return `runtime_bypass_hits<${runtime.highConfidenceBypassMinHits}`;
     }
     if (
       Number.isFinite(runtime.hits)

@@ -391,14 +391,15 @@
       ]
     ],
     "max_edit_distance": 1,
-    "wake_word_trail_tolerance": 3,
-    "min_matched_confidence": 4.0
+    "wake_word_trail_tolerance": 1,
+    "min_matched_confidence": 2.0
   },
   "runtime": {
-    "required_hits": 2,
+    "required_hits": 3,
     "hit_mode": "consecutive",
     "cooldown_ms": 2000,
-    "high_confidence_bypass": 5.8
+    "high_confidence_bypass": 5.0,
+    "high_confidence_bypass_min_hits": 2
   },
   "best_epoch": 73,
   "best_val": {

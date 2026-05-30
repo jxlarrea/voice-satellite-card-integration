@@ -70,6 +70,10 @@ function runtimeModeFromManifest(cfg) {
     && Number.isFinite(cfg.high_confidence_bypass)
     ? cfg.high_confidence_bypass
     : null;
+  const highConfidenceBypassMinHits = cfg && typeof cfg.high_confidence_bypass_min_hits === 'number'
+    && Number.isFinite(cfg.high_confidence_bypass_min_hits)
+    ? Math.max(1, Math.floor(cfg.high_confidence_bypass_min_hits))
+    : 1;
   const hitMode = cfg?.hit_mode === 'consecutive' ? 'consecutive' : 'consecutive';
   return requiredHits > 0
     ? {
@@ -77,6 +81,7 @@ function runtimeModeFromManifest(cfg) {
         requiredHits,
         hitMode,
         highConfidenceBypass,
+        highConfidenceBypassMinHits,
         cooldownMs: cooldown,
       }
     : { mode: 'borderline', cooldownMs: cooldown };
@@ -91,6 +96,13 @@ function formatRuntimeStatus(status, triggerType = null) {
   }
   if (typeof status.highConfidenceBypass === 'number' && Number.isFinite(status.highConfidenceBypass)) {
     parts.push(`runtime_bypass=${status.highConfidenceBypass.toFixed(2)}`);
+  }
+  if (
+    Number.isFinite(status.highConfidenceBypassMinHits)
+    && Number.isFinite(status.hits)
+    && status.highConfidence === true
+  ) {
+    parts.push(`runtime_bypass_hits=${status.hits}/${status.highConfidenceBypassMinHits}`);
   }
   if (status.bypassed === true) parts.push('runtime_bypassed=true');
   return parts.join(' ');
@@ -258,7 +270,10 @@ export class VwwBackend {
         const bypass = typeof r.high_confidence_bypass === 'number'
           ? `, bypass=${r.high_confidence_bypass.toFixed(1)}`
           : '';
-        return `${c.name}(c=${cutoffs[c.name].toFixed(3)}, hits=${r.required_hits}${bypass})`;
+        const bypassMinHits = typeof r.high_confidence_bypass_min_hits === 'number'
+          ? `, bypass_hits=${Math.max(1, Math.floor(r.high_confidence_bypass_min_hits))}`
+          : '';
+        return `${c.name}(c=${cutoffs[c.name].toFixed(3)}, hits=${r.required_hits}${bypass}${bypassMinHits})`;
       }
       return `${c.name}(c=${cutoffs[c.name].toFixed(3)}, borderline)`;
     }).join(', ');
@@ -527,7 +542,7 @@ export class VwwBackend {
           reasons.push('conf<gate');
         }
         const runtimeStatus = this._runtimeStatus?.[name];
-        if (
+        const runtimeCandidate = !!(
           runtimeStatus
           && runtimeStatus.mode === 'counter'
           && ed <= maxEd
@@ -535,6 +550,17 @@ export class VwwBackend {
             && typeof gateThreshold === 'number'
             && Number.isFinite(gateThreshold)
             && info.matchedConfidence < gateThreshold)
+        );
+        if (
+          runtimeCandidate
+          && runtimeStatus.highConfidence === true
+          && Number.isFinite(runtimeStatus.highConfidenceBypassMinHits)
+          && Number.isFinite(runtimeStatus.hits)
+          && runtimeStatus.hits < runtimeStatus.highConfidenceBypassMinHits
+        ) {
+          reasons.push(`runtime_bypass_hits<${runtimeStatus.highConfidenceBypassMinHits}`);
+        } else if (
+          runtimeCandidate
           && Number.isFinite(runtimeStatus.hits)
           && Number.isFinite(runtimeStatus.requiredHits)
           && runtimeStatus.hits < runtimeStatus.requiredHits
@@ -592,32 +618,34 @@ export class VwwBackend {
    */
   _gateCounter(name, score, cutoff, mode, ctcInfo = null) {
     if (score > cutoff) {
+      this._hitCounters[name] = (this._hitCounters[name] || 0) + 1;
       const bypass = mode?.highConfidenceBypass;
-      if (
+      const isHighConfidence = (
         typeof bypass === 'number'
         && ctcInfo
         && typeof ctcInfo.matchedConfidence === 'number'
         && ctcInfo.matchedConfidence >= bypass
-      ) {
-        this._runtimeStatus[name] = this._makeRuntimeStatus(name, 1, true);
+      );
+      const bypassMinHits = Math.max(1, Math.floor(mode?.highConfidenceBypassMinHits || 1));
+      if (isHighConfidence && this._hitCounters[name] >= bypassMinHits) {
+        this._runtimeStatus[name] = this._makeRuntimeStatus(name, this._hitCounters[name], true, true);
         this._hitCounters[name] = 0;
         return 'bypass';
       }
-      this._hitCounters[name] = (this._hitCounters[name] || 0) + 1;
       if (this._hitCounters[name] >= mode.requiredHits) {
-        this._runtimeStatus[name] = this._makeRuntimeStatus(name, mode.requiredHits, false);
+        this._runtimeStatus[name] = this._makeRuntimeStatus(name, mode.requiredHits, false, isHighConfidence);
         this._hitCounters[name] = 0;
         return 'counter';
       }
-      this._runtimeStatus[name] = this._makeRuntimeStatus(name, this._hitCounters[name], false);
+      this._runtimeStatus[name] = this._makeRuntimeStatus(name, this._hitCounters[name], false, isHighConfidence);
     } else {
       this._hitCounters[name] = 0;
-      this._runtimeStatus[name] = this._makeRuntimeStatus(name, 0, false);
+      this._runtimeStatus[name] = this._makeRuntimeStatus(name, 0, false, false);
     }
     return null;
   }
 
-  _makeRuntimeStatus(name, hits = 0, bypassed = false) {
+  _makeRuntimeStatus(name, hits = 0, bypassed = false, highConfidence = false) {
     const mode = this._runtimeMode[name] || { mode: 'borderline', cooldownMs: COOLDOWN_MS };
     if (mode.mode !== 'counter') {
       return { mode: 'borderline', cooldownMs: mode.cooldownMs };
@@ -628,6 +656,8 @@ export class VwwBackend {
       hits,
       requiredHits: mode.requiredHits,
       highConfidenceBypass: mode.highConfidenceBypass,
+      highConfidenceBypassMinHits: mode.highConfidenceBypassMinHits,
+      highConfidence,
       bypassed,
       cooldownMs: mode.cooldownMs,
     };
