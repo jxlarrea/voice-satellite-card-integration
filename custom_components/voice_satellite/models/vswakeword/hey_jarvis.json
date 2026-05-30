@@ -1,4 +1,4 @@
-﻿{
+{
     "name": "hey_jarvis",
     "format": "vs-wake-word-ctc-v1",
     "recommended_threshold": 0.5,
@@ -290,13 +290,13 @@
         ],
         "max_edit_distance": 1,
         "wake_word_trail_tolerance": 3,
-        "min_matched_confidence": 5.0
+        "min_matched_confidence": 3.0
     },
     "runtime": {
-        "required_hits": 4,
+        "required_hits": 2,
         "hit_mode": "consecutive",
         "cooldown_ms": 2000,
-        "high_confidence_bypass": 6.8,
+        "high_confidence_bypass": 5.0,
         "high_confidence_bypass_min_hits": 2
     },
     "best_epoch": 11,
