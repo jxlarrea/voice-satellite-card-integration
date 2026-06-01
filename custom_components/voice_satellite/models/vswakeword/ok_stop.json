@@ -140,7 +140,8 @@
     "required_hits": 2,
     "hit_mode": "consecutive",
     "cooldown_ms": 2000,
-    "high_confidence_bypass": 3.0
+    "high_confidence_bypass": 3.0,
+    "high_confidence_bypass_min_hits": 1
   },
   "best_epoch": 91,
   "best_val": {
