@@ -438,14 +438,14 @@
     ],
     "max_edit_distance": 1,
     "wake_word_trail_tolerance": 3,
-    "min_matched_confidence": 4.0
+    "min_matched_confidence": 5.0
   },
   "runtime": {
     "required_hits": 4,
     "hit_mode": "consecutive",
     "cooldown_ms": 2000,
     "high_confidence_bypass": 6.8,
-    "high_confidence_bypass_min_hits": 1
+    "high_confidence_bypass_min_hits": 2
   },
   "best_epoch": 73,
   "best_val": {

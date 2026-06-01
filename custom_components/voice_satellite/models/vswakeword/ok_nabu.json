@@ -529,7 +529,7 @@
     "hit_mode": "consecutive",
     "high_confidence_bypass": 6.8,
     "cooldown_ms": 2000,
-    "high_confidence_bypass_min_hits": 1
+    "high_confidence_bypass_min_hits": 2
   },
   "best_epoch": 124,
   "best_val": {
