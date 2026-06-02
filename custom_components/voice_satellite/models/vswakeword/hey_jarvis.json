@@ -608,7 +608,7 @@
     ],
     "max_edit_distance": 1,
     "wake_word_trail_tolerance": 3,
-    "min_matched_confidence": 4.6
+    "min_matched_confidence": 4.4
   },
   "runtime": {
     "required_hits": 2,
