@@ -294,13 +294,13 @@
     ],
     "max_edit_distance": 1,
     "wake_word_trail_tolerance": 3,
-    "min_matched_confidence": 4.5
+    "min_matched_confidence": 5.5
   },
   "runtime": {
-    "required_hits": 3,
+    "required_hits": 2,
     "hit_mode": "consecutive",
     "cooldown_ms": 2000,
-    "high_confidence_bypass": 5.8,
+    "high_confidence_bypass": 6.8,
     "high_confidence_bypass_min_hits": 2
   }
 }
