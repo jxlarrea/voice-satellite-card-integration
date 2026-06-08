@@ -262,7 +262,39 @@
     ],
     "max_edit_distance": 1,
     "wake_word_trail_tolerance": 3,
-    "min_matched_confidence": 3.2
+    "min_matched_confidence": 3.2,
+    "wake_word_target_anchors": [
+      [
+        2,
+        6,
+        9
+      ],
+      [
+        2,
+        5,
+        8
+      ],
+      [
+        2,
+        6,
+        8
+      ],
+      [
+        2,
+        6,
+        9
+      ],
+      [
+        2,
+        5,
+        7
+      ],
+      [
+        2,
+        7,
+        10
+      ]
+    ]
   },
   "runtime": {
     "required_hits": 2,
