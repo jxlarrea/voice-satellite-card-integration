@@ -9,8 +9,7 @@
       128,
       40
     ],
-    "dtype": "float32",
-    "feature": "log_mel"
+    "dtype": "float32"
   },
   "output": {
     "name": "log_probs",
@@ -19,8 +18,7 @@
       64,
       52
     ],
-    "dtype": "float32",
-    "meaning": "frame_level_phoneme_log_probabilities"
+    "dtype": "float32"
   },
   "feature_config": {
     "sample_rate": 16000,
@@ -272,33 +270,5 @@
     "hit_mode": "consecutive",
     "high_confidence_bypass": 5.8,
     "high_confidence_bypass_min_hits": 1
-  },
-  "best_epoch": 76,
-  "best_val": {
-    "loss": 1.6483372390270232,
-    "exact_decode_acc": 0.5912,
-    "wake_detect_rate": 0.6180836707152496,
-    "wake_fp_rate": 0.0005685048322910744,
-    "wake_pos_total": 1482,
-    "wake_fp_total": 3518,
-    "silence_nonblank_rate": 0.09884959522795057,
-    "silence_nonblank_total": 2347,
-    "silence_nonblank_hits": 232,
-    "utterance_wake_recall": 0.7254901960784313,
-    "utterance_fp_rate": 0.001015744032503809,
-    "utterance_pos_total": 816,
-    "utterance_fp_total": 1969,
-    "selector_recall_rate": 0.709379217273954,
-    "selector_utterance_recall_weight": 0.85,
-    "adaptive_positive_boost_this_epoch": 1.0,
-    "adaptive_positive_boost_next_epoch": 1.0627007316910373,
-    "adaptive_recall_fpr_cap": 0.001,
-    "adaptive_recall_start_epoch": 40,
-    "adaptive_recall_min_selector_recall": 0.55,
-    "adaptive_recall_max_silence_nonblank": 0.1,
-    "adaptive_recall_max_boost": 1.12
-  },
-  "deployed_from": "data/runs/ok_nabu_v32/checkpoints/ok_nabu-ctc-bestrecall-ep076.pt",
-  "manifest_source": "public/models/ok_nabu_v32_adaptive_ep056_bestrecall/ok_nabu.json",
-  "version_note": "ok_nabu v32 adaptive ep076 bestrecall using the same manifest targets/runtime knobs as v32 adaptive ep056 bestrecall."
+  }
 }

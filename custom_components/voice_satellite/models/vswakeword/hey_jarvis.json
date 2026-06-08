@@ -9,8 +9,7 @@
       128,
       40
     ],
-    "dtype": "float32",
-    "feature": "log_mel"
+    "dtype": "float32"
   },
   "output": {
     "name": "log_probs",
@@ -19,8 +18,7 @@
       64,
       52
     ],
-    "dtype": "float32",
-    "meaning": "frame_level_phoneme_log_probabilities"
+    "dtype": "float32"
   },
   "feature_config": {
     "sample_rate": 16000,
@@ -1065,35 +1063,5 @@
     "hit_mode": "consecutive",
     "high_confidence_bypass": 5.8,
     "high_confidence_bypass_min_hits": 1
-  },
-  "best_epoch": 60,
-  "best_val": {
-    "loss": 1.3773616075515747,
-    "exact_decode_acc": 0.6682,
-    "wake_detect_rate": 0.6416264645072364,
-    "wake_fp_rate": 0.0,
-    "wake_pos_total": 1451,
-    "wake_fp_total": 3549,
-    "silence_nonblank_rate": 0.07465472191116088,
-    "silence_nonblank_total": 2679,
-    "silence_nonblank_hits": 200,
-    "utterance_wake_recall": 0.7238204833141542,
-    "utterance_fp_rate": 0.0,
-    "utterance_pos_total": 869,
-    "utterance_fp_total": 2163,
-    "selector_recall_rate": 0.7114913804931166,
-    "selector_utterance_recall_weight": 0.85
-  },
-  "deployed_from": "data/runs/hey_jarvis_v25/checkpoints/hey_jarvis-ctc-bestrecall-ep060.pt",
-  "candidate_note": "v25 best-recall checkpoint ep060, patched with active v25 targets/runtime knobs; added anchored manifest targets for ep060 missed-positive recovery",
-  "manifest_target_patch": {
-    "name": "ep060_missed_positive_recovery_v1",
-    "added_phoneme_targets": [
-      "h e ɪ   ʒ ɑ ː ɹ v ɪ s",
-      "h e ɪ   d ʒ v ɪ s",
-      "h e ɪ   d ʒ ɑ ː v i"
-    ],
-    "anchor": "first phoneme h is required for each added target",
-    "reason": "Recovered 6/9 benchmark misses in matcher replay while keeping TTS ordinary negatives and broadcast at 0 FP."
   }
 }
