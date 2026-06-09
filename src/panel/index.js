@@ -186,14 +186,15 @@ class VoiceSatellitePanel extends HTMLElement {
       const stt = `stt_${key}`;
       if (this._config[stt] === undefined) this._config[stt] = legacy;
     }
-    // v6.10.x shipped wake-word DSP defaulting to off - fix persisted
-    // false values back to true (matching Voice PE hardware behavior).
-    // Auto gain control is intentionally left off (its own default), so
-    // the migration must not force it on.
-    if (!(this._config._dsp_version >= 2)) {
+    // Wake-word DSP migration (see migrateWakeWordDsp in engine/index.js).
+    // v2 forced NS/EC/AGC on; v3 forces AGC back off for everyone while
+    // keeping NS/EC on. An explicit "on" and a v2-migration "on" are
+    // indistinguishable in storage, so v3 deliberately resets both.
+    if (!(this._config._dsp_version >= 3)) {
       this._config.wake_word_noise_suppression = true;
       this._config.wake_word_echo_cancellation = true;
-      this._config._dsp_version = 2;
+      this._config.wake_word_auto_gain_control = false;
+      this._config._dsp_version = 3;
       setStoredConfig(this._config);
     }
     // Sync entity from dedicated storage into config

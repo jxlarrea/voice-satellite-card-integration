@@ -30,22 +30,26 @@ function getStoredConfig() {
 }
 
 /**
- * One-time migration: v6.10.x shipped with wake-word DSP defaulting to
- * off.  Users who opened the panel during that window have explicit
- * `false` values persisted — flip noise suppression and echo
- * cancellation back to true (matching Voice PE hardware behavior) and
- * stamp a version flag so this only runs once.  Auto gain control is
- * intentionally left off (its own default), so the migration must not
- * force it on.
+ * One-time wake-word DSP migration.  History:
+ *   - v6.10.x shipped wake-word DSP defaulting to off.
+ *   - v2 forced noise suppression, echo cancellation, AND auto gain
+ *     control back on (matching Voice PE hardware behavior).
+ *   - v3 forces auto gain control back OFF for everyone (including users
+ *     the v2 migration switched it on for), while leaving noise
+ *     suppression and echo cancellation on.  An explicit user "on" and a
+ *     v2-migration "on" are indistinguishable in storage, so this
+ *     deliberately resets both.
+ * The version flag ensures it only runs once.
  */
 function migrateWakeWordDsp() {
   try {
     const config = getStoredConfig();
-    if (config._dsp_version >= 2) return;
+    if (config._dsp_version >= 3) return;
     config.wake_word_noise_suppression = true;
     config.wake_word_echo_cancellation = true;
-    // auto_gain_control and voice_isolation stay off (their own defaults)
-    config._dsp_version = 2;
+    config.wake_word_auto_gain_control = false;
+    // voice_isolation stays off (Chrome-only, aggressive)
+    config._dsp_version = 3;
     localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
   } catch (_) { /* private browsing */ }
 }
