@@ -75,9 +75,9 @@ const PLATFORM_FIX = {
     micDenied: 'Fully Kiosk → Web Content Settings → enable "Enable Microphone Access". Also confirm the Android app permissions for Fully Kiosk include Microphone.',
   },
   kiosker: {
-    audio: 'Kiosker → Settings → enable "Allow Inline Media Playback" / "Autoplay". Also make sure "Allow JavaScript Integration" is on if you use the screensaver.',
-    micPrompt: 'Kiosker → Settings → enable microphone/camera access, then tap the start button once. iOS will prompt for microphone permission on the first user gesture.',
-    micDenied: 'Kiosker → Settings → enable microphone access, and confirm iOS Settings → Kiosker → Microphone is allowed. Reload the page afterwards.',
+    audio: 'Kiosker → Settings → enable inline media playback / autoplay. Also make sure Settings → Security → "Allow JavaScript integration" is on if you use the screensaver.',
+    micPrompt: 'Kiosker → Settings → Security → "Camera and microphone permission" → set to "Allow". The default "Prompt" asks on every page load; "Allow" grants it silently.',
+    micDenied: 'Kiosker → Settings → Security → "Camera and microphone permission" → set to "Allow", and confirm iOS Settings → Kiosker → Microphone is enabled. Reload the page afterwards.',
   },
   browser: {
     audio: 'In Chrome/Edge: click the lock icon → Site settings → Sound: Allow. In Safari: Settings → Websites → Auto-Play → Allow All Auto-Play for this site.',

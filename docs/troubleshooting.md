@@ -32,8 +32,9 @@ Failures and warnings render at the top of the panel with specific remediation f
 
 1. **Check HTTPS:** Browsers require HTTPS for microphone access. If you're using HTTP, the microphone permission prompt won't appear. Use HTTPS or access via `localhost`.
 2. **Check browser permissions:** Make sure the browser has microphone permission for your HA URL. Look for a microphone icon in the address bar.
-3. **Check Fully Kiosk settings:** If using Fully Kiosk, ensure **Web Content Settings -> Enable Microphone Access** and **Autoplay Audio** are enabled.
-4. **Check the browser console:** Open the developer tools (F12) and look for errors.
+3. **Check Fully Kiosk settings (Android):** If using Fully Kiosk, ensure **Web Content Settings -> Enable Microphone Access** and **Autoplay Audio** are enabled.
+4. **Check Kiosker Pro settings (iOS):** If using Kiosker Pro, set **Settings -> Security -> Camera and microphone permission** to **Allow**. The default is **Prompt**, which asks for microphone access on every page load. Also enable **Settings -> Security -> Allow JavaScript integration** so screensaver backlight dimming works.
+5. **Check the browser console:** Open the developer tools (F12) and look for errors.
 
 ## Wake word not detected
 
@@ -56,8 +57,9 @@ Failures and warnings render at the top of the panel with specific remediation f
 
 1. Check that TTS is configured in your Assist pipeline.
 2. Check browser audio permissions.
-3. If **using Fully Kiosk**, ensure that **Web Content Settings** -> **Autoplay Audio** is enabled.
-4. The **Home Assistant Companion App** may block audio autoplay by default, ensure that **Settings** -> **Companion App** -> **Other settings** -> **Autoplay videos** is enabled.
+3. If **using Fully Kiosk** (Android), ensure that **Web Content Settings** -> **Autoplay Audio** is enabled.
+4. If **using Kiosker Pro** (iOS), ensure inline media playback / autoplay is enabled in **Settings** so TTS audio can play without a tap.
+5. The **Home Assistant Companion App** may block audio autoplay by default, ensure that **Settings** -> **Companion App** -> **Other settings** -> **Autoplay videos** is enabled.
 
 Without these settings, Voice Satellite will still function (wake word detection, speech-to-text, and visual feedback all work normally) but TTS audio won't play. The UI will clean up gracefully after the interaction completes.
 
