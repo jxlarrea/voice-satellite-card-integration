@@ -5,6 +5,7 @@ import { buildMediaUrl, playMediaUrl } from '../audio/media-playback.js';
 import { playRemote, stopRemote } from '../tts/comms.js';
 import { getSelectState } from '../shared/satellite-state.js';
 import { BlurReason, DEFAULT_CONFIG, Timing } from '../constants.js';
+import * as kiosk from '../kiosk/index.js';
 
 let _alertLoopTimer = null;
 let _alertLoopToken = null;
@@ -13,8 +14,8 @@ let _timerTtsAudio = null;
 let _timerTtsRemoteTimer = null;
 let _timerTtsRemoteActive = false;
 // Screensaver keepalive: while the alert is on screen we ping the
-// in-app idle timer (notifyActivity) AND Fully Kiosk's native screensaver
-// every 4 s so neither covers the alert UI before the user sees it.
+// in-app idle timer (notifyActivity) AND the kiosk browser's native
+// screensaver every 4 s so neither covers the alert UI before the user sees it.
 // Same cadence the media-player overlays use for video/image playback.
 let _screensaverKeepaliveTimer = null;
 const SCREENSAVER_KEEPALIVE_MS = 4000;
@@ -432,14 +433,16 @@ function stopScreensaverKeepalive(_mgr) {
   if (_screensaverKeepaliveTimer) {
     clearInterval(_screensaverKeepaliveTimer);
     _screensaverKeepaliveTimer = null;
+    // Re-enable the kiosk screensaver if we paused it (Kiosker only;
+    // no-op on Fully Kiosk).
+    kiosk.releaseScreensaver();
   }
 }
 
 /** @param {import('./index.js').TimerManager} mgr */
 function pingScreensaver(mgr) {
   mgr.card.screensaver?.notifyActivity?.();
-  if (typeof window !== 'undefined' && window.fully
-      && typeof window.fully.stopScreensaver === 'function') {
-    try { window.fully.stopScreensaver(); } catch (_e) { /* best-effort */ }
-  }
+  // Suppress the kiosk browser's own screensaver (FK one-shot stop /
+  // Kiosker pause) so it can't cover the timer-alert UI.
+  kiosk.stopScreensaver();
 }

@@ -33,6 +33,7 @@ import { getMicroModelParams, loadMicroModelParams } from '../wake-word/micro-mo
 import { getVwwModelParams, loadVwwModelParams } from '../wake-word/vww/manifest-cache.js';
 import { getSelectOptions, getSelectAttribute, getSelectState, getSwitchState } from '../shared/satellite-state.js';
 import { DiagnosticsManager } from '../diagnostics';
+import * as kiosk from '../kiosk/index.js';
 import { buildMarkdownReport } from '../diagnostics/report.js';
 import { exportLogBufferText } from '../logger.js';
 import { getAudioInputDeviceOptions } from '../audio/devices.js';
@@ -462,10 +463,11 @@ class VoiceSatellitePanel extends HTMLElement {
   }
 
   /**
-   * Show/hide the Fully Kiosk Integration sub-section.  It's only
-   * relevant when the screensaver is enabled (there's nothing for FK
-   * to do otherwise).  When shown, also render the detection banner
-   * and disable the inner controls if Fully Kiosk isn't detected.
+   * Show/hide the Kiosk Browser Integration sub-section.  It's only
+   * relevant when the screensaver is enabled (there's nothing for the
+   * kiosk browser to do otherwise).  When shown, also render the
+   * detection banner and disable the inner controls if no supported
+   * kiosk browser (Fully Kiosk / Kiosker Pro) is detected.
    */
   _syncFkSectionVisibility() {
     const section = this.querySelector(`.${P}-ss-fk`);
@@ -474,15 +476,16 @@ class VoiceSatellitePanel extends HTMLElement {
     section.style.display = enabled ? '' : 'none';
     if (!enabled) return;
 
-    const detected = typeof window !== 'undefined' && !!window.fully;
+    const detected = kiosk.isAvailable();
+    const kioskName = kiosk.name();
 
     const status = this.querySelector(`.${P}-ss-fk-status`);
     if (status) {
       status.classList.toggle('is-ok', detected);
       status.classList.toggle('is-missing', !detected);
       status.textContent = detected
-        ? '✓ Fully Kiosk JavaScript Interface detected.'
-        : '⚠ Fully Kiosk JavaScript Interface not detected - controls disabled.';
+        ? `✓ ${kioskName} JavaScript integration detected.`
+        : '⚠ No supported kiosk browser (Fully Kiosk / Kiosker Pro) detected - controls disabled.';
     }
 
     const formWrap = this.querySelector(`.${P}-ss-fk-form`);
@@ -1355,10 +1358,10 @@ class VoiceSatellitePanel extends HTMLElement {
         </div>
 
         <details class="${P}-ss-fk" style="display: none;">
-          <summary class="${P}-ss-fk-summary">Fully Kiosk Integration</summary>
+          <summary class="${P}-ss-fk-summary">Kiosk Browser Integration</summary>
           <div class="${P}-ss-fk-body">
             <div class="${P}-ss-fk-intro">
-              These settings only apply when running inside Fully Kiosk Browser with the JavaScript Interface enabled.
+              These settings only apply when running inside Fully Kiosk Browser (Android) or Kiosker Pro (iOS) with its JavaScript integration enabled. Motion-dismiss is Fully Kiosk only.
             </div>
             <div class="${P}-ss-fk-status"></div>
             <div class="${P}-ss-fk-form"></div>

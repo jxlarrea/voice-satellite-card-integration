@@ -130,9 +130,11 @@ export const DEFAULT_CONFIG = {
   screensaver_website_url: '',
   screensaver_suppress_external: '',
 
-  // Fully Kiosk — only effective when FK's JavaScript Interface is
-  // enabled.  Ignored on other browsers.  `screensaver_dim_percent`
-  // is intentionally NOT listed here — an undefined value means "no
-  // dimming" (matches the background_opacity pattern).
+  // Kiosk browser integration — only effective inside Fully Kiosk
+  // (Android) or Kiosker Pro (iOS) with the JS integration enabled.
+  // Ignored on other browsers.  Motion-dismiss is Fully Kiosk only.
+  // `screensaver_dim_percent` is intentionally NOT listed here — an
+  // undefined value means "no dimming" (matches the background_opacity
+  // pattern).
   screensaver_fk_motion_dismiss: false,
 };

@@ -82,9 +82,10 @@ export function buildScreensaverPostSchema(cfg) {
 }
 
 /**
- * Schema for the Fully Kiosk Integration sub-form.  Rendered as its
- * own ha-form below the main screensaver fields so it can be
- * disabled wholesale when Fully Kiosk is not detected.
+ * Schema for the Kiosk Browser Integration sub-form (Fully Kiosk on
+ * Android, Kiosker Pro on iOS).  Rendered as its own ha-form below the
+ * main screensaver fields so it can be disabled wholesale when no
+ * supported kiosk browser is detected.
  */
 export const screensaverFkSchema = [
   {
@@ -108,8 +109,8 @@ export const screensaverLabels = {
 };
 
 export const screensaverHelpers = {
-  screensaver_dim_percent: t(null, 'editor.screensaver.helper_dim_percent', 'Hardware backlight level while the screensaver is showing. The previous brightness is restored on dismiss. 0% = fully dark, 100% = leave the backlight untouched (default).'),
-  screensaver_fk_motion_dismiss: t(null, 'editor.screensaver.helper_fk_motion_dismiss', "Dismiss the screensaver when Fully Kiosk's camera-based motion detection fires. Requires Motion Detection to be enabled in the Fully Kiosk settings."),
+  screensaver_dim_percent: t(null, 'editor.screensaver.helper_dim_percent', 'Hardware backlight level while the screensaver is showing (Fully Kiosk or Kiosker Pro). The previous brightness is restored on dismiss. 0% = fully dark, 100% = leave the backlight untouched (default).'),
+  screensaver_fk_motion_dismiss: t(null, 'editor.screensaver.helper_fk_motion_dismiss', "Dismiss the screensaver when Fully Kiosk's camera-based motion detection fires. Fully Kiosk only (Kiosker Pro has no motion API). Requires Motion Detection to be enabled in the Fully Kiosk settings."),
   screensaver_timer_s: t(null, 'editor.screensaver.helper_timer', 'Idle seconds before the screensaver activates.'),
   screensaver_type: t(null, 'editor.screensaver.helper_type', 'Black: solid overlay. Media: image/video file, folder, or camera feed from the HA media library. Website: embed any URL (e.g. immich-kiosk, a photo frame app, a dashboard).'),
   screensaver_media_interval_s: t(null, 'editor.screensaver.helper_media_interval', 'Seconds per image when cycling through a folder. Videos play to completion regardless of this value.'),

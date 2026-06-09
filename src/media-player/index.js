@@ -13,6 +13,7 @@
 import { buildMediaUrl, playMediaUrl } from '../audio/media-playback.js';
 import { attachDoubleTap } from '../shared/double-tap.js';
 import { Timing } from '../constants.js';
+import * as kiosk from '../kiosk/index.js';
 
 let hlsLoaderPromise = null;
 
@@ -439,10 +440,9 @@ export class MediaPlayerManager {
 
   _screensaverKeepalivePing() {
     this._card.screensaver?.notifyActivity();
-    if (typeof window !== 'undefined' && window.fully
-        && typeof window.fully.stopScreensaver === 'function') {
-      try { window.fully.stopScreensaver(); } catch (_e) { /* best-effort */ }
-    }
+    // Suppress the kiosk browser's own screensaver (FK one-shot stop /
+    // Kiosker pause) so it can't cover the media overlay.
+    kiosk.stopScreensaver();
   }
 
   _stopScreensaverKeepalive() {
@@ -450,6 +450,9 @@ export class MediaPlayerManager {
       this._log.log('media-player', 'Screensaver keepalive stopped');
       clearInterval(this._screensaverKeepaliveTimer);
       this._screensaverKeepaliveTimer = null;
+      // Re-enable the kiosk screensaver if we paused it (Kiosker only;
+      // no-op on Fully Kiosk, which resumes on its own idle schedule).
+      kiosk.releaseScreensaver();
     }
   }
 

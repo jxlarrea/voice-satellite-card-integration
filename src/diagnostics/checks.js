@@ -10,6 +10,7 @@
  */
 
 import { getSelectState } from '../shared/satellite-state.js';
+import * as kiosk from '../kiosk/index.js';
 
 const WAKE_WORD_DETECTION_OWW = 'On Device (openWakeWord)';
 const WAKE_WORD_DETECTION_VWW = 'On Device (vsWakeWord)';
@@ -48,9 +49,8 @@ const CATEGORY = {
  * very different fixes across these three hosts.
  */
 function detectPlatform() {
-  if (typeof window !== 'undefined' && typeof window.fully !== 'undefined') {
-    return 'fullykiosk';
-  }
+  const kioskPlatform = kiosk.platform();
+  if (kioskPlatform) return kioskPlatform; // 'fullykiosk' | 'kiosker'
   const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
   if (/Home Assistant\//.test(ua) || /HomeAssistant\//.test(ua)) return 'companion';
   return 'browser';
@@ -73,6 +73,11 @@ const PLATFORM_FIX = {
     audio: 'Fully Kiosk → Web Content Settings → enable "Autoplay Audio". Also make sure "Enable JavaScript Interface" is on if you use the screensaver.',
     micPrompt: 'Fully Kiosk → Web Content Settings → enable "Enable Microphone Access". Tapping the start button once after enabling will finalize the permission.',
     micDenied: 'Fully Kiosk → Web Content Settings → enable "Enable Microphone Access". Also confirm the Android app permissions for Fully Kiosk include Microphone.',
+  },
+  kiosker: {
+    audio: 'Kiosker → Settings → enable "Allow Inline Media Playback" / "Autoplay". Also make sure "Allow JavaScript Integration" is on if you use the screensaver.',
+    micPrompt: 'Kiosker → Settings → enable microphone/camera access, then tap the start button once. iOS will prompt for microphone permission on the first user gesture.',
+    micDenied: 'Kiosker → Settings → enable microphone access, and confirm iOS Settings → Kiosker → Microphone is allowed. Reload the page afterwards.',
   },
   browser: {
     audio: 'In Chrome/Edge: click the lock icon → Site settings → Sound: Allow. In Safari: Settings → Websites → Auto-Play → Allow All Auto-Play for this site.',
@@ -481,7 +486,8 @@ export const CLIENT_CHECKS = [
     run: async () => {
       const ua = navigator.userAgent || '';
       const flags = [];
-      if (typeof window.fully !== 'undefined') flags.push('Fully Kiosk');
+      const kioskName = kiosk.name();
+      if (kioskName) flags.push(kioskName);
       if (/Home Assistant\//.test(ua) || /HomeAssistant\//.test(ua)) flags.push('Companion App');
       if (/CrOS/.test(ua)) flags.push('ChromeOS');
       if (/iPhone|iPad|iPod/.test(ua)) flags.push('iOS');
@@ -508,6 +514,27 @@ export const CLIENT_CHECKS = [
         status: 'warn',
         detail: 'Fully Kiosk detected but the JavaScript Interface is not enabled.',
         remediation: 'Fully Kiosk → Settings → Advanced Web Settings → Enable JavaScript Interface.',
+      };
+    },
+  },
+  {
+    id: 'platform.kiosker-js-interface',
+    category: CATEGORY.PLATFORM,
+    title: 'Kiosker JavaScript Integration',
+    run: async () => {
+      if (detectPlatform() !== 'kiosker') {
+        return { status: 'skip', detail: 'Not running inside Kiosker Pro.' };
+      }
+      // Kiosker's message handler can't be probed synchronously; a
+      // successful getUUID round-trip confirms the integration responds.
+      const responds = await kiosk.confirmAvailable();
+      if (responds) {
+        return { status: 'pass', detail: 'Kiosker JavaScript Integration responds.' };
+      }
+      return {
+        status: 'warn',
+        detail: 'Kiosker detected but the JavaScript Integration did not respond.',
+        remediation: 'Kiosker → Settings → Allow JavaScript Integration.',
       };
     },
   },

@@ -68,7 +68,7 @@ Per-browser overlay appearance, microphone processing, timer behavior, and debug
 
 ### Screensaver
 
-A browser overlay that kicks in after an idle timeout. Configured per-browser in the sidebar panel; automatically dismissed on voice interaction, tap, or Fully Kiosk motion detection. Does not activate while the engine is stopped.
+A browser overlay that kicks in after an idle timeout. Configured per-browser in the sidebar panel; automatically dismissed on voice interaction, tap, or Fully Kiosk motion detection. Hardware backlight dimming works in both Fully Kiosk (Android) and Kiosker Pro (iOS). Does not activate while the engine is stopped.
 
 | Setting | Description |
 |---------|-------------|
@@ -80,8 +80,8 @@ A browser overlay that kicks in after an idle timeout. Configured per-browser in
 | **Shuffle folder items** *(Media type, folders only)* | Randomize the playback order each time the folder is opened |
 | **Website URL** *(Website type only)* | Full URL to embed. The site must permit iframe embedding (no strict `X-Frame-Options` / `frame-ancestors`). Touch input on the iframe is suppressed so a tap anywhere on the screen dismisses the screensaver |
 | **External screensaver** *(screensaver disabled only)* | A `switch` or `input_boolean` that's forced off for the duration of each voice interaction, then left alone so its owner (typically Fully Kiosk) can resume its own idle timer. Useful to keep Fully Kiosk's screensaver from covering the voice UI mid-conversation |
-| **Fully Kiosk Integration -> Screen brightness while active** | Hardware backlight level (0-100%) while the screensaver is showing. The previous brightness is restored on dismiss. 0% = fully dark, 100% = leave the backlight untouched (default) |
-| **Fully Kiosk Integration -> Dismiss on motion** | Dismiss the screensaver when Fully Kiosk's camera-based motion detection fires. Requires Motion Detection to be enabled in the Fully Kiosk settings. Default off |
+| **Kiosk Browser Integration -> Screen brightness while active** | Hardware backlight level (0-100%) while the screensaver is showing. Works in Fully Kiosk (Android) and Kiosker Pro (iOS) with the JavaScript integration enabled. The previous brightness is restored on dismiss. 0% = fully dark, 100% = leave the backlight untouched (default) |
+| **Kiosk Browser Integration -> Dismiss on motion** | Dismiss the screensaver when Fully Kiosk's camera-based motion detection fires. Fully Kiosk only (Kiosker Pro has no motion API). Requires Motion Detection to be enabled in the Fully Kiosk settings. Default off |
 
 ## Mini Card
 

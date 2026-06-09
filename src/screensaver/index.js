@@ -23,6 +23,7 @@
  */
 
 import { INTERACTING_STATES, State } from '../constants.js';
+import * as kiosk from '../kiosk/index.js';
 
 const OVERLAY_ID = 'voice-satellite-screensaver';
 const FADE_MS = 200;
@@ -279,7 +280,7 @@ export class ScreensaverManager {
     this._active = true;
     this._ensureOverlay();
 
-    // Dim the hardware backlight (Fully Kiosk only) before rendering
+    // Dim the hardware backlight (kiosk browsers only) before rendering
     // content — applies to all screensaver types, using the user's
     // configured brightness.  0% = fully dim (black overlay default),
     // 100% = keep current brightness.
@@ -583,26 +584,26 @@ export class ScreensaverManager {
   // ── FK motion / backlight ───────────────────────────────────────
 
   _bindFkMotion() {
-    if (this._fkMotionBound || !window.fully) return;
+    // Motion detection is Fully-Kiosk-only; Kiosker exposes no motion
+    // event, so this is a no-op there.
+    if (this._fkMotionBound || !kiosk.supportsMotion()) return;
     window.__vsOnFkMotion = () => {
       if (!this._active) return;
       this._log.log('screensaver', 'FK motion detected -- dismissing');
       this.notifyActivity();
     };
-    try {
-      window.fully.bind('onMotion', '__vsOnFkMotion()');
+    if (kiosk.bindMotion('__vsOnFkMotion')) {
       this._fkMotionBound = true;
       this._log.log('screensaver', 'FK motion detection bound');
-    } catch (e) {
-      this._log.log('screensaver', `Failed to bind FK motion: ${e.message || e}`);
+    } else {
+      delete window.__vsOnFkMotion;
+      this._log.log('screensaver', 'Failed to bind FK motion');
     }
   }
 
   _unbindFkMotion() {
     if (!this._fkMotionBound) return;
-    try {
-      window.fully.bind('onMotion', '');
-    } catch (e) { /* ignore */ }
+    kiosk.unbindMotion();
     delete window.__vsOnFkMotion;
     this._fkMotionBound = false;
   }
@@ -610,8 +611,8 @@ export class ScreensaverManager {
   _setupUnloadHandler() {
     if (this._unloadHandler) return;
     this._unloadHandler = () => {
-      if (this._savedBrightness !== null && window.fully) {
-        try { window.fully.setScreenBrightness(this._savedBrightness); } catch (_) {}
+      if (this._savedBrightness !== null) {
+        kiosk.setBrightness(this._savedBrightness);
       }
     };
     window.addEventListener('beforeunload', this._unloadHandler);
@@ -623,20 +624,27 @@ export class ScreensaverManager {
     this._unloadHandler = null;
   }
 
-  _dimScreen() {
-    // Only Fully Kiosk exposes a hardware-backlight API.  Other
-    // browsers just ignore the dim setting.  Null (no value stored)
-    // and 100% (max) both mean "leave the current brightness alone"
-    // so we don't clobber the user's existing FK brightness.
-    if (!window.fully) return;
+  async _dimScreen() {
+    // Only kiosk browsers expose a hardware-backlight API (Fully Kiosk on
+    // Android, Kiosker Pro on iOS).  Other browsers just ignore the dim
+    // setting.  Null (no value stored) and 100% (max) both mean "leave
+    // the current brightness alone" so we don't clobber the user's
+    // existing brightness.  Brightness is normalised to 0..1 here.
+    if (!kiosk.isAvailable()) return;
     if (this._dimPercent === null || this._dimPercent >= 100) return;
     try {
-      this._savedBrightness = window.fully.getScreenBrightness();
-      const target = Math.round(this._dimPercent * 2.55);
-      window.fully.setScreenBrightness(target);
+      const saved = await kiosk.getBrightness();
+      // Guard against a stale write: the screensaver may have been
+      // dismissed (and brightness already restored) while we awaited the
+      // async read on Kiosker.
+      if (!this._active) return;
+      this._savedBrightness = saved;
+      const target = Math.min(1, Math.max(0, this._dimPercent / 100));
+      kiosk.setBrightness(target);
       this._log.log(
         'screensaver',
-        `Screen dimmed to ${target}/255 (saved: ${this._savedBrightness})`,
+        `Screen dimmed to ${Math.round(target * 100)}% (saved: ${
+          saved === null ? 'n/a' : `${Math.round(saved * 100)}%`})`,
       );
     } catch (e) {
       this._log.log('screensaver', `Failed to dim screen: ${e.message || e}`);
@@ -644,10 +652,13 @@ export class ScreensaverManager {
   }
 
   _restoreScreen() {
-    if (!window.fully || this._savedBrightness === null) return;
+    if (this._savedBrightness === null) return;
     try {
-      window.fully.setScreenBrightness(this._savedBrightness);
-      this._log.log('screensaver', `Screen brightness restored to ${this._savedBrightness}`);
+      kiosk.setBrightness(this._savedBrightness);
+      this._log.log(
+        'screensaver',
+        `Screen brightness restored to ${Math.round(this._savedBrightness * 100)}%`,
+      );
       this._savedBrightness = null;
     } catch (e) {
       this._log.log('screensaver', `Failed to restore brightness: ${e.message || e}`);
