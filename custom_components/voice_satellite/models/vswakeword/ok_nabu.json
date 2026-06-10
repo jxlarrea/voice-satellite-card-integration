@@ -300,7 +300,7 @@
     "required_hits": 2,
     "cooldown_ms": 2000,
     "hit_mode": "consecutive",
-    "high_confidence_bypass": 5.8,
+    "high_confidence_bypass": 6.8,
     "high_confidence_bypass_min_hits": 1
   }
 }
