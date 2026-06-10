@@ -1,5 +1,5 @@
 {
-  "name": "ok_computer_v5_ep014",
+  "name": "ok_computer",
   "format": "vs-wake-word-ctc-v1",
   "recommended_threshold": 0.5,
   "input": {
@@ -9,7 +9,8 @@
       128,
       40
     ],
-    "dtype": "float32"
+    "dtype": "float32",
+    "feature": "log_mel"
   },
   "output": {
     "name": "log_probs",
@@ -18,7 +19,8 @@
       64,
       52
     ],
-    "dtype": "float32"
+    "dtype": "float32",
+    "meaning": "frame_level_phoneme_log_probabilities"
   },
   "feature_config": {
     "sample_rate": 16000,
@@ -422,5 +424,34 @@
     "cooldown_ms": 2000,
     "high_confidence_bypass": 5.8,
     "high_confidence_bypass_min_hits": 1
-  }
+  },
+  "best_epoch": 35,
+  "best_val": {
+    "loss": 1.3254418313503264,
+    "exact_decode_acc": 0.6822,
+    "wake_detect_rate": 0.5650118203309693,
+    "wake_fp_rate": 0.0,
+    "wake_pos_total": 846,
+    "wake_fp_total": 4154,
+    "silence_nonblank_rate": 0.07204968944099378,
+    "silence_nonblank_total": 3220,
+    "silence_nonblank_hits": 232,
+    "utterance_wake_recall": 0.6687631027253669,
+    "utterance_fp_rate": 0.0,
+    "utterance_pos_total": 477,
+    "utterance_fp_total": 2231,
+    "selector_recall_rate": 0.6687631027253669,
+    "selector_utterance_recall_weight": 1.0,
+    "adaptive_positive_boost_this_epoch": 1.1625469729865583,
+    "adaptive_positive_boost_next_epoch": 1.1656184486373165,
+    "adaptive_recall_fpr_cap": 0.004,
+    "adaptive_recall_start_epoch": 8,
+    "adaptive_recall_min_selector_recall": 0.4,
+    "adaptive_recall_max_silence_nonblank": 0.1,
+    "adaptive_recall_max_boost": 1.4
+  },
+  "deployed_from": "data/runs/ok_computer_v5/checkpoints/ok_computer-ctc-bestrecall-ep035.pt",
+  "manifest_behavior_source": "D:\\VS Code Projects\\voice-satellite-card-integration\\custom_components\\voice_satellite\\models\\vswakeword\\ok_computer.json",
+  "manifest_behavior_source_name": "ok_computer_v5_ep014",
+  "source_checkpoint": "data/runs/ok_computer_v5/checkpoints/ok_computer-ctc-bestrecall-ep035.pt"
 }
