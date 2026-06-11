@@ -550,6 +550,29 @@
         3,
         41,
         14
+      ],
+      [
+        27,
+        9,
+        15,
+        2,
+        24,
+        44,
+        5,
+        3,
+        36,
+        41
+      ],
+      [
+        27,
+        9,
+        15,
+        24,
+        44,
+        5,
+        3,
+        36,
+        41
       ]
     ],
     "wake_word_target_phonemes": [
@@ -1008,6 +1031,29 @@
         "ː",
         "v",
         "i"
+      ],
+      [
+        "h",
+        "e",
+        "ɪ",
+        " ",
+        "d",
+        "ʒ",
+        "ɑ",
+        "ː",
+        "ɹ",
+        "v"
+      ],
+      [
+        "h",
+        "e",
+        "ɪ",
+        "d",
+        "ʒ",
+        "ɑ",
+        "ː",
+        "ɹ",
+        "v"
       ]
     ],
     "wake_word_target_anchors": [
@@ -1051,7 +1097,9 @@
       ],
       [
         0
-      ]
+      ],
+      [],
+      []
     ],
     "max_edit_distance": 1,
     "wake_word_trail_tolerance": 3,
@@ -1062,6 +1110,45 @@
     "cooldown_ms": 2000,
     "hit_mode": "consecutive",
     "high_confidence_bypass": 5.8,
-    "high_confidence_bypass_min_hits": 1
+    "high_confidence_bypass_min_hits": 1,
+    "target_required_hits": [
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      3,
+      3
+    ]
   }
 }
