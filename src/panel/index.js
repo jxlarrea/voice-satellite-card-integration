@@ -1232,6 +1232,114 @@ class VoiceSatellitePanel extends HTMLElement {
         .${P}-tester-log-clear:hover {
           background: var(--secondary-background-color);
         }
+        .${P}-tester-diag {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          flex-wrap: wrap;
+          margin-top: 16px;
+          padding: 14px 16px;
+          border: 1px solid var(--divider-color, #333);
+          border-radius: 8px;
+          background: var(--secondary-background-color, rgba(255,255,255,0.03));
+        }
+        .${P}-tester-diag.is-hidden {
+          display: none;
+        }
+        .${P}-tester-diag-text {
+          flex: 1;
+          min-width: 200px;
+        }
+        .${P}-tester-diag-title {
+          font-size: 14px;
+          font-weight: 500;
+          color: var(--primary-text-color, #fff);
+        }
+        .${P}-tester-diag-sub {
+          font-size: 12px;
+          line-height: 1.5;
+          color: var(--secondary-text-color, #999);
+          margin-top: 3px;
+        }
+        .${P}-tester-diag-action {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-shrink: 0;
+        }
+        .${P}-tester-diag-btn {
+          background: var(--primary-color, #03a9f4);
+          color: #fff;
+          border: none;
+          border-radius: 6px;
+          padding: 9px 16px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .${P}-tester-diag-btn:hover:not(:disabled) {
+          opacity: 0.9;
+        }
+        .${P}-tester-diag-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .${P}-tester-diag-status {
+          font-size: 12px;
+          color: var(--secondary-text-color, #999);
+        }
+        .${P}-tester-diag-status.is-ok { color: #81c784; }
+        .${P}-tester-diag-status.is-error { color: #e57373; }
+        .${P}-diag-dialog-root { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; }
+        .${P}-diag-dialog-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.6); }
+        .${P}-diag-dialog {
+          position: relative; width: min(480px, 92vw);
+          background: var(--ha-card-background, var(--card-background-color, #1c1c1e));
+          color: var(--primary-text-color, #fff);
+          border-radius: var(--ha-card-border-radius, 12px);
+          border: 1px solid var(--divider-color, #333);
+          box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+          padding: 20px;
+        }
+        .${P}-diag-dialog h3 { margin: 0 0 10px; font-size: 17px; font-weight: 500; }
+        .${P}-diag-dialog p { margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: var(--secondary-text-color, #bbb); }
+        .${P}-diag-dialog audio { width: 100%; margin-bottom: 14px; }
+        .${P}-diag-name-label {
+          display: block;
+          font-size: 13px;
+          color: var(--primary-text-color, #fff);
+          margin-bottom: 16px;
+        }
+        .${P}-diag-name-label span {
+          color: var(--secondary-text-color, #999);
+          font-weight: 400;
+        }
+        .${P}-diag-name {
+          display: block;
+          width: 100%;
+          box-sizing: border-box;
+          margin-top: 6px;
+          padding: 9px 11px;
+          font: inherit;
+          font-size: 13px;
+          color: var(--primary-text-color, #fff);
+          background: var(--secondary-background-color, #2c2c2e);
+          border: 1px solid var(--divider-color, #444);
+          border-radius: 6px;
+        }
+        .${P}-diag-name:focus {
+          outline: none;
+          border-color: var(--primary-color, #03a9f4);
+        }
+        .${P}-diag-name::placeholder { color: var(--secondary-text-color, #777); }
+        .${P}-diag-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+        .${P}-diag-dialog-actions button {
+          padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; border: none;
+        }
+        .${P}-diag-cancel { background: transparent; color: var(--primary-text-color, #fff); border: 1px solid var(--divider-color, #444) !important; }
+        .${P}-diag-confirm { background: var(--primary-color, #03a9f4); color: #fff; }
         .${P}-tester-log {
           width: 100%;
           height: 180px;
@@ -1472,6 +1580,17 @@ class VoiceSatellitePanel extends HTMLElement {
           monitoring. Stand at your usual distance and say the wake word.
           The probability curve should cross the dashed threshold line -
           when it does, the engine would have triggered a detection.
+        </div>
+
+        <div class="${P}-tester-diag is-hidden">
+          <div class="${P}-tester-diag-text">
+            <div class="${P}-tester-diag-title">Wake word not triggering reliably?</div>
+            <div class="${P}-tester-diag-sub">Submit the tester's last 10 seconds of audio so detection can be improved for your voice and device. Anonymous.</div>
+          </div>
+          <div class="${P}-tester-diag-action">
+            <button type="button" class="${P}-tester-diag-btn">Submit recording</button>
+            <span class="${P}-tester-diag-status"></span>
+          </div>
         </div>
       </div>
 
@@ -1938,6 +2057,18 @@ class VoiceSatellitePanel extends HTMLElement {
     this._testerSelectedModel = modelSelect.value;
     this._testerSensitivity = sensitivitySelect?.value || 'Moderately sensitive';
 
+    // Diagnostic recording submission - vsWakeWord only (the upload
+    // pipeline and analysis tooling are VWW-specific).
+    const diagCallout = card.querySelector(`.${P}-tester-diag`);
+    const diagBtn = card.querySelector(`.${P}-tester-diag-btn`);
+    this._testerDiagStatus = card.querySelector(`.${P}-tester-diag-status`);
+    const syncDiagSubmitVisibility = () => {
+      const isVww = (engineSelect?.value || 'mww') === 'vww';
+      diagCallout?.classList.toggle('is-hidden', !isVww);
+    };
+    syncDiagSubmitVisibility();
+    diagBtn?.addEventListener('click', () => this._submitDiagnosticRecording());
+
     let thresholdUpdateSeq = 0;
     const updateThresholdForModel = async () => {
       const seq = ++thresholdUpdateSeq;
@@ -2006,7 +2137,7 @@ class VoiceSatellitePanel extends HTMLElement {
       // needs different model files loaded - switchModel can't bridge
       // engines mid-session).
       populate();
-      syncVwwCompatVisibility();
+      syncDiagSubmitVisibility();
       await updateThresholdForModel();
       if (this._testerSession?.running) {
         await this._stopTesterSession();
@@ -2085,6 +2216,11 @@ class VoiceSatellitePanel extends HTMLElement {
 
     try {
       this._testerSession = new WakeWordTestSession();
+      // Retain VWW sessions past Stop so "Submit recording for analysis"
+      // can snapshot the capture ring of the most recent run.
+      if (this._testerEngine === 'vww') {
+        this._lastVwwTesterSession = this._testerSession;
+      }
       // Route the tester through the *wake-word* DSP settings so it mirrors
       // the audio path the main engine uses during wake-word listening.
       const dsp = resolveDspForMode(this._config, 'wake_word');
@@ -2179,6 +2315,160 @@ class VoiceSatellitePanel extends HTMLElement {
     if (this._testerEngineWasRunning) {
       this._resumeEngineAfterTester();
     }
+  }
+
+  _setDiagStatus(text, kind = '') {
+    const el = this._testerDiagStatus;
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle('is-ok', kind === 'ok');
+    el.classList.toggle('is-error', kind === 'error');
+  }
+
+  /**
+   * "Submit recording for analysis" - consent dialog with an audio
+   * preview of the exact clip that will be uploaded, then the upload.
+   * vsWakeWord only.
+   */
+  _submitDiagnosticRecording() {
+    const session = this._testerSession || this._lastVwwTesterSession;
+    const wav = session?.getCaptureWavBlob?.();
+    if (!session || !wav) {
+      this._setDiagStatus('Run the tester first so there is audio to submit.', 'error');
+      return;
+    }
+    this._setDiagStatus('');
+
+    const root = document.createElement('div');
+    root.className = `${P}-diag-dialog-root`;
+    const backdrop = document.createElement('div');
+    backdrop.className = `${P}-diag-dialog-backdrop`;
+    const dialog = document.createElement('div');
+    dialog.className = `${P}-diag-dialog`;
+    const audioUrl = URL.createObjectURL(wav.blob);
+    dialog.innerHTML = `
+      <h3>Submit recording for analysis</h3>
+      <p>This securely uploads the wake word tester's last ${Math.round(wav.seconds)} seconds of audio to the
+      Voice Satellite author for analysis, to improve wake word detection for voices and
+      devices like yours. The submission is <strong>completely anonymous</strong>: it contains
+      this recording, the tester's event log, your tester settings, and device/version
+      information - no account or personal data.</p>
+      <p>You can listen to exactly what will be sent:</p>
+      <audio controls src="${audioUrl}"></audio>
+      <label class="${P}-diag-name-label">
+        Name <span>(optional)</span>
+        <input type="text" class="${P}-diag-name" maxlength="32" autocomplete="off"
+          placeholder="e.g. a nickname, so your submissions are grouped">
+      </label>
+      <div class="${P}-diag-dialog-actions">
+        <button type="button" class="${P}-diag-cancel">Cancel</button>
+        <button type="button" class="${P}-diag-confirm">Submit</button>
+      </div>
+    `;
+    root.appendChild(backdrop);
+    root.appendChild(dialog);
+    // Append within the panel element, not document.body: the panel's
+    // styles live in its own (shadow) tree scope and don't reach the
+    // top-level document, which is why a body-level modal renders
+    // unstyled.  position:fixed still overlays the whole viewport.
+    this.appendChild(root);
+
+    // Prefill the name from a prior submission (set via property, not
+    // interpolated into innerHTML, so a stored value can't inject markup).
+    const nameInput = dialog.querySelector(`.${P}-diag-name`);
+    try { nameInput.value = localStorage.getItem('vs_diag_name') || ''; } catch (_) { /* ignore */ }
+
+    const close = () => {
+      try { URL.revokeObjectURL(audioUrl); } catch (_) { /* ignore */ }
+      root.remove();
+    };
+    backdrop.addEventListener('click', close);
+    dialog.querySelector(`.${P}-diag-cancel`).addEventListener('click', close);
+    const confirmBtn = dialog.querySelector(`.${P}-diag-confirm`);
+    confirmBtn.addEventListener('click', async () => {
+      const name = (nameInput.value || '').trim().slice(0, 32);
+      // Remember (or clear) the name for future submissions.
+      try {
+        if (name) localStorage.setItem('vs_diag_name', name);
+        else localStorage.removeItem('vs_diag_name');
+      } catch (_) { /* private browsing */ }
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Uploading...';
+      try {
+        await this._uploadDiagnosticRecording(session, wav, name);
+        close();
+        this._setDiagStatus('Submitted - thank you! This helps improve detection.', 'ok');
+      } catch (e) {
+        close();
+        this._setDiagStatus(`Upload failed: ${e?.message || e}`, 'error');
+      }
+    });
+  }
+
+  async _uploadDiagnosticRecording(session, wav, name = '') {
+    // localStorage override for development/testing against a local server.
+    const endpoint = (localStorage.getItem('vs_diag_endpoint') || 'https://voicesatellite.com')
+      .replace(/\/+$/, '');
+
+    const info = session.getDiagnosticInfo();
+    let manifest = null;
+    try { manifest = await loadVwwModelParams(info.model); } catch (_) { /* optional */ }
+
+    let webgpuTier = 'unknown';
+    try {
+      if (!navigator.gpu) webgpuTier = 'none';
+      else if (await navigator.gpu.requestAdapter()) webgpuTier = 'core';
+      else {
+        try {
+          webgpuTier = (await navigator.gpu.requestAdapter({ featureLevel: 'compatibility' }))
+            ? 'compatibility' : 'none';
+        } catch (_) { webgpuTier = 'none'; }
+      }
+    } catch (_) { /* leave unknown */ }
+
+    const report = {
+      type: 'vww-tester-recording',
+      schema: 1,
+      name: name || null,
+      ...info,
+      manifest,
+      vs_version: VERSION,
+      ha_version: this._hass?.config?.version || null,
+      user_agent: navigator.userAgent,
+      platform: kiosk.platform() || 'browser',
+      webgpu_tier: webgpuTier,
+      capture_seconds: Math.round(wav.seconds * 10) / 10,
+      log: session.getRecentLogLines(),
+      submitted_at: new Date().toISOString(),
+    };
+
+    const audioB64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.onerror = () => reject(new Error('could not read recording'));
+      reader.readAsDataURL(wav.blob);
+    });
+
+    const ticketRes = await fetch(`${endpoint}/v1/ticket`);
+    if (!ticketRes.ok) {
+      throw new Error(ticketRes.status === 429
+        ? 'too many submissions from your network - try again later'
+        : `server unavailable (${ticketRes.status})`);
+    }
+    const { token } = await ticketRes.json();
+
+    const submitRes = await fetch(`${endpoint}/v1/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ audio: audioB64, report }),
+    });
+    if (!submitRes.ok) {
+      let detail = `${submitRes.status}`;
+      try { detail = (await submitRes.json()).error || detail; } catch (_) { /* keep status */ }
+      throw new Error(detail);
+    }
+    const { id } = await submitRes.json();
+    this._appendTesterLog('info', `diagnostic recording submitted (id ${id})`);
   }
 
   _resumeEngineAfterTester() {

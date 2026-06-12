@@ -68,14 +68,21 @@ export class WakeWordTestSession {
       error: (cat, msg) => this._emitLog('warn', `[${cat}] ${msg}`),
     };
 
-    // Rolling capture for offline inspection.  Holds the most recent
-    // CAPTURE_SECONDS of 16 kHz mono Float32 samples that were fed to the
-    // frontend, so the user can dump exactly what the JS pipeline saw right
-    // before a (possibly false) trigger.  Overwrites itself - ring buffer.
-    this._captureSeconds = 6;
+    // Rolling capture for offline inspection and diagnostic submission.
+    // Holds the most recent CAPTURE_SECONDS of 16 kHz mono Float32 samples
+    // that were fed to the frontend, so the user can dump/submit exactly
+    // what the JS pipeline saw (mic + DSP + resampling included).
+    // Overwrites itself - ring buffer.
+    this._captureSeconds = 10;
     this._captureBuf = new Float32Array(TARGET_RATE * this._captureSeconds);
     this._captureHead = 0;      // next write index
     this._captureFilled = 0;    // total samples ever written (for "how full")
+
+    // Recent tester log lines (ring).  Snapshotted into diagnostic
+    // submissions so the CTC decode/confidence timeline travels with the
+    // audio it describes.
+    this._recentLog = [];
+    this._recentLogMax = 400;
 
     // Per-chunk inference latency telemetry.  Used to compare CPU MWW vs
     // GPU OWW on the user's actual hardware.  Logs a summary every
@@ -102,8 +109,27 @@ export class WakeWordTestSession {
    * exact signal the JS frontend processed, including mic + DSP + resampling.
    */
   exportCapture(filename = 'voice-satellite-capture.wav') {
+    const wav = this.getCaptureWavBlob();
+    if (!wav) return false;
+    const url = URL.createObjectURL(wav.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  }
+
+  /**
+   * Snapshot the rolling capture as a 16 kHz mono 16-bit PCM WAV Blob.
+   * Returns { blob, seconds } or null when nothing has been captured.
+   * Survives stop() - the ring is only overwritten by a new session.
+   */
+  getCaptureWavBlob() {
     const n = Math.min(this._captureFilled, this._captureBuf.length);
-    if (n === 0) return false;
+    if (n === 0) return null;
     // Rotate ring buffer so the oldest sample is first.
     const out = new Float32Array(n);
     if (this._captureFilled < this._captureBuf.length) {
@@ -135,16 +161,38 @@ export class WakeWordTestSession {
     dv.setUint16(32, 2, true);
     dv.setUint16(34, 16, true);
     writeAscii(36, 'data');  dv.setUint32(40, byteLen, true);
-    const blob = new Blob([header, pcm.buffer], { type: 'audio/wav' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return true;
+    return {
+      blob: new Blob([header, pcm.buffer], { type: 'audio/wav' }),
+      seconds: n / TARGET_RATE,
+    };
+  }
+
+  /**
+   * Recent tester log lines (oldest first) formatted for diagnostic
+   * submission - covers at least the same window as the audio capture.
+   */
+  getRecentLogLines(max = 250) {
+    const entries = this._recentLog.slice(-max);
+    return entries.map((e) => `${new Date(e.ts).toISOString()} [${e.cat}] ${e.msg}`);
+  }
+
+  /**
+   * Settings + runtime context for diagnostic submissions.
+   */
+  getDiagnosticInfo() {
+    const perf = [];
+    for (let i = 0; i < this._perfRingFilled; i++) perf.push(this._perfTimes[i]);
+    perf.sort((a, b) => a - b);
+    const pct = (q) => (perf.length ? Math.round(perf[Math.min(perf.length - 1, Math.floor(perf.length * q))] * 10) / 10 : null);
+    return {
+      engine: this._engine,
+      model: this._modelName,
+      threshold: this._threshold,
+      sensitivity: this._sensitivityLabel,
+      energy_gate: this._energyGateEnabled,
+      dsp_constraints: this._constraints || null,
+      perf_ms: perf.length ? { p50: pct(0.5), p95: pct(0.95), n: perf.length } : null,
+    };
   }
 
   get running() { return this._running; }
@@ -625,6 +673,11 @@ export class WakeWordTestSession {
   _emitLog(cat, msg) {
     if (!msg) return;
     const ts = Date.now();
+    // Ring of recent lines for diagnostic submissions.
+    this._recentLog.push({ ts, cat, msg });
+    if (this._recentLog.length > this._recentLogMax) {
+      this._recentLog.splice(0, this._recentLog.length - this._recentLogMax);
+    }
     // Mirror to browser console so the lines show up in DevTools next
     // to production [VS][wake-word] logs, not only in the tester
     // panel's embedded log pane.  Useful for debugging tester behavior

@@ -9,6 +9,7 @@ Voice Satellite includes built-in wake word detection that runs entirely in the 
 - [How It Works](#how-it-works)
 - [Built-in Wake Words](#built-in-wake-words)
 - [Custom Wake Words](#custom-wake-words)
+- [Wake Word Tester](#wake-word-tester)
 - [Configuration](#configuration)
 - [Dual Wake Words and Pipelines](#dual-wake-words-and-pipelines)
 - [Stop Word Interruption](#stop-word-interruption)
@@ -105,6 +106,25 @@ Drop your model file in the right folder, restart Home Assistant, and it appears
 
 If the model has a companion `.json` manifest, place it next to the model file with the same base filename. The filename without its extension becomes the dropdown label - `hey_computer.tflite` for microWakeWord, `hey_computer.onnx` for openWakeWord, or `hey_computer.onnx` (with `hey_computer.json`) for vsWakeWord all appear as `hey_computer`. vsWakeWord models always require their `.json` manifest (it carries the phoneme target sequence and per-model gating parameters). Only OWW classifier `.onnx` files go in the custom openWakeWord folder; the shared mel-spectrogram and embedding models are bundled.
 
+
+## Wake Word Tester
+
+The sidebar panel includes a Wake Word Tester that visualizes wake word activation in real time: pick an engine, model, and sensitivity, press Start, and watch the live probability curve, detection latencies, and event log while speaking the wake word from your usual distance. The tester runs with the same microphone processing settings the live engine uses, so what you see is what the engine will do at runtime. Starting the tester pauses the main voice engine; it resumes automatically when the tester stops.
+
+### Submitting a recording for analysis (vsWakeWord)
+
+If a vsWakeWord model won't trigger reliably for you - because of your device's audio processing, your distance, or your pronunciation or accent - you can submit the tester's last 10 seconds of audio for analysis so detection can be improved for voices and devices like yours. The button appears below the tester when the vsWakeWord engine is selected.
+
+What gets sent:
+
+- The last 10 seconds of audio exactly as the detection model heard it (16 kHz mono, after your device's microphone processing)
+- The tester's event log for the same window (the model's decode/confidence timeline)
+- Your tester settings (model, sensitivity, threshold, noise gate, microphone processing flags), the model's manifest, Voice Satellite and Home Assistant versions, browser/platform info, and inference performance stats
+- An optional **name** if you choose to enter one, so multiple submissions from you can be grouped together; it is remembered in your browser for next time
+
+Nothing is uploaded until you confirm: the dialog plays back the exact clip that will be sent and explains what the submission contains. Submissions are anonymous - no account, IP, or personal data is stored with them - and are used solely to improve wake word models and their manifests.
+
+A useful pattern when a wake word keeps missing: start the tester, say the wake word a few times the way you naturally would, then submit. The recording then contains real attempts together with the model's near-miss decisions, which is exactly what's needed to tune the model or its manifest gates.
 
 ## Configuration
 
