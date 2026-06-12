@@ -310,6 +310,37 @@ export class OwwInference {
   }
 
   /**
+   * Ingest one chunk's audio WITHOUT running the embedding or
+   * classifiers - the backpressure path for stale chunks.  Keeps the
+   * audio history and the rolling mel window (GPU-resident on the
+   * fused path, CPU buffer otherwise) gap-free so the next full
+   * processChunk operates on current, contiguous features.  Costs the
+   * mel stage only - the embedding model is the dominant per-chunk
+   * cost this path exists to skip.
+   *
+   * Same input contract as processChunk (int16-range float32).
+   *
+   * @param {Float32Array} chunk - exactly CHUNK_SAMPLES = 1280 samples
+   */
+  async ingestChunk(chunk) {
+    if (chunk.length !== CHUNK_SAMPLES) {
+      throw new Error(`Chunk must be exactly ${CHUNK_SAMPLES} samples, got ${chunk.length}`);
+    }
+    this._melInput.set(this._audioHistory, 0);
+    this._melInput.set(chunk, MEL_PREFIX_SAMPLES);
+    this._audioHistory.set(chunk.subarray(CHUNK_SAMPLES - MEL_PREFIX_SAMPLES));
+
+    if (this._fusedGpuFrontend) {
+      this._fusedGpuFrontend.ingest(this._melInput);
+      return;
+    }
+    const melOut = this._melGpuRunner
+      ? await this._melGpuRunner.invoke(this._melInput)
+      : this.melspec.invoke(this._melInput, { state: this._melState });
+    this._appendMelFrames(melOut);
+  }
+
+  /**
    * Feed one 1280-sample chunk of audio.  Audio values must be int16-range
    * float32 (i.e. raw PCM cast to float, NOT divided by 32767) to match
    * openWakeWord's training-time preprocessing.

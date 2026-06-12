@@ -100,6 +100,32 @@ export class FusedOwwGpuFrontend {
     return this._embeddingRunner.readOutput();
   }
 
+  /**
+   * Mel-only update: run the mel model and roll the GPU-resident mel
+   * window forward WITHOUT the embedding stage or readback.  The
+   * backpressure path uses this to keep the window gap-free for stale
+   * chunks at a fraction of a full invoke's cost.  The next invoke()
+   * copies the freshest window into the embedding input as usual.
+   */
+  ingest(melInput) {
+    this._melRunner.writeInput(melInput);
+
+    const enc = this._device.createCommandEncoder();
+    this._melRunner.encode(enc);
+
+    const nextWindow = 1 - this._activeWindow;
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this._updatePipeline);
+    pass.setBindGroup(0, this._bindGroups[this._activeWindow]);
+    pass.dispatchWorkgroups(this._dispatchX);
+    pass.end();
+
+    this._device.queue.submit([enc.finish()]);
+    this._activeWindow = nextWindow;
+    // No await: queue ordering guarantees this lands before the next
+    // invoke()'s copy of the window buffer.
+  }
+
   destroy() {
     for (const win of this._windows) win.destroy();
     this._windows = [];

@@ -42,6 +42,8 @@ let currentSensitivityLabel = 'Moderately sensitive';
 // so normal postMessage jitter never triggers it.
 const STALE_CHUNK_MS = 150;
 let staleSkips = 0;
+let chunkCount = 0;
+let overloadWarned = false;
 // Per-instance microWakeWord runtime + model cache.  Only used when
 // engine === 'mww'.  We keep them on the worker scope so subsequent
 // keyword loads can reuse the same TFLite runtime.
@@ -121,6 +123,10 @@ async function init({
     try { backend.destroy(); } catch (_) { /* ignore */ }
     backend = null;
   }
+  // Fresh backend = fresh backpressure accounting.
+  staleSkips = 0;
+  chunkCount = 0;
+  overloadWarned = false;
   // `activeKeywords` defaults to "all models active".  When the manager
   // wants a keyword loaded but not active (the OWW stop-word case during
   // normal listening), it sends a strict subset and we deactivate the
@@ -228,6 +234,24 @@ async function dispatch(type, payload) {
       // sent the bare Float32Array - keep accepting it).
       const samples = payload?.samples || payload;
       const sentAt = typeof payload?.t === 'number' ? payload.t : null;
+      chunkCount++;
+      // OWW's streaming classifier expects one embedding per 80 ms chunk.
+      // Sustained skipping keeps latency bounded but compresses the
+      // embedding timeline, which collapses detection accuracy - there is
+      // no way to skip work in OWW without breaking its feature geometry.
+      // Surface that loudly once instead of failing silently.
+      if (
+        !overloadWarned
+        && engineKind === 'oww'
+        && chunkCount > 125
+        && staleSkips / chunkCount > 0.25
+      ) {
+        overloadWarned = true;
+        workerLogger.error(
+          'wake-word',
+          `openWakeWord cannot keep up with real time on this device (${Math.round((staleSkips / chunkCount) * 100)}% of audio chunks skipped). Its streaming classifier degrades badly when chunks are skipped - switch to vsWakeWord or microWakeWord for reliable detection.`,
+        );
+      }
       // Backpressure: when inference is slower than real time (>80 ms
       // per chunk on compatibility-tier GPUs), chunks pile up in this
       // worker's message queue and the audio window falls progressively

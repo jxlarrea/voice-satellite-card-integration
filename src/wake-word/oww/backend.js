@@ -340,6 +340,85 @@ export class OwwBackend {
     return this._processInferenceChunk(samples, rms);
   }
 
+  /**
+   * Ingest one chunk's audio without the embedding/classifier stages -
+   * the backpressure path for stale chunks (see the worker's
+   * processChunk dispatch).  Keeps the energy-gate state machine and
+   * the inference mel window in sync so the next full inference
+   * operates on a gap-free, current window.
+   */
+  async ingestChunk(samples) {
+    if (samples.length !== CHUNK_SAMPLES) {
+      throw new Error(`OWW chunk must be ${CHUNK_SAMPLES} samples, got ${samples.length}`);
+    }
+    if (typeof this._inference.ingestChunk !== 'function') {
+      return this.processChunk(samples);
+    }
+    const rms = this._rms(samples);
+    this._latestRms = rms;
+
+    if (this._energyGateEnabled) {
+      if (this._sleeping) {
+        if (rms >= this._wakeRms) {
+          this._sleeping = false;
+          this._silentChunks = 0;
+          this._log?.log?.(
+            'wake-word',
+            `OWW wake - inference resumed (rms=${rms.toFixed(4)}, buffered=${this._sleepBufLen} chunks)`,
+          );
+        } else {
+          this._bufferSleepingChunk(samples);
+          this._latestScores = {};
+          return this._skippedResult(rms);
+        }
+      } else if (rms < this._wakeRms) {
+        this._silentChunks++;
+        if (this._silentChunks >= SLEEP_CHUNKS) {
+          this._sleeping = true;
+          this._resetStreamState();
+          this._log?.log?.('wake-word', `OWW sleep - inference paused (rms=${rms.toFixed(4)})`);
+        }
+      } else {
+        this._silentChunks = 0;
+      }
+      // Buffered sleep chunks must enter the mel window before this one
+      // so the audio stays ordered and gap-free.
+      if (this._sleepBufLen > 0) {
+        const replay = this._sleepBufferOrdered();
+        this._clearSleepBuffer();
+        for (const buffered of replay) {
+          await this._inference.ingestChunk(this._scaleChunk(buffered));
+        }
+      }
+    }
+
+    await this._inference.ingestChunk(this._scaleChunk(samples));
+    return this._skippedResult(rms);
+  }
+
+  /** Scale ±1 float32 to int16 range (OWW training-time input format)
+   *  into the shared scratch buffer. */
+  _scaleChunk(samples) {
+    if (!this._scaledChunk) this._scaledChunk = new Float32Array(CHUNK_SAMPLES);
+    const scaled = this._scaledChunk;
+    for (let i = 0; i < CHUNK_SAMPLES; i++) scaled[i] = samples[i] * 32768;
+    return scaled;
+  }
+
+  _skippedResult(rms) {
+    return {
+      detected: false,
+      score: 0,
+      vadScore: 0,
+      model: null,
+      cutoff: 0,
+      rms,
+      triggerType: null,
+      skipped: true,
+      perModelScores: this._latestScores || {},
+    };
+  }
+
   async _processInferenceChunk(samples, rms) {
     const totalStart = this._enableTimings ? nowMs() : 0;
     const scaleStart = totalStart;

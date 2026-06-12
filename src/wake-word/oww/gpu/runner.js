@@ -31,10 +31,12 @@
  */
 
 import {
-  conv2dShader,
-  conv1dNcwShader,
-  conv2dNchwShader,
   CONV_DISPATCH_WORKGROUP,
+  COMPAT_CONV_DISPATCH_WORKGROUP,
+  COMPAT_CONV_W_VECTOR,
+  compatConv2dNhwcShader,
+  compatConv1dNcwShader,
+  compatConv2dNchwShader,
   leakyReluShader,
   maximumScalarShader,
   maxPool2dShader,
@@ -83,6 +85,9 @@ export class GpuModelRunner {
     this._activationBuffers = new Map();
     // Recorded compute pipelines + bind groups in op order.
     this._steps = [];
+    // Per-conv uniform parameter buffers (shape/stride/padding), freed
+    // on destroy.
+    this._uniformBuffers = [];
     // Pre-allocated staging buffer for reading the output back to CPU.
     this._readBuffer = null;
     // Final output tensor metadata (id + element count) for invoke().
@@ -390,15 +395,7 @@ export class GpuModelRunner {
     const [, kernelH, kernelW] = wMeta.shape;
     const pad = computePadding(padding, inH, inW, kernelH, kernelW, strideH, strideW, dilationH, dilationW, outH, outW);
 
-    const wgsl = conv2dShader({
-      inShape: inMeta.shape,
-      outShape: outMeta.shape,
-      weightShape: wMeta.shape,
-      strideH, strideW, dilationH, dilationW,
-      padTop: pad.top,
-      padLeft: pad.left,
-      activation: fused?.activation,
-    });
+    const wgsl = compatConv2dNhwcShader();
     const pipeline = this._device.createComputePipeline({
       layout: 'auto',
       compute: { module: this._device.createShaderModule({ code: wgsl }), entryPoint: 'main' },
@@ -407,6 +404,17 @@ export class GpuModelRunner {
     const weightsBuf = this._bufferFor(op.inputs[1]);
     const biasBuf = this._bufferFor(op.inputs[2]);
     const outputBuf = this._bufferFor(outId);
+    const [outBatch, outHt, outWd, outC] = outMeta.shape;
+    void outBatch;
+    const paramsBuf = this._createCompatConvParams(
+      [
+        inH, inW, inMeta.shape[3],
+        outHt, outWd, outC, kernelH, kernelW,
+        strideH, strideW, dilationH, dilationW,
+        pad.top, pad.left, fused?.activation?.kind === 'leakyReluThenMax' ? 1 : 0, 0,
+      ],
+      [fused?.activation?.alpha ?? 0, fused?.activation?.maxScalar ?? 0, 0, 0],
+    );
     const bindGroup = this._device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
       entries: [
@@ -414,14 +422,29 @@ export class GpuModelRunner {
         { binding: 1, resource: { buffer: weightsBuf } },
         { binding: 2, resource: { buffer: biasBuf } },
         { binding: 3, resource: { buffer: outputBuf } },
+        { binding: 4, resource: { buffer: paramsBuf } },
       ],
     });
-    const [outBatch, outHt, outWd, outC] = outMeta.shape;
-    void outBatch;
-    const dispatchX = Math.ceil(outWd / CONV_DISPATCH_WORKGROUP[0]);
-    const dispatchY = Math.ceil(outHt / CONV_DISPATCH_WORKGROUP[1]);
-    const dispatchZ = Math.ceil(outC / CONV_DISPATCH_WORKGROUP[2]);
+    const wg = COMPAT_CONV_DISPATCH_WORKGROUP;
+    const dispatchX = Math.ceil(outWd / wg[0]);
+    const dispatchY = Math.ceil(outHt / wg[1]);
+    const dispatchZ = Math.ceil(outC / wg[2]);
     return { kind: 'conv', pipeline, bindGroup, dispatchX, dispatchY, dispatchZ };
+  }
+
+  _createCompatConvParams(ints, floats = []) {
+    const buffer = new ArrayBuffer(80);
+    const i32 = new Int32Array(buffer);
+    const f32 = new Float32Array(buffer);
+    for (let i = 0; i < Math.min(16, ints.length); i++) i32[i] = ints[i] | 0;
+    for (let i = 0; i < Math.min(4, floats.length); i++) f32[16 + i] = floats[i];
+    const gpuBuffer = this._device.createBuffer({
+      size: 80,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._device.queue.writeBuffer(gpuBuffer, 0, buffer, 0, buffer.byteLength);
+    this._uniformBuffers.push(gpuBuffer);
+    return gpuBuffer;
   }
 
   _buildOnnxConv(op, tensors) {
@@ -435,33 +458,32 @@ export class GpuModelRunner {
     let dispatchX;
     let dispatchY;
     let dispatchZ;
+    let paramsBuf;
+    const wg = COMPAT_CONV_DISPATCH_WORKGROUP;
     if (inMeta.shape.length === 3) {
-      wgsl = conv1dNcwShader({
-        inShape: inMeta.shape,
-        outShape: outMeta.shape,
-        weightShape: wMeta.shape,
-        strideW: strides[0],
-        dilationW: dilations[0],
-        padLeft: pads[0],
-      });
-      dispatchX = Math.ceil(outMeta.shape[2] / CONV_DISPATCH_WORKGROUP[0]);
-      dispatchY = Math.ceil(outMeta.shape[1] / CONV_DISPATCH_WORKGROUP[1]);
+      wgsl = compatConv1dNcwShader();
+      paramsBuf = this._createCompatConvParams([
+        inMeta.shape[1], inMeta.shape[2], outMeta.shape[1], outMeta.shape[2],
+        wMeta.shape[2], 0, 0, 0,
+        strides[0], dilations[0], 0, 0,
+        pads[0], 0, 0, 0,
+      ]);
+      dispatchX = Math.ceil(outMeta.shape[2] / wg[0]);
+      dispatchY = Math.ceil(outMeta.shape[1] / wg[1]);
       dispatchZ = 1;
     } else {
-      wgsl = conv2dNchwShader({
-        inShape: inMeta.shape,
-        outShape: outMeta.shape,
-        weightShape: wMeta.shape,
-        strideH: strides[0],
-        strideW: strides[1],
-        dilationH: dilations[0],
-        dilationW: dilations[1],
-        padTop: pads[0],
-        padLeft: pads[1],
-      });
-      dispatchX = Math.ceil(outMeta.shape[3] / CONV_DISPATCH_WORKGROUP[0]);
-      dispatchY = Math.ceil(outMeta.shape[2] / CONV_DISPATCH_WORKGROUP[1]);
-      dispatchZ = Math.ceil(outMeta.shape[1] / CONV_DISPATCH_WORKGROUP[2]);
+      wgsl = compatConv2dNchwShader();
+      paramsBuf = this._createCompatConvParams([
+        inMeta.shape[1], inMeta.shape[2], inMeta.shape[3], outMeta.shape[1],
+        outMeta.shape[2], outMeta.shape[3], wMeta.shape[2], wMeta.shape[3],
+        strides[0], strides[1], dilations[0], dilations[1],
+        pads[0], pads[1], 0, 0,
+      ]);
+      // The vectorized NCHW shader covers COMPAT_CONV_W_VECTOR outputs
+      // along W per invocation.
+      dispatchX = Math.ceil(outMeta.shape[3] / (wg[0] * COMPAT_CONV_W_VECTOR));
+      dispatchY = Math.ceil(outMeta.shape[2] / wg[1]);
+      dispatchZ = Math.ceil(outMeta.shape[1] / wg[2]);
     }
     const pipeline = this._device.createComputePipeline({
       layout: 'auto',
@@ -480,6 +502,7 @@ export class GpuModelRunner {
         { binding: 1, resource: { buffer: weightsBuf } },
         { binding: 2, resource: { buffer: biasBuf } },
         { binding: 3, resource: { buffer: outputBuf } },
+        { binding: 4, resource: { buffer: paramsBuf } },
       ],
     });
     return { kind: 'conv', pipeline, bindGroup, dispatchX, dispatchY, dispatchZ };
@@ -1095,10 +1118,12 @@ export class GpuModelRunner {
     for (const b of this._constantBuffers.values()) b.destroy();
     for (const b of this._zeroBuffers.values()) b.destroy();
     for (const b of this._activationBuffers.values()) b.destroy();
+    for (const b of this._uniformBuffers) b.destroy();
     if (this._readBuffer) this._readBuffer.destroy();
     this._constantBuffers.clear();
     this._zeroBuffers.clear();
     this._activationBuffers.clear();
+    this._uniformBuffers = [];
     this._steps = [];
   }
 }
