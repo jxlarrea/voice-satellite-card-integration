@@ -77,6 +77,7 @@ export class WakeWordTestSession {
     this._captureBuf = new Float32Array(TARGET_RATE * this._captureSeconds);
     this._captureHead = 0;      // next write index
     this._captureFilled = 0;    // total samples ever written (for "how full")
+    this._workletBatchQuanta = 10;
 
     // Recent tester log lines (ring).  Snapshotted into diagnostic
     // submissions so the CTC decode/confidence timeline travels with the
@@ -192,6 +193,58 @@ export class WakeWordTestSession {
       energy_gate: this._energyGateEnabled,
       dsp_constraints: this._constraints || null,
       perf_ms: perf.length ? { p50: pct(0.5), p95: pct(0.95), n: perf.length } : null,
+      audio_capture: this._getCaptureStats(),
+    };
+  }
+
+  _getCaptureStats() {
+    const n = Math.min(this._captureFilled, this._captureBuf.length);
+    if (n === 0) return null;
+
+    const cap = this._captureBuf;
+    const start = this._captureFilled < cap.length ? 0 : this._captureHead;
+    const nearZero = 1 / 32768;
+    let sumSq = 0;
+    let peak = 0;
+    let exactZero = 0;
+    let nearZeroSamples = 0;
+    let clipped = 0;
+    let currentNearZeroRun = 0;
+    let longestNearZeroRun = 0;
+    let longNearZeroRuns = 0;
+    const longRunSamples = Math.round(TARGET_RATE * 0.08);
+
+    for (let i = 0; i < n; i++) {
+      const v = cap[(start + i) % cap.length] || 0;
+      const a = Math.abs(v);
+      sumSq += v * v;
+      if (a > peak) peak = a;
+      if (v === 0) exactZero++;
+      if (a <= nearZero) {
+        nearZeroSamples++;
+        currentNearZeroRun++;
+      } else {
+        if (currentNearZeroRun >= longRunSamples) longNearZeroRuns++;
+        if (currentNearZeroRun > longestNearZeroRun) longestNearZeroRun = currentNearZeroRun;
+        currentNearZeroRun = 0;
+      }
+      if (a >= 0.999) clipped++;
+    }
+    if (currentNearZeroRun >= longRunSamples) longNearZeroRuns++;
+    if (currentNearZeroRun > longestNearZeroRun) longestNearZeroRun = currentNearZeroRun;
+
+    return {
+      sample_rate: TARGET_RATE,
+      source_rate: this._actualSampleRate,
+      worklet_batch_quanta: this._workletBatchQuanta,
+      seconds: Math.round((n / TARGET_RATE) * 1000) / 1000,
+      peak_abs: Math.round(peak * 10000) / 10000,
+      rms: Math.round(Math.sqrt(sumSq / n) * 10000) / 10000,
+      exact_zero_pct: Math.round((exactZero / n) * 10000) / 100,
+      near_zero_pct: Math.round((nearZeroSamples / n) * 10000) / 100,
+      clipped_pct: Math.round((clipped / n) * 10000) / 100,
+      longest_near_zero_ms: Math.round((longestNearZeroRun / TARGET_RATE) * 1000),
+      long_near_zero_runs: longNearZeroRuns,
     };
   }
 
@@ -419,9 +472,11 @@ export class WakeWordTestSession {
   }
 
   async _setupWorklet() {
-    // 10 render quanta = 1280 samples at 128/quanta. The worklet name is
-    // distinct from the main engine's so they coexist on a shared origin.
-    const BATCH_QUANTA = 10;
+    // Batch roughly 80 ms of source audio per post. 10 render quanta is
+    // correct at 16 kHz, but a 48 kHz AudioContext needs 30 quanta; otherwise
+    // the tester sends 3x as many main-thread capture/resample messages.
+    const BATCH_QUANTA = Math.max(1, Math.round((this._actualSampleRate / TARGET_RATE) * 10));
+    this._workletBatchQuanta = BATCH_QUANTA;
     const code =
       'var B=' + BATCH_QUANTA + ';' +
       'class VsCalibProc extends AudioWorkletProcessor{' +
@@ -456,6 +511,13 @@ export class WakeWordTestSession {
     this._silentGain.gain.value = 0;
     this._workletNode.connect(this._silentGain);
     this._silentGain.connect(this._audioContext.destination);
+
+    const postMs = (128 * BATCH_QUANTA / this._actualSampleRate) * 1000;
+    this._emitLog(
+      'info',
+      `tester capture batch: rate=${this._actualSampleRate}Hz `
+      + `quanta=${BATCH_QUANTA} post=${postMs.toFixed(1)}ms`,
+    );
   }
 
   async _setupInference() {

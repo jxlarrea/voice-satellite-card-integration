@@ -21,11 +21,11 @@ import { sendBinaryAudio } from './comms.js';
 const _registeredContexts = new WeakSet();
 
 export async function setupAudioWorklet(mgr, sourceNode) {
-  // Batch 10 render quanta (10 * 128 = 1280 samples) before posting.
-  // This reduces postMessage structured-clone overhead from 125/s to 12.5/s
-  // at 16 kHz, and produces 5120-byte ArrayBuffers that V8 tracks as external
-  // memory — preventing native backing-store buildup on low-RAM devices.
-  const BATCH_QUANTA = 10;
+  // Batch roughly one 16 kHz inference chunk per post. 10 render quanta is
+  // correct at 16 kHz, but a 48 kHz AudioContext needs 30 quanta; otherwise
+  // the live engine sends 3x as many main-thread capture/resample messages.
+  const BATCH_QUANTA = Math.max(1, Math.round((mgr.actualSampleRate / 16000) * 10));
+  mgr.workletBatchQuanta = BATCH_QUANTA;
 
   if (!_registeredContexts.has(mgr.audioContext)) {
     const workletCode =
@@ -86,6 +86,13 @@ export async function setupAudioWorklet(mgr, sourceNode) {
   mgr._silentGainNode = silentGain;
   mgr.workletNode.connect(silentGain);
   silentGain.connect(mgr.audioContext.destination);
+
+  const postMs = (128 * BATCH_QUANTA / mgr.actualSampleRate) * 1000;
+  mgr._log?.log?.(
+    'mic',
+    `AudioWorklet capture batch: rate=${mgr.actualSampleRate}Hz `
+    + `quanta=${BATCH_QUANTA} post=${postMs.toFixed(1)}ms`,
+  );
 }
 
 /**
