@@ -186,15 +186,19 @@ class VoiceSatellitePanel extends HTMLElement {
       const stt = `stt_${key}`;
       if (this._config[stt] === undefined) this._config[stt] = legacy;
     }
-    // Wake-word DSP migration (see migrateWakeWordDsp in engine/index.js).
-    // v2 forced NS/EC/AGC on; v3 forces AGC back off for everyone while
-    // keeping NS/EC on. An explicit "on" and a v2-migration "on" are
-    // indistinguishable in storage, so v3 deliberately resets both.
-    if (!(this._config._dsp_version >= 3)) {
-      this._config.wake_word_noise_suppression = true;
+    // Mic DSP migration (see migrateMicDsp in engine/index.js). v4 leaves
+    // only echo cancellation on by default for both wake-word and STT, with
+    // noise suppression and auto gain control off. An explicit "on" and a
+    // prior-migration "on" are indistinguishable in storage, so v4
+    // deliberately resets them.
+    if (!(this._config._dsp_version >= 4)) {
+      this._config.wake_word_noise_suppression = false;
       this._config.wake_word_echo_cancellation = true;
       this._config.wake_word_auto_gain_control = false;
-      this._config._dsp_version = 3;
+      this._config.stt_noise_suppression = false;
+      this._config.stt_echo_cancellation = true;
+      this._config.stt_auto_gain_control = false;
+      this._config._dsp_version = 4;
       setStoredConfig(this._config);
     }
     // Sync entity from dedicated storage into config

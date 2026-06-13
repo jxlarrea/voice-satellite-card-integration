@@ -75,23 +75,20 @@ export const DEFAULT_CONFIG = {
   debug: false,
 
   // Microphone Processing — Wake Word listening.
-  // All DSP off by default.  The microWakeWord models were trained on raw
-  // hardware-captured audio (Voice PE, ESPHome, Raspberry Pi boards — no
-  // Microphone Processing — Wake Word.
-  // Browser WebRTC DSP (AGC, NS, EC) normalizes volume and removes
-  // background noise, matching what the XMOS chip does on Voice PE
-  // hardware before audio reaches the wake-word model.
-  wake_word_noise_suppression: true,
+  // Only echo cancellation is on by default; noise suppression and auto
+  // gain control are off, as they can distort the raw signal the wake-word
+  // model expects. Users can re-enable any of these per mode in the panel.
+  wake_word_noise_suppression: false,
   wake_word_echo_cancellation: true,
   wake_word_auto_gain_control: false,
   wake_word_voice_isolation: false,
 
   // Microphone Processing — Speech to Text streaming.
   // Mic is re-acquired with these constraints on the wake-word → STT
-  // transition.
-  stt_noise_suppression: true,
+  // transition. Only echo cancellation on by default; NS and AGC off.
+  stt_noise_suppression: false,
   stt_echo_cancellation: true,
-  stt_auto_gain_control: true,
+  stt_auto_gain_control: false,
   stt_voice_isolation: false,
   // Extra pause inserted between TTS playback ending and STT starting on
   // continue-conversation follow-up turns.  Default 0 (no delay).  Lets

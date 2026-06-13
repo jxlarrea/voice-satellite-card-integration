@@ -30,26 +30,32 @@ function getStoredConfig() {
 }
 
 /**
- * One-time wake-word DSP migration.  History:
+ * One-time microphone DSP migration.  History:
  *   - v6.10.x shipped wake-word DSP defaulting to off.
  *   - v2 forced noise suppression, echo cancellation, AND auto gain
  *     control back on (matching Voice PE hardware behavior).
- *   - v3 forces auto gain control back OFF for everyone (including users
- *     the v2 migration switched it on for), while leaving noise
- *     suppression and echo cancellation on.  An explicit user "on" and a
- *     v2-migration "on" are indistinguishable in storage, so this
- *     deliberately resets both.
+ *   - v3 forced auto gain control back OFF for everyone, leaving noise
+ *     suppression and echo cancellation on.
+ *   - v4 turns noise suppression OFF for both wake-word and STT, and auto
+ *     gain control OFF for STT, leaving only echo cancellation on by
+ *     default for both modes.  Noise suppression/AGC were degrading the
+ *     signal; echo cancellation stays on to suppress TTS bleed.  An
+ *     explicit user "on" and a prior-migration "on" are indistinguishable
+ *     in storage, so this deliberately resets them.
  * The version flag ensures it only runs once.
  */
-function migrateWakeWordDsp() {
+function migrateMicDsp() {
   try {
     const config = getStoredConfig();
-    if (config._dsp_version >= 3) return;
-    config.wake_word_noise_suppression = true;
+    if (config._dsp_version >= 4) return;
+    config.wake_word_noise_suppression = false;
     config.wake_word_echo_cancellation = true;
     config.wake_word_auto_gain_control = false;
+    config.stt_noise_suppression = false;
+    config.stt_echo_cancellation = true;
+    config.stt_auto_gain_control = false;
     // voice_isolation stays off (Chrome-only, aggressive)
-    config._dsp_version = 3;
+    config._dsp_version = 4;
     localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
   } catch (_) { /* private browsing */ }
 }
@@ -72,7 +78,7 @@ export function initEngine() {
 }
 
 async function bootstrapEngine() {
-  migrateWakeWordDsp();
+  migrateMicDsp();
   const ha = await waitForHass();
   const session = VoiceSatelliteSession.getInstance();
 
