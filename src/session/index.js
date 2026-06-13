@@ -345,7 +345,7 @@ export class VoiceSatelliteSession {
     const sessionKeys = [
       'satellite_entity', 'debug',
       ...micKeys,
-      'stt_followup_delay_ms', 'stt_followup_chime',
+      'seamless_wake_command', 'stt_followup_delay_ms', 'stt_followup_chime',
       'reactive_bar', 'reactive_bar_update_interval_ms',
       'hide_timer_pills', 'hide_timer_name_on_alert', 'show_timer_name_in_pill',
       'timer_tts_enabled', 'timer_tts_text', 'timer_named_tts_text',

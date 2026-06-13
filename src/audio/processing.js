@@ -63,10 +63,9 @@ export async function setupAudioWorklet(mgr, sourceNode) {
 
   mgr.workletNode = new AudioWorkletNode(mgr.audioContext, 'voice-satellite-processor');
   mgr.workletNode.port.onmessage = (e) => {
-    // Only buffer audio when actively sending to the pipeline — otherwise
-    // the array grows unbounded during on-device wake word detection
-    // (no sendInterval to drain it).
-    if (mgr._sendInterval) {
+    // Only buffer audio while streaming to the pipeline, or during the brief
+    // seamless wake handoff before the binary handler is ready.
+    if (mgr._sendInterval || mgr._captureBuffering) {
       mgr.audioBuffer.push(e.data);
     }
     // Feed on-device wake word engine if active or in stop-only mode (resampled to 16kHz)

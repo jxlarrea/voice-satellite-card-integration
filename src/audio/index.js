@@ -25,6 +25,7 @@ export class AudioManager {
     this._actualSampleRate = TARGET_SAMPLE_RATE;
     this._sendSessionCount = 0;
     this._silentGainNode = null;
+    this._captureBuffering = false;
     // Authoritative mute flag — separate from any specific MediaStreamTrack
     // so a stream swap (switchMicMode) can re-apply it to the new tracks
     // without racing the wake-word handler's synchronous mute call.
@@ -239,6 +240,7 @@ export class AudioManager {
     // different MediaElementSourceNode", AND the old binding sinks TTS
     // audio into the dead graph so playback is silent.  The context is
     // cheap to keep alive; real teardown happens in destroy().
+    this._captureBuffering = false;
     this._audioBuffer = [];
     if (hadWorklet || hadStream) {
       this._log.log('mic', `stopMicrophone: worklet=${hadWorklet} stream=${hadStream} (ctx kept)`);
@@ -265,6 +267,7 @@ export class AudioManager {
    */
   startSending(binaryHandlerIdGetter) {
     this.stopSending();
+    this._captureBuffering = false;
     this._sendSessionCount += 1;
     const sendSession = this._sendSessionCount;
     let firstSendLogged = false;
@@ -284,6 +287,16 @@ export class AudioManager {
       clearInterval(this._sendInterval);
       this._sendInterval = null;
     }
+  }
+
+  startBuffering({ reset = false } = {}) {
+    if (reset) this._audioBuffer = [];
+    this._captureBuffering = true;
+  }
+
+  stopBuffering({ clear = false } = {}) {
+    this._captureBuffering = false;
+    if (clear) this._audioBuffer = [];
   }
 
   async _logMicDevices(reason) {

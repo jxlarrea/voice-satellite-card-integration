@@ -103,6 +103,9 @@ export const DEFAULT_CONFIG = {
   // Off by default (the existing flow continues silently).  Useful as an
   // audible "speak now" cue when paired with a follow-up listen delay.
   stt_followup_chime: false,
+  // Skip the wake chime and keep buffering mic audio while the STT pipeline
+  // starts, so users can say "hey vesta turn off the lights" in one run.
+  seamless_wake_command: false,
 
   // Timers
   hide_timer_pills: false,

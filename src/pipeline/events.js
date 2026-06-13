@@ -557,16 +557,27 @@ export function handleError(mgr, errorData) {
     // after a local detection), cancel it so the user doesn't hear
     // anything from this tablet at all. The other tablet — the one
     // that won the dedupe race — handles the user's actual interaction.
+    let duplicateLatencyMs = null;
     if (errorCode === 'duplicate_wake_up_detected') {
-      const duplicateLatencyMs = mgr.card.wakeWord?.getPendingWakeLatencyMs?.();
+      duplicateLatencyMs = mgr.card.wakeWord?.getPendingWakeLatencyMs?.();
       if (duplicateLatencyMs !== null && duplicateLatencyMs !== undefined) {
         mgr.log.log('pipeline', `Duplicate wake-up received ${duplicateLatencyMs}ms after local wake activation`);
       }
     }
-    if (errorCode === 'duplicate_wake_up_detected'
-        && mgr.card.wakeWord?.cancelPendingChime?.()) {
-      mgr.log.log('pipeline',
-        'Duplicate wake-up — cancelled pending chime, silently aborting');
+    const duplicateWake = errorCode === 'duplicate_wake_up_detected';
+    const cancelledPendingChime = duplicateWake && mgr.card.wakeWord?.cancelPendingChime?.();
+    const seamlessPendingWake = duplicateWake
+      && mgr.card.config?.seamless_wake_command === true
+      && duplicateLatencyMs !== null
+      && duplicateLatencyMs !== undefined;
+    if (cancelledPendingChime || seamlessPendingWake) {
+      mgr.log.log(
+        'pipeline',
+        cancelledPendingChime
+          ? 'Duplicate wake-up - cancelled pending chime, silently aborting'
+          : 'Duplicate wake-up - cancelled seamless wake stream, silently aborting',
+      );
+      mgr.card.audio.stopBuffering?.({ clear: true });
       mgr.card.wakeWord?.clearPendingWakeLatency?.();
       mgr.card.ui.hideBlurOverlay(BlurReason.PIPELINE);
       mgr.card.mediaPlayer.resumeAfterInterrupt();
@@ -591,6 +602,8 @@ export function handleError(mgr, errorData) {
       mgr.restart(0);
       return;
     }
+
+    mgr.card.wakeWord?.clearPendingWakeLatency?.();
 
     // Always hide blur — duplicate_wake_up_detected arrives after run-start
     // has already moved state out of INTERACTING_STATES, but overlay is still up.

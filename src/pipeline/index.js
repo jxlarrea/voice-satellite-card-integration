@@ -298,7 +298,11 @@ export class PipelineManager {
       }
     }
 
-    audio.audioBuffer = [];
+    if (opts.preserve_audio_buffer) {
+      this._log.log('pipeline', `Preserving ${audio.audioBuffer.length} buffered audio chunk(s) for STT`);
+    } else {
+      audio.audioBuffer = [];
+    }
     audio.startSending(() => this._binaryHandlerId);
 
     this._isStreaming = true;
@@ -322,6 +326,7 @@ export class PipelineManager {
     }
 
     this._card.audio.stopSending();
+    this._card.audio.stopBuffering?.({ clear: true });
     this._binaryHandlerId = null;
     this._isStreaming = false;
 
@@ -563,6 +568,7 @@ export class PipelineManager {
   }
   finishRunEnd() {
     this._pendingRunEnd = false;
+    this._card.wakeWord?.clearPendingWakeLatency?.();
 
     // Show is active (silent variant — no TTS playback, so onTTSComplete
     // never fires). Bubble + rich media stay on screen until dismissed;

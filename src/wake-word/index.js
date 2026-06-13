@@ -910,6 +910,11 @@ export class WakeWordManager {
     session.pipeline.shouldContinue = false;
     session.pipeline.continueConversationId = null;
 
+    const seamlessWakeCommand = session.config.seamless_wake_command === true;
+    if (seamlessWakeCommand) {
+      session.audio.startBuffering?.({ reset: true });
+    }
+
     // console.log('[wf-diag] _onDetection -- setState + showBlurOverlay');
     session.setState(State.WAKE_WORD_DETECTED);
     session.ui.showBlurOverlay(BlurReason.PIPELINE);
@@ -917,6 +922,33 @@ export class WakeWordManager {
     const wakeSound = getSwitchState(
       session.hass, session.config.satellite_entity, 'wake_sound',
     ) !== false;
+
+    // Seamless wake command: do not play a wake chime, and keep the
+    // post-detection mic audio buffered until the STT stream is ready.
+    if (seamlessWakeCommand) {
+      this._log.log(
+        'wake-word',
+        wakeSound
+          ? 'Seamless wake command enabled - skipping wake chime and streaming buffered STT audio'
+          : 'Seamless wake command enabled - streaming buffered STT audio',
+      );
+
+      session.pipeline
+        .start({
+          start_stage: 'stt',
+          wake_word_phrase: this.getWakeWordPhrase(modelName),
+          wake_word_slot: this.getSlotForModel(modelName),
+          preserve_audio_buffer: true,
+        })
+        .catch((e) => {
+          this._log.error('wake-word', `Pipeline start failed after seamless detection: ${e.message || e}`);
+          session.audio.stopBuffering?.({ clear: true });
+          this._setMicTracksMuted(false);
+          try { session.ui.setReactiveSuppressed(false); } catch (_) {}
+          session.pipeline.restart(session.pipeline.calculateRetryDelay());
+        });
+      return;
+    }
 
     // ── Cross-tablet dedupe handling ─────────────────────────────────
     // If multiple satellites can hear the user, more than one of them
