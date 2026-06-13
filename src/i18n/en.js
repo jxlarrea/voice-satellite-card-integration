@@ -109,7 +109,7 @@ export default {
       stt_followup_chime: 'Follow-up ready chime',
       helper_satellite_entity: 'Add a satellite device first via Settings → Devices & Services → Voice Satellite.',
       helper_voice_isolation: 'AI-based voice isolation, currently only available in Chrome',
-      helper_seamless_wake_command: 'Experimental: let one-shot phrases like "hey vesta turn off the lights" flow directly into STT. Skips the wake chime for that turn; results can vary by microphone, room acoustics, and STT engine.',
+      helper_seamless_wake_command: 'Experimental and off by default. Lets one-shot phrases like "hey vesta turn off the lights" flow directly into STT. Skips the wake chime for that turn; results can vary by microphone, room acoustics, and STT engine.',
       helper_stt_followup_delay_ms: 'Pause between the assistant finishing speaking and the mic listening again on follow-up turns. Use this if the tail of the response (last word or two) is being captured into your next reply. Common on tablets without hardware echo cancellation, especially with synthesized voices like Piper. Try 300-500 ms; leave at 0 if follow-ups already work cleanly.',
       helper_stt_followup_chime: 'Play the wake chime when the mic starts listening for a follow-up turn, so you have an audible "speak now" cue. Pairs naturally with a non-zero follow-up listen delay.',
     },

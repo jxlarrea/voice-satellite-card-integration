@@ -168,7 +168,7 @@ export const behaviorHelpers = {
   microphone_device_id: t(null, 'editor.behavior.helper_microphone_device_id', 'Use the browser default microphone, or select a specific input if the default device is silent or wrong.'),
   wake_word_voice_isolation: t(null, 'editor.behavior.helper_voice_isolation', 'AI-based voice isolation, currently only available in Chrome'),
   stt_voice_isolation: t(null, 'editor.behavior.helper_voice_isolation', 'AI-based voice isolation, currently only available in Chrome'),
-  seamless_wake_command: t(null, 'editor.behavior.helper_seamless_wake_command', 'Experimental: let one-shot phrases like "hey vesta turn off the lights" flow directly into STT. Skips the wake chime for that turn; results can vary by microphone, room acoustics, and STT engine.'),
+  seamless_wake_command: t(null, 'editor.behavior.helper_seamless_wake_command', 'Experimental and off by default. Lets one-shot phrases like "hey vesta turn off the lights" flow directly into STT. Skips the wake chime for that turn; results can vary by microphone, room acoustics, and STT engine.'),
   hide_timer_pills: t(null, 'editor.behavior.helper_hide_timer_pills', 'Hide the countdown pill on screen. Timers still run and the alert still fires when they finish.'),
   show_timer_name_in_pill: t(null, 'editor.behavior.helper_show_timer_name_in_pill', 'Display the timer name alongside the countdown in the pill (e.g. "Stir the sauce | 15:30"). Names longer than 25 characters are truncated.'),
   hide_timer_name_on_alert: t(null, 'editor.behavior.helper_hide_timer_name_on_alert', 'When a timer finishes, hide the timer name shown below the alert.'),

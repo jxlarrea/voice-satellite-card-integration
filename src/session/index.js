@@ -94,6 +94,8 @@ export class VoiceSatelliteSession {
     this._videoPlaying = false;
     this._activeSkin = null;
     this._fullCardSuppressed = false;
+    this._lastLoggedSeamlessWakeCommand = null;
+    this._seamlessWakeActive = false;
 
     this._logger = new Logger();
 
@@ -356,6 +358,7 @@ export class VoiceSatelliteSession {
     ];
 
     const oldEntity = this._config.satellite_entity;
+    const oldSeamlessWakeCommand = this._config.seamless_wake_command === true;
     let micChanged = false;
     for (const key of sessionKeys) {
       if (config[key] !== undefined) {
@@ -366,6 +369,18 @@ export class VoiceSatelliteSession {
       }
     }
     this._logger.debug = !!this._config.debug;
+
+    const seamlessWakeCommand = this._config.seamless_wake_command === true;
+    if (
+      config.seamless_wake_command !== undefined
+      && oldSeamlessWakeCommand !== seamlessWakeCommand
+    ) {
+      this._logger.log(
+        'session',
+        `Seamless wake command: ${seamlessWakeCommand ? 'enabled' : 'disabled'}`,
+      );
+      this._lastLoggedSeamlessWakeCommand = seamlessWakeCommand;
+    }
 
     // If entity changed while running, restart
     if (oldEntity && this._config.satellite_entity

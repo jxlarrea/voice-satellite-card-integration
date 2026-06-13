@@ -148,9 +148,22 @@ export function setState(session, newState) {
   const isStt = sttPhase(newState);
   if (wasStt !== isStt && session._hasStarted && session.audio?.switchMicMode) {
     const targetMode = isStt ? 'stt' : 'wake_word';
-    session.audio.switchMicMode(targetMode).catch((e) => {
-      session.logger.error('mic', `switchMicMode(${targetMode}) failed: ${e.message || e}`);
-    });
+    const keepWakeStreamForSeamless = isStt
+      && session._seamlessWakeActive === true
+      && session.config.seamless_wake_command === true;
+    if (keepWakeStreamForSeamless) {
+      session.logger.log(
+        'mic',
+        'Seamless wake command - keeping current mic stream for STT',
+      );
+    } else {
+      session.audio.switchMicMode(targetMode).catch((e) => {
+        session.logger.error('mic', `switchMicMode(${targetMode}) failed: ${e.message || e}`);
+      });
+    }
+    if (!isStt && session._seamlessWakeActive) {
+      session._seamlessWakeActive = false;
+    }
   }
 
   session.ui.updateForState(newState, session.pipeline.serviceUnavailable, session.tts.isPlaying);
@@ -197,6 +210,12 @@ export async function startListening(session) {
 
   try {
     const mode = getWakeWordMode(session);
+    const seamlessWakeCommand = session.config.seamless_wake_command === true;
+    session.logger.log(
+      'session',
+      `Seamless wake command: ${seamlessWakeCommand ? 'enabled' : 'disabled'}`,
+    );
+    session._lastLoggedSeamlessWakeCommand = seamlessWakeCommand;
 
     // Disabled: don't acquire the mic and don't start the pipeline. The
     // session sits idle waiting for voice_satellite.wake to fire, which

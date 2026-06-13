@@ -39,7 +39,7 @@ The primary settings for this browser. Pick the satellite device this browser sh
 | **Satellite entity** | The Voice Satellite device this browser will use. Each browser must explicitly select an entity before the engine will start. Create one entity per device in **Settings -> Devices & Services -> Voice Satellite** |
 | **Auto start** | Start the engine automatically on page load. When off, use the Start button to activate manually |
 | **Microphone** | Browser microphone input. Use the default device, or pick a specific input when the browser exposes one |
-| **Seamless wake command (experimental)** | Lets one-shot phrases such as "hey vesta turn off the lights" flow directly into STT. Skips the wake chime for that turn and buffers command audio while the Assist pipeline starts. Results can vary by microphone, room acoustics, and STT engine |
+| **Seamless wake command (experimental)** | Off by default. Lets one-shot phrases such as "hey vesta turn off the lights" flow directly into STT. Skips the wake chime for that turn and buffers command audio while the Assist pipeline starts. Results can vary by microphone, room acoustics, and STT engine |
 
 ### Preview
 

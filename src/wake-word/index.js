@@ -912,6 +912,7 @@ export class WakeWordManager {
 
     const seamlessWakeCommand = session.config.seamless_wake_command === true;
     if (seamlessWakeCommand) {
+      session._seamlessWakeActive = true;
       session.audio.startBuffering?.({ reset: true });
     }
 
@@ -922,6 +923,10 @@ export class WakeWordManager {
     const wakeSound = getSwitchState(
       session.hass, session.config.satellite_entity, 'wake_sound',
     ) !== false;
+    this._log.log(
+      'wake-word',
+      `Wake activation settings: seamless_wake_command=${seamlessWakeCommand ? 'enabled' : 'disabled'}, wake_sound=${wakeSound ? 'enabled' : 'disabled'}`,
+    );
 
     // Seamless wake command: do not play a wake chime, and keep the
     // post-detection mic audio buffered until the STT stream is ready.
@@ -942,6 +947,7 @@ export class WakeWordManager {
         })
         .catch((e) => {
           this._log.error('wake-word', `Pipeline start failed after seamless detection: ${e.message || e}`);
+          session._seamlessWakeActive = false;
           session.audio.stopBuffering?.({ clear: true });
           this._setMicTracksMuted(false);
           try { session.ui.setReactiveSuppressed(false); } catch (_) {}
