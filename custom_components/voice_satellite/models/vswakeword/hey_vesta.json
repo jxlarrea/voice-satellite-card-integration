@@ -1,0 +1,248 @@
+{
+  "name": "hey_vesta",
+  "format": "vs-wake-word-ctc-v1",
+  "recommended_threshold": 0.5,
+  "input": {
+    "name": "input",
+    "shape": [
+      1,
+      128,
+      40
+    ],
+    "dtype": "float32",
+    "feature": "log_mel"
+  },
+  "output": {
+    "name": "log_probs",
+    "shape": [
+      1,
+      64,
+      52
+    ],
+    "dtype": "float32",
+    "meaning": "frame_level_phoneme_log_probabilities"
+  },
+  "feature_config": {
+    "sample_rate": 16000,
+    "window_ms": 1300,
+    "frame_ms": 25,
+    "hop_ms": 10,
+    "n_fft": 512,
+    "n_mels": 40,
+    "f_min": 80.0,
+    "f_max": 7600.0,
+    "log_floor": 1e-06,
+    "window_samples": 20800,
+    "frame_samples": 400,
+    "hop_samples": 160,
+    "frames": 128
+  },
+  "ctc": {
+    "vocab_size": 52,
+    "blank_id": 1,
+    "pad_id": 0,
+    "word_sep_id": 2,
+    "inventory": [
+      "<pad>",
+      "<blank>",
+      " ",
+      "ː",
+      "a",
+      "ɑ",
+      "ɐ",
+      "ɔ",
+      "æ",
+      "e",
+      "ɛ",
+      "ɜ",
+      "ə",
+      "ɚ",
+      "i",
+      "ɪ",
+      "ɨ",
+      "ᵻ",
+      "o",
+      "ɒ",
+      "u",
+      "ʊ",
+      "ʌ",
+      "b",
+      "d",
+      "f",
+      "ɡ",
+      "h",
+      "j",
+      "k",
+      "l",
+      "m",
+      "n",
+      "ŋ",
+      "p",
+      "r",
+      "ɹ",
+      "ɾ",
+      "s",
+      "ʃ",
+      "t",
+      "v",
+      "w",
+      "z",
+      "ʒ",
+      "ð",
+      "θ",
+      "ʔ",
+      "tʃ",
+      "dʒ",
+      "x",
+      "ʲ"
+    ],
+    "wake_word_targets": [
+      [
+        27,
+        9,
+        15,
+        2,
+        41,
+        10,
+        38,
+        40,
+        12
+      ],
+      [
+        27,
+        4,
+        15,
+        2,
+        41,
+        10,
+        38,
+        40,
+        12
+      ],
+      [
+        27,
+        4,
+        15,
+        6,
+        2,
+        41,
+        10,
+        38,
+        40,
+        12
+      ],
+      [
+        9,
+        15,
+        2,
+        41,
+        10,
+        38,
+        40,
+        12
+      ],
+      [
+        27,
+        9,
+        15,
+        41,
+        10,
+        38,
+        40,
+        12
+      ]
+    ],
+    "wake_word_target_phonemes": [
+      [
+        "h",
+        "e",
+        "ɪ",
+        " ",
+        "v",
+        "ɛ",
+        "s",
+        "t",
+        "ə"
+      ],
+      [
+        "h",
+        "a",
+        "ɪ",
+        " ",
+        "v",
+        "ɛ",
+        "s",
+        "t",
+        "ə"
+      ],
+      [
+        "h",
+        "a",
+        "ɪ",
+        "ɐ",
+        " ",
+        "v",
+        "ɛ",
+        "s",
+        "t",
+        "ə"
+      ],
+      [
+        "e",
+        "ɪ",
+        " ",
+        "v",
+        "ɛ",
+        "s",
+        "t",
+        "ə"
+      ],
+      [
+        "h",
+        "e",
+        "ɪ",
+        "v",
+        "ɛ",
+        "s",
+        "t",
+        "ə"
+      ]
+    ],
+    "max_edit_distance": 1,
+    "wake_word_trail_tolerance": 3,
+    "min_matched_confidence": 4.5,
+    "wake_word_target_anchors": [
+      [
+        8
+      ],
+      [
+        8
+      ],
+      [
+        7,
+        9
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        7
+      ]
+    ]
+  },
+  "runtime": {
+    "required_hits": 3,
+    "cooldown_ms": 2000,
+    "hit_mode": "consecutive",
+    "high_confidence_bypass": 5.8,
+    "high_confidence_bypass_min_hits": 3,
+    "target_required_hits": [
+      3,
+      3,
+      4,
+      4,
+      2
+    ]
+  }
+}
