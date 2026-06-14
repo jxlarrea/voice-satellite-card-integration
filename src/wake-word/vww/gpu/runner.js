@@ -38,6 +38,11 @@ import {
   compatConv2dNhwcShader,
   compatConv1dNcwShader,
   compatConv2dNchwShader,
+  clearU32Shader,
+  reduceMaxAbsShader,
+  quantizePackNhwcShader,
+  int8ConvNhwcShader,
+  INT8_CONV_WG,
   MATMUL_DISPATCH_WORKGROUP,
   leakyReluShader,
   maximumScalarShader,
@@ -83,6 +88,16 @@ export class GpuModelRunner {
     this._compiled = compiled;
     this._log = options.log || null;
     this._pipelineLog = options.pipelineLog === true;
+    // int8 conv path (dot4I8Packed, NHWC channel-packed) is THE conv path,
+    // not an optional one: acquireWebGpuDevice() already hard-requires the
+    // 'packed_4x8_integer_dot_product' WGSL feature (a device without it
+    // almost certainly can't run the fp32 path in real time either, so we
+    // refuse to load there - same posture as no-WebGPU). ~2x faster conv on
+    // the floor-device GPU (Tab A): over -> under the real-time budget, ~1%
+    // numeric error. options.int8 === false is a debug-only fp32 escape.
+    this._int8 = options.int8 !== false;
+    // Count of convs actually built on the int8 path (for the load log).
+    this._int8ConvCount = 0;
     // Map<tensorId, GPUBuffer> for constants (weights/biases) loaded once.
     this._constantBuffers = new Map();
     this._zeroBuffers = new Map();
@@ -135,7 +150,10 @@ export class GpuModelRunner {
         continue;
       }
       const step = await this._buildStep(op, tensors);
-      if (step) this._steps.push(step);
+      // int8 convs expand to several sequenced dispatches (clear/maxabs/
+      // pack/conv); _buildOnnxConvInt8 returns them as an array.
+      if (Array.isArray(step)) { for (const s of step) this._steps.push(s); }
+      else if (step) this._steps.push(step);
     }
 
     // Output buffer: the model's primary output tensor.  We add a
@@ -160,6 +178,16 @@ export class GpuModelRunner {
     this._inputSize = shapeSize(tensors[inputId].shape);
     this._buildOpIndex = null;
     this._buildOpName = null;
+
+    // Surface the int8 status in the debug log so it's clear which conv path
+    // a loaded model is running (int8 is default-on; device.js already
+    // hard-requires dot4I8Packed support).
+    this._log?.log?.(
+      'wake-word',
+      this._int8
+        ? `VWW conv path: int8 ENABLED (${this._int8ConvCount} convs int8 via dot4I8Packed; conv1 + classifier fp32)`
+        : 'VWW conv path: fp32 (int8 disabled)',
+    );
   }
 
   async _createComputePipeline(wgsl, label) {
@@ -501,6 +529,11 @@ export class GpuModelRunner {
     const inMeta = tensors[op.inputs[0]];
     const wMeta = tensors[op.inputs[1]];
     const outMeta = tensors[op.outputs[0]];
+    // int8 path: only 2D convs with >=4 input channels benefit from channel
+    // packing.  conv1 (1 channel) and the Conv1d classifier stay fp32.
+    if (this._int8 && inMeta.shape.length === 4 && inMeta.shape[1] >= 4) {
+      return this._buildOnnxConvInt8(op, tensors, inMeta, wMeta, outMeta);
+    }
     const strides = onnxIntsAttr(op, 'strides') || new Array(inMeta.shape.length - 2).fill(1);
     const pads = onnxIntsAttr(op, 'pads') || new Array((inMeta.shape.length - 2) * 2).fill(0);
     const dilations = onnxIntsAttr(op, 'dilations') || new Array(inMeta.shape.length - 2).fill(1);
@@ -553,6 +586,110 @@ export class GpuModelRunner {
       ],
     });
     return { kind: 'conv', pipeline, bindGroup, dispatchX, dispatchY, dispatchZ };
+  }
+
+  // int8 NHWC conv.  Drop-in for _buildOnnxConv: NCHW fp32 in/out, but
+  // internally reduces max|x|, quantize+packs the input to int8 NHWC, and
+  // runs dot4I8Packed.  Weights are pre-quantized per-output-channel here.
+  // Returns FOUR sequenced steps (clear, maxabs, pack, conv).  ReLU is left to
+  // the graph's separate Relu op (relu flag = 0).
+  async _buildOnnxConvInt8(op, tensors, inMeta, wMeta, outMeta) {
+    const strides = onnxIntsAttr(op, 'strides') || [1, 1];
+    const pads = onnxIntsAttr(op, 'pads') || [0, 0, 0, 0];
+    const dilations = onnxIntsAttr(op, 'dilations') || [1, 1];
+    const C = inMeta.shape[1], H = inMeta.shape[2], W = inMeta.shape[3];
+    const OC = outMeta.shape[1], outH = outMeta.shape[2], outW = outMeta.shape[3];
+    const kH = wMeta.shape[2], kW = wMeta.shape[3];
+    const cgroups = Math.ceil(C / 4);
+    this._int8ConvCount += 1;
+
+    // --- pre-quantize weights (fp32 [OC][C][kH][kW] -> per-OC int8, packed
+    //     NHWC [OC][kH][kW][cgroups] u32, 4 channels per lane). ---
+    const wSrc = new Float32Array(
+      wMeta.constant.buffer, wMeta.constant.byteOffset, wMeta.constant.byteLength / 4,
+    );
+    const wscale = new Float32Array(OC);
+    const wPacked = new Uint32Array(OC * kH * kW * cgroups);
+    for (let oc = 0; oc < OC; oc++) {
+      const base = oc * C * kH * kW;
+      let m = 0;
+      for (let i = 0; i < C * kH * kW; i++) { const a = Math.abs(wSrc[base + i]); if (a > m) m = a; }
+      const s = (m / 127) || 1e-8;
+      wscale[oc] = s;
+      for (let kh = 0; kh < kH; kh++) {
+        for (let kw = 0; kw < kW; kw++) {
+          for (let g = 0; g < cgroups; g++) {
+            let packed = 0;
+            for (let l = 0; l < 4; l++) {
+              const ic = g * 4 + l;
+              let q = 0;
+              if (ic < C) {
+                q = Math.round(wSrc[((oc * C + ic) * kH + kh) * kW + kw] / s);
+                if (q > 127) q = 127; if (q < -128) q = -128;
+              }
+              packed |= (q & 0xFF) << (l * 8);
+            }
+            wPacked[((oc * kH + kh) * kW + kw) * cgroups + g] = packed >>> 0;
+          }
+        }
+      }
+    }
+
+    const mkStorage = (bytes, data) => {
+      const b = this._device.createBuffer({
+        size: alignedSize(bytes),
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      if (data) this._device.queue.writeBuffer(b, 0, data.buffer, data.byteOffset, data.byteLength);
+      return b;
+    };
+    const wPackedBuf = mkStorage(wPacked.byteLength, wPacked);
+    const wscaleBuf = mkStorage(wscale.byteLength, wscale);
+    const maxabsBuf = mkStorage(4, null);
+    const packedInBuf = mkStorage(cgroups * H * W * 4, null);
+    const inputBuf = this._bufferFor(op.inputs[0]);
+    const outputBuf = this._bufferFor(op.outputs[0]);
+    const biasBuf = op.inputs[2] !== undefined
+      ? this._bufferFor(op.inputs[2]) : this._zeroFloatBuffer(OC);
+
+    // params uniform (4x vec4<i32>) for the int8 conv.
+    const params = new Int32Array([
+      H, W, C, OC,
+      outH, outW, kH, kW,
+      strides[0], strides[1], dilations[0], dilations[1],
+      pads[0], pads[1], cgroups, 0 /* relu: separate Relu op */,
+    ]);
+    const paramsBuf = this._device.createBuffer({
+      size: alignedSize(params.byteLength),
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._device.queue.writeBuffer(paramsBuf, 0, params.buffer, 0, params.byteLength);
+
+    const bg = (pipeline, entries) => this._device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: entries.map((buffer, i) => ({ binding: i, resource: { buffer } })),
+    });
+
+    // 1) clear maxabs
+    const clearPipe = await this._createComputePipeline(clearU32Shader(), 'int8.clear');
+    const stepClear = { kind: 'int8', pipeline: clearPipe, bindGroup: bg(clearPipe, [maxabsBuf]), dispatchX: 1, dispatchY: 1, dispatchZ: 1 };
+    // 2) reduce max|x| over the NCHW input
+    const numEl = C * H * W;
+    const maxPipe = await this._createComputePipeline(reduceMaxAbsShader(numEl), 'int8.maxabs');
+    const stepMax = { kind: 'int8', pipeline: maxPipe, bindGroup: bg(maxPipe, [inputBuf, maxabsBuf]), dispatchX: Math.ceil(numEl / 64), dispatchY: 1, dispatchZ: 1 };
+    // 3) quantize + pack to int8 NHWC
+    const packPipe = await this._createComputePipeline(quantizePackNhwcShader(C, H, W), 'int8.pack');
+    const stepPack = { kind: 'int8', pipeline: packPipe, bindGroup: bg(packPipe, [inputBuf, maxabsBuf, packedInBuf]), dispatchX: Math.ceil(W / 8), dispatchY: Math.ceil(H / 8), dispatchZ: cgroups };
+    // 4) int8 conv
+    const convPipe = await this._createComputePipeline(int8ConvNhwcShader(), 'int8.conv');
+    const stepConv = {
+      kind: 'int8', pipeline: convPipe,
+      bindGroup: bg(convPipe, [packedInBuf, wPackedBuf, wscaleBuf, biasBuf, outputBuf, maxabsBuf, paramsBuf]),
+      dispatchX: Math.ceil(outW / INT8_CONV_WG[0]),
+      dispatchY: Math.ceil(outH / INT8_CONV_WG[1]),
+      dispatchZ: Math.ceil(OC / 4),
+    };
+    return [stepClear, stepMax, stepPack, stepConv];
   }
 
   async _buildLeakyRelu(op, tensors) {

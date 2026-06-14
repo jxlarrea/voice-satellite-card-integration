@@ -86,6 +86,21 @@ export async function acquireWebGpuDevice() {
     throw new WebGpuUnavailableError('WebGPU adapter returned null device');
   }
 
+  // Hard-require the packed int8 dot product (dot4I8Packed).  The conv path
+  // is int8-only; without this WGSL feature the shaders won't compile.  A
+  // device that lacks it is almost certainly too weak to run the fp32 path
+  // in real time anyway, so we refuse to load here and surface the same
+  // model-switch toast as a missing-WebGPU failure (rather than silently
+  // degrading).  wgslLanguageFeatures lives on navigator.gpu, not the
+  // adapter; it's available in the worker.
+  const wgsl = (typeof navigator !== 'undefined' && navigator.gpu?.wgslLanguageFeatures) || null;
+  if (!wgsl || !wgsl.has('packed_4x8_integer_dot_product')) {
+    throw new WebGpuUnavailableError(
+      'WebGPU lacks the packed_4x8_integer_dot_product feature (no native int8 '
+      + 'dot product) - this device cannot run the wake-word model',
+    );
+  }
+
   // Lost-device handler - tear down the worker on a context loss so the
   // outer manager re-initializes from scratch instead of inferring on a
   // dead device handle.

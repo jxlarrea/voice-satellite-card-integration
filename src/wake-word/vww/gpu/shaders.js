@@ -883,3 +883,146 @@ export function concatInputShader(outer, axisSize, inner, outAxisSize, axisOffse
     }
   `;
 }
+
+// int8 conv path (experimental).  Drop-in replacement for an ONNX Conv: takes
+// NCHW fp32 in, returns NCHW fp32 out, but internally quantizes the input to
+// per-tensor symmetric int8, packs it NHWC (4 channels per u32), and uses
+// dot4I8Packed so the dominant input-load traffic drops 4x.  Validated math:
+// tmp/int8_conv_validate.js (~1% per-conv error).  Three helper dispatches
+// precede the conv: clear the maxabs scalar, reduce |x| max (atomic), then
+// quantize+pack.  Weights are pre-quantized per-output-channel on the CPU.
+// ---------------------------------------------------------------------------
+
+export const INT8_CONV_WG = [8, 8, 1];
+
+/** Zero a single u32 (the per-tensor maxabs accumulator) before the reduce. */
+export function clearU32Shader() {
+  return /* wgsl */`
+    @group(0) @binding(0) var<storage, read_write> buf: array<u32>;
+    @compute @workgroup_size(1, 1, 1)
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      if (gid.x == 0u) { buf[0] = 0u; }
+    }
+  `;
+}
+
+/** Per-tensor max(|x|) via atomicMax on the sign-cleared float bits.  For any
+ *  float, (bits & 0x7fffffff) is the bit pattern of |x|, which is monotonic in
+ *  |x|, so atomicMax yields max|x|.  Result read back as bitcast<f32>. */
+export function reduceMaxAbsShader(numElements) {
+  return /* wgsl */`
+    @group(0) @binding(0) var<storage, read> inp: array<f32>;
+    @group(0) @binding(1) var<storage, read_write> maxabs: atomic<u32>;
+    @compute @workgroup_size(64, 1, 1)
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let i: u32 = gid.x;
+      if (i >= ${numElements}u) { return; }
+      let bits: u32 = bitcast<u32>(inp[i]) & 0x7fffffffu;
+      atomicMax(&maxabs, bits);
+    }
+  `;
+}
+
+/** Quantize NCHW fp32 [C][H][W] -> packed int8 NHWC [H][W][cgroups] (u32, 4
+ *  channels per lane, tail group zero-padded).  Per-tensor symmetric scale =
+ *  max|x|/127 read from the maxabs scalar. */
+export function quantizePackNhwcShader(C, H, W) {
+  const cgroups = Math.ceil(C / 4);
+  return /* wgsl */`
+    @group(0) @binding(0) var<storage, read> inp: array<f32>;
+    @group(0) @binding(1) var<storage, read> maxabs: array<u32>;
+    @group(0) @binding(2) var<storage, read_write> outp: array<u32>;
+    @compute @workgroup_size(8, 8, 1)
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let w: u32 = gid.x;
+      let h: u32 = gid.y;
+      let g: u32 = gid.z;
+      if (w >= ${W}u || h >= ${H}u || g >= ${cgroups}u) { return; }
+      let m: f32 = bitcast<f32>(maxabs[0]);
+      let scale: f32 = max(m, 1e-8) / 127.0;
+      var packed: u32 = 0u;
+      for (var l: u32 = 0u; l < 4u; l = l + 1u) {
+        let ic: u32 = g * 4u + l;
+        var q: i32 = 0;
+        if (ic < ${C}u) {
+          let v: f32 = inp[(ic * ${H}u + h) * ${W}u + w];
+          q = i32(round(v / scale));
+          if (q > 127) { q = 127; }
+          if (q < -128) { q = -128; }
+        }
+        packed = packed | ((u32(q) & 0xFFu) << (l * 8u));
+      }
+      outp[(h * ${W}u + w) * ${cgroups}u + g] = packed;
+    }
+  `;
+}
+
+/** int8 NHWC conv, 4-deep along output channels (one input packed-vec reused
+ *  across 4 OCs).  Packed int8 input + per-OC int8 weights -> NCHW fp32 + ReLU.
+ *  dims0: inH,inW,inC,outC ; dims1: outH,outW,kH,kW ; steps0: sH,sW,dH,dW ;
+ *  pad0: padTop,padLeft,cgroups,reluFlag. */
+export function int8ConvNhwcShader() {
+  return /* wgsl */`
+    struct P {
+      dims0: vec4<i32>,
+      dims1: vec4<i32>,
+      steps0: vec4<i32>,
+      pad0: vec4<i32>,
+    };
+    @group(0) @binding(0) var<storage, read> inPacked: array<u32>;
+    @group(0) @binding(1) var<storage, read> wPacked: array<u32>;
+    @group(0) @binding(2) var<storage, read> wscale: array<f32>;
+    @group(0) @binding(3) var<storage, read> bias: array<f32>;
+    @group(0) @binding(4) var<storage, read_write> outBuf: array<f32>;
+    @group(0) @binding(5) var<storage, read> maxabs: array<u32>;
+    @group(0) @binding(6) var<uniform> p: P;
+
+    @compute @workgroup_size(${INT8_CONV_WG[0]}, ${INT8_CONV_WG[1]}, ${INT8_CONV_WG[2]})
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let ow: u32 = gid.x;
+      let oh: u32 = gid.y;
+      let ocBase: u32 = gid.z * 4u;
+      let inH: i32 = p.dims0.x;
+      let inW: i32 = p.dims0.y;
+      let outC: u32 = u32(p.dims0.w);
+      let outH: u32 = u32(p.dims1.x);
+      let outW: u32 = u32(p.dims1.y);
+      let kH: u32 = u32(p.dims1.z);
+      let kW: u32 = u32(p.dims1.w);
+      let cgroups: u32 = u32(p.pad0.z);
+      if (ow >= outW || oh >= outH || ocBase >= outC) { return; }
+
+      let wocStride: u32 = kH * kW * cgroups;
+      var acc0: i32 = 0; var acc1: i32 = 0; var acc2: i32 = 0; var acc3: i32 = 0;
+      for (var kh: u32 = 0u; kh < kH; kh = kh + 1u) {
+        let ih: i32 = i32(oh) * p.steps0.x + i32(kh) * p.steps0.z - p.pad0.x;
+        if (ih < 0 || ih >= inH) { continue; }
+        for (var kw: u32 = 0u; kw < kW; kw = kw + 1u) {
+          let iw: i32 = i32(ow) * p.steps0.y + i32(kw) * p.steps0.w - p.pad0.y;
+          if (iw < 0 || iw >= inW) { continue; }
+          let inPixBase: u32 = (u32(ih) * u32(inW) + u32(iw)) * cgroups;
+          let wKwBase: u32 = ((ocBase * kH + kh) * kW + kw) * cgroups;
+          for (var g: u32 = 0u; g < cgroups; g = g + 1u) {
+            let av: u32 = inPacked[inPixBase + g];
+            let wIdx: u32 = wKwBase + g;
+            acc0 = acc0 + dot4I8Packed(av, wPacked[wIdx]);
+            acc1 = acc1 + dot4I8Packed(av, wPacked[wIdx + wocStride]);
+            acc2 = acc2 + dot4I8Packed(av, wPacked[wIdx + 2u * wocStride]);
+            acc3 = acc3 + dot4I8Packed(av, wPacked[wIdx + 3u * wocStride]);
+          }
+        }
+      }
+      let ascale: f32 = max(bitcast<f32>(maxabs[0]), 1e-8) / 127.0;
+      let relu: bool = p.pad0.w == 1;
+      for (var j: u32 = 0u; j < 4u; j = j + 1u) {
+        let oc: u32 = ocBase + j;
+        if (oc >= outC) { break; }
+        var a: i32;
+        if (j == 0u) { a = acc0; } else if (j == 1u) { a = acc1; } else if (j == 2u) { a = acc2; } else { a = acc3; }
+        var v: f32 = f32(a) * wscale[oc] * ascale + bias[oc];
+        if (relu && v < 0.0) { v = 0.0; }
+        outBuf[(oc * outH + oh) * outW + ow] = v;
+      }
+    }
+  `;
+}
