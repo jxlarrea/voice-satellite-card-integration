@@ -31,7 +31,7 @@
     "n_mels": 40,
     "f_min": 80.0,
     "f_max": 7600.0,
-    "log_floor": 1E-06,
+    "log_floor": 1e-06,
     "window_samples": 20800,
     "frame_samples": 400,
     "hop_samples": 160,
@@ -43,8 +43,8 @@
     "pad_id": 0,
     "word_sep_id": 2,
     "inventory": [
-      "\u003cpad\u003e",
-      "\u003cblank\u003e",
+      "<pad>",
+      "<blank>",
       " ",
       "ː",
       "a",
@@ -109,6 +109,16 @@
         12
       ],
       [
+        9,
+        15,
+        2,
+        41,
+        10,
+        38,
+        40,
+        12
+      ],
+      [
         27,
         9,
         15,
@@ -141,6 +151,16 @@
         "ə"
       ],
       [
+        "e",
+        "ɪ",
+        " ",
+        "v",
+        "ɛ",
+        "s",
+        "t",
+        "ə"
+      ],
+      [
         "h",
         "e",
         "ɪ",
@@ -163,21 +183,23 @@
     "wake_word_target_anchors": [
       [
         6,
-        7,
         8
       ],
       [
+        0,
         5,
-        6,
+        7
+      ],
+      [
+        5,
         7
       ],
       [
         4,
-        5,
         6
       ]
     ],
-    "max_edit_distance": 0,
+    "max_edit_distance": 1,
     "wake_word_trail_tolerance": 3,
     "min_matched_confidence": 4.5
   },
@@ -186,11 +208,12 @@
     "hit_mode": "consecutive",
     "cooldown_ms": 2000,
     "high_confidence_bypass": 5.8,
-    "high_confidence_bypass_min_hits": 2,
+    "high_confidence_bypass_min_hits": 3,
     "target_required_hits": [
       3,
-      3,
-      4
+      4,
+      2,
+      3
     ]
   }
 }
