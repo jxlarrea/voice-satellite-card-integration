@@ -179,6 +179,7 @@ export class VwwInference {
           totalConfidence: info.totalConfidence,
           gateThreshold: info.gateThreshold,
           maxEditDistance: kw.ctcDecoder.maxEditDistance,
+          targetMaxEditDistance: kw.ctcDecoder.targetMaxEditDistance,
           trailTolerance: kw.ctcDecoder.trailTolerance,
         };
       } else {
