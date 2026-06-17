@@ -13,6 +13,9 @@
  *     severity: 'error'|'warn'|'info',
  *     category: string,        // short bucket shown inline before the description
  *     description: string,     // one-liner explaining what happened
+ *     persistent?: boolean,    // stays until dismissed/replaced, overriding
+ *                              // the severity's auto-dismiss timeout (used
+ *                              // for ongoing states like "microphone muted")
  *     action?: {
  *       label: string,
  *       type: 'diagnostics' | 'retry' | 'custom',
@@ -129,7 +132,7 @@ export class ToastManager {
   _resetTimer() {
     this._clearTimer();
     if (!this._current) return;
-    const duration = DURATION[this._current.severity] ?? 0;
+    const duration = this._current.persistent ? 0 : (DURATION[this._current.severity] ?? 0);
     if (duration <= 0) return;
     const id = this._current.id;
     this._timer = setTimeout(() => {

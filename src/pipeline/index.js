@@ -5,12 +5,15 @@
  * voice_satellite/run_pipeline subscription.
  *
  * Handles starting, stopping, restarting, error recovery with
- * linear backoff, continue conversation, mute state polling,
- * and stale event filtering.
+ * linear backoff, continue conversation, and stale event filtering.
+ *
+ * Mute is no longer handled here: the session lifecycle owns it and
+ * releases the mic + wake word entirely while muted, so the pipeline is
+ * simply never started in that state.
  */
 
 import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
-import { getSwitchState, getSelectState } from '../shared/satellite-state.js';
+import { getSelectState } from '../shared/satellite-state.js';
 import { subscribePipelineRun, setupReconnectListener } from './comms.js';
 import {
   handleRunStart,
@@ -24,8 +27,6 @@ import {
   handleError,
   handleVadWatchdog,
 } from './events.js';
-
-const MUTE_POLL_INTERVAL = 2000;
 
 export class PipelineManager {
   constructor(card) {
@@ -54,7 +55,6 @@ export class PipelineManager {
     this._askQuestionHandled = false;
     this._reconnectRef = { listener: null };
 
-    this._muteCheckId = null;
     this._runStartReceived = false;
     this._wakeWordPhase = false;
     this._errorReceived = false;
@@ -139,26 +139,6 @@ export class PipelineManager {
     if (!config.satellite_entity) {
       throw new Error('No satellite_entity configured');
     }
-
-    // Clear any pending mute poll
-    if (this._muteCheckId) {
-      clearTimeout(this._muteCheckId);
-      this._muteCheckId = null;
-    }
-
-    // Check mute state - if muted, show visual and poll for unmute
-    if (getSwitchState(this._card.hass, config.satellite_entity, 'mute') === true) {
-      this._log.log('pipeline', 'Satellite muted - pipeline blocked');
-      this._card.ui.showServiceError();
-      this._muteCheckId = setTimeout(() => {
-        this._muteCheckId = null;
-        this.start(opts).catch(() => {});
-      }, MUTE_POLL_INTERVAL);
-      return;
-    }
-
-    // Clear service error in case we were previously muted
-    this._card.ui.clearServiceError();
 
     // Defensive cleanup - stop any previous subscription before starting
     if (this._unsubscribe) {
@@ -329,11 +309,6 @@ export class PipelineManager {
     this._card.audio.stopBuffering?.({ clear: true });
     this._binaryHandlerId = null;
     this._isStreaming = false;
-
-    if (this._muteCheckId) {
-      clearTimeout(this._muteCheckId);
-      this._muteCheckId = null;
-    }
 
     if (this._unsubscribe) {
       try { await this._unsubscribe(); } catch (_) { /* cleanup */ }
@@ -670,10 +645,6 @@ export class PipelineManager {
     if (this._intentErrorBarTimeout) {
       clearTimeout(this._intentErrorBarTimeout);
       this._intentErrorBarTimeout = null;
-    }
-    if (this._muteCheckId) {
-      clearTimeout(this._muteCheckId);
-      this._muteCheckId = null;
     }
   }
 }

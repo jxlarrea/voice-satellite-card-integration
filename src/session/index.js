@@ -96,6 +96,10 @@ export class VoiceSatelliteSession {
     this._fullCardSuppressed = false;
     this._lastLoggedSeamlessWakeCommand = null;
     this._seamlessWakeActive = false;
+    // Tracks the last-applied mute switch state so updateHass() can detect
+    // on/off transitions and actually release / re-acquire the mic + wake
+    // word (not just gate pipeline start).
+    this._muted = false;
 
     this._logger = new Logger();
 
@@ -307,11 +311,19 @@ export class VoiceSatelliteSession {
       checkRemoteNotificationPlayback(this._announcement, hass);
       checkRemoteNotificationPlayback(this._startConversation, hass);
       checkRemoteNotificationPlayback(this._askQuestion, hass);
-      if (this._wakeWord) {
-        this._wakeWord.checkSettingsChanged();
-      } else {
-        this._checkWakeWordActivation();
-        this._checkDetectionDisabled();
+      // Apply mute transitions before the wake-word checks. While muted the
+      // mic + wake word are fully released, so skip the reactivation paths
+      // that would otherwise fight the suspend and re-acquire the mic. On
+      // the unmute tick, _resumeFromMute already kicked off startListening,
+      // so skip the redundant checks for this update too.
+      const muteTransitioned = this._applyMuteState();
+      if (!this._muted && !muteTransitioned) {
+        if (this._wakeWord) {
+          this._wakeWord.checkSettingsChanged();
+        } else {
+          this._checkWakeWordActivation();
+          this._checkDetectionDisabled();
+        }
       }
       this._screensaver.checkSettings();
       subscribeSatelliteEvents(this, (event) => dispatchSatelliteEvent(this, event));
@@ -534,6 +546,73 @@ export class VoiceSatelliteSession {
     try { this._pipeline.stop(); } catch (_) { /* ignore */ }
     try { this._audio.stopMicrophone(); } catch (_) { /* ignore */ }
     this.setState(State.IDLE);
+  }
+
+  // ── Mute ───────────────────────────────────────────────────────
+
+  /**
+   * Detect a mute switch transition and actually release / re-acquire the
+   * mic + wake word. Unlike the old behaviour (which only blocked the
+   * pipeline while leaving the mic open and wake-word inference running),
+   * muting now powers the mic down entirely - the OS capture indicator
+   * goes off and the device stops drawing power for detection, which is
+   * the point of the switch for battery-conscious wall tablets.
+   *
+   * Output paths (TTS, media, timers, announcements) are intentionally
+   * untouched: mute is mic-only.
+   */
+  _applyMuteState() {
+    const muted = getSwitchState(
+      this._hass, this._config.satellite_entity, 'mute',
+    ) === true;
+    if (muted === this._muted) return false;
+    this._muted = muted;
+    if (muted) this._suspendForMute();
+    else this._resumeFromMute();
+    return true;
+  }
+
+  /** Release the mic + wake word and surface the persistent muted toast. */
+  _suspendForMute() {
+    this._logger.log('session', 'Muted - releasing mic and wake word');
+    try { this._wakeWord?.release(); } catch (e) { this._logger.log('session', `mute: wakeWord.release: ${e.message || e}`); }
+    try { this._pipeline.stop(); } catch (e) { this._logger.log('session', `mute: pipeline.stop: ${e.message || e}`); }
+    try { this._audio.stopMicrophone(); } catch (e) { this._logger.log('session', `mute: stopMicrophone: ${e.message || e}`); }
+    this.setState(State.IDLE);
+    this.showMutedToast();
+  }
+
+  /**
+   * Re-acquire the mic + wake word per the current wake-word mode. Reuses
+   * startListening (its one-time setup steps are all idempotent), which
+   * brings the mic and the right detector back up and itself re-checks the
+   * mute switch defensively.
+   */
+  _resumeFromMute() {
+    this._logger.log('session', 'Unmuted - restarting mic and wake word');
+    this._dismissMutedToast();
+    // Clear the in-flight guard so startListening proceeds; the pipeline is
+    // already stopped (binaryHandlerId null) so its early-return won't trip.
+    this._starting = false;
+    startListening(this).catch((e) => {
+      this._logger.error('session', `Resume from mute failed: ${e.message || e}`);
+    });
+  }
+
+  /** Show the persistent "microphone muted" status toast. */
+  showMutedToast() {
+    this._toast.show({
+      id: 'mic-muted',
+      severity: 'info',
+      persistent: true,
+      category: 'Microphone',
+      description: 'Muted - voice control is off',
+    });
+  }
+
+  /** Dismiss the muted status toast, if present. */
+  _dismissMutedToast() {
+    this._toast.dismiss('mic-muted');
   }
 
   /**

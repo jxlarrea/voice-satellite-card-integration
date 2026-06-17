@@ -217,6 +217,20 @@ export async function startListening(session) {
     );
     session._lastLoggedSeamlessWakeCommand = seamlessWakeCommand;
 
+    // Mute is a hard mic-off: when the switch is on we acquire no mic and
+    // start no wake-word or pipeline inference at all. The session still
+    // completes its one-time setup (subscriptions, timers, screensaver)
+    // and sits idle behind the muted toast until unmuted - output paths
+    // (TTS, media, timers, announcements) are deliberately unaffected.
+    const muted = getSwitchState(
+      session.hass, session.config.satellite_entity, 'mute',
+    ) === true;
+    session._muted = muted;
+    if (muted) {
+      session.logger.log('session', 'Muted - mic and wake word suspended at startup');
+      session.showMutedToast();
+    }
+
     // Disabled: don't acquire the mic and don't start the pipeline. The
     // session sits idle waiting for voice_satellite.wake to fire, which
     // starts the mic on demand and jumps straight to STT.  The full
@@ -240,7 +254,7 @@ export async function startListening(session) {
       const stopWordOnDisabled = getSwitchState(
         session.hass, session.config.satellite_entity, 'stop_word',
       ) === true;
-      if (stopWordOnDisabled) {
+      if (!muted && stopWordOnDisabled) {
         session._loadWakeWordModule()
           .then((ww) => ww.start())
           .catch((e) => {
@@ -250,33 +264,39 @@ export async function startListening(session) {
       return;
     }
 
-    setState(session, State.CONNECTING);
-    await session.audio.startMicrophone();
-
-    // On-device wake word: load module lazily, start local inference.
-    // HA wake word mode + stop word switch on: also load the module so
-    // the local inference runtime is ready in standby for stop-word
-    // detection during interruptible states (TTS, alerts). The pipeline
-    // still starts normally so HA handles wake detection server-side.
-    const stopWordOn = getSwitchState(
-      session.hass, session.config.satellite_entity, 'stop_word',
-    ) === true;
-    if (mode === WAKE_MODE_LOCAL) {
-      const ww = await session._loadWakeWordModule();
-      // Constrained-WebView delay moved inside ww.start() (wake-word/index.js)
-      // so all start paths benefit, not just this one.  No-op here.
-      await ww.start();
+    if (muted) {
+      // Muted: skip mic acquisition and all inference. Stay idle; the
+      // session is otherwise fully set up below and resumes on unmute.
+      setState(session, State.IDLE);
     } else {
-      await session.pipeline.start();
-      if (mode === WAKE_MODE_HA && stopWordOn) {
-        // Load runtime in standby. Failure here is non-fatal - stop-word
-        // interruption simply won't be available, but server-side wake
-        // detection and the rest of the pipeline still work.
-        session._loadWakeWordModule()
-          .then((ww) => ww.start())
-          .catch((e) => {
-            session.logger.error('wake-word', `Stop-word standby start failed: ${e.message || e}`);
-          });
+      setState(session, State.CONNECTING);
+      await session.audio.startMicrophone();
+
+      // On-device wake word: load module lazily, start local inference.
+      // HA wake word mode + stop word switch on: also load the module so
+      // the local inference runtime is ready in standby for stop-word
+      // detection during interruptible states (TTS, alerts). The pipeline
+      // still starts normally so HA handles wake detection server-side.
+      const stopWordOn = getSwitchState(
+        session.hass, session.config.satellite_entity, 'stop_word',
+      ) === true;
+      if (mode === WAKE_MODE_LOCAL) {
+        const ww = await session._loadWakeWordModule();
+        // Constrained-WebView delay moved inside ww.start() (wake-word/index.js)
+        // so all start paths benefit, not just this one.  No-op here.
+        await ww.start();
+      } else {
+        await session.pipeline.start();
+        if (mode === WAKE_MODE_HA && stopWordOn) {
+          // Load runtime in standby. Failure here is non-fatal - stop-word
+          // interruption simply won't be available, but server-side wake
+          // detection and the rest of the pipeline still work.
+          session._loadWakeWordModule()
+            .then((ww) => ww.start())
+            .catch((e) => {
+              session.logger.error('wake-word', `Stop-word standby start failed: ${e.message || e}`);
+            });
+        }
       }
     }
 
@@ -665,6 +685,13 @@ export function handlePipelineMessage(session, message) {
  * @param {import('./index.js').VoiceSatelliteSession} session
  */
 export async function triggerWake(session) {
+  // Block while muted: mute means the mic is off, period - that includes
+  // the on-demand mic the wake service would otherwise bring up.
+  if (getSwitchState(session.hass, session.config.satellite_entity, 'mute') === true) {
+    session.logger.log('wake', 'Ignored - satellite is muted');
+    return;
+  }
+
   // Block if mid-interaction - the user is already in STT/INTENT/TTS
   // and another wake would just thrash state.
   const interacting = INTERACTING_STATES.includes(session.currentState);
