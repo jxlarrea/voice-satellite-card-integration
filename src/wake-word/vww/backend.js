@@ -322,7 +322,13 @@ export class VwwBackend {
               return Number.isFinite(n) ? n.toFixed(2) : '-';
             }).join(',')}]`
           : '';
-        return `${c.name}(c=${cutoffs[c.name].toFixed(3)}, hits=${r.required_hits}${targetHits}${targetMinConf}${bypass}${bypassMinHits})`;
+        const targetMaxEd = Array.isArray(entry.manifest?.ctc?.target_max_edit_distance)
+          ? `, target_max_ed=[${entry.manifest.ctc.target_max_edit_distance.map((value) => {
+              const n = Number(value);
+              return Number.isFinite(n) && n >= 0 ? Math.floor(n) : '-';
+            }).join(',')}]`
+          : '';
+        return `${c.name}(c=${cutoffs[c.name].toFixed(3)}, hits=${r.required_hits}${targetHits}${targetMaxEd}${targetMinConf}${bypass}${bypassMinHits})`;
       }
       return `${c.name}(c=${cutoffs[c.name].toFixed(3)}, borderline)`;
     }).join(', ');

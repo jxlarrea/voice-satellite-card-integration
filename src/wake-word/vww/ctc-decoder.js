@@ -24,6 +24,7 @@
  * @property {number} word_sep_id
  * @property {number[][]} wake_word_targets   accepted phoneme-ID sequences
  * @property {number} [max_edit_distance]     default 1
+ * @property {number[]} [target_max_edit_distance] per-target override
  * @property {string[]} [inventory]           id -> phoneme symbol (for logs)
  */
 
@@ -40,6 +41,9 @@ export class CtcDecoder {
     this.padId = (ctcConfig.pad_id != null) ? ctcConfig.pad_id : 0;
     this.wordSepId = (ctcConfig.word_sep_id != null) ? ctcConfig.word_sep_id : 2;
     this.maxEditDistance = (ctcConfig.max_edit_distance != null) ? ctcConfig.max_edit_distance : 1;
+    const targetMaxEd = Array.isArray(ctcConfig.target_max_edit_distance)
+      ? ctcConfig.target_max_edit_distance
+      : [];
     // trail_tolerance: when >=0, the wake-word window must end within
     // this many phonemes of the end of the decode (i.e. wake word at
     // or near the trailing edge of the decoded sequence).  Kills FPs
@@ -62,6 +66,12 @@ export class CtcDecoder {
       ? Number(ctcConfig.min_matched_confidence)
       : -Infinity;
     this.targets = (ctcConfig.wake_word_targets || []).map((t) => t.slice());
+    this.targetMaxEditDistance = this.targets.map((_, ti) => {
+      const value = Number(targetMaxEd[ti]);
+      return Number.isFinite(value) && value >= 0
+        ? Math.floor(value)
+        : (this.maxEditDistance | 0);
+    });
     const targetMinConf = Array.isArray(ctcConfig.target_min_matched_confidence)
       ? ctcConfig.target_min_matched_confidence
       : [];
@@ -245,10 +255,10 @@ export class CtcDecoder {
         idx++;
       }
     }
-    const max = this.maxEditDistance | 0;
-    if (max <= 0) return miss;
     const ws = this.wordSepId;
     for (let ti = 0; ti < this.targets.length; ti++) {
+      const max = this.targetMaxEditDistance[ti] ?? (this.maxEditDistance | 0);
+      if (max <= 0) continue;
       const target = this.targets[ti];
       const anchors = this.targetAnchors[ti];
       const useAnchors = anchors && anchors.length > 0;
@@ -359,13 +369,13 @@ export class CtcDecoder {
     // trail-anchor logic so the closest reported match is one the
     // matcher would actually consider.
     const ws = this.wordSepId;
-    const max = this.maxEditDistance | 0;
     const trailTol = this.trailTolerance;
     let bestEd = Infinity;
     let bestStart = -1;
     let bestLen = 0;
     let bestTargetIndex = -1;
     for (let ti = 0; ti < this.targets.length; ti++) {
+      const max = this.targetMaxEditDistance[ti] ?? (this.maxEditDistance | 0);
       const target = this.targets[ti];
       const anchors = this.targetAnchors[ti];
       const useAnchors = anchors && anchors.length > 0;
