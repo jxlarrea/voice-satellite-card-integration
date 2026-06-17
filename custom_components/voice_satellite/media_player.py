@@ -31,6 +31,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 
 from .const import DOMAIN
+from .media_proxy import register_proxied_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -215,6 +216,19 @@ class VoiceSatelliteMediaPlayer(MediaPlayerEntity, RestoreEntity):
             media_id = result.url
             media_type = result.mime_type
 
+        # Plain-HTTP sources (e.g. Music Assistant's stream server, which
+        # is HTTP-only by design) get blocked as mixed content when the
+        # panel is loaded over HTTPS.  We offer a same-origin proxy path
+        # as an alternative, but whether it's needed depends on the page
+        # scheme - which only the browser knows (HA may be reachable over
+        # both http and https).  So we always provide `proxy_url` for
+        # http upstreams and let the frontend use it only when its page
+        # is actually HTTPS; an all-HTTP setup plays the direct URL and
+        # skips the needless relay through HA.
+        proxy_url = None
+        if isinstance(media_id, str) and media_id.startswith("http://"):
+            proxy_url = register_proxied_url(self.hass, media_id)
+
         announce = kwargs.get("announce")
         self._push_command(
             "play",
@@ -222,9 +236,10 @@ class VoiceSatelliteMediaPlayer(MediaPlayerEntity, RestoreEntity):
             media_type=str(media_type),
             announce=announce,
             volume=self._attr_volume_level,
+            proxy_url=proxy_url,
         )
 
-        # Optimistic state update
+        # Optimistic state update (keep the original URL on the entity)
         self._attr_state = MediaPlayerState.PLAYING
         self._attr_media_content_id = media_id
         self._attr_media_content_type = str(media_type)

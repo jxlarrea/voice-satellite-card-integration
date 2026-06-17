@@ -81,6 +81,11 @@ export class MediaPlayerManager {
     // WebRTC camera playback state
     this._webrtcHandle = null;
     this._cameraFallbackTried = false;
+
+    // True while the current playback shows a fullscreen overlay
+    // (video / camera / image). Gates whether the stop word is armed:
+    // visual playback uses stop-only mode, audio-only keeps the wake word.
+    this._currentIsVisual = false;
   }
 
   get isPlaying() { return this._playing; }
@@ -245,12 +250,30 @@ export class MediaPlayerManager {
   }
 
   /**
-   * Arm the stop keyword in shared mode (stop alongside wake words) so
-   * the user can both wake-word-interrupt media and say "stop" to halt
-   * it. enableStopModel/addKeyword are idempotent at the inference layer,
-   * so calling this when already armed is a no-op.
+   * Arm the stop keyword for the current playback - but ONLY for visual
+   * media (video / camera / image), which puts a fullscreen overlay on
+   * screen that "stop" is the natural way to dismiss.
+   *
+   * Arming stop puts the engine in stop-only mode, which pauses wake-word
+   * inference (slower tablets can't run wake + stop simultaneously). For
+   * audio-only playback (e.g. Music Assistant) that's the wrong trade:
+   * there's nothing on screen to dismiss, and the user is more likely to
+   * want to wake the assistant (to pause/adjust by voice) than to say
+   * "stop". So for audio-only we leave the wake word running and do not
+   * arm stop - never both at once, but the right one for the context.
    */
   _armStopWord() {
+    if (!this._currentIsVisual) {
+      this._log.log(
+        'media-player',
+        'Audio-only playback - keeping wake word active, NOT arming stop word',
+      );
+      return;
+    }
+    this._log.log(
+      'media-player',
+      'Visual playback - arming stop word (wake-word inference pauses)',
+    );
     this._card.wakeWord?.enableStopModel(false);
   }
 
@@ -304,7 +327,7 @@ export class MediaPlayerManager {
     this._cleanup();
     this._interruptedForResume = false;
 
-    const { media_id, media_type, volume, announce } = data;
+    const { media_id, media_type, volume, announce, proxy_url } = data;
     this._log.log(
       'media-player',
       `_play received: media_id=${media_id} media_type=${media_type} volume=${volume} announce=${announce}`,
@@ -331,19 +354,34 @@ export class MediaPlayerManager {
     // continuous MJPEG. Render those in <img>; <video> won't accept them.
     const isImage = mt.startsWith('image/') || mt.startsWith('multipart/x-mixed-replace');
     const isVideo = mt.startsWith('video/') || mt === 'video' || isHls;
+    // Visual playback (overlay on screen) arms the stop word; audio-only
+    // keeps the wake word running instead. See _armStopWord().
+    this._currentIsVisual = isCamera || isVideo || isImage;
     this._log.log(
       'media-player',
-      `Detection: isCamera=${isCamera} isVideo=${isVideo} isHls=${isHls} isImage=${isImage} (mime="${mt}")`,
+      `Detection: isCamera=${isCamera} isVideo=${isVideo} isHls=${isHls} isImage=${isImage} visual=${this._currentIsVisual} (mime="${mt}")`,
     );
 
     // Sign relative URLs - HA media endpoints require authentication.
     // HLS stream URLs from HA's stream integration are already path-token
     // signed by `_async_stream_endpoint_url`, so signing them again would
     // either be redundant or rewrite the path. Use them directly.
+    // The integration offers proxy_url for HTTP-only sources (e.g. Music
+    // Assistant). It's only needed to dodge mixed-content blocking, which
+    // only happens when THIS page is HTTPS - so decide here, where we
+    // know our own scheme. On an all-HTTP setup we play the direct URL
+    // and skip the needless relay through HA.
+    const pageIsHttps = typeof location !== 'undefined' && location.protocol === 'https:';
+    const useProxy = !!proxy_url && pageIsHttps;
+
     let url;
     if (isCamera) {
       url = null; // no URL - WebRTC negotiates over the WS connection
       this._log.log('media-player', `URL path: camera entity (WebRTC). entity=${media_id}`);
+    } else if (useProxy) {
+      // Same-origin proxy path - resolve against our HTTPS origin, no signing.
+      url = buildMediaUrl(proxy_url);
+      this._log.log('media-player', `URL path: same-origin media proxy (mixed-content avoidance). url=${url}`);
     } else if (media_id.startsWith('http://') || media_id.startsWith('https://')) {
       url = media_id;
       this._log.log('media-player', `URL path: absolute (no signing). url=${url}`);
@@ -976,6 +1014,7 @@ export class MediaPlayerManager {
     this._isLive = false;
     this._playing = false;
     this._paused = false;
+    this._currentIsVisual = false;
     this._disarmStopWord();
   }
 
