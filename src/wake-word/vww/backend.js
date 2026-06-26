@@ -38,6 +38,7 @@ const DEFAULT_ENERGY = ENERGY_THRESHOLDS['Moderately sensitive'];
 const SLEEP_CHUNKS = 30;        // ~2.4 s of silence before sleeping
 const COOLDOWN_MS = 2000;       // matches OWW / MWW so triggers don't cascade
 const SLEEP_BUFFER_CHUNKS = 13; // ~1.04 s - one full window + a couple chunks
+const HARD_SILENCE_VETO_RMS = 0.002;
 
 // Borderline confirmation: same shape as OWW so a freshly-trained VWW
 // model that produces a single-frame TV spike still gets filtered.
@@ -474,6 +475,10 @@ export class VwwBackend {
       }
     }
 
+    if (rms !== null && rms < HARD_SILENCE_VETO_RMS) {
+      return this._silenceVetoResult(samples, rms);
+    }
+
     if (this._energyGateEnabled && this._sleepBufLen > 0) {
       const replay = this._sleepBufferOrdered();
       this._clearSleepBuffer();
@@ -537,6 +542,11 @@ export class VwwBackend {
       }
     }
 
+    if (rms < HARD_SILENCE_VETO_RMS) {
+      this._clearScoreWindows();
+      this._latestScores = {};
+    }
+
     this._inference.ingestChunk(samples);
     return this._skippedResult(rms);
   }
@@ -553,6 +563,20 @@ export class VwwBackend {
       skipped: true,
       perModelScores: this._latestScores || {},
     };
+  }
+
+  _silenceVetoResult(samples, rms) {
+    // Probability-style VWW models can assign non-zero wake scores to
+    // exact digital silence if the feature frontend maps it outside the
+    // training distribution.  Never let near-zero RMS frames advance the
+    // runtime hit counter.  Keep the audio ring current so the next real
+    // speech window is still temporally correct.
+    this._clearScoreWindows();
+    this._latestScores = {};
+    if (typeof this._inference.ingestChunk === 'function') {
+      this._inference.ingestChunk(samples);
+    }
+    return this._skippedResult(rms);
   }
 
   async _processInferenceChunk(samples, rms) {
