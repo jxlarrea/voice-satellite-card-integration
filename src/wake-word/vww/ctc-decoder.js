@@ -228,6 +228,26 @@ export class CtcDecoder {
       const minConf = minConfForTarget(ti);
       return !hasConfidence || !Number.isFinite(minConf) || meanConf(start, len) >= minConf;
     };
+    let bestMatch = null;
+    const considerMatch = (ti, start, len, ed) => {
+      const conf = meanConf(start, len);
+      if (
+        bestMatch == null
+        || ed < bestMatch.editDistance
+        || (ed === bestMatch.editDistance && conf > bestMatch.confidence)
+      ) {
+        const group = this.targetGroupIds[ti] ?? ti;
+        bestMatch = {
+          matched: true,
+          targetIndex: ti,
+          targetGroupIndex: group,
+          targetGroupSize: this.targetGroupSizes[group] ?? 1,
+          editDistance: ed,
+          confidence: conf,
+          gateThreshold: minConfForTarget(ti),
+        };
+      }
+    };
     // Exact-substring fast path.  When trailTol or confidence gate is
     // active, we need to know the match location, so loop occurrences.
     for (let ti = 0; ti < this.targetBytes.length; ti++) {
@@ -241,15 +261,7 @@ export class CtcDecoder {
         if (match) {
           const trailing = hay.length - (idx + t.length);
           if ((trailTol < 0 || trailing <= trailTol) && confOk(ti, idx, t.length)) {
-            return {
-              matched: true,
-              targetIndex: ti,
-              targetGroupIndex: this.targetGroupIds[ti] ?? ti,
-              targetGroupSize: this.targetGroupSizes[this.targetGroupIds[ti] ?? ti] ?? 1,
-              editDistance: 0,
-              confidence: meanConf(idx, t.length),
-              gateThreshold: minConfForTarget(ti),
-            };
+            considerMatch(ti, idx, t.length, 0);
           }
         }
         idx++;
@@ -285,20 +297,12 @@ export class CtcDecoder {
             ? editDistanceAnchored(decoded, i, winLen, target, anchors, ws)
             : editDistance(decoded, i, winLen, target, ws);
           if (ed <= max && confOk(ti, i, winLen)) {
-            return {
-              matched: true,
-              targetIndex: ti,
-              targetGroupIndex: this.targetGroupIds[ti] ?? ti,
-              targetGroupSize: this.targetGroupSizes[this.targetGroupIds[ti] ?? ti] ?? 1,
-              editDistance: ed,
-              confidence: meanConf(i, winLen),
-              gateThreshold: minConfForTarget(ti),
-            };
+            considerMatch(ti, i, winLen, ed);
           }
         }
       }
     }
-    return miss;
+    return bestMatch ?? miss;
   }
 
   matches(decoded, confidence) {

@@ -9,7 +9,7 @@
  * Differences from OWW worth knowing about:
  *   - VWW models are single-stage (no shared mel + embedding); each
  *     keyword runs its own ONNX graph on the GPU.
- *   - No int16 scaling - VWW was trained on ±1 audio so we feed the
+ *   - No int16 scaling - VWW was trained on +/-1 audio so we feed the
  *     worklet samples through unmodified.
  *   - No "warmup" required (OWW primes a 16-embedding ring with
  *     synthetic noise; VWW just waits for the first 1 s of real audio).
@@ -20,6 +20,7 @@ import { VwwEmbeddingInference } from './embedding-inference.js';
 import { loadVwwModel } from './models.js';
 import { acquireWebGpuDevice, WebGpuUnavailableError } from './gpu/device.js';
 import { clearVwwStartupBreadcrumb, checkpointVwwStartup } from './startup-breadcrumb.js';
+import { createJsMicroFrontend } from '../micro-frontend-js/index.js';
 
 export { WebGpuUnavailableError };
 
@@ -27,7 +28,7 @@ const DEFAULT_CUTOFF = 0.6;
 
 // Energy-gate thresholds keyed off the same Sensitivity select MWW / OWW
 // use, so the user gets consistent gate behavior across engines.  RMS is
-// computed on the raw ±1 worklet input - identical to OWW.
+// computed on the raw +/-1 worklet input - identical to OWW.
 const ENERGY_THRESHOLDS = {
   'Slightly sensitive':   { sleep: 0.10,  wake: 0.12  },
   'Moderately sensitive': { sleep: 0.05,  wake: 0.06  },
@@ -251,17 +252,28 @@ export class VwwBackend {
         sharedEmbedding: firstEntry.sharedEmbedding,
         log,
         pipelineLog: options.pipelineLog === true,
+        int8: options.int8,
       });
       await inference.ready;
     } else {
-      // CNN and CTC both use the same log-mel feature pipeline and
-      // single-stage ONNX runner.  Differ only in output interpretation,
-      // which is handled per-keyword by VwwInference.addKeyword().
+      // CNN and CTC use the same single-stage ONNX runner.  The feature
+      // frontend is selected from the manifest so microfrontend CNNs do
+      // not accidentally receive log-mel tensors.
       const firstEntry = entries[keywordConfigs[0].name];
-      const featureCfg = firstEntry.manifest?.feature_config || null;
+      const featureCfg = {
+        ...(firstEntry.manifest?.feature_config || {}),
+        feature: firstEntry.manifest?.input?.feature
+          || firstEntry.manifest?.feature_config?.feature
+          || 'log_mel',
+      };
+      const microFrontend = featureCfg.feature === 'microfrontend'
+        ? await createJsMicroFrontend()
+        : null;
       inference = new VwwInference(device, featureCfg, {
         log,
         pipelineLog: options.pipelineLog === true,
+        int8: options.int8,
+        microFrontend,
       });
     }
 
@@ -553,13 +565,14 @@ export class VwwBackend {
       this._latestRms = rms;
     }
 
-    // Both CNN and embedding inferences expect ±1 normalized audio.
-    // (The embedding pipeline does NOT use OWW's int16-scaling path
-    // because our Python trainer fed raw ±1 audio to the same OWW
-    // melspec model, so the classifier learned that distribution.)
+    // CNN and CTC consume normalized audio directly. Embedding inference
+    // receives the same normalized chunk and restores openWakeWord's
+    // int16 frontend scale internally.
     const { probs, ctc } = await this._inference.processChunk(samples, {
       activeKeywords: this._activeKeywords,
+      collectTimings: this._enableTimings,
     });
+    const inferenceTimings = this._enableTimings ? this._inference.consumeLastTimings?.() : null;
     this._latestScores = probs;
     this._latestCtc = ctc || null;
     const confirmFrame = ++this._confirmFrameIndex;
@@ -733,6 +746,7 @@ export class VwwBackend {
     if (this._enableTimings) {
       result.timings = {
         engine: 'vww',
+        ...(inferenceTimings || {}),
         backendTotalMs: nowMs() - totalStart,
       };
     }
@@ -741,9 +755,9 @@ export class VwwBackend {
 
   /**
    * Counter mode: trigger after N consecutive frames above cutoff.
-   * CTC models can declare runtime.high_confidence_bypass so a very
-   * confident phoneme match still fires immediately, while weaker
-   * matches must repeat on the next chunk.
+   * Models can declare runtime.high_confidence_bypass so a very confident
+   * score still uses the bypass label. CTC uses matched phoneme
+   * confidence; binary/embedding models use the model probability.
    * Any sub-cutoff frame resets the counter.  Simpler than the
    * borderline-confirm gate, well-suited to high-cutoff models whose
    * real triggers sustain confident scores across multiple frames
@@ -762,11 +776,13 @@ export class VwwBackend {
     const baseBypassMinHits = bypassMinHitsForTarget(mode, matchedTargetIndex, baseRequiredHits);
     if (score > cutoff) {
       const prev = this._hitCounters[name] || this._makeHitCounter();
-      const sameGroup = (
+      const hasTargetGroup = (
         Number.isInteger(matchedTargetGroupIndex)
         && matchedTargetGroupIndex >= 0
-        && prev.targetGroupIndex === matchedTargetGroupIndex
       );
+      const sameGroup = hasTargetGroup
+        ? prev.targetGroupIndex === matchedTargetGroupIndex
+        : (prev.hits > 0 && prev.targetGroupIndex < 0);
       const requiredHits = sameGroup && Number.isFinite(prev.requiredHits)
         ? Math.max(baseRequiredHits, prev.requiredHits)
         : baseRequiredHits;
@@ -791,11 +807,16 @@ export class VwwBackend {
         bypassMinHits,
       };
       const bypass = mode?.highConfidenceBypass;
+      const confidenceForBypass = (
+        ctcInfo
+        && typeof ctcInfo.matchedConfidence === 'number'
+      )
+        ? ctcInfo.matchedConfidence
+        : score;
       const isHighConfidence = (
         typeof bypass === 'number'
-        && ctcInfo
-        && typeof ctcInfo.matchedConfidence === 'number'
-        && ctcInfo.matchedConfidence >= bypass
+        && Number.isFinite(confidenceForBypass)
+        && confidenceForBypass >= bypass
       );
       if (isHighConfidence && nextHits >= bypassMinHits) {
         this._runtimeStatus[name] = this._makeRuntimeStatus(name, nextHits, true, true, requiredHits, matchedTargetIndex, bypassMinHits, matchedTargetGroupIndex, grouped);

@@ -34,6 +34,12 @@ const DEFAULT_FEATURE_CONFIG = {
   log_floor: 1e-6,
 };
 
+function nowMs() {
+  return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? performance.now()
+    : Date.now();
+}
+
 /**
  * @typedef {Object} VwwKeyword
  * @property {string} name
@@ -55,8 +61,10 @@ export class VwwInference {
     this._device = device;
     this._log = options.log || null;
     this._pipelineLog = options.pipelineLog === true;
+    this._int8 = options.int8;
     this._featureConfig = { ...DEFAULT_FEATURE_CONFIG, ...(featureConfig || {}) };
     const cfg = this._featureConfig;
+    this._featureKind = cfg.feature === 'microfrontend' ? 'microfrontend' : 'log_mel';
     this._windowSamples = Math.round(cfg.sample_rate * cfg.window_ms / 1000);
     this._frameSamples = Math.round(cfg.sample_rate * cfg.frame_ms / 1000);
     this._hopSamples = Math.round(cfg.sample_rate * cfg.hop_ms / 1000);
@@ -75,6 +83,9 @@ export class VwwInference {
     // Pre-allocated feature scratch (98 × 40 = 3920 f32 for the default).
     this._featureBuf = new Float32Array(this._frames * this._nMels);
     this._featuresInitialized = false;
+    this._microFrontend = this._featureKind === 'microfrontend'
+      ? (options.microFrontend || null)
+      : null;
     // Pre-allocated FFT working buffers (re-used per frame).
     this._fftRe = new Float32Array(this._nFft);
     this._fftIm = new Float32Array(this._nFft);
@@ -102,6 +113,7 @@ export class VwwInference {
     const runner = await GpuModelRunner.create(this._device, compiled, {
       log: this._log,
       pipelineLog: this._pipelineLog,
+      int8: this._int8,
     });
     const keyword = { name, compiled, runner, ctcDecoder: null };
     if (ctcConfig) {
@@ -143,20 +155,40 @@ export class VwwInference {
    * @param {Set<string>} [activeKeywords] subset of loaded keywords to score
    * @returns {Promise<{probs: object}>}
    */
-  async processChunk(samples, { activeKeywords = null } = {}) {
+  async processChunk(samples, { activeKeywords = null, collectTimings = false } = {}) {
     if (samples.length !== CHUNK_SAMPLES) {
       throw new Error(`VWW chunk must be ${CHUNK_SAMPLES} samples, got ${samples.length}`);
     }
+    const timings = collectTimings ? {
+      featureKind: this._featureKind,
+      frontendStreaming: false,
+    } : null;
+    const totalStart = timings ? nowMs() : 0;
+    const appendStart = timings ? totalStart : 0;
     this._appendRing(samples);
-    if (this._ringFilled < this._windowSamples) {
-      return { probs: {} };
+    if (timings) timings.appendMs = nowMs() - appendStart;
+    const featureStart = timings ? nowMs() : 0;
+    const features = this._featureKind === 'microfrontend'
+      ? (this._ringFilled < this._windowSamples ? null : this._extractMicroFrontendWindow())
+      : (this._ringFilled < this._windowSamples ? null : this._extractLogMel());
+    if (timings) {
+      timings.frontendMs = features ? nowMs() - featureStart : 0;
+      timings.fusedFrontend = this._featureKind === 'microfrontend';
+      timings.classifyMs = 0;
+      timings.inferenceTotalMs = nowMs() - totalStart;
+      this._lastTimings = timings;
     }
-    const features = this._extractLogMel();
+    if (!features) return { probs: {} };
     const probs = {};
     const ctc = {};
+    let modelCount = 0;
+    let classifyMs = 0;
     for (const [name, kw] of this._keywords) {
       if (activeKeywords && !activeKeywords.has(name)) continue;
+      modelCount++;
+      const invokeStart = timings ? nowMs() : 0;
       const out = await kw.runner.invoke(features);
+      if (timings) classifyMs += nowMs() - invokeStart;
       if (kw.ctcDecoder) {
         // CTC: flat (T_out * V) output gets greedy-decoded and substring-
         // matched into 0 (no wake) or 1 (wake).  Plugs into the existing
@@ -186,7 +218,19 @@ export class VwwInference {
         probs[name] = out.length > 0 ? out[0] : 0;
       }
     }
+    if (timings) {
+      timings.classifyMs = classifyMs;
+      timings.modelCount = modelCount;
+      timings.inferenceTotalMs = nowMs() - totalStart;
+      this._lastTimings = timings;
+    }
     return { probs, ctc };
+  }
+
+  consumeLastTimings() {
+    const out = this._lastTimings || null;
+    this._lastTimings = null;
+    return out;
   }
 
   /**
@@ -203,8 +247,9 @@ export class VwwInference {
       throw new Error(`VWW chunk must be ${CHUNK_SAMPLES} samples, got ${samples.length}`);
     }
     this._appendRing(samples);
-    if (this._ringFilled < this._windowSamples) return;
-    this._extractLogMel();
+    if (this._featureKind !== 'microfrontend' && this._ringFilled >= this._windowSamples) {
+      this._extractLogMel();
+    }
   }
 
   /** Reset the audio buffer state.  Doesn't unload models. */
@@ -215,6 +260,7 @@ export class VwwInference {
     this._linearBuf.fill(0);
     this._featureBuf.fill(0);
     this._featuresInitialized = false;
+    if (this._microFrontend) this._microFrontend.reset();
   }
 
   /** Free all GPU resources owned by this inference. */
@@ -222,6 +268,7 @@ export class VwwInference {
     for (const kw of this._keywords.values()) {
       try { kw.runner.destroy(); } catch (_) { /* ignore */ }
     }
+    try { this._microFrontend?.destroy?.(); } catch (_) { /* ignore */ }
     this._keywords.clear();
   }
 
@@ -254,6 +301,30 @@ export class VwwInference {
     const head = this._ringHead;
     out.set(ring.subarray(head));
     out.set(ring.subarray(0, head), n - head);
+    return out;
+  }
+
+  _extractMicroFrontendWindow() {
+    if (!this._microFrontend) {
+      throw new Error('VWW microfrontend model loaded without a microfrontend instance');
+    }
+    // Training/benchmark extraction resets the TFLM microfrontend for every
+    // window. Keep runtime identical; a persistent streaming frontend changes
+    // the noise/PCAN state and shifts scores enough to break hit gating.
+    this._microFrontend.reset();
+    const frames = this._microFrontend.feed(this._linearWindow());
+    const out = this._featureBuf;
+    const nMels = this._nMels;
+    const cap = this._frames;
+    out.fill(0);
+    const count = Math.min(cap, frames.length);
+    for (let f = 0; f < count; f++) {
+      const frame = frames[f];
+      const base = f * nMels;
+      const copy = Math.min(nMels, frame.length);
+      for (let i = 0; i < copy; i++) out[base + i] = frame[i];
+      this._microFrontend.recycleFeature?.(frame);
+    }
     return out;
   }
 

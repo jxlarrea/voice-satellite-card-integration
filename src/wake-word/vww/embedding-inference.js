@@ -19,13 +19,10 @@
  *   7. Run the per-keyword classifier on its window -> raw logit;
  *      caller applies sigmoid.
  *
- * Audio scale: ±1 normalized float32.  Our Python trainer feeds the
- * OWW melspec ONNX raw ±1 audio (NOT int16-scaled like OWW's own
- * runtime does).  Because the trained classifier saw the resulting
- * "unconventional" embeddings, the JS pipeline must do the same -
- * no int16 scaling, no `x*0.1+2` mel post-transform.  Doing either
- * would produce a different embedding distribution than the
- * classifier was trained on.
+ * Audio scale: callers pass repo-standard normalized float32 audio in
+ * [-1, 1]. This runner restores openWakeWord's int16-range
+ * frontend scale before melspectrogram.onnx and applies the `x*0.1+2`
+ * mel post-transform before embedding_model.onnx.
  */
 
 import { compileOwwOnnxModel } from './onnx-runner.js';  // noqa: F401 - re-export consumer
@@ -53,12 +50,13 @@ export class VwwEmbeddingInference {
    * @param {object} opts.sharedMelspec     - compiled OWW melspec ONNX
    * @param {object} opts.sharedEmbedding   - compiled OWW embedding ONNX
    */
-  constructor({ device, sharedMelspec, sharedEmbedding, log = null, pipelineLog = false }) {
+  constructor({ device, sharedMelspec, sharedEmbedding, log = null, pipelineLog = false, int8 = undefined }) {
     this._device = device;
     this._sharedMelspec = sharedMelspec;
     this._sharedEmbedding = sharedEmbedding;
     this._log = log;
     this._pipelineLog = pipelineLog === true;
+    this._int8 = int8;
     this._melGpuRunner = null;
     this._embeddingGpuRunner = null;
 
@@ -69,8 +67,9 @@ export class VwwEmbeddingInference {
     // so the mel STFT has frame continuity across chunk boundaries.
     this._audioHistory = new Float32Array(MEL_PREFIX_SAMPLES);
     this._melInput = new Float32Array(CHUNK_SAMPLES + MEL_PREFIX_SAMPLES);
+    this._scaledChunk = new Float32Array(CHUNK_SAMPLES);
 
-    // Rolling mel buffer (flat, row-major frames × MEL_BINS).
+    // Rolling mel buffer (flat, row-major frames x MEL_BINS).
     this._melBuffer = new Float32Array(MEL_BUFFER_MAX * MEL_BINS);
     this._melBufferLen = 0;
     this._initMelBuffer();
@@ -88,6 +87,7 @@ export class VwwEmbeddingInference {
     const runnerOptions = {
       log: this._log,
       pipelineLog: this._pipelineLog,
+      int8: this._int8,
     };
     this._melGpuRunner = await GpuModelRunner.create(this._device, this._sharedMelspec, runnerOptions);
     this._embeddingGpuRunner = await GpuModelRunner.create(this._device, this._sharedEmbedding, runnerOptions);
@@ -110,6 +110,7 @@ export class VwwEmbeddingInference {
     const classifierRunner = await GpuModelRunner.create(this._device, classifierCompiled, {
       log: this._log,
       pipelineLog: this._pipelineLog,
+      int8: this._int8,
     });
     const kw = {
       classifierRunner,
@@ -137,10 +138,10 @@ export class VwwEmbeddingInference {
   }
 
   /**
-   * Process one 80 ms (1280-sample) audio chunk.  Audio values must be
-   * int16-range float32 (samples scaled by 32768) to match the
-   * OWW-trained melspectrogram model.  Returns `{name: probability}`
-   * for every active keyword.
+   * Process one 80 ms (1280-sample) audio chunk.  Audio values are the
+   * same normalized float32 samples used by the rest of the VWW runner;
+   * this class restores OWW's int16-range frontend scale internally.
+   * Returns `{name: probability}` for every active keyword.
    *
    * @param {Float32Array} samples
    * @param {object} [opts]
@@ -154,10 +155,12 @@ export class VwwEmbeddingInference {
       throw new Error('VwwEmbeddingInference not ready; await this.ready first');
     }
 
+    const owwSamples = this._toOwwAudioScale(samples);
+
     // Build [history(480) || chunk(1280)] and run mel+embedding.
     this._melInput.set(this._audioHistory, 0);
-    this._melInput.set(samples, MEL_PREFIX_SAMPLES);
-    this._audioHistory.set(samples.subarray(CHUNK_SAMPLES - MEL_PREFIX_SAMPLES));
+    this._melInput.set(owwSamples, MEL_PREFIX_SAMPLES);
+    this._audioHistory.set(owwSamples.subarray(CHUNK_SAMPLES - MEL_PREFIX_SAMPLES));
     const emb = await this._runFrontend(this._melInput);
 
     // Update every keyword's rolling embedding window with this chunk's
@@ -196,7 +199,7 @@ export class VwwEmbeddingInference {
     this._keywords.clear();
   }
 
-  // ─── Internals ──────────────────────────────────────────────────────
+  // Internals
 
   _initMelBuffer() {
     // Match openWakeWord's `melspectrogram_buffer = np.ones((76, 32))`.
@@ -225,12 +228,12 @@ export class VwwEmbeddingInference {
       buf.copyWithin(0, dropFrames * MEL_BINS, len * MEL_BINS);
       len = keep;
     }
-    // NB: do NOT apply OWW's `x*0.1+2` mel transform here.  Our Python
-    // trainer feeds the embedding model raw mel output (no transform),
-    // so the classifier was trained against the untransformed
-    // distribution.  Applying the transform would produce embeddings
-    // outside the trained distribution.
-    buf.set(melOut.subarray(0, numFrames * MEL_BINS), len * MEL_BINS);
+    // Match openWakeWord's melspec transform before the embedding model.
+    const n = numFrames * MEL_BINS;
+    const dst = len * MEL_BINS;
+    for (let i = 0; i < n; i++) {
+      buf[dst + i] = melOut[i] * 0.1 + 2.0;
+    }
     this._melBufferLen = len + numFrames;
   }
 
@@ -247,18 +250,33 @@ export class VwwEmbeddingInference {
     kw.classifierInput.set(emb, (kw.embeddingWindow - 1) * EMBEDDING_DIM);
   }
 
+  _toOwwAudioScale(samples) {
+    let maxAbs = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const v = Math.abs(samples[i]);
+      if (v > maxAbs) maxAbs = v;
+    }
+    if (maxAbs > 2.0) return samples;
+    const out = this._scaledChunk;
+    for (let i = 0; i < samples.length; i++) {
+      const v = Math.max(-32768, Math.min(32767, samples[i] * 32768.0));
+      out[i] = Math.trunc(v);
+    }
+    return out;
+  }
+
   /** Run `embeddingWindow` synthetic-noise chunks through the shared
    * front-end to pre-fill the keyword's classifier window with real
-   * embeddings instead of zeros.  Noise is scaled to ±0.03 (matching
-   * the ±1 normalized audio convention of our trainer). */
+   * embeddings instead of zeros.  Noise is scaled to Â±0.03 (matching
+   * the +/-1 normalized audio convention of our trainer). */
   async _warmupKeyword(kw) {
     const audio = new Float32Array(CHUNK_SAMPLES);
     let state = 0x9E3779B1 >>> 0;
     for (let chunkIdx = 0; chunkIdx < kw.embeddingWindow; chunkIdx++) {
       for (let i = 0; i < audio.length; i++) {
         state = (state + 0x9E3779B1) >>> 0;
-        // Map [0, 2^32) to [-0.03, 0.03) - quiet pseudo-noise.
-        audio[i] = ((state / 0x100000000) - 0.5) * 0.06;
+        // Map [0, 2^32) to roughly [-1000, 1000) PCM units.
+        audio[i] = ((state / 0x100000000) - 0.5) * 2000.0;
       }
       this._melInput.set(this._audioHistory, 0);
       this._melInput.set(audio, MEL_PREFIX_SAMPLES);

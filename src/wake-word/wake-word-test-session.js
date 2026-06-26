@@ -713,6 +713,22 @@ export class WakeWordTestSession {
                 + `decoded=[${info.phonemes.join(' ')}]`,
               );
             }
+          } else if (result?.perModelScores && this._modelName) {
+            const score = result.perModelScores[this._modelName];
+            const cutoff = typeof result.cutoff === 'number'
+              ? result.cutoff
+              : (typeof this._threshold === 'number' ? this._threshold : 0.5);
+            if (typeof score === 'number' && score > cutoff) {
+              const runtimeBits = this._formatVwwRuntimeInfo(result, this._modelName, null);
+              const reason = this._getVwwRuntimeRejectReason(result, this._modelName, null)
+                || 'reason=other';
+              this._emitLog(
+                'diag',
+                `VWW near-miss "${this._modelName}" score=${score.toFixed(3)} `
+                + `cutoff=${cutoff.toFixed(3)}`
+                + `${runtimeBits ? ` ${runtimeBits}` : ''} ${reason}`,
+              );
+            }
           }
         } catch (_) { /* swallow - the tester is best-effort */ }
       }
@@ -855,7 +871,8 @@ export class WakeWordTestSession {
       if (st.melMs !== undefined) parts.push(`mel=${fmt(st.melMs)}ms`);
       if (st.embeddingMs !== undefined) parts.push(`embed=${fmt(st.embeddingMs)}ms`);
       if (st.classifyMs !== undefined) parts.push(`classify=${fmt(st.classifyMs)}ms`);
-      if (st.inferenceTotalMs !== undefined) parts.push(`oww=${fmt(st.inferenceTotalMs)}ms`);
+      if (st.inferenceTotalMs !== undefined) parts.push(`infer=${fmt(st.inferenceTotalMs)}ms`);
+      if (st.modelCount !== undefined) parts.push(`models=${fmt(st.modelCount)}`);
       if (st.backendTotalMs !== undefined) parts.push(`worker=${fmt(st.backendTotalMs)}ms`);
       this._emitLog('diag', `perf stages avg: ${parts.join(' ')}`);
     }
@@ -1238,17 +1255,19 @@ export class WakeWordTestSession {
   _getVwwRuntimeRejectReason(result, model, ctcInfo) {
     const runtime = result?.runtime?.[model];
     if (!runtime || runtime.mode !== 'counter') return '';
-    if (!ctcInfo || !Number.isFinite(ctcInfo.minEditDistance)) return '';
-    const maxEd = typeof ctcInfo.maxEditDistance === 'number' ? ctcInfo.maxEditDistance : 1;
-    if (ctcInfo.minEditDistance > maxEd) return '';
-    const gate = ctcInfo.gateThreshold;
-    if (
-      typeof ctcInfo.matchedConfidence === 'number'
-      && typeof gate === 'number'
-      && Number.isFinite(gate)
-      && ctcInfo.matchedConfidence < gate
-    ) {
-      return '';
+    if (ctcInfo) {
+      if (!Number.isFinite(ctcInfo.minEditDistance)) return '';
+      const maxEd = typeof ctcInfo.maxEditDistance === 'number' ? ctcInfo.maxEditDistance : 1;
+      if (ctcInfo.minEditDistance > maxEd) return '';
+      const gate = ctcInfo.gateThreshold;
+      if (
+        typeof ctcInfo.matchedConfidence === 'number'
+        && typeof gate === 'number'
+        && Number.isFinite(gate)
+        && ctcInfo.matchedConfidence < gate
+      ) {
+        return '';
+      }
     }
     if (
       runtime.highConfidence === true
