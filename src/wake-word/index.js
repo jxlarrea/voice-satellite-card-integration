@@ -82,6 +82,14 @@ function formatWakeRuntimeStatus(result) {
   }
   if (status.bypassed === true) bits.push('runtime_bypassed=true');
   if (status.grouped === true) bits.push('runtime_grouped=true');
+  if (status.cnnSequenceGate === true) {
+    const prefix = Number(status.cnnPrefixScore);
+    const completion = Number(status.cnnCompletionScore);
+    if (Number.isFinite(prefix)) bits.push(`cnn_prefix=${prefix.toFixed(3)}`);
+    if (Number.isFinite(completion)) bits.push(`cnn_completion=${completion.toFixed(3)}`);
+    if (status.cnnSequencePassed === false) bits.push('cnn_sequence=blocked');
+    else if (status.cnnSequencePassed === true) bits.push('cnn_sequence=passed');
+  }
   return bits;
 }
 
@@ -822,6 +830,7 @@ export class WakeWordManager {
           triggerBits.push(...formatWakeRuntimeStatus(result));
           if (typeof result.cutoff === 'number') triggerBits.push(`cutoff=${result.cutoff.toFixed(3)}`);
           if (typeof result.rms === 'number') triggerBits.push(`rms=${result.rms.toFixed(4)}`);
+          if (typeof result.windowRms === 'number') triggerBits.push(`window_rms=${result.windowRms.toFixed(4)}`);
           if (typeof result.immediateMargin === 'number') triggerBits.push(`margin=${result.immediateMargin.toFixed(3)}`);
           const triggerMeta = triggerBits.length ? `, ${triggerBits.join(', ')}` : '';
           this._log.log('wake-word', `Detected: ${result.model} (score=${result.score.toFixed(3)}${triggerMeta})`);

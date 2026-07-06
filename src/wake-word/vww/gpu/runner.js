@@ -36,8 +36,8 @@ import {
   COMPAT_CONV_W_VECTOR,
   COMPAT_CONV_OC_VECTOR,
   compatConv2dNhwcShader,
-  compatConv1dNcwShader,
   compatConv2dNchwShader,
+  compatConvNchwOc4Shader,
   clearU32Shader,
   reduceMaxAbsShader,
   quantizePackNhwcShader,
@@ -59,6 +59,7 @@ import {
   batchMatmulShader,
   gemmShader,
   reduceMeanTailShader,
+  reduceMeanAllShader,
   sliceShader,
   concatInputShader,
 } from './shaders.js';
@@ -138,6 +139,13 @@ export class GpuModelRunner {
       }
     }
 
+    // Convs feeding the graph output (through shape-only ops) stay
+    // fp32 even on the int8 path: for CTC models they emit the
+    // log-probs the decoder's confidence gates compare against
+    // absolute thresholds - same posture as the 2D CNN path keeping
+    // its classifier head fp32.
+    this._fp32OutputTensors = collectOutputPrecisionTensors(sg);
+
     // Walk ops in declared order; build a pipeline + bind group per step.
     for (let i = 0; i < ops.length; i++) {
       const op = ops[i];
@@ -147,6 +155,23 @@ export class GpuModelRunner {
       if (fused) {
         this._steps.push(fused);
         i += 2;
+        continue;
+      }
+      // ONNX peepholes: Conv+Relu folds into the conv's output write
+      // (both fp32 and int8 conv shaders take a relu flag); Add+Relu
+      // folds into the residual add.  Both require the intermediate
+      // tensor to have exactly one consumer.
+      const convRelu = await this._tryBuildFusedOnnxConvRelu(ops, i, tensors);
+      if (convRelu) {
+        if (Array.isArray(convRelu)) { for (const s of convRelu) this._steps.push(s); }
+        else this._steps.push(convRelu);
+        i += 1;
+        continue;
+      }
+      const addRelu = await this._tryBuildFusedAddRelu(ops, i, tensors);
+      if (addRelu) {
+        this._steps.push(addRelu);
+        i += 1;
         continue;
       }
       const step = await this._buildStep(op, tensors);
@@ -185,7 +210,7 @@ export class GpuModelRunner {
     this._log?.log?.(
       'wake-word',
       this._int8
-        ? `VWW conv path: int8 ENABLED (${this._int8ConvCount} convs int8 via dot4I8Packed; conv1 + classifier fp32)`
+        ? `VWW conv path: int8 ENABLED (${this._int8ConvCount} convs int8 via dot4I8Packed; low-channel + output-head convs fp32)`
         : 'VWW conv path: fp32 (int8 disabled)',
     );
   }
@@ -460,6 +485,43 @@ export class GpuModelRunner {
     });
   }
 
+  /** ONNX Conv immediately followed by Relu, with the conv output
+   *  consumed only by that Relu: build the conv writing directly to
+   *  the Relu's output with the shader-side relu flag set. */
+  async _tryBuildFusedOnnxConvRelu(ops, i, tensors) {
+    const conv = ops[i];
+    const relu = ops[i + 1];
+    if (!conv || !relu) return null;
+    if (conv.opName !== 'Conv' || relu.opName !== 'Relu') return null;
+    if (conv.outputs.length !== 1 || relu.outputs.length !== 1) return null;
+    if (relu.inputs[0] !== conv.outputs[0]) return null;
+    if (this._tensorUseCounts.get(conv.outputs[0]) !== 1) return null;
+    if (!sameShape(tensors[relu.outputs[0]].shape, tensors[conv.outputs[0]].shape)) return null;
+    return this._buildOnnxConv(conv, tensors, { outputId: relu.outputs[0], relu: true });
+  }
+
+  /** ONNX Add immediately followed by Relu (the residual-block tail in
+   *  the TCResNet CTC graphs).  Same-shape element-wise only; other
+   *  broadcast patterns fall through to the unfused builders. */
+  async _tryBuildFusedAddRelu(ops, i, tensors) {
+    const add = ops[i];
+    const relu = ops[i + 1];
+    if (!add || !relu) return null;
+    if (add.opName !== 'Add' || relu.opName !== 'Relu') return null;
+    if (add.outputs.length !== 1 || relu.outputs.length !== 1) return null;
+    if (relu.inputs[0] !== add.outputs[0]) return null;
+    if (this._tensorUseCounts.get(add.outputs[0]) !== 1) return null;
+    const aSize = shapeSize(tensors[add.inputs[0]].shape);
+    const bSize = shapeSize(tensors[add.inputs[1]].shape);
+    const outSize = shapeSize(tensors[relu.outputs[0]].shape);
+    if (aSize !== bSize || aSize !== outSize) return null;
+    const wgsl = binaryElementwiseShader(aSize, '+', true);
+    return this._build2InElementwiseStep(
+      { ...add, outputs: [relu.outputs[0]] },
+      wgsl, aSize, add.inputs[0], add.inputs[1],
+    );
+  }
+
   // The following helpers each:
   //   1. Read op options (padding, stride, kernel size, etc.) from the
   //      flatbuffer the same way the CPU runner does.  We ferry the
@@ -525,56 +587,80 @@ export class GpuModelRunner {
     return { kind: 'conv', pipeline, bindGroup, dispatchX, dispatchY, dispatchZ };
   }
 
-  async _buildOnnxConv(op, tensors) {
+  async _buildOnnxConv(op, tensors, fused = null) {
     const inMeta = tensors[op.inputs[0]];
     const wMeta = tensors[op.inputs[1]];
-    const outMeta = tensors[op.outputs[0]];
-    // int8 path: only 2D convs with >=4 input channels benefit from channel
-    // packing.  conv1 (1 channel) and the Conv1d classifier stay fp32.
-    if (this._int8 && inMeta.shape.length === 4 && inMeta.shape[1] >= 4) {
-      return this._buildOnnxConvInt8(op, tensors, inMeta, wMeta, outMeta);
+    const outId = fused?.outputId ?? op.outputs[0];
+    const outMeta = tensors[outId];
+    // Normalized NCHW geometry.  Rank-3 convs (Conv1d NCW - the whole
+    // CTC/TCResNet family) run through the same 2-D machinery as H=1
+    // convs: NCW and NC1W are byte-identical layouts, as are [OC,C,kW]
+    // and [OC,C,1,kW] weights.  Before this, rank-3 convs fell to a
+    // scalar one-output-per-invocation shader with no vectorization or
+    // input reuse, and never qualified for the int8 path at all.
+    const spatial = inMeta.shape.length - 2;
+    const strides = onnxIntsAttr(op, 'strides') || new Array(spatial).fill(1);
+    const pads = onnxIntsAttr(op, 'pads') || new Array(spatial * 2).fill(0);
+    const dilations = onnxIntsAttr(op, 'dilations') || new Array(spatial).fill(1);
+    const geom = spatial === 1
+      ? {
+          C: inMeta.shape[1], H: 1, W: inMeta.shape[2],
+          OC: outMeta.shape[1], outH: 1, outW: outMeta.shape[2],
+          kH: 1, kW: wMeta.shape[2],
+          strideH: 1, strideW: strides[0],
+          dilationH: 1, dilationW: dilations[0],
+          padTop: 0, padLeft: pads[0],
+        }
+      : {
+          C: inMeta.shape[1], H: inMeta.shape[2], W: inMeta.shape[3],
+          OC: outMeta.shape[1], outH: outMeta.shape[2], outW: outMeta.shape[3],
+          kH: wMeta.shape[2], kW: wMeta.shape[3],
+          strideH: strides[0], strideW: strides[1],
+          dilationH: dilations[0], dilationW: dilations[1],
+          padTop: pads[0], padLeft: pads[1],
+        };
+    // int8 path: rank-4 convs with >=4 input channels benefit from
+    // channel packing.  conv1 of the 2D CNNs (1 channel) and any conv
+    // feeding the graph output stay fp32.  Rank-3 (Conv1d / CTC) convs
+    // ALWAYS stay fp32: int8 measured a ~0.1 mean / ~0.7 max shift on
+    // the decoder-facing argmax logits (which the CTC confidence gates
+    // compare against absolute manifest thresholds), while the OC4 fp32
+    // kernel below is within pipeline-level noise of int8 on healthy
+    // GPUs - the accuracy risk buys nothing.
+    if (
+      this._int8
+      && geom.C >= 4
+      && spatial === 2
+      && !this._fp32OutputTensors.has(op.outputs[0])
+    ) {
+      return this._buildOnnxConvInt8(op, tensors, geom, fused);
     }
-    const strides = onnxIntsAttr(op, 'strides') || new Array(inMeta.shape.length - 2).fill(1);
-    const pads = onnxIntsAttr(op, 'pads') || new Array((inMeta.shape.length - 2) * 2).fill(0);
-    const dilations = onnxIntsAttr(op, 'dilations') || new Array(inMeta.shape.length - 2).fill(1);
-    let wgsl;
-    let dispatchX;
-    let dispatchY;
-    let dispatchZ;
-    let paramsBuf;
-    const wg = COMPAT_CONV_DISPATCH_WORKGROUP;
-    if (inMeta.shape.length === 3) {
-      wgsl = compatConv1dNcwShader();
-      paramsBuf = this._createCompatConvParams([
-        inMeta.shape[1], inMeta.shape[2], outMeta.shape[1], outMeta.shape[2],
-        wMeta.shape[2], 0, 0, 0,
-        strides[0], dilations[0], 0, 0,
-        pads[0], 0, 0, 0,
-      ]);
-      dispatchX = Math.ceil(outMeta.shape[2] / wg[0]);
-      dispatchY = Math.ceil(outMeta.shape[1] / wg[1]);
-      dispatchZ = 1;
-    } else {
-      wgsl = compatConv2dNchwShader();
-      paramsBuf = this._createCompatConvParams([
-        inMeta.shape[1], inMeta.shape[2], inMeta.shape[3], outMeta.shape[1],
-        outMeta.shape[2], outMeta.shape[3], wMeta.shape[2], wMeta.shape[3],
-        strides[0], strides[1], dilations[0], dilations[1],
-        pads[0], pads[1], 0, 0,
-      ]);
-      // The vectorized NCHW shader covers COMPAT_CONV_W_VECTOR outputs
-      // along W and COMPAT_CONV_OC_VECTOR output channels per invocation.
-      dispatchX = Math.ceil(outMeta.shape[3] / (wg[0] * COMPAT_CONV_W_VECTOR));
-      dispatchY = Math.ceil(outMeta.shape[2] / wg[1]);
-      dispatchZ = Math.ceil(outMeta.shape[1] / (wg[2] * COMPAT_CONV_OC_VECTOR));
-    }
+    // H=1 graphs use the OC4 variant: the W-vectorized shader measured
+    // slower than even the old scalar Conv1d path there (too few
+    // invocations to hide latency + uncoalesced lane reads), while OC4
+    // keeps coalesced input reads with 4x input reuse.  Genuinely 2-D
+    // outputs keep the W-vectorized kernel (measured ~1.4x on Mali).
+    const useOc4 = geom.outH === 1;
+    const wg = useOc4 ? [64, 1, 1] : COMPAT_CONV_DISPATCH_WORKGROUP;
+    const wgsl = useOc4 ? compatConvNchwOc4Shader(wg) : compatConv2dNchwShader(wg);
+    const paramsBuf = this._createCompatConvParams([
+      geom.C, geom.H, geom.W, geom.OC,
+      geom.outH, geom.outW, geom.kH, geom.kW,
+      geom.strideH, geom.strideW, geom.dilationH, geom.dilationW,
+      geom.padTop, geom.padLeft, fused?.relu ? 1 : 0, 0,
+    ]);
+    // W-vectorized covers COMPAT_CONV_W_VECTOR outputs along W per
+    // invocation; OC4 covers one.  Both cover 4 output channels.
+    const dispatchX = Math.ceil(geom.outW / (wg[0] * (useOc4 ? 1 : COMPAT_CONV_W_VECTOR)));
+    const dispatchY = Math.ceil(geom.outH / wg[1]);
+    const dispatchZ = Math.ceil(geom.OC / (wg[2] * COMPAT_CONV_OC_VECTOR));
     const pipeline = await this._createComputePipeline(wgsl, 'conv.onnx');
     const inputBuf = this._bufferFor(op.inputs[0]);
     const weightsBuf = this._bufferFor(op.inputs[1]);
     const biasBuf = op.inputs[2] !== undefined
       ? this._bufferFor(op.inputs[2])
-      : this._zeroFloatBuffer(outMeta.shape[1]);
-    const outputBuf = this._bufferFor(op.outputs[0]);
+      : this._zeroFloatBuffer(geom.OC);
+    const outputBuf = this._bufferFor(outId);
     const bindGroup = this._device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
       entries: [
@@ -582,7 +668,7 @@ export class GpuModelRunner {
         { binding: 1, resource: { buffer: weightsBuf } },
         { binding: 2, resource: { buffer: biasBuf } },
         { binding: 3, resource: { buffer: outputBuf } },
-        ...(paramsBuf ? [{ binding: 4, resource: { buffer: paramsBuf } }] : []),
+        { binding: 4, resource: { buffer: paramsBuf } },
       ],
     });
     return { kind: 'conv', pipeline, bindGroup, dispatchX, dispatchY, dispatchZ };
@@ -591,15 +677,14 @@ export class GpuModelRunner {
   // int8 NHWC conv.  Drop-in for _buildOnnxConv: NCHW fp32 in/out, but
   // internally reduces max|x|, quantize+packs the input to int8 NHWC, and
   // runs dot4I8Packed.  Weights are pre-quantized per-output-channel here.
-  // Returns FOUR sequenced steps (clear, maxabs, pack, conv).  ReLU is left to
-  // the graph's separate Relu op (relu flag = 0).
-  async _buildOnnxConvInt8(op, tensors, inMeta, wMeta, outMeta) {
-    const strides = onnxIntsAttr(op, 'strides') || [1, 1];
-    const pads = onnxIntsAttr(op, 'pads') || [0, 0, 0, 0];
-    const dilations = onnxIntsAttr(op, 'dilations') || [1, 1];
-    const C = inMeta.shape[1], H = inMeta.shape[2], W = inMeta.shape[3];
-    const OC = outMeta.shape[1], outH = outMeta.shape[2], outW = outMeta.shape[3];
-    const kH = wMeta.shape[2], kW = wMeta.shape[3];
+  // Returns FOUR sequenced steps (clear, maxabs, pack, conv).  Geometry
+  // arrives pre-normalized from _buildOnnxConv (rank-3 convs come through
+  // as H=1).  A fused trailing Relu sets the shader's relu flag.
+  async _buildOnnxConvInt8(op, tensors, geom, fused = null) {
+    const wMeta = tensors[op.inputs[1]];
+    const {
+      C, H, W, OC, outH, outW, kH, kW,
+    } = geom;
     const cgroups = Math.ceil(C / 4);
     this._int8ConvCount += 1;
 
@@ -648,7 +733,7 @@ export class GpuModelRunner {
     const maxabsBuf = mkStorage(4, null);
     const packedInBuf = mkStorage(cgroups * H * W * 4, null);
     const inputBuf = this._bufferFor(op.inputs[0]);
-    const outputBuf = this._bufferFor(op.outputs[0]);
+    const outputBuf = this._bufferFor(fused?.outputId ?? op.outputs[0]);
     const biasBuf = op.inputs[2] !== undefined
       ? this._bufferFor(op.inputs[2]) : this._zeroFloatBuffer(OC);
 
@@ -656,8 +741,8 @@ export class GpuModelRunner {
     const params = new Int32Array([
       H, W, C, OC,
       outH, outW, kH, kW,
-      strides[0], strides[1], dilations[0], dilations[1],
-      pads[0], pads[1], cgroups, 0 /* relu: separate Relu op */,
+      geom.strideH, geom.strideW, geom.dilationH, geom.dilationW,
+      geom.padTop, geom.padLeft, cgroups, fused?.relu ? 1 : 0,
     ]);
     const paramsBuf = this._device.createBuffer({
       size: alignedSize(params.byteLength),
@@ -670,6 +755,11 @@ export class GpuModelRunner {
       entries: entries.map((buffer, i) => ({ binding: i, resource: { buffer } })),
     });
 
+    // H=1 (routed Conv1d) graphs use W-heavy workgroups so the 8x8
+    // shapes don't idle 7/8 of every workgroup.
+    const packWg = H === 1 ? [64, 1, 1] : [8, 8, 1];
+    const convWg = outH === 1 ? [64, 1, 1] : INT8_CONV_WG;
+
     // 1) clear maxabs
     const clearPipe = await this._createComputePipeline(clearU32Shader(), 'int8.clear');
     const stepClear = { kind: 'int8', pipeline: clearPipe, bindGroup: bg(clearPipe, [maxabsBuf]), dispatchX: 1, dispatchY: 1, dispatchZ: 1 };
@@ -678,16 +768,16 @@ export class GpuModelRunner {
     const maxPipe = await this._createComputePipeline(reduceMaxAbsShader(numEl), 'int8.maxabs');
     const stepMax = { kind: 'int8', pipeline: maxPipe, bindGroup: bg(maxPipe, [inputBuf, maxabsBuf]), dispatchX: Math.ceil(numEl / 64), dispatchY: 1, dispatchZ: 1 };
     // 3) quantize + pack to int8 NHWC
-    const packPipe = await this._createComputePipeline(quantizePackNhwcShader(C, H, W), 'int8.pack');
-    const stepPack = { kind: 'int8', pipeline: packPipe, bindGroup: bg(packPipe, [inputBuf, maxabsBuf, packedInBuf]), dispatchX: Math.ceil(W / 8), dispatchY: Math.ceil(H / 8), dispatchZ: cgroups };
+    const packPipe = await this._createComputePipeline(quantizePackNhwcShader(C, H, W, packWg), 'int8.pack');
+    const stepPack = { kind: 'int8', pipeline: packPipe, bindGroup: bg(packPipe, [inputBuf, maxabsBuf, packedInBuf]), dispatchX: Math.ceil(W / packWg[0]), dispatchY: Math.ceil(H / packWg[1]), dispatchZ: cgroups };
     // 4) int8 conv
-    const convPipe = await this._createComputePipeline(int8ConvNhwcShader(), 'int8.conv');
+    const convPipe = await this._createComputePipeline(int8ConvNhwcShader(convWg), 'int8.conv');
     const stepConv = {
       kind: 'int8', pipeline: convPipe,
       bindGroup: bg(convPipe, [packedInBuf, wPackedBuf, wscaleBuf, biasBuf, outputBuf, maxabsBuf, paramsBuf]),
-      dispatchX: Math.ceil(outW / INT8_CONV_WG[0]),
-      dispatchY: Math.ceil(outH / INT8_CONV_WG[1]),
-      dispatchZ: Math.ceil(OC / 4),
+      dispatchX: Math.ceil(outW / convWg[0]),
+      dispatchY: Math.ceil(outH / convWg[1]),
+      dispatchZ: Math.ceil(OC / (4 * convWg[2])),
     };
     return [stepClear, stepMax, stepPack, stepConv];
   }
@@ -1081,6 +1171,25 @@ export class GpuModelRunner {
     for (let i = 0; i < firstReduced; i++) outerCount *= inShape[i];
     let reduceCount = 1;
     for (let i = firstReduced; i < rank; i++) reduceCount *= inShape[i];
+    // All-axis reduction (the CTC models' input-normalization mean over
+    // 5120 elements): the tail shader would leave a single active
+    // thread doing a serial N-element loop.  Use the workgroup
+    // tree-reduce instead - one 64-thread workgroup.
+    if (outerCount === 1) {
+      const wgsl = reduceMeanAllShader(reduceCount);
+      const pipeline = await this._createComputePipeline(wgsl, 'reduce-mean-all');
+      const bindGroup = this._device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this._bufferFor(op.inputs[0]) } },
+          { binding: 1, resource: { buffer: this._bufferFor(op.outputs[0]) } },
+        ],
+      });
+      return {
+        kind: 'reduce_mean', pipeline, bindGroup,
+        dispatchX: 1, dispatchY: 1, dispatchZ: 1,
+      };
+    }
     const wgsl = reduceMeanTailShader(outerCount, reduceCount);
     const pipeline = await this._createComputePipeline(wgsl, 'reduce-mean');
     const bindGroup = this._device.createBindGroup({
@@ -1332,7 +1441,71 @@ export class GpuModelRunner {
   }
 }
 
+/**
+ * Run several runners over the SAME input with one queue submission and
+ * concurrent readbacks.  The sequential per-runner `invoke()` loop pays
+ * a full GPU→CPU mapAsync round trip per model; batching encodes every
+ * model's graph into a single command buffer so the GPU works through
+ * them back-to-back and the CPU waits on all readbacks together.
+ *
+ * First invoke of any runner falls back to the sequential path so the
+ * startup breadcrumbs (WebView crash diagnosis) keep their per-step
+ * accuracy.
+ *
+ * @param {GpuModelRunner[]} runners  must share one GPUDevice
+ * @param {Float32Array} input
+ * @returns {Promise<Float32Array[]>} per-runner output views (each view
+ *   is recycled by its runner on the next invoke, same as invoke())
+ */
+export async function invokeAll(runners, input) {
+  if (runners.length === 0) return [];
+  if (runners.length === 1 || runners.some((r) => r._invokeCount === 0)) {
+    const outs = [];
+    for (const r of runners) outs.push(await r.invoke(input));
+    return outs;
+  }
+  const device = runners[0]._device;
+  for (const r of runners) r.writeInput(input);
+  const enc = device.createCommandEncoder();
+  for (const r of runners) {
+    r.encode(enc);
+    r.encodeOutputReadback(enc);
+  }
+  device.queue.submit([enc.finish()]);
+  const outs = await Promise.all(runners.map((r) => r.readOutput()));
+  for (const r of runners) r._invokeCount++;
+  return outs;
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Tensor ids that reach the graph output through shape-only ops
+ * (transpose/reshape/etc).  Convs producing one of these keep fp32
+ * precision on the int8 path - they emit the model's final logits.
+ */
+function collectOutputPrecisionTensors(sg) {
+  const SHAPE_OPS = new Set([
+    'Transpose', 'TRANSPOSE', 'Reshape', 'Unsqueeze', 'Squeeze',
+    'SQUEEZE', 'EXPAND_DIMS', 'Flatten', 'Cast', 'Identity',
+  ]);
+  const producerOf = new Map();
+  for (const op of sg.ops) {
+    for (const outId of op.outputs) producerOf.set(outId, op);
+  }
+  const set = new Set();
+  const frontier = [...sg.outputIds];
+  while (frontier.length > 0) {
+    const t = frontier.pop();
+    if (set.has(t)) continue;
+    set.add(t);
+    const producer = producerOf.get(t);
+    if (producer && SHAPE_OPS.has(producer.opName)) {
+      frontier.push(producer.inputs[0]);
+    }
+  }
+  return set;
+}
 
 /**
  * Per-op metadata: WGSL infix operator + whether the op is commutative

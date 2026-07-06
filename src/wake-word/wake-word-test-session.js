@@ -655,28 +655,29 @@ export class WakeWordTestSession {
               + `${latencyBits ? `${latencyBits} ` : ''}`
               + `${runtimeBits ? `${runtimeBits} ` : ''}`
               + `rms_now=${(result.rms ?? 0).toFixed(4)} `
+              + `window_rms=${(result.windowRms ?? 0).toFixed(4)} `
               + `rms_peak_1s=${this._getRecentRmsPeak(13).toFixed(4)}`
               + ctcBits,
             );
           } else if (result?.ctc) {
-            // CTC near-miss diagnostic: when the model decoded a non-
-            // trivial sequence, emit a 'diag' line so the user can see
-            // WHAT the model heard and WHY it didn't fire.  Thresholds
-            // are loose (any decode with >=3 phonemes and any ed) so
-            // off-axis / weak-signal cases that produce partial wake-
-            // shape are still visible in the log.  The `reason` field
-            // explicitly names which gate rejected the decode.
+            // CTC near-miss diagnostic: when the model decoded something
+            // CLOSE to the wake word, emit a 'diag' line so the user can
+            // see what it heard and why it didn't fire.  The `reason`
+            // field names which gate rejected the decode.  Models with a
+            // pretrained phoneme backbone (ok_nabu v121+) honestly decode
+            // ALL speech, so the old loose thresholds (>=3 phonemes, any
+            // ed up to 8) logged every window of TV audio as a "near
+            // miss"; only decodes within one edit of the matcher gate are
+            // legitimate near misses.
             for (const [name, info] of Object.entries(result.ctc)) {
               if (!info || !Array.isArray(info.phonemes)) continue;
               // Skip silence/blank decodes - require at least 3 emitted
               // phonemes to be worth logging.
               if (info.phonemes.length < 3) continue;
               const ed = info.minEditDistance;
-              // Loose ed filter: anything within 8 edits gives signal on
-              // weak/off-axis triggers.  Without this, off-axis decodes
-              // that produced ed=5+ partial wake-shape were invisible
-              // in the logs and made tuning impossible.
-              if (!Number.isFinite(ed) || ed > 8) continue;
+              const nearMaxEd = ((typeof info.maxEditDistance === 'number')
+                ? info.maxEditDistance : 1) + 1;
+              if (!Number.isFinite(ed) || ed > nearMaxEd) continue;
               const mc = (typeof info.matchedConfidence === 'number')
                 ? ` conf=${info.matchedConfidence.toFixed(2)}`
                 : '';
@@ -1249,6 +1250,14 @@ export class WakeWordTestSession {
     }
     if (info.bypassed === true) parts.push('runtime_bypassed=true');
     if (info.grouped === true) parts.push('runtime_grouped=true');
+    if (info.cnnSequenceGate === true) {
+      const p = Number(info.cnnPrefixScore);
+      const c = Number(info.cnnCompletionScore);
+      if (Number.isFinite(p)) parts.push(`cnn_prefix=${p.toFixed(3)}`);
+      if (Number.isFinite(c)) parts.push(`cnn_completion=${c.toFixed(3)}`);
+      if (info.cnnSequencePassed === false) parts.push('cnn_sequence=blocked');
+      else if (info.cnnSequencePassed === true) parts.push('cnn_sequence=passed');
+    }
     return parts.join(' ');
   }
 
@@ -1276,6 +1285,9 @@ export class WakeWordTestSession {
       && runtime.hits < runtime.highConfidenceBypassMinHits
     ) {
       return `runtime_bypass_hits<${runtime.highConfidenceBypassMinHits}`;
+    }
+    if (runtime.cnnSequenceGate === true && runtime.cnnSequencePassed === false) {
+      return 'cnn_sequence';
     }
     if (
       Number.isFinite(runtime.hits)

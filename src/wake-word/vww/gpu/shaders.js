@@ -110,46 +110,6 @@ export function compatConv2dNhwcShader() {
   `;
 }
 
-export function compatConv1dNcwShader() {
-  return /* wgsl */`
-    struct ConvCompatParams {
-      dims0: vec4<i32>,  // inC, inW, outC, outW
-      dims1: vec4<i32>,  // kW, unused, unused, unused
-      steps0: vec4<i32>, // strideW, dilationW, unused, unused
-      pad0: vec4<i32>,   // padLeft, unused, unused, unused
-      act0: vec4<f32>,
-    };
-
-    @group(0) @binding(0) var<storage, read> inputBuf: array<f32>;
-    @group(0) @binding(1) var<storage, read> weightsBuf: array<f32>;
-    @group(0) @binding(2) var<storage, read> biasBuf: array<f32>;
-    @group(0) @binding(3) var<storage, read_write> outputBuf: array<f32>;
-    @group(0) @binding(4) var<uniform> p: ConvCompatParams;
-
-    @compute @workgroup_size(${COMPAT_CONV_WG_W}, ${COMPAT_CONV_WG_H}, 1)
-    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-      let ow: u32 = gid.x;
-      let oc: u32 = gid.y;
-      let inC: u32 = u32(p.dims0.x);
-      let inW: i32 = p.dims0.y;
-      let outC: u32 = u32(p.dims0.z);
-      let outW: u32 = u32(p.dims0.w);
-      let kW: u32 = u32(p.dims1.x);
-      if (ow >= outW || oc >= outC) { return; }
-
-      var acc: f32 = biasBuf[oc];
-      for (var ic: u32 = 0u; ic < inC; ic = ic + 1u) {
-        for (var kw: u32 = 0u; kw < kW; kw = kw + 1u) {
-          let iw: i32 = i32(ow) * p.steps0.x + i32(kw) * p.steps0.y - p.pad0.x;
-          if (iw < 0 || iw >= inW) { continue; }
-          acc = acc + inputBuf[ic * u32(inW) + u32(iw)] * weightsBuf[(oc * inC + ic) * kW + kw];
-        }
-      }
-      outputBuf[oc * outW + ow] = acc;
-    }
-  `;
-}
-
 /**
  * Each invocation of the NCHW compat Conv computes this many adjacent
  * outputs along W (vec4 accumulators) for this many output channels.
@@ -159,7 +119,7 @@ export function compatConv1dNcwShader() {
 export const COMPAT_CONV_W_VECTOR = 4;
 export const COMPAT_CONV_OC_VECTOR = 4;
 
-export function compatConv2dNchwShader() {
+export function compatConv2dNchwShader(wg = COMPAT_CONV_DISPATCH_WORKGROUP) {
   // Vectorized 4-wide along output W and 4-deep along output channels:
   // each invocation produces a 4-output strip for four channels.  Each
   // loaded input vec4 is reused across all four channels' weights -
@@ -169,12 +129,18 @@ export function compatConv2dNchwShader() {
   // tiling and f16 weights both measured slower.  Keeps the uniform
   // params and simple un-unrolled loops that fragile shader compilers
   // require (see compatConv2dNhwcShader docs).
+  //
+  // `wg` is the workgroup shape: (8,8,1) for genuinely 2-D outputs, a
+  // W-heavy shape like (16,1,4) for rank-3 (Conv1d) graphs routed
+  // through here as H=1 convs - an 8-deep H dimension would idle 7/8
+  // of every workgroup there.  pad0.z != 0 fuses a ReLU into the
+  // output write (Conv+Relu peephole in the runner).
   return /* wgsl */`
     struct ConvCompatParams {
       dims0: vec4<i32>,  // inC, inH, inW, outC
       dims1: vec4<i32>,  // outH, outW, kH, kW
       steps0: vec4<i32>, // strideH, strideW, dilationH, dilationW
-      pad0: vec4<i32>,   // padTop, padLeft, unused, unused
+      pad0: vec4<i32>,   // padTop, padLeft, reluFlag, unused
       act0: vec4<f32>,
     };
 
@@ -184,7 +150,7 @@ export function compatConv2dNchwShader() {
     @group(0) @binding(3) var<storage, read_write> outputBuf: array<f32>;
     @group(0) @binding(4) var<uniform> p: ConvCompatParams;
 
-    @compute @workgroup_size(${COMPAT_CONV_WG_W}, ${COMPAT_CONV_WG_H}, ${COMPAT_CONV_WG_C})
+    @compute @workgroup_size(${wg[0]}, ${wg[1]}, ${wg[2]})
     fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       let owBase: u32 = gid.x * ${COMPAT_CONV_W_VECTOR}u;
       let oh: u32 = gid.y;
@@ -234,17 +200,108 @@ export function compatConv2dNchwShader() {
       let strip0: u32 = (ocBase * outH + oh) * outW + owBase;
       let stripStride: u32 = outH * outW;
       let lanes: u32 = min(outW - owBase, ${COMPAT_CONV_W_VECTOR}u);
+      let relu: bool = p.pad0.z != 0;
       for (var j: u32 = 0u; j < ${COMPAT_CONV_OC_VECTOR}u; j = j + 1u) {
         if (ocBase + j >= outC) { break; }
         var a: vec4<f32>;
         if (j == 0u) { a = acc0; } else if (j == 1u) { a = acc1; } else if (j == 2u) { a = acc2; } else { a = acc3; }
         a = a + vec4<f32>(biasBuf[ocBase + j]);
+        if (relu) { a = max(a, vec4<f32>(0.0)); }
         let strip: u32 = strip0 + j * stripStride;
         outputBuf[strip] = a.x;
         if (lanes > 1u) { outputBuf[strip + 1u] = a.y; }
         if (lanes > 2u) { outputBuf[strip + 2u] = a.z; }
         if (lanes > 3u) { outputBuf[strip + 3u] = a.w; }
       }
+    }
+  `;
+}
+
+/**
+ * fp32 NCHW conv, 4-deep along output channels only (no W
+ * vectorization).  The W-vectorized shader above wins on genuinely 2-D
+ * outputs (measured ~1.4x on Mali), but on H=1 graphs (rank-3 convs
+ * routed through the 2-D machinery) it measured SLOWER than even the
+ * old scalar Conv1d shader on Adreno 7xx: dividing both W and OC by 4
+ * left too few invocations to hide memory latency, and adjacent lanes
+ * read inputs 4 apart (uncoalesced).  This variant mirrors the int8
+ * conv's geometry instead - one thread per output position covering 4
+ * output channels - so each loaded input is reused 4x while adjacent
+ * lanes keep adjacent (coalesced) input reads.  pad0.z != 0 fuses ReLU.
+ */
+export function compatConvNchwOc4Shader(wg = [64, 1, 1]) {
+  return /* wgsl */`
+    struct ConvCompatParams {
+      dims0: vec4<i32>,  // inC, inH, inW, outC
+      dims1: vec4<i32>,  // outH, outW, kH, kW
+      steps0: vec4<i32>, // strideH, strideW, dilationH, dilationW
+      pad0: vec4<i32>,   // padTop, padLeft, reluFlag, unused
+      act0: vec4<f32>,
+    };
+
+    @group(0) @binding(0) var<storage, read> inputBuf: array<f32>;
+    @group(0) @binding(1) var<storage, read> weightsBuf: array<f32>;
+    @group(0) @binding(2) var<storage, read> biasBuf: array<f32>;
+    @group(0) @binding(3) var<storage, read_write> outputBuf: array<f32>;
+    @group(0) @binding(4) var<uniform> p: ConvCompatParams;
+
+    @compute @workgroup_size(${wg[0]}, ${wg[1]}, ${wg[2]})
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let ow: u32 = gid.x;
+      let oh: u32 = gid.y;
+      let ocBase: u32 = gid.z * 4u;
+      let inC: u32 = u32(p.dims0.x);
+      let inH: i32 = p.dims0.y;
+      let inW: i32 = p.dims0.z;
+      let outC: u32 = u32(p.dims0.w);
+      let outH: u32 = u32(p.dims1.x);
+      let outW: u32 = u32(p.dims1.y);
+      let kH: u32 = u32(p.dims1.z);
+      let kW: u32 = u32(p.dims1.w);
+      if (ow >= outW || oh >= outH || ocBase >= outC) { return; }
+
+      let wOcStride: u32 = inC * kH * kW;
+      var acc: vec4<f32> = vec4<f32>(0.0);
+      for (var ic: u32 = 0u; ic < inC; ic = ic + 1u) {
+        let inIcBase: u32 = ic * u32(inH) * u32(inW);
+        let wIcBase: u32 = (ocBase * inC + ic) * kH * kW;
+        for (var kh: u32 = 0u; kh < kH; kh = kh + 1u) {
+          let ih: i32 = i32(oh) * p.steps0.x + i32(kh) * p.steps0.z - p.pad0.x;
+          if (ih < 0 || ih >= inH) { continue; }
+          let rowBase: u32 = inIcBase + u32(ih) * u32(inW);
+          let wRowBase: u32 = wIcBase + kh * kW;
+          for (var kw: u32 = 0u; kw < kW; kw = kw + 1u) {
+            let iw: i32 = i32(ow) * p.steps0.y + i32(kw) * p.steps0.w - p.pad0.y;
+            if (iw < 0 || iw >= inW) { continue; }
+            let x: f32 = inputBuf[rowBase + u32(iw)];
+            let wIdx: u32 = wRowBase + kw;
+            acc = fma(
+              vec4<f32>(x),
+              vec4<f32>(
+                weightsBuf[wIdx],
+                weightsBuf[wIdx + wOcStride],
+                weightsBuf[wIdx + 2u * wOcStride],
+                weightsBuf[wIdx + 3u * wOcStride],
+              ),
+              acc,
+            );
+          }
+        }
+      }
+
+      acc = acc + vec4<f32>(
+        biasBuf[ocBase],
+        biasBuf[min(ocBase + 1u, outC - 1u)],
+        biasBuf[min(ocBase + 2u, outC - 1u)],
+        biasBuf[min(ocBase + 3u, outC - 1u)],
+      );
+      if (p.pad0.z != 0) { acc = max(acc, vec4<f32>(0.0)); }
+      let stripStride: u32 = outH * outW;
+      let outBase: u32 = (ocBase * outH + oh) * outW + ow;
+      outputBuf[outBase] = acc.x;
+      if (ocBase + 1u < outC) { outputBuf[outBase + stripStride] = acc.y; }
+      if (ocBase + 2u < outC) { outputBuf[outBase + 2u * stripStride] = acc.z; }
+      if (ocBase + 3u < outC) { outputBuf[outBase + 3u * stripStride] = acc.w; }
     }
   `;
 }
@@ -413,7 +470,8 @@ export function padShader(cfg) {
  * the dominant MUL/ADD/SUB pattern in the mel spec model where both
  * operands are activation tensors of identical shape.
  */
-export function binaryElementwiseShader(numElements, opCode) {
+export function binaryElementwiseShader(numElements, opCode, fuseRelu = false) {
+  const expr = `aBuf[i] ${opCode} bBuf[i]`;
   return /* wgsl */`
     @group(0) @binding(0) var<storage, read> aBuf: array<f32>;
     @group(0) @binding(1) var<storage, read> bBuf: array<f32>;
@@ -425,7 +483,7 @@ export function binaryElementwiseShader(numElements, opCode) {
     fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       let i: u32 = gid.x;
       if (i >= N) { return; }
-      outputBuf[i] = aBuf[i] ${opCode} bBuf[i];
+      outputBuf[i] = ${fuseRelu ? `max(${expr}, 0.0)` : expr};
     }
   `;
 }
@@ -803,6 +861,50 @@ export function reduceMeanTailShader(outerCount, reduceCount) {
 }
 
 /**
+ * Reduce-mean over ALL elements to a single scalar.  The tail shader
+ * above degenerates for this case (outerCount=1 leaves one active
+ * thread doing a serial N-element loop); this variant uses the same
+ * stride-loop + shared-memory tree reduction as reduceMaxAllShader.
+ * Dispatched as a single workgroup.
+ */
+export function reduceMeanAllShader(numElements) {
+  return /* wgsl */`
+    @group(0) @binding(0) var<storage, read> inputBuf: array<f32>;
+    @group(0) @binding(1) var<storage, read_write> outputBuf: array<f32>;
+
+    const N: u32 = ${numElements}u;
+    const WG: u32 = 64u;
+
+    var<workgroup> partial: array<f32, 64>;
+
+    @compute @workgroup_size(64)
+    fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
+      let tid: u32 = lid.x;
+
+      var acc: f32 = 0.0;
+      var i: u32 = tid;
+      while (i < N) {
+        acc = acc + inputBuf[i];
+        i = i + WG;
+      }
+      partial[tid] = acc;
+      workgroupBarrier();
+
+      var stride: u32 = WG >> 1u;
+      while (stride > 0u) {
+        if (tid < stride) {
+          partial[tid] = partial[tid] + partial[tid + stride];
+        }
+        workgroupBarrier();
+        stride = stride >> 1u;
+      }
+
+      if (tid == 0u) { outputBuf[0] = partial[0] / f32(N); }
+    }
+  `;
+}
+
+/**
  * Slice: copy a strided sub-region of `inputBuf` into a dense output.
  * Per-axis start offsets and steps are baked into the shader.  Rank is
  * arbitrary (up to 4 in practice for the adaptive-pool slices); shapes
@@ -926,13 +1028,13 @@ export function reduceMaxAbsShader(numElements) {
 /** Quantize NCHW fp32 [C][H][W] -> packed int8 NHWC [H][W][cgroups] (u32, 4
  *  channels per lane, tail group zero-padded).  Per-tensor symmetric scale =
  *  max|x|/127 read from the maxabs scalar. */
-export function quantizePackNhwcShader(C, H, W) {
+export function quantizePackNhwcShader(C, H, W, wg = [8, 8, 1]) {
   const cgroups = Math.ceil(C / 4);
   return /* wgsl */`
     @group(0) @binding(0) var<storage, read> inp: array<f32>;
     @group(0) @binding(1) var<storage, read> maxabs: array<u32>;
     @group(0) @binding(2) var<storage, read_write> outp: array<u32>;
-    @compute @workgroup_size(8, 8, 1)
+    @compute @workgroup_size(${wg[0]}, ${wg[1]}, ${wg[2]})
     fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       let w: u32 = gid.x;
       let h: u32 = gid.y;
@@ -961,7 +1063,7 @@ export function quantizePackNhwcShader(C, H, W) {
  *  across 4 OCs).  Packed int8 input + per-OC int8 weights -> NCHW fp32 + ReLU.
  *  dims0: inH,inW,inC,outC ; dims1: outH,outW,kH,kW ; steps0: sH,sW,dH,dW ;
  *  pad0: padTop,padLeft,cgroups,reluFlag. */
-export function int8ConvNhwcShader() {
+export function int8ConvNhwcShader(wg = INT8_CONV_WG) {
   return /* wgsl */`
     struct P {
       dims0: vec4<i32>,
@@ -977,7 +1079,7 @@ export function int8ConvNhwcShader() {
     @group(0) @binding(5) var<storage, read> maxabs: array<u32>;
     @group(0) @binding(6) var<uniform> p: P;
 
-    @compute @workgroup_size(${INT8_CONV_WG[0]}, ${INT8_CONV_WG[1]}, ${INT8_CONV_WG[2]})
+    @compute @workgroup_size(${wg[0]}, ${wg[1]}, ${wg[2]})
     fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       let ow: u32 = gid.x;
       let oh: u32 = gid.y;

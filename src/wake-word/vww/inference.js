@@ -16,7 +16,7 @@
  */
 
 import { compileOwwOnnxModel } from './onnx-runner.js';
-import { GpuModelRunner } from './gpu/runner.js';
+import { GpuModelRunner, invokeAll } from './gpu/runner.js';
 import { CtcDecoder } from './ctc-decoder.js';
 
 export const CHUNK_SAMPLES = 1280;     // 80 ms @ 16 kHz, matches OWW
@@ -65,6 +65,11 @@ export class VwwInference {
     this._featureConfig = { ...DEFAULT_FEATURE_CONFIG, ...(featureConfig || {}) };
     const cfg = this._featureConfig;
     this._featureKind = cfg.feature === 'microfrontend' ? 'microfrontend' : 'log_mel';
+    this._streamingOnnx = this._featureKind === 'microfrontend'
+      && (
+        cfg.format === 'vs-wake-word-microfrontend-stream-cnn-v1'
+        || cfg.streaming_onnx?.enabled === true
+      );
     this._windowSamples = Math.round(cfg.sample_rate * cfg.window_ms / 1000);
     this._frameSamples = Math.round(cfg.sample_rate * cfg.frame_ms / 1000);
     this._hopSamples = Math.round(cfg.sample_rate * cfg.hop_ms / 1000);
@@ -78,6 +83,7 @@ export class VwwInference {
     this._ring = new Float32Array(this._windowSamples);
     this._ringHead = 0;
     this._ringFilled = 0;
+    this._ringSumSq = 0;
     this._linearBuf = new Float32Array(this._windowSamples);
 
     // Pre-allocated feature scratch (98 × 40 = 3920 f32 for the default).
@@ -86,6 +92,17 @@ export class VwwInference {
     this._microFrontend = this._featureKind === 'microfrontend'
       ? (options.microFrontend || null)
       : null;
+    this._streamStepFrames = Math.max(1, Math.floor(Number(cfg.streaming_onnx?.step_frames ?? 3)));
+    this._streamDefaultSlidingWindow = Math.max(1, Math.floor(Number(cfg.streaming_onnx?.sliding_window ?? 5)));
+    this._streamFeaturesSinceInfer = 0;
+    this._streamFeatureRing = this._streamingOnnx
+      ? new Float32Array(this._frames * this._nMels)
+      : null;
+    this._streamFeatureScratch = this._streamingOnnx
+      ? new Float32Array(this._frames * this._nMels)
+      : null;
+    this._streamFeatureHead = 0;
+    this._streamFeatureFilled = 0;
     // Pre-allocated FFT working buffers (re-used per frame).
     this._fftRe = new Float32Array(this._nFft);
     this._fftIm = new Float32Array(this._nFft);
@@ -108,14 +125,14 @@ export class VwwInference {
    *   and decoded via a wake-word phoneme substring match.  Score is 0/1
    *   (match / no-match) instead of a binary CNN probability.
    */
-  async addKeyword(name, compiled, ctcConfig = null) {
+  async addKeyword(name, compiled, ctcConfig = null, manifest = null) {
     if (this._keywords.has(name)) return;
     const runner = await GpuModelRunner.create(this._device, compiled, {
       log: this._log,
       pipelineLog: this._pipelineLog,
       int8: this._int8,
     });
-    const keyword = { name, compiled, runner, ctcDecoder: null };
+    const keyword = { name, compiled, runner, ctcDecoder: null, stream: null };
     if (ctcConfig) {
       // Output shape is (1, T_out, V).  compiled.outputs[0].dims has
       // it if the trainer wrote a concrete shape (we do).
@@ -126,9 +143,32 @@ export class VwwInference {
         || null;
       try {
         keyword.ctcDecoder = new CtcDecoder(ctcConfig, outShape || [1, 64, ctcConfig.vocab_size || 52]);
+        // Cross-window stream matching (pause-tolerant): on unless the
+        // manifest disables it.  Buffer/lag are manifest-tunable.
+        const rt = manifest?.runtime || {};
+        if (rt.stream_match !== false) {
+          keyword.ctcDecoder.enableStreamMatch({
+            windowSamples: this._windowSamples,
+            windowMs: this._featureConfig?.window_ms ?? 1300,
+            bufferMs: rt.stream_buffer_ms,
+            lagFrames: rt.stream_lag_frames,
+          });
+        }
       } catch (err) {
         throw new Error(`CTC decoder init failed for keyword "${name}": ${err.message}`);
       }
+    } else if (this._streamingOnnx) {
+      const streamCfg = manifest?.streaming_onnx || manifest?.feature_config?.streaming_onnx || {};
+      const slidingWindow = Math.max(1, Math.floor(Number(streamCfg.sliding_window ?? this._streamDefaultSlidingWindow)));
+      keyword.stream = {
+        slidingWindow,
+        probBuffer: new Float32Array(slidingWindow),
+        probIndex: 0,
+        probCount: 0,
+        probSum: 0,
+        lastRaw: 0,
+        lastMean: 0,
+      };
     }
     this._keywords.set(name, keyword);
   }
@@ -161,13 +201,23 @@ export class VwwInference {
     }
     const timings = collectTimings ? {
       featureKind: this._featureKind,
-      frontendStreaming: false,
+      frontendStreaming: this._streamingOnnx,
     } : null;
     const totalStart = timings ? nowMs() : 0;
     const appendStart = timings ? totalStart : 0;
     this._appendRing(samples);
+    const windowRms = this.currentWindowRms();
     if (timings) timings.appendMs = nowMs() - appendStart;
     const featureStart = timings ? nowMs() : 0;
+    if (this._streamingOnnx) {
+      const result = await this._processStreamingMicroFrontend(samples, {
+        activeKeywords,
+        timings,
+        featureStart,
+        totalStart,
+      });
+      return { ...result, windowRms };
+    }
     const features = this._featureKind === 'microfrontend'
       ? (this._ringFilled < this._windowSamples ? null : this._extractMicroFrontendWindow())
       : (this._ringFilled < this._windowSamples ? null : this._extractLogMel());
@@ -178,17 +228,27 @@ export class VwwInference {
       timings.inferenceTotalMs = nowMs() - totalStart;
       this._lastTimings = timings;
     }
-    if (!features) return { probs: {} };
+    if (!features) return { probs: {}, windowRms };
     const probs = {};
     const ctc = {};
-    let modelCount = 0;
+    const cnn = {};
     let classifyMs = 0;
+    // All active keywords score the same feature tensor, so their GPU
+    // graphs go out in ONE queue submission (invokeAll) instead of a
+    // sequential invoke-per-keyword loop that pays a full GPU→CPU
+    // readback round trip per model.
+    const active = [];
     for (const [name, kw] of this._keywords) {
       if (activeKeywords && !activeKeywords.has(name)) continue;
-      modelCount++;
-      const invokeStart = timings ? nowMs() : 0;
-      const out = await kw.runner.invoke(features);
-      if (timings) classifyMs += nowMs() - invokeStart;
+      active.push([name, kw]);
+    }
+    const modelCount = active.length;
+    const invokeStart = timings ? nowMs() : 0;
+    const outputs = await invokeAll(active.map(([, kw]) => kw.runner), features);
+    if (timings) classifyMs = nowMs() - invokeStart;
+    for (let ki = 0; ki < active.length; ki++) {
+      const [name, kw] = active[ki];
+      const out = outputs[ki];
       if (kw.ctcDecoder) {
         // CTC: flat (T_out * V) output gets greedy-decoded and substring-
         // matched into 0 (no wake) or 1 (wake).  Plugs into the existing
@@ -198,8 +258,18 @@ export class VwwInference {
         // what the model heard AND how confident it was (useful for
         // tuning the confidence gate and debugging FPs).
         const info = kw.ctcDecoder.analyzeWithConfidence(out);
-        probs[name] = info.matched ? 1.0 : 0.0;
+        // Stream path: append this window's fresh frames, then match on
+        // the stitched stream.  Catches "okay <pause> nabu" that no
+        // single 1300 ms window can contain.  Per-window match stays
+        // primary (instant); stream fires arrive ~400 ms later.
+        kw.ctcDecoder.streamUpdate(out, samples.length);
+        const streamInfo = kw.ctcDecoder.streamAnalyze();
+        const streamMatched = !!(streamInfo && streamInfo.matched);
+        probs[name] = (info.matched || streamMatched) ? 1.0 : 0.0;
         ctc[name] = {
+          streamMatched,
+          streamDecoded: streamInfo ? streamInfo.decoded : [],
+          streamConfidence: streamInfo ? streamInfo.matchedConfidence : 0,
           decoded: info.decoded,
           phonemes: kw.ctcDecoder.toPhonemes(info.decoded),
           minEditDistance: info.minEditDistance,
@@ -215,7 +285,15 @@ export class VwwInference {
           trailTolerance: kw.ctcDecoder.trailTolerance,
         };
       } else {
-        probs[name] = out.length > 0 ? out[0] : 0;
+        const wake = out.length > 0 ? out[0] : 0;
+        probs[name] = wake;
+        if (out.length >= 3) {
+          cnn[name] = {
+            wake,
+            prefix: out[1],
+            completion: out[2],
+          };
+        }
       }
     }
     if (timings) {
@@ -224,7 +302,7 @@ export class VwwInference {
       timings.inferenceTotalMs = nowMs() - totalStart;
       this._lastTimings = timings;
     }
-    return { probs, ctc };
+    return { probs, ctc, cnn, windowRms };
   }
 
   consumeLastTimings() {
@@ -247,7 +325,9 @@ export class VwwInference {
       throw new Error(`VWW chunk must be ${CHUNK_SAMPLES} samples, got ${samples.length}`);
     }
     this._appendRing(samples);
-    if (this._featureKind !== 'microfrontend' && this._ringFilled >= this._windowSamples) {
+    if (this._streamingOnnx) {
+      this._ingestStreamingMicroFrontend(samples);
+    } else if (this._featureKind !== 'microfrontend' && this._ringFilled >= this._windowSamples) {
       this._extractLogMel();
     }
   }
@@ -256,11 +336,26 @@ export class VwwInference {
   reset() {
     this._ringHead = 0;
     this._ringFilled = 0;
+    this._ringSumSq = 0;
     this._ring.fill(0);
     this._linearBuf.fill(0);
     this._featureBuf.fill(0);
     this._featuresInitialized = false;
     if (this._microFrontend) this._microFrontend.reset();
+    this._streamFeaturesSinceInfer = 0;
+    this._streamFeatureHead = 0;
+    this._streamFeatureFilled = 0;
+    if (this._streamFeatureRing) this._streamFeatureRing.fill(0);
+    if (this._streamFeatureScratch) this._streamFeatureScratch.fill(0);
+    for (const kw of this._keywords.values()) {
+      if (!kw.stream) continue;
+      kw.stream.probBuffer.fill(0);
+      kw.stream.probIndex = 0;
+      kw.stream.probCount = 0;
+      kw.stream.probSum = 0;
+      kw.stream.lastRaw = 0;
+      kw.stream.lastMean = 0;
+    }
   }
 
   /** Free all GPU resources owned by this inference. */
@@ -278,14 +373,155 @@ export class VwwInference {
     const ring = this._ring;
     const n = ring.length;
     let head = this._ringHead;
+    let sumSq = this._ringSumSq;
+    const updateSumSq = (src, dstStart) => {
+      for (let i = 0; i < src.length; i++) {
+        const old = ring[dstStart + i];
+        const value = src[i];
+        sumSq += value * value - old * old;
+      }
+    };
     // Bulk copy without modulo per sample.  At most two copy operations
     // (one wraps the end of the ring, one fills the start).
     const first = Math.min(samples.length, n - head);
+    updateSumSq(samples.subarray(0, first), head);
     ring.set(samples.subarray(0, first), head);
     const remaining = samples.length - first;
-    if (remaining > 0) ring.set(samples.subarray(first), 0);
+    if (remaining > 0) {
+      updateSumSq(samples.subarray(first), 0);
+      ring.set(samples.subarray(first), 0);
+    }
     this._ringHead = (head + samples.length) % n;
     this._ringFilled = Math.min(n, this._ringFilled + samples.length);
+    this._ringSumSq = Math.max(0, sumSq);
+  }
+
+  _appendStreamFeature(frame) {
+    if (!this._streamFeatureRing) return;
+    const nMels = this._nMels;
+    const dst = this._streamFeatureHead * nMels;
+    const copy = Math.min(nMels, frame.length);
+    for (let i = 0; i < copy; i++) this._streamFeatureRing[dst + i] = frame[i];
+    for (let i = copy; i < nMels; i++) this._streamFeatureRing[dst + i] = 0;
+    this._streamFeatureHead = (this._streamFeatureHead + 1) % this._frames;
+    this._streamFeatureFilled = Math.min(this._frames, this._streamFeatureFilled + 1);
+  }
+
+  _streamFeatureWindow() {
+    if (!this._streamFeatureRing || !this._streamFeatureScratch) return null;
+    if (this._streamFeatureFilled < this._frames) return null;
+    const nMels = this._nMels;
+    const frames = this._frames;
+    const head = this._streamFeatureHead;
+    const ring = this._streamFeatureRing;
+    const out = this._streamFeatureScratch;
+    let dst = 0;
+    for (let f = 0; f < frames; f++) {
+      const srcFrame = (head + f) % frames;
+      out.set(ring.subarray(srcFrame * nMels, srcFrame * nMels + nMels), dst);
+      dst += nMels;
+    }
+    return out;
+  }
+
+  _pushStreamProbability(kw, probability) {
+    const state = kw.stream;
+    if (!state) return probability;
+    if (state.probCount >= state.slidingWindow) {
+      state.probSum -= state.probBuffer[state.probIndex];
+    }
+    state.probBuffer[state.probIndex] = probability;
+    state.probSum += probability;
+    state.probIndex = (state.probIndex + 1) % state.slidingWindow;
+    if (state.probCount < state.slidingWindow) state.probCount++;
+    state.lastRaw = probability;
+    state.lastMean = state.probCount > 0 ? state.probSum / state.probCount : probability;
+    return state.lastMean;
+  }
+
+  async _processStreamingMicroFrontend(samples, { activeKeywords = null, timings = null, featureStart = 0, totalStart = 0 } = {}) {
+    if (!this._microFrontend) {
+      throw new Error('VWW streaming microfrontend model loaded without a microfrontend instance');
+    }
+    const features = this._microFrontend.feed(samples);
+    const probs = {};
+    const cnn = {};
+    let classifyMs = 0;
+    let steps = 0;
+    let invoked = false;
+    for (const frame of features) {
+      this._appendStreamFeature(frame);
+      this._microFrontend.recycleFeature?.(frame);
+      this._streamFeaturesSinceInfer++;
+      if (this._streamFeatureFilled < this._frames) continue;
+      if (this._streamFeaturesSinceInfer < this._streamStepFrames) continue;
+      this._streamFeaturesSinceInfer = 0;
+      const context = this._streamFeatureWindow();
+      if (!context) continue;
+      steps++;
+      const active = [];
+      for (const [name, kw] of this._keywords) {
+        if (activeKeywords && !activeKeywords.has(name)) continue;
+        if (kw.ctcDecoder) continue;
+        active.push([name, kw]);
+      }
+      const invokeStart = timings ? nowMs() : 0;
+      const outputs = await invokeAll(active.map(([, kw]) => kw.runner), context);
+      if (timings) classifyMs += nowMs() - invokeStart;
+      for (let ki = 0; ki < active.length; ki++) {
+        const [name, kw] = active[ki];
+        const out = outputs[ki];
+        const raw = out.length > 0 ? out[0] : 0;
+        const mean = this._pushStreamProbability(kw, raw);
+        if (mean >= (probs[name] ?? -Infinity)) {
+          probs[name] = mean;
+          cnn[name] = {
+            wake: raw,
+            streamMean: mean,
+            streamSteps: steps,
+            slidingWindow: kw.stream?.slidingWindow ?? this._streamDefaultSlidingWindow,
+          };
+          if (out.length >= 3) {
+            cnn[name].prefix = out[1];
+            cnn[name].completion = out[2];
+          }
+        }
+        invoked = true;
+      }
+    }
+    if (timings) {
+      timings.frontendMs = nowMs() - featureStart;
+      timings.fusedFrontend = true;
+      timings.streamingOnnx = true;
+      timings.streamSteps = steps;
+      timings.classifyMs = classifyMs;
+      timings.modelCount = Object.keys(probs).length;
+      timings.inferenceTotalMs = nowMs() - totalStart;
+      this._lastTimings = timings;
+    }
+    return {
+      probs: invoked ? probs : {},
+      ctc: {},
+      cnn,
+    };
+  }
+
+  _ingestStreamingMicroFrontend(samples) {
+    if (!this._microFrontend) return;
+    const features = this._microFrontend.feed(samples);
+    for (const frame of features) {
+      this._appendStreamFeature(frame);
+      this._microFrontend.recycleFeature?.(frame);
+      this._streamFeaturesSinceInfer++;
+    }
+    if (this._streamFeaturesSinceInfer > this._streamStepFrames) {
+      this._streamFeaturesSinceInfer = this._streamStepFrames;
+    }
+  }
+
+  currentWindowRms() {
+    const denom = this._ringFilled > 0 ? this._ringFilled : this._windowSamples;
+    return Math.sqrt(Math.max(0, this._ringSumSq) / denom);
   }
 
   /** Copy the latest 1-second window into a linear buffer in time order. */

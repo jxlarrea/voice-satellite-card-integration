@@ -4,7 +4,7 @@
  * to either engine without engine-specific branching.
  *
  * Per-chunk output shape (matches OwwBackend.processChunk):
- *   { detected, score, vadScore, model, cutoff, rms, triggerType, perModelScores }
+ *   { detected, score, vadScore, model, cutoff, rms, windowRms, triggerType, perModelScores }
  *
  * Differences from OWW worth knowing about:
  *   - VWW models are single-stage (no shared mel + embedding); each
@@ -83,6 +83,23 @@ function runtimeModeFromManifest(cfg) {
     ? Math.max(1, Math.floor(cfg.high_confidence_bypass_min_hits))
     : 1;
   const hitMode = cfg?.hit_mode === 'consecutive' ? 'consecutive' : 'consecutive';
+  const minWindowRmsRaw = Number(cfg?.min_window_rms);
+  const minWindowRms = Number.isFinite(minWindowRmsRaw) && minWindowRmsRaw > 0
+    ? minWindowRmsRaw
+    : HARD_SILENCE_VETO_RMS;
+  const rawSequenceGate = cfg?.cnn_sequence_gate;
+  const cnnSequenceGate = (
+    rawSequenceGate
+    && typeof rawSequenceGate === 'object'
+    && rawSequenceGate.enabled !== false
+  ) ? {
+      enabled: true,
+      wakeIndex: Number.isFinite(Number(rawSequenceGate.wake_index)) ? Number(rawSequenceGate.wake_index) : 0,
+      prefixIndex: Number.isFinite(Number(rawSequenceGate.prefix_index)) ? Number(rawSequenceGate.prefix_index) : 1,
+      completionIndex: Number.isFinite(Number(rawSequenceGate.completion_index)) ? Number(rawSequenceGate.completion_index) : 2,
+      prefixThreshold: Number.isFinite(Number(rawSequenceGate.prefix_threshold)) ? Number(rawSequenceGate.prefix_threshold) : 0.5,
+      completionThreshold: Number.isFinite(Number(rawSequenceGate.completion_threshold)) ? Number(rawSequenceGate.completion_threshold) : 0.5,
+    } : null;
   return requiredHits > 0
     ? {
         mode: 'counter',
@@ -91,9 +108,32 @@ function runtimeModeFromManifest(cfg) {
         hitMode,
         highConfidenceBypass,
         highConfidenceBypassMinHits,
+        minWindowRms,
+        cnnSequenceGate,
         cooldownMs: cooldown,
       }
-    : { mode: 'borderline', cooldownMs: cooldown };
+    : { mode: 'borderline', minWindowRms, cnnSequenceGate, cooldownMs: cooldown };
+}
+
+function evaluateCnnSequenceGate(mode, cnnInfo) {
+  const gate = mode?.cnnSequenceGate;
+  if (!gate) return { enabled: false, passed: true };
+  const prefixScore = Number(cnnInfo?.prefix);
+  const completionScore = Number(cnnInfo?.completion);
+  const passed = (
+    Number.isFinite(prefixScore)
+    && Number.isFinite(completionScore)
+    && prefixScore >= gate.prefixThreshold
+    && completionScore >= gate.completionThreshold
+  );
+  return {
+    enabled: true,
+    passed,
+    prefixScore,
+    completionScore,
+    prefixThreshold: gate.prefixThreshold,
+    completionThreshold: gate.completionThreshold,
+  };
 }
 
 function requiredHitsForTarget(mode, targetIndex) {
@@ -140,6 +180,14 @@ function formatRuntimeStatus(status, triggerType = null) {
   }
   if (status.bypassed === true) parts.push('runtime_bypassed=true');
   if (status.grouped === true) parts.push('runtime_grouped=true');
+  if (status.cnnSequenceGate === true) {
+    const p = Number(status.cnnPrefixScore);
+    const c = Number(status.cnnCompletionScore);
+    if (Number.isFinite(p)) parts.push(`cnn_prefix=${p.toFixed(3)}`);
+    if (Number.isFinite(c)) parts.push(`cnn_completion=${c.toFixed(3)}`);
+    if (status.cnnSequencePassed === false) parts.push('cnn_sequence=blocked');
+    else if (status.cnnSequencePassed === true) parts.push('cnn_sequence=passed');
+  }
   return parts.join(' ');
 }
 
@@ -263,6 +311,9 @@ export class VwwBackend {
       const firstEntry = entries[keywordConfigs[0].name];
       const featureCfg = {
         ...(firstEntry.manifest?.feature_config || {}),
+        format: firstEntry.manifest?.format,
+        streaming_onnx: firstEntry.manifest?.streaming_onnx
+          || firstEntry.manifest?.feature_config?.streaming_onnx,
         feature: firstEntry.manifest?.input?.feature
           || firstEntry.manifest?.feature_config?.feature
           || 'log_mel',
@@ -299,7 +350,7 @@ export class VwwBackend {
         // so VwwInference decodes the (T_out, V) output into 0/1.
         await inference.addKeyword(cfg.name, entry.compiled, entry.ctcConfig);
       } else {
-        await inference.addKeyword(cfg.name, entry.compiled);
+        await inference.addKeyword(cfg.name, entry.compiled, null, entry.manifest);
       }
       const manifestCutoff = entry.manifest?.recommended_threshold;
       cutoffs[cfg.name] = typeof cfg.cutoff === 'number'
@@ -475,10 +526,6 @@ export class VwwBackend {
       }
     }
 
-    if (rms !== null && rms < HARD_SILENCE_VETO_RMS) {
-      return this._silenceVetoResult(samples, rms);
-    }
-
     if (this._energyGateEnabled && this._sleepBufLen > 0) {
       const replay = this._sleepBufferOrdered();
       this._clearSleepBuffer();
@@ -542,16 +589,18 @@ export class VwwBackend {
       }
     }
 
-    if (rms < HARD_SILENCE_VETO_RMS) {
+    this._inference.ingestChunk(samples);
+    const windowRms = typeof this._inference.currentWindowRms === 'function'
+      ? this._inference.currentWindowRms()
+      : rms;
+    if (rms < HARD_SILENCE_VETO_RMS && windowRms < HARD_SILENCE_VETO_RMS) {
       this._clearScoreWindows();
       this._latestScores = {};
     }
-
-    this._inference.ingestChunk(samples);
-    return this._skippedResult(rms);
+    return this._skippedResult(rms, windowRms);
   }
 
-  _skippedResult(rms) {
+  _skippedResult(rms, windowRms = null) {
     return {
       detected: false,
       score: 0,
@@ -559,24 +608,20 @@ export class VwwBackend {
       model: null,
       cutoff: 0,
       rms,
+      windowRms,
       triggerType: null,
       skipped: true,
       perModelScores: this._latestScores || {},
     };
   }
 
-  _silenceVetoResult(samples, rms) {
-    // Probability-style VWW models can assign non-zero wake scores to
-    // exact digital silence if the feature frontend maps it outside the
-    // training distribution.  Never let near-zero RMS frames advance the
-    // runtime hit counter.  Keep the audio ring current so the next real
-    // speech window is still temporally correct.
+  _windowSilenceVetoResult(rms, windowRms) {
+    // Veto only when the full model window is silent.  A valid wake score
+    // often lands on a quiet tail chunk while the rolling window still
+    // contains the spoken wake word, so chunk RMS alone is misleading.
     this._clearScoreWindows();
     this._latestScores = {};
-    if (typeof this._inference.ingestChunk === 'function') {
-      this._inference.ingestChunk(samples);
-    }
-    return this._skippedResult(rms);
+    return this._skippedResult(rms, windowRms);
   }
 
   async _processInferenceChunk(samples, rms) {
@@ -592,14 +637,22 @@ export class VwwBackend {
     // CNN and CTC consume normalized audio directly. Embedding inference
     // receives the same normalized chunk and restores openWakeWord's
     // int16 frontend scale internally.
-    const { probs, ctc } = await this._inference.processChunk(samples, {
+    const { probs, ctc, cnn, windowRms } = await this._inference.processChunk(samples, {
       activeKeywords: this._activeKeywords,
       collectTimings: this._enableTimings,
     });
+    if (
+      rms < HARD_SILENCE_VETO_RMS
+      && typeof windowRms === 'number'
+      && windowRms < HARD_SILENCE_VETO_RMS
+    ) {
+      return this._windowSilenceVetoResult(rms, windowRms);
+    }
     const inferenceTimings = this._enableTimings ? this._inference.consumeLastTimings?.() : null;
-    this._latestScores = probs;
     this._latestCtc = ctc || null;
+    this._latestCnn = cnn || null;
     const confirmFrame = ++this._confirmFrameIndex;
+    const effectiveProbs = {};
 
     const now = nowMs();
     let leaderName = null;
@@ -611,18 +664,29 @@ export class VwwBackend {
     let triggerType = null;
     let triggerCooldownMs = COOLDOWN_MS;
     for (const name in probs) {
-      const p = probs[name];
       if (!this._activeKeywords.has(name)) continue;
+      const mode = this._runtimeMode[name] || { mode: 'borderline', minWindowRms: HARD_SILENCE_VETO_RMS, cooldownMs: COOLDOWN_MS };
+      const minWindowRms = Number.isFinite(mode.minWindowRms)
+        ? mode.minWindowRms
+        : HARD_SILENCE_VETO_RMS;
+      const energyVetoed = (
+        typeof windowRms === 'number'
+        && Number.isFinite(windowRms)
+        && windowRms < minWindowRms
+      );
+      const cnnSequence = evaluateCnnSequenceGate(mode, cnn?.[name]);
+      const sequenceVetoed = cnnSequence.enabled && !cnnSequence.passed;
+      const p = (energyVetoed || sequenceVetoed) ? 0 : probs[name];
+      effectiveProbs[name] = p;
       const cutoff = this._cutoffs[name] ?? DEFAULT_CUTOFF;
       if (p > leaderScore) {
         leaderName = name;
         leaderScore = p;
         leaderCutoff = cutoff;
       }
-      const mode = this._runtimeMode[name] || { mode: 'borderline', cooldownMs: COOLDOWN_MS };
       let tt = null;
       if (mode.mode === 'counter') {
-        tt = this._gateCounter(name, p, cutoff, mode, ctc?.[name]);
+        tt = this._gateCounter(name, p, cutoff, mode, ctc?.[name], cnnSequence);
       } else {
         const w = this._scoreWindows[name];
         if (w) tt = this._gateBorderline(w, p, cutoff, name, now, confirmFrame);
@@ -635,6 +699,7 @@ export class VwwBackend {
         triggerCooldownMs = mode.cooldownMs;
       }
     }
+    this._latestScores = effectiveProbs;
 
     let detected = false;
     const cooldownActive = (now - this._lastTriggerAt) < triggerCooldownMs;
@@ -679,18 +744,20 @@ export class VwwBackend {
     }
 
     // CTC near-miss diagnostic (debug-only - no-op unless vs_debug=true).
-    // Same format as wake-word-test-session.js so users debugging
-    // production behavior see the same kind of log they're used to
-    // from the tester.  Filtered by phonemes>=3 and ed<=8 to skip
-    // silence/blank decodes and far-off-target noise.  Without this,
-    // tuning gate / max_edit_distance / pronunciation-variants in
-    // production requires going to the tester first.
+    // Same format and threshold as wake-word-test-session.js so users
+    // debugging production behavior see the same log they're used to
+    // from the tester.  Only decodes within one edit of the matcher gate
+    // are legitimate near misses: pretrained-backbone models (ok_nabu
+    // v121+) honestly decode ALL speech, so looser thresholds log every
+    // window of ambient TV audio.
     if (this._log?.isDebug && this._latestCtc) {
       for (const [name, info] of Object.entries(this._latestCtc)) {
         if (!info || !Array.isArray(info.phonemes)) continue;
         if (info.phonemes.length < 3) continue;
         const ed = info.minEditDistance;
-        if (!Number.isFinite(ed) || ed > 8) continue;
+        const nearMaxEd = ((typeof info.maxEditDistance === 'number')
+          ? info.maxEditDistance : 1) + 1;
+        if (!Number.isFinite(ed) || ed > nearMaxEd) continue;
         // Skip the same decode that just triggered - already logged above.
         if (detected && name === triggerName) continue;
         const mc = (typeof info.matchedConfidence === 'number')
@@ -757,14 +824,16 @@ export class VwwBackend {
       model: triggerName || leaderName,
       cutoff: triggerName ? triggerCutoff : leaderCutoff,
       rms,
+      windowRms,
       triggerType,
-      perModelScores: probs,
+      perModelScores: effectiveProbs,
       // CTC: per-keyword decode info (phonemes + edit distance to
       // nearest wake-word target).  Null/undefined for non-CTC keywords.
       // Test session uses this to log what the model heard, so a
       // missed pronunciation or a triggering FP can be debugged
       // without rebuilding the panel.
       ctc: ctc || null,
+      cnn: cnn || null,
       runtime: this._runtimeStatus ? { ...this._runtimeStatus } : {},
     };
     if (this._enableTimings) {
@@ -789,7 +858,7 @@ export class VwwBackend {
    * over an hour of TV-background field testing).  Per-keyword
    * counters live in this._hitCounters keyed by name.
    */
-  _gateCounter(name, score, cutoff, mode, ctcInfo = null) {
+  _gateCounter(name, score, cutoff, mode, ctcInfo = null, cnnSequence = null) {
     const matchedTargetIndex = Number.isInteger(ctcInfo?.matchedTargetIndex)
       ? ctcInfo.matchedTargetIndex
       : -1;
@@ -843,29 +912,29 @@ export class VwwBackend {
         && confidenceForBypass >= bypass
       );
       if (isHighConfidence && nextHits >= bypassMinHits) {
-        this._runtimeStatus[name] = this._makeRuntimeStatus(name, nextHits, true, true, requiredHits, matchedTargetIndex, bypassMinHits, matchedTargetGroupIndex, grouped);
+        this._runtimeStatus[name] = this._makeRuntimeStatus(name, nextHits, true, true, requiredHits, matchedTargetIndex, bypassMinHits, matchedTargetGroupIndex, grouped, cnnSequence);
         this._hitCounters[name] = this._makeHitCounter();
         return 'bypass';
       }
       if (nextHits >= requiredHits) {
-        this._runtimeStatus[name] = this._makeRuntimeStatus(name, requiredHits, false, isHighConfidence, requiredHits, matchedTargetIndex, bypassMinHits, matchedTargetGroupIndex, grouped);
+        this._runtimeStatus[name] = this._makeRuntimeStatus(name, requiredHits, false, isHighConfidence, requiredHits, matchedTargetIndex, bypassMinHits, matchedTargetGroupIndex, grouped, cnnSequence);
         this._hitCounters[name] = this._makeHitCounter();
         return 'counter';
       }
-      this._runtimeStatus[name] = this._makeRuntimeStatus(name, nextHits, false, isHighConfidence, requiredHits, matchedTargetIndex, bypassMinHits, matchedTargetGroupIndex, grouped);
+      this._runtimeStatus[name] = this._makeRuntimeStatus(name, nextHits, false, isHighConfidence, requiredHits, matchedTargetIndex, bypassMinHits, matchedTargetGroupIndex, grouped, cnnSequence);
     } else {
       this._hitCounters[name] = this._makeHitCounter();
-      this._runtimeStatus[name] = this._makeRuntimeStatus(name, 0, false, false, baseRequiredHits, matchedTargetIndex, baseBypassMinHits, matchedTargetGroupIndex, false);
+      this._runtimeStatus[name] = this._makeRuntimeStatus(name, 0, false, false, baseRequiredHits, matchedTargetIndex, baseBypassMinHits, matchedTargetGroupIndex, false, cnnSequence);
     }
     return null;
   }
 
-  _makeRuntimeStatus(name, hits = 0, bypassed = false, highConfidence = false, requiredHits = null, matchedTargetIndex = -1, bypassMinHits = null, matchedTargetGroupIndex = -1, grouped = false) {
+  _makeRuntimeStatus(name, hits = 0, bypassed = false, highConfidence = false, requiredHits = null, matchedTargetIndex = -1, bypassMinHits = null, matchedTargetGroupIndex = -1, grouped = false, cnnSequence = null) {
     const mode = this._runtimeMode[name] || { mode: 'borderline', cooldownMs: COOLDOWN_MS };
     if (mode.mode !== 'counter') {
       return { mode: 'borderline', cooldownMs: mode.cooldownMs };
     }
-    return {
+    const status = {
       mode: 'counter',
       hitMode: mode.hitMode || 'consecutive',
       hits,
@@ -883,6 +952,15 @@ export class VwwBackend {
       bypassed,
       cooldownMs: mode.cooldownMs,
     };
+    if (cnnSequence?.enabled) {
+      status.cnnSequenceGate = true;
+      status.cnnSequencePassed = cnnSequence.passed === true;
+      status.cnnPrefixScore = cnnSequence.prefixScore;
+      status.cnnCompletionScore = cnnSequence.completionScore;
+      status.cnnPrefixThreshold = cnnSequence.prefixThreshold;
+      status.cnnCompletionThreshold = cnnSequence.completionThreshold;
+    }
+    return status;
   }
 
   _gateBorderline(w, score, cutoff, name, now, frameIndex) {
@@ -1002,7 +1080,7 @@ export class VwwBackend {
       } else if (entry.architecture === 'ctc') {
         await this._inference.addKeyword(cfg.name, entry.compiled, entry.ctcConfig);
       } else {
-        await this._inference.addKeyword(cfg.name, entry.compiled);
+        await this._inference.addKeyword(cfg.name, entry.compiled, null, entry.manifest);
       }
       if (typeof this._cutoffs[cfg.name] !== 'number') {
         const mc = entry.manifest?.recommended_threshold;

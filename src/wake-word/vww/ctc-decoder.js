@@ -102,6 +102,20 @@ export class CtcDecoder {
     this.targetGroupIds = groups.ids;
     this.targetGroupSizes = groups.sizes;
     this.inventory = ctcConfig.inventory || null;
+    // Cross-window stream matching ("okay <pause> nabu" fix).  The
+    // 1300 ms window cannot contain the phrase when the inter-word
+    // pause is long: the prefix slides out before the suffix completes,
+    // so every per-window decode sees only fragments (n ɑ ː b u ː,
+    // ed=3) and can never match.  streamUpdate() stitches per-frame
+    // argmax slices from consecutive windows into one rolling frame
+    // stream; streamAnalyze() decodes that stream and applies the SAME
+    // matcher, making the phrase span limited by the buffer (~2.5 s)
+    // instead of the window.  Slices are taken `streamLagFrames` before
+    // the window edge because emissions only appear once a phoneme has
+    // enough right-context inside the window - so stream matches land
+    // ~lag*frameMs (~400 ms) later than per-window matches.  Benchmarked
+    // on v120: zero added FP over 14.5 h of continuous speech.
+    this._streamState = null;
     // T_out from output shape: shape is (B, T_out, V).  We only ever
     // run B=1 inference, so dims are [1, T_out, V].
     if (!Array.isArray(outputShape) || outputShape.length !== 3) {
@@ -113,6 +127,121 @@ export class CtcDecoder {
         `CtcDecoder: output dim ${outputShape[2]} != vocab_size ${this.vocabSize}`,
       );
     }
+  }
+
+  /**
+   * Enable cross-window stream matching.  Called by the inference
+   * engine when manifest.runtime.stream_match is not disabled.
+   * @param {object} opts {windowSamples, bufferMs, lagFrames, windowMs}
+   */
+  enableStreamMatch(opts) {
+    const windowMs = Number(opts.windowMs) || 1300;
+    const frameMs = windowMs / this.tOut;
+    const lag = Math.min(
+      Math.max(4, Math.floor(Number(opts.lagFrames ?? 20))),
+      this.tOut - 2,
+    );
+    this._streamState = {
+      frameSamples: Math.max(1, Math.round(Number(opts.windowSamples) / this.tOut)),
+      frameMs,
+      lag,
+      bufFrames: Math.max(this.tOut, Math.round(Number(opts.bufferMs ?? 2500) / frameMs)),
+      ids: [],
+      logits: [],
+      sampleAcc: 0,
+      bootstrapped: false,
+      matchStreak: 0,
+    };
+  }
+
+  /**
+   * Append this window's fresh argmax frames to the rolling stream.
+   * @param {Float32Array} flatLogProbs  full window output (T_out * V)
+   * @param {number} newSamples          audio samples appended since the
+   *                                     previous inference call
+   */
+  streamUpdate(flatLogProbs, newSamples) {
+    const st = this._streamState;
+    if (!st) return;
+    const T = this.tOut;
+    const V = this.vocabSize;
+    st.sampleAcc += Math.max(0, newSamples | 0);
+    let newFrames = Math.floor(st.sampleAcc / st.frameSamples);
+    if (newFrames <= 0 && st.bootstrapped) return;
+    st.sampleAcc -= newFrames * st.frameSamples;
+
+    const pushFrame = (t) => {
+      let bestI = 0;
+      let bestV = -Infinity;
+      const base = t * V;
+      for (let v = 0; v < V; v++) {
+        const lv = flatLogProbs[base + v];
+        if (lv > bestV) { bestV = lv; bestI = v; }
+      }
+      st.ids.push(bestI);
+      st.logits.push(bestV);
+    };
+
+    if (!st.bootstrapped) {
+      for (let t = 0; t < T - st.lag; t++) pushFrame(t);
+      st.bootstrapped = true;
+    } else {
+      newFrames = Math.min(newFrames, T - st.lag);
+      for (let t = T - st.lag - newFrames; t < T - st.lag; t++) pushFrame(t);
+    }
+    const excess = st.ids.length - st.bufFrames;
+    if (excess > 0) {
+      st.ids.splice(0, excess);
+      st.logits.splice(0, excess);
+    }
+  }
+
+  /**
+   * Decode the rolling stream and run the standard matcher on it.
+   * Returns the same shape as analyzeWithConfidence() plus
+   * {stream: true}.  After a few consecutive matched calls the buffer
+   * is consumed so one utterance cannot re-fire after the runtime
+   * cooldown expires while its frames are still in the buffer.
+   */
+  streamAnalyze() {
+    const st = this._streamState;
+    if (!st || st.ids.length === 0) return null;
+    const ids = [];
+    const confidence = [];
+    let i = 0;
+    const n = st.ids.length;
+    while (i < n) {
+      const tok = st.ids[i];
+      let j = i;
+      let sum = 0;
+      while (j < n && st.ids[j] === tok) { sum += st.logits[j]; j++; }
+      if (tok !== this.blankId && tok !== this.padId) {
+        ids.push(tok);
+        confidence.push(sum / (j - i));
+      }
+      i = j;
+    }
+    const match = this.acceptedMatch(ids, confidence);
+    if (match.matched) {
+      st.matchStreak += 1;
+      if (st.matchStreak >= 4) {
+        st.ids.length = 0;
+        st.logits.length = 0;
+        st.matchStreak = 0;
+      }
+    } else {
+      st.matchStreak = 0;
+    }
+    return {
+      stream: true,
+      decoded: ids,
+      matched: match.matched,
+      matchedTargetIndex: match.targetIndex,
+      matchedTargetGroupIndex: match.targetGroupIndex,
+      matchedTargetGroupSize: match.targetGroupSize,
+      matchedConfidence: match.confidence,
+      minEditDistance: match.editDistance,
+    };
   }
 
   /**
@@ -425,6 +554,12 @@ export class CtcDecoder {
       out.minEditDistance = accepted.editDistance;
       out.matchedConfidence = accepted.confidence;
       out.gateThreshold = accepted.gateThreshold ?? this.minMatchedConfidence;
+    } else if (!Number.isFinite(out.minEditDistance)) {
+      // Diagnostic only: strict production matching uses the asymmetric,
+      // trail-anchored sweep above.  For near-miss logs/UI we still want
+      // to show decodes that are close to the wake shape but were rejected
+      // by strict runtime rules.
+      out.minEditDistance = this.minEditDistanceToTargets(ids);
     }
     return out;
   }

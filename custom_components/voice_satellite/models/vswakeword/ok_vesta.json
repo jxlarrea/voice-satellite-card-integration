@@ -1,5 +1,5 @@
 {
-  "name": "ok_nabu",
+  "name": "ok_vesta",
   "format": "vs-wake-word-ctc-v1",
   "recommended_threshold": 0.5,
   "input": {
@@ -115,24 +115,22 @@
         9,
         15,
         2,
-        32,
-        5,
-        3,
-        23,
-        20,
-        3
+        41,
+        10,
+        38,
+        40,
+        12
       ],
       [
         29,
         9,
         15,
         2,
-        32,
-        5,
-        3,
-        23,
-        20,
-        3
+        41,
+        10,
+        38,
+        40,
+        12
       ]
     ],
     "wake_word_target_phonemes": [
@@ -143,24 +141,22 @@
         "e",
         "ɪ",
         " ",
-        "n",
-        "ɑ",
-        "ː",
-        "b",
-        "u",
-        "ː"
+        "v",
+        "ɛ",
+        "s",
+        "t",
+        "ə"
       ],
       [
         "k",
         "e",
         "ɪ",
         " ",
-        "n",
-        "ɑ",
-        "ː",
-        "b",
-        "u",
-        "ː"
+        "v",
+        "ɛ",
+        "s",
+        "t",
+        "ə"
       ]
     ],
     "max_edit_distance": 1,
@@ -173,6 +169,18 @@
     "target_min_matched_confidence": [
       3.2,
       6.0
+    ],
+    "wake_word_target_anchors": [
+      [
+        2,
+        7,
+        9
+      ],
+      [
+        0,
+        5,
+        7
+      ]
     ]
   },
   "runtime": {
