@@ -121,6 +121,8 @@ export const DEFAULT_CONFIG = {
   reactive_bar_update_interval_ms: 33,
 
   // Screensaver
+  // Fallback only: the integration's Screensaver switch entity is
+  // authoritative for enable/disable when it exists.
   screensaver_enabled: false,
   screensaver_timer_s: 60,
   screensaver_type: 'black', // 'black' | 'media' | 'website' | 'clock'

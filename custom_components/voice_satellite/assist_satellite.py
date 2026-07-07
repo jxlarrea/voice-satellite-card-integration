@@ -227,6 +227,10 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
         if s is not None:
             attrs["stop_word"] = s.state == "on"
 
+        s = self._get_child_state(registry, "switch", "_screensaver")
+        if s is not None:
+            attrs["screensaver"] = s.state == "on"
+
         # Expose TTS output select entity_id for the card
         s = self._get_child_state(registry, "select", "_tts_output")
         if s and s.state not in ("Browser", "unknown", "unavailable"):

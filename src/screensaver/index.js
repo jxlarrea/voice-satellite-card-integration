@@ -17,7 +17,9 @@
  * (typically Fully Kiosk's built-in screensaver) so it can't cover the
  * voice UI mid-conversation.
  *
- * All configuration comes from the session config (sidebar panel):
+ * All configuration comes from the session config (sidebar panel),
+ * except enable/disable, where the integration's Screensaver switch
+ * entity wins when it exists (so automations can toggle it):
  *   - screensaver_enabled, screensaver_timer_s
  *   - screensaver_type
  *   - screensaver_media_id, screensaver_media_interval_s, screensaver_media_shuffle
@@ -26,6 +28,7 @@
  */
 
 import { INTERACTING_STATES, State } from '../constants.js';
+import { getSwitchState } from '../shared/satellite-state.js';
 import { cameraSupportsWebrtc, attachCameraWebrtc } from '../shared/camera-webrtc.js';
 import * as kiosk from '../kiosk/index.js';
 
@@ -114,7 +117,12 @@ export class ScreensaverManager {
   checkSettings() {
     const cfg = this._session.config || {};
 
-    const newEnabled = cfg.screensaver_enabled === true;
+    // Enable/disable: the integration's Screensaver switch entity is
+    // authoritative when present, so automations and the HA UI can
+    // toggle the screensaver.  The panel config value is the fallback
+    // for older integration versions without the switch.
+    const switchOn = getSwitchState(this._session.hass, cfg.satellite_entity, 'screensaver');
+    const newEnabled = switchOn !== undefined ? switchOn : cfg.screensaver_enabled === true;
     const newTimer = Math.max(10, parseInt(cfg.screensaver_timer_s, 10) || 60);
     // Dim percent is a "null = no dimming" tri-state: null/undefined/
     // empty-string means leave the backlight alone, numbers 0–100 pick

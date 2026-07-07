@@ -2,6 +2,7 @@
 
 Wake sound switch - enable/disable the wake word chime.
 Mute switch - mute/unmute the satellite microphone.
+Screensaver switch - enable/disable the built-in screensaver.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN
+from .settings_store import async_get_panel_settings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ async def async_setup_entry(
         VoiceSatelliteMuteSwitch(entry),
         VoiceSatelliteNoiseGateSwitch(entry),
         VoiceSatelliteStopWordSwitch(entry),
+        VoiceSatelliteScreensaverSwitch(entry),
     ]
     async_add_entities(entities)
 
@@ -209,6 +212,66 @@ class VoiceSatelliteStopWordSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable the stop word model for interruptible playback."""
+        self._attr_is_on = False
+        self.async_write_ha_state()
+
+
+class VoiceSatelliteScreensaverSwitch(SwitchEntity, RestoreEntity):
+    """Switch entity enabling/disabling the built-in screensaver.
+
+    Automation-facing counterpart of the panel's "Enable Voice Satellite
+    screensaver" toggle.  The card treats this switch as authoritative:
+    turning it off while the screensaver is showing dismisses it, turning
+    it on arms the idle timer.  The panel toggle proxies this switch and
+    folds external flips back into its config.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_translation_key = "screensaver"
+    _attr_icon = "mdi:monitor-star"
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        """Initialize the screensaver switch."""
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_screensaver"
+        self._attr_is_on = False  # Default: screensaver disabled
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info - same identifiers as the satellite entity."""
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous state on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            self._attr_is_on = last_state.state == "on"
+            return
+        # First add (integration upgrade): seed from the stored panel
+        # profile so an already-enabled screensaver stays enabled instead
+        # of being switched off by the default.
+        registry = er.async_get(self.hass)
+        for reg_entry in er.async_entries_for_config_entry(
+            registry, self._entry.entry_id
+        ):
+            if reg_entry.domain != "assist_satellite":
+                continue
+            stored = await async_get_panel_settings(self.hass, reg_entry.entity_id)
+            if stored is not None:
+                self._attr_is_on = stored.get("screensaver_enabled") is True
+            break
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable the screensaver."""
+        self._attr_is_on = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable the screensaver."""
         self._attr_is_on = False
         self.async_write_ha_state()
 

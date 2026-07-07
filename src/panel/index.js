@@ -32,7 +32,7 @@ import { WakeWordTestSession } from '../wake-word/wake-word-test-session.js';
 import { resolveDspForMode } from '../audio/dsp-config.js';
 import { getMicroModelParams, loadMicroModelParams } from '../wake-word/micro-models.js';
 import { getVwwModelParams, loadVwwModelParams } from '../wake-word/vww/manifest-cache.js';
-import { getSelectOptions, getSelectAttribute, getSelectState, getSwitchState } from '../shared/satellite-state.js';
+import { getSelectOptions, getSelectAttribute, getSelectState, getSwitchState, getSwitchEntityId } from '../shared/satellite-state.js';
 import { loadPanelConfig, savePanelConfig } from '../shared/server-settings.js';
 import { DiagnosticsManager } from '../diagnostics';
 import * as kiosk from '../kiosk/index.js';
@@ -183,6 +183,7 @@ class VoiceSatellitePanel extends HTMLElement {
     this._serverConfigLoadedEntity = null;
     this._serverConfigLoadSeq = 0;
     this._serverConfigSaveTimer = null;
+    this._ssSwitchPending = null;
     this._config = Object.assign({}, DEFAULT_CONFIG, getStoredConfig());
     // Migrate legacy unified DSP keys into the STT group.
     const LEGACY_DSP_KEYS = ['noise_suppression', 'echo_cancellation', 'auto_gain_control', 'voice_isolation'];
@@ -219,6 +220,7 @@ class VoiceSatellitePanel extends HTMLElement {
     if (!this._rendered) {
       this._buildDom();
     }
+    this._reconcileScreensaverSwitch();
     this._updateForm();
     this._updateStatus();
   }
@@ -254,6 +256,9 @@ class VoiceSatellitePanel extends HTMLElement {
         if (entry.device_id !== satEntity.device_id) continue;
         if (entry.platform !== 'voice_satellite') continue;
         if (entry.translation_key !== 'screensaver') continue;
+        // Only the removed v6.11.x select qualifies - the current
+        // integration's Screensaver switch shares the translation_key.
+        if (!otherEid.startsWith('select.')) continue;
         const extState = hass.states?.[otherEid];
         const extAttrEid = extState?.attributes?.entity_id;
         if (extAttrEid) {
@@ -529,6 +534,13 @@ class VoiceSatellitePanel extends HTMLElement {
     this._persistLocalConfig();
     this._scheduleServerConfigSave();
 
+    // Mirror the enable toggle to the integration's Screensaver switch
+    // so automations and the HA UI stay in sync with the panel.
+    if (Object.prototype.hasOwnProperty.call(newData, 'screensaver_enabled')
+        && this._config.screensaver_enabled !== prevScreensaverEnabled) {
+      this._pushScreensaverSwitch(this._config.screensaver_enabled === true);
+    }
+
     // Propagate to running session (debug, mic constraints, reactive bar, etc.)
     const session = this._getSession();
     if (session) {
@@ -577,6 +589,61 @@ class VoiceSatellitePanel extends HTMLElement {
     if (this._testerSession?.running) {
       this._stopTesterSession().catch(() => { /* ignore */ });
     }
+  }
+
+  /**
+   * Push the panel's enable toggle to the integration's Screensaver
+   * switch entity.  Records a short-lived expectation so the stale
+   * switch state seen on hass updates while the service call is in
+   * flight doesn't flip the toggle back (see
+   * _reconcileScreensaverSwitch).  No-op when the switch entity
+   * doesn't exist (older integration version).
+   */
+  _pushScreensaverSwitch(enabled) {
+    if (!this._hass || !this._config.satellite_entity) return;
+    const eid = getSwitchEntityId(this._hass, this._config.satellite_entity, 'screensaver');
+    if (!eid) return;
+    if (this._hass.states[eid]?.state === (enabled ? 'on' : 'off')) return;
+    this._ssSwitchPending = { value: enabled, until: Date.now() + 5000 };
+    this._hass.callService('switch', enabled ? 'turn_on' : 'turn_off', { entity_id: eid })
+      .catch(() => { this._ssSwitchPending = null; });
+  }
+
+  /**
+   * Fold an external flip of the Screensaver switch (automation, HA
+   * UI) back into the panel config so the enable toggle and the
+   * type-specific sub-forms reflect it live.  The switch is
+   * authoritative for enable/disable when it exists; the panel config
+   * value only serves older integration versions without the switch.
+   */
+  _reconcileScreensaverSwitch() {
+    if (!this._hass || !this._config.satellite_entity) return;
+    // Wait for the server profile hydration round-trip - reconciling
+    // against a not-yet-hydrated local config would abort the load and
+    // push stale local settings back to the server.
+    if (this._serverConfigLoadedEntity !== this._config.satellite_entity) return;
+    const switchOn = getSwitchState(this._hass, this._config.satellite_entity, 'screensaver');
+    if (switchOn === undefined) return;
+
+    const pending = this._ssSwitchPending;
+    if (pending) {
+      if (switchOn === pending.value || Date.now() > pending.until) {
+        this._ssSwitchPending = null;
+      } else {
+        return; // our own service call is still in flight
+      }
+    }
+    if ((this._config.screensaver_enabled === true) === switchOn) return;
+
+    this._localChangeVersion += 1;
+    this._config.screensaver_enabled = switchOn;
+    this._persistLocalConfig();
+    this._scheduleServerConfigSave();
+    const session = this._getSession();
+    if (session) {
+      session.updateConfig(Object.assign({}, this._config), { fromPanel: true });
+    }
+    this._syncConfigToUi({ rebuildSchemas: true });
   }
 
   /**

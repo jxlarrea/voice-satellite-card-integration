@@ -159,24 +159,43 @@ export function getSelectAttribute(hass, satelliteId, translationKey, attrName) 
  * @returns {boolean|undefined} true if switch is on, false if off, undefined if not found
  */
 export function getSwitchState(hass, satelliteId, translationKey) {
-  if (!hass || !satelliteId) return undefined;
-
-  // Find the switch via the frontend entity registry cache (hass.entities)
-  if (hass.entities) {
-    const satellite = hass.entities[satelliteId];
-    if (satellite?.device_id) {
-      for (const [eid, entry] of Object.entries(hass.entities)) {
-        if (entry.device_id === satellite.device_id &&
-            entry.platform === 'voice_satellite' &&
-            entry.translation_key === translationKey) {
-          return hass.states[eid]?.state === 'on';
-        }
-      }
-    }
+  const eid = getSwitchEntityId(hass, satelliteId, translationKey);
+  if (eid) {
+    const state = hass.states[eid]?.state;
+    // 'unavailable'/'unknown' (integration reloading, HA restarting)
+    // falls through to the fallbacks so a transient outage doesn't
+    // read as "off" and flap consumers like the screensaver.
+    if (state === 'on' || state === 'off') return state === 'on';
   }
 
   // Fallback: satellite extra_state_attributes (may be stale)
   const attrName = translationKey === 'mute' ? 'muted' : translationKey;
   const val = getSatelliteAttr(hass, satelliteId, attrName);
   return val !== undefined ? val === true : undefined;
+}
+
+/**
+ * Find a sibling switch entity's entity_id via the frontend entity
+ * registry cache.  Restricted to the switch domain so translation keys
+ * shared with other platforms (e.g. 'screensaver' switch vs
+ * 'screensaver_active' binary sensor) can't mismatch.
+ *
+ * @param {object} hass - HA frontend object
+ * @param {string} satelliteId - Satellite entity ID
+ * @param {string} translationKey - Switch translation_key
+ * @returns {string|undefined} The switch entity_id, or undefined if not found
+ */
+export function getSwitchEntityId(hass, satelliteId, translationKey) {
+  if (!hass?.entities || !satelliteId) return undefined;
+  const satellite = hass.entities[satelliteId];
+  if (!satellite?.device_id) return undefined;
+  for (const [eid, entry] of Object.entries(hass.entities)) {
+    if (eid.startsWith('switch.') &&
+        entry.device_id === satellite.device_id &&
+        entry.platform === 'voice_satellite' &&
+        entry.translation_key === translationKey) {
+      return eid;
+    }
+  }
+  return undefined;
 }

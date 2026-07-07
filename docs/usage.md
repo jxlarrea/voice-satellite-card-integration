@@ -13,6 +13,8 @@ Day-to-day use of the satellite plus every service/action it exposes.
 - [Ask Question](#ask-question)
 - [Voice Satellite Wake Action](#voice-satellite-wake-action)
 - [Voice Satellite Show Action](#voice-satellite-show-action)
+- [Screensaver Control from Automations](#screensaver-control-from-automations)
+- [Voice Satellite Set Screensaver Action](#voice-satellite-set-screensaver-action)
 - [Media Player](#media-player)
 
 ## Starting the Satellite
@@ -212,6 +214,31 @@ After dismissal the satellite plays a "done" chime, resumes any media that was p
 - If the browser tab is hidden when the show fires, it's queued and runs the moment the tab becomes visible.
 - Pipeline errors (LLM unreachable, intent failure, etc.) dismiss the show automatically and surface through the standard error toast.
 
+## Screensaver Control from Automations
+
+Two controls cover the screensaver from automations:
+
+- The **Screensaver switch** entity on the satellite device turns the screensaver on or off.
+- The **`voice_satellite.set_screensaver` action** changes the screensaver type.
+
+### Screensaver Switch
+
+Each satellite exposes a `switch` entity named **Screensaver** that enables or disables the built-in screensaver, mirroring the "Enable Voice Satellite screensaver" toggle in the side panel. Turning it off while the screensaver is on screen dismisses it immediately; turning it on arms the idle timer. Because it is a regular Home Assistant switch, its state persists across restarts, applies when a disconnected browser reconnects, and can be used in conditions.
+
+Disable the screensaver while somebody is home, enable it otherwise:
+
+```yaml
+alias: Screensaver only when away
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.kitchen_occupancy
+actions:
+  - action: >
+      switch.turn_{{ 'off' if is_state('binary_sensor.kitchen_occupancy', 'on') else 'on' }}
+    target:
+      entity_id: switch.kitchen_tablet_screensaver
+```
+
 ## Voice Satellite Set Screensaver Action
 
 Change the satellite's screensaver type live from an automation. Useful for time-based scheduling such as a black overlay overnight to keep an always-on tablet cool, and a media or website screensaver during the day.
@@ -269,9 +296,9 @@ actions:
 ### Behavior notes
 
 - The change applies to every browser currently connected to the targeted satellite. For the typical one-tablet-per-entity setup that is exactly the device you targeted.
-- If no browser is connected when the action fires (tablet off, app closed), the action is a no-op for that satellite. The change is not stored on the integration side and will not replay when the browser reconnects.
+- If no browser is connected when the action fires (tablet off, app closed), nothing changes on screen at that moment, but the new type is still persisted to the satellite's panel profile on the integration side. The browser applies it the next time the page loads and hydrates its settings from the server.
 - If the side panel happens to be open at the moment the action fires, its Screensaver Type dropdown will not live-update. The next time the panel opens it reads the new value from local storage and reflects it correctly.
-- The action only changes the type. To swap a tablet between "on" and "off" overnight, pair `type: black` with a low `Screen brightness while active` percentage in the panel (`0%` drives the Fully Kiosk backlight fully off).
+- The action only changes the type. To turn the screensaver on or off, use the satellite's **Screensaver** switch entity (see [Screensaver Switch](#screensaver-switch)). For an "always on but dark" tablet overnight, pair `type: black` with a low `Screen brightness while active` percentage in the panel (`0%` drives the Fully Kiosk backlight fully off).
 
 ## Media Player
 

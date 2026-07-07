@@ -89,7 +89,7 @@ export function dispatchSatelliteEvent(card, event) {
   // re-renders with the new settings.
   if (type === 'set_screensaver') {
     const newType = data?.type;
-    if (!['black', 'media', 'website'].includes(newType)) {
+    if (!['black', 'media', 'website', 'clock'].includes(newType)) {
       card.logger.log('set-screensaver', `Ignoring invalid type=${newType}`);
       return;
     }

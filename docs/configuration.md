@@ -74,7 +74,7 @@ A browser overlay that kicks in after an idle timeout. Configured per-browser in
 
 | Setting | Description |
 |---------|-------------|
-| **Enable Voice Satellite screensaver** | Master toggle for the overlay |
+| **Enable Voice Satellite screensaver** | Master toggle for the overlay. Mirrors the satellite's **Screensaver** switch entity: toggling either one updates the other, and automations can turn the screensaver on/off through the switch (see [usage.md](usage.md#screensaver-switch)) |
 | **Idle timeout** | Seconds before the screensaver activates (10-600, default 60) |
 | **Type** | **Black overlay** - solid black overlay. **Media** - image, video, folder, or camera feed selected from the HA media library. **Website** - embed any URL in an iframe (e.g. immich-kiosk, photo frame apps, a dashboard). **Digital clock** - large time and date on a black background |
 | **Media source** *(Media type only)* | Use the **Browse** button to pick a file, folder, or camera from the HA media browser; the selected `media-source://` URI is shown in the read-only field next to it. Folders cycle through their playable contents; cameras stream live over WebRTC with sub-second latency (falling back to MJPEG when the camera has no WebRTC provider); images cross-fade on transitions |
