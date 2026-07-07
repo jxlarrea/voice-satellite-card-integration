@@ -79,6 +79,11 @@ export class CtcDecoder {
       const value = Number(targetMinConf[ti]);
       return Number.isFinite(value) ? value : this.minMatchedConfidence;
     });
+    // Manifest-declared gate values, kept pristine so the sensitivity
+    // scale can be re-applied (and un-applied) at runtime.
+    this._baseMinMatchedConfidence = this.minMatchedConfidence;
+    this._baseTargetMinMatchedConfidence = this.targetMinMatchedConfidence.slice();
+    this.confidenceScale = 1;
     this.hasConfidenceGate = (
       Number.isFinite(this.minMatchedConfidence)
       || this.targetMinMatchedConfidence.some((value) => Number.isFinite(value))
@@ -127,6 +132,26 @@ export class CtcDecoder {
         `CtcDecoder: output dim ${outputShape[2]} != vocab_size ${this.vocabSize}`,
       );
     }
+  }
+
+  /**
+   * Scale every matched-confidence gate (wake word sensitivity setting;
+   * >1 = stricter / fewer FPs, <1 = more sensitive).  Applies to the
+   * per-window matcher and the stream matcher alike (both read these
+   * fields).  The global min_matched_confidence scales too: deployed
+   * manifests set it equal to the lowest calibrated target gate, so
+   * treating it as a floor would silently neutralize downward scaling.
+   * Disabled gates (-Infinity) stay disabled.  Idempotent - always
+   * recomputes from the manifest-declared bases.
+   *
+   * @param {number} scale multiplicative factor (1 = manifest truth)
+   */
+  setConfidenceScale(scale) {
+    const k = Number.isFinite(scale) && scale > 0 ? scale : 1;
+    this.confidenceScale = k;
+    const scaleGate = (value) => (Number.isFinite(value) ? value * k : value);
+    this.minMatchedConfidence = scaleGate(this._baseMinMatchedConfidence);
+    this.targetMinMatchedConfidence = this._baseTargetMinMatchedConfidence.map(scaleGate);
   }
 
   /**

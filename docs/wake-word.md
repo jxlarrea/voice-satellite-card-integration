@@ -141,7 +141,7 @@ All wake word settings are configured per-device on the satellite's device page 
 - **Pipeline 1** - Assist pipeline used when Wake word 1 fires (this is the device's default pipeline)
 - **Pipeline 2** - Assist pipeline used when Wake word 2 fires, only shown when Wake word 2 is enabled
 - **Stop word interruption** - optional on-device stop keyword that can cancel timer alerts, TTS, and announcement playback. Disabled by default. Keyword is engine-specific: `"stop"` on microWakeWord and openWakeWord, `"ok stop"` on vsWakeWord. See [Stop Word Interruption](#stop-word-interruption)
-- **Wake word sensitivity** - "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive" (shared by both slots)
+- **Wake word sensitivity** - "Slightly sensitive", "Moderately sensitive" (default), or "Very sensitive" (shared by both slots). Each engine maps the setting onto its own detector: microWakeWord scales the detection margin, openWakeWord offsets the score cutoff, and vsWakeWord scales the model's phoneme-confidence gates by ±10% (stop words ±5%). "Slightly" filters out faint borderline matches at the cost of the quietest across-the-room wakes; "Very" accepts fainter matches at the cost of occasional false triggers. All engines also use the setting for the standby energy gate.
 
 To use server-side detection instead, set "Wake word detection" to "Home Assistant". This requires a wake word service (openWakeWord or microWakeWord) configured in your Assist pipeline. Server-side detection is single-slot only - dual wake words require On Device mode.
 

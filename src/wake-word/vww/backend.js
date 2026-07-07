@@ -35,6 +35,30 @@ const ENERGY_THRESHOLDS = {
   'Very sensitive':       { sleep: 0.02,  wake: 0.025 },
 };
 const DEFAULT_ENERGY = ENERGY_THRESHOLDS['Moderately sensitive'];
+
+// Sensitivity -> CTC matched-confidence gate scaling.  Deployed per-target
+// confidence gates are calibrated between the measured forge band and the
+// real-clip confidence floor, which sit ~10-20% apart, so one notch is
+// +/-10%: 'Slightly' raises gates toward the real floor (fewer FPs, trims
+// only the faintest wakes), 'Very' lowers them toward the forge band
+// (catches fainter single-window wakes, admits marginal forges).  Stop
+// classifiers get a gentler +/-5% notch, mirroring the OWW/MWW stop
+// tables.  The global min_matched_confidence scales along with the
+// per-target gates (deployed manifests set it to the lowest calibrated
+// gate, so holding it fixed would neutralize 'Very').  required_hits,
+// edit distance, anchors, and trail tolerance are deliberately NOT scaled:
+// those are measured cliffs, not dials (hits=2 collapses degraded-audio
+// recall; ed changes admit whole confusable families).
+const VWW_SENSITIVITY_CONF_FACTORS = {
+  'Slightly sensitive':   1.10,
+  'Moderately sensitive': 1.00,
+  'Very sensitive':       0.90,
+};
+const VWW_STOP_SENSITIVITY_CONF_FACTORS = {
+  'Slightly sensitive':   1.05,
+  'Moderately sensitive': 1.00,
+  'Very sensitive':       0.95,
+};
 const SLEEP_CHUNKS = 30;        // ~2.4 s of silence before sleeping
 const COOLDOWN_MS = 2000;       // matches OWW / MWW so triggers don't cascade
 const SLEEP_BUFFER_CHUNKS = 13; // ~1.04 s - one full window + a couple chunks
@@ -107,6 +131,9 @@ function runtimeModeFromManifest(cfg) {
         targetRequiredHits,
         hitMode,
         highConfidenceBypass,
+        // Manifest-declared bypass, kept pristine so the sensitivity
+        // scale is re-applied from the base on every retune.
+        baseHighConfidenceBypass: highConfidenceBypass,
         highConfidenceBypassMinHits,
         minWindowRms,
         cnnSequenceGate,
@@ -226,6 +253,10 @@ export class VwwBackend {
       this._hitCounters[name] = this._makeHitCounter();
       this._runtimeStatus[name] = this._makeRuntimeStatus(name, 0, false);
     }
+
+    // Apply the sensitivity setting to the CTC matcher confidence
+    // gates (energy thresholds above only pre-gate the audio).
+    this._applySensitivityConfScale(sensitivityLabel);
 
     // Per-keyword borderline-confirmation state (only consulted for
     // keywords whose runtimeMode is 'borderline').
@@ -400,7 +431,8 @@ export class VwwBackend {
       'wake-word',
       `VWW backend ready: ${modesDesc} `
       + `(energy gate ${energyGateEnabled ? 'on' : 'off'}, `
-      + `sensitivity=${sensitivityLabel}, sleep=${energy.sleep} wake=${energy.wake}`
+      + `sensitivity=${sensitivityLabel}, sleep=${energy.sleep} wake=${energy.wake}, `
+      + `conf gate scale x${(VWW_SENSITIVITY_CONF_FACTORS[sensitivityLabel] ?? 1).toFixed(2)}`
       + `${compatibilityTier ? ', adapter=compat-tier' : ''})`,
     );
     clearVwwStartupBreadcrumb({
@@ -1137,13 +1169,41 @@ export class VwwBackend {
     return scores[keywordName] ?? 0;
   }
 
+  /**
+   * Apply the wake-word sensitivity setting to the CTC matcher gates:
+   * scales every target's min matched confidence (in the decoder, which
+   * covers the per-window AND stream matchers) plus the high-confidence
+   * bypass by the label's factor.  Stop classifiers use the gentler stop
+   * table.  Idempotent - always recomputed from manifest-declared bases.
+   */
+  _applySensitivityConfScale(sensitivityLabel) {
+    const wakeK = VWW_SENSITIVITY_CONF_FACTORS[sensitivityLabel] ?? 1;
+    const stopK = VWW_STOP_SENSITIVITY_CONF_FACTORS[sensitivityLabel] ?? 1;
+    if (typeof this._inference.setConfidenceScale === 'function') {
+      const wakeNames = this._keywordNames.filter((n) => !this._stopClassifiers[n]);
+      const stopNames = this._keywordNames.filter((n) => this._stopClassifiers[n]);
+      if (wakeNames.length) this._inference.setConfidenceScale(wakeK, wakeNames);
+      if (stopNames.length) this._inference.setConfidenceScale(stopK, stopNames);
+    }
+    for (const name of this._keywordNames) {
+      const mode = this._runtimeMode[name];
+      if (!mode || typeof mode.baseHighConfidenceBypass !== 'number') continue;
+      const k = this._stopClassifiers[name] ? stopK : wakeK;
+      mode.highConfidenceBypass = mode.baseHighConfidenceBypass * k;
+    }
+    this._confScaleWake = wakeK;
+    this._confScaleStop = stopK;
+  }
+
   updateEnergyThresholds(sensitivityLabel) {
     const energy = ENERGY_THRESHOLDS[sensitivityLabel] || DEFAULT_ENERGY;
     this._sleepRms = energy.sleep;
     this._wakeRms = energy.wake;
+    this._applySensitivityConfScale(sensitivityLabel);
     this._log?.log?.(
       'wake-word',
-      `VWW energy gate retuned: sensitivity=${sensitivityLabel} sleep=${energy.sleep} wake=${energy.wake}`,
+      `VWW sensitivity retuned: ${sensitivityLabel} - energy sleep=${energy.sleep} wake=${energy.wake}, `
+      + `conf gate scale wake=x${this._confScaleWake.toFixed(2)} stop=x${this._confScaleStop.toFixed(2)}`,
     );
   }
 

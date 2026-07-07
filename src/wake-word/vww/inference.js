@@ -173,6 +173,21 @@ export class VwwInference {
     this._keywords.set(name, keyword);
   }
 
+  /**
+   * Scale the CTC matched-confidence gates (wake word sensitivity
+   * setting).  No-op for keywords without a CTC decoder.
+   *
+   * @param {number} scale multiplicative factor (1 = manifest truth)
+   * @param {string[]|null} [names] keywords to retune (default: all)
+   */
+  setConfidenceScale(scale, names = null) {
+    const only = Array.isArray(names) ? new Set(names) : null;
+    for (const [name, kw] of this._keywords) {
+      if (only && !only.has(name)) continue;
+      kw.ctcDecoder?.setConfidenceScale(scale);
+    }
+  }
+
   /** Drop a keyword and free its GPU resources. */
   removeKeyword(name) {
     const kw = this._keywords.get(name);
