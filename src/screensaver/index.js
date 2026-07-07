@@ -85,6 +85,7 @@ export class ScreensaverManager {
     this._clock24h = false;
     this._clockSeconds = false;
     this._clockShowDate = true;
+    this._clockScale = 100;
     this._clockTimer = null;
     this._clockTimeEl = null;
     this._clockDateEl = null;
@@ -147,6 +148,11 @@ export class ScreensaverManager {
     const newClockSeconds = cfg.screensaver_clock_seconds === true;
     // Defaults to on: only an explicit `false` hides the date.
     const newClockShowDate = cfg.screensaver_clock_show_date !== false;
+    // Percentage scale for the clock/date size.  The base size is in
+    // viewport units, which browsers/webviews report differently
+    // (zoom, chrome, kiosk viewport settings), so this per-browser
+    // knob lets users equalize the apparent size across tablets.
+    const newClockScale = Math.min(300, Math.max(50, parseInt(cfg.screensaver_clock_scale, 10) || 100));
     const newSuppressExternal = cfg.screensaver_suppress_external || '';
 
     const settingsChanged =
@@ -161,7 +167,8 @@ export class ScreensaverManager {
       newWebsiteUrl !== this._websiteUrl ||
       newClock24h !== this._clock24h ||
       newClockSeconds !== this._clockSeconds ||
-      newClockShowDate !== this._clockShowDate;
+      newClockShowDate !== this._clockShowDate ||
+      newClockScale !== this._clockScale;
 
     this._suppressExternal = newSuppressExternal;
 
@@ -181,6 +188,7 @@ export class ScreensaverManager {
     this._clock24h = newClock24h;
     this._clockSeconds = newClockSeconds;
     this._clockShowDate = newClockShowDate;
+    this._clockScale = newClockScale;
 
     this._log.log('screensaver', `Settings: enabled=${newEnabled}, timer=${newTimer}s, type=${newType}`);
 
@@ -444,13 +452,14 @@ export class ScreensaverManager {
       `transition:opacity ${MEDIA_FADE_MS}ms ease`,
     ].join(';');
 
+    const scale = this._clockScale / 100;
     const timeEl = document.createElement('div');
     timeEl.style.cssText = [
       'color:#fafafa',
       'font-weight:300',
       'letter-spacing:0.02em',
       'line-height:1',
-      'font-size:min(20vw, 30vh)',
+      `font-size:calc(min(20vw, 30vh) * ${scale})`,
     ].join(';');
     wrap.appendChild(timeEl);
     this._clockTimeEl = timeEl;
@@ -460,7 +469,7 @@ export class ScreensaverManager {
       dateEl.style.cssText = [
         'color:rgba(255,255,255,0.65)',
         'font-weight:400',
-        'font-size:min(5vw, 7vh)',
+        `font-size:calc(min(5vw, 7vh) * ${scale})`,
       ].join(';');
       wrap.appendChild(dateEl);
       this._clockDateEl = dateEl;
