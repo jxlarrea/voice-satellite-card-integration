@@ -32,10 +32,21 @@
     "f_min": 80.0,
     "f_max": 7600.0,
     "log_floor": 1e-06,
+    "window_cmn": false,
     "window_samples": 20800,
     "frame_samples": 400,
     "hop_samples": 160,
     "frames": 128
+  },
+  "model": {
+    "architecture": "ctc",
+    "backbone": "tcresnet",
+    "conv_channels": [
+      20,
+      40,
+      60,
+      60
+    ]
   },
   "ctc": {
     "vocab_size": 52,
@@ -115,9 +126,6 @@
         13
       ],
       [
-        18,
-        21,
-        2,
         29,
         9,
         15,
@@ -149,134 +157,11 @@
         13
       ],
       [
-        18,
-        21,
-        2,
         29,
         9,
         15,
         2,
         29,
-        12,
-        31,
-        34,
-        20,
-        3,
-        37,
-        13
-      ],
-      [
-        18,
-        21,
-        29,
-        9,
-        15,
-        2,
-        34,
-        28,
-        20,
-        3,
-        37,
-        13
-      ],
-      [
-        18,
-        21,
-        29,
-        9,
-        15,
-        2,
-        34,
-        20,
-        3,
-        37,
-        13
-      ],
-      [
-        18,
-        21,
-        2,
-        29,
-        9,
-        15,
-        2,
-        34,
-        28,
-        20,
-        3,
-        37,
-        13
-      ],
-      [
-        18,
-        21,
-        2,
-        29,
-        9,
-        15,
-        2,
-        34,
-        20,
-        3,
-        37,
-        13
-      ],
-      [
-        18,
-        21,
-        29,
-        9,
-        15,
-        2,
-        12,
-        31,
-        34,
-        28,
-        20,
-        3,
-        37,
-        13
-      ],
-      [
-        18,
-        21,
-        29,
-        9,
-        15,
-        2,
-        12,
-        31,
-        34,
-        20,
-        3,
-        37,
-        13
-      ],
-      [
-        18,
-        21,
-        2,
-        29,
-        9,
-        15,
-        2,
-        12,
-        31,
-        34,
-        28,
-        20,
-        3,
-        37,
-        13
-      ],
-      [
-        18,
-        21,
-        2,
-        29,
-        9,
-        15,
-        2,
         12,
         31,
         34,
@@ -305,9 +190,6 @@
         "ɚ"
       ],
       [
-        "o",
-        "ʊ",
-        " ",
         "k",
         "e",
         "ɪ",
@@ -339,9 +221,6 @@
         "ɚ"
       ],
       [
-        "o",
-        "ʊ",
-        " ",
         "k",
         "e",
         "ɪ",
@@ -354,290 +233,48 @@
         "ː",
         "ɾ",
         "ɚ"
-      ],
-      [
-        "o",
-        "ʊ",
-        "k",
-        "e",
-        "ɪ",
-        " ",
-        "p",
-        "j",
-        "u",
-        "ː",
-        "ɾ",
-        "ɚ"
-      ],
-      [
-        "o",
-        "ʊ",
-        "k",
-        "e",
-        "ɪ",
-        " ",
-        "p",
-        "u",
-        "ː",
-        "ɾ",
-        "ɚ"
-      ],
-      [
-        "o",
-        "ʊ",
-        " ",
-        "k",
-        "e",
-        "ɪ",
-        " ",
-        "p",
-        "j",
-        "u",
-        "ː",
-        "ɾ",
-        "ɚ"
-      ],
-      [
-        "o",
-        "ʊ",
-        " ",
-        "k",
-        "e",
-        "ɪ",
-        " ",
-        "p",
-        "u",
-        "ː",
-        "ɾ",
-        "ɚ"
-      ],
-      [
-        "o",
-        "ʊ",
-        "k",
-        "e",
-        "ɪ",
-        " ",
-        "ə",
-        "m",
-        "p",
-        "j",
-        "u",
-        "ː",
-        "ɾ",
-        "ɚ"
-      ],
-      [
-        "o",
-        "ʊ",
-        "k",
-        "e",
-        "ɪ",
-        " ",
-        "ə",
-        "m",
-        "p",
-        "u",
-        "ː",
-        "ɾ",
-        "ɚ"
-      ],
-      [
-        "o",
-        "ʊ",
-        " ",
-        "k",
-        "e",
-        "ɪ",
-        " ",
-        "ə",
-        "m",
-        "p",
-        "j",
-        "u",
-        "ː",
-        "ɾ",
-        "ɚ"
-      ],
-      [
-        "o",
-        "ʊ",
-        " ",
-        "k",
-        "e",
-        "ɪ",
-        " ",
-        "ə",
-        "m",
-        "p",
-        "u",
-        "ː",
-        "ɾ",
-        "ɚ"
-      ]
-    ],
-    "wake_word_target_anchors": [
-      [
-        2,
-        6,
-        8,
-        9
-      ],
-      [
-        3,
-        7,
-        9,
-        10
-      ],
-      [
-        2,
-        6,
-        8,
-        9
-      ],
-      [
-        3,
-        7,
-        9,
-        10
-      ],
-      [
-        2,
-        6,
-        10,
-        11
-      ],
-      [
-        2,
-        6,
-        9,
-        10
-      ],
-      [
-        3,
-        7,
-        11,
-        12
-      ],
-      [
-        3,
-        7,
-        10,
-        11
-      ],
-      [
-        2,
-        7,
-        8,
-        12
-      ],
-      [
-        2,
-        7,
-        8,
-        11
-      ],
-      [
-        3,
-        8,
-        9,
-        13
-      ],
-      [
-        3,
-        8,
-        9,
-        12
       ]
     ],
     "max_edit_distance": 1,
-    "wake_word_trail_tolerance": 3,
-    "min_matched_confidence": 3.2,
-    "wake_word_target_groups": [
-      "ok_computer",
-      "ok_computer",
-      "ok_computer",
-      "ok_computer",
-      "ok_computer",
-      "ok_computer",
-      "ok_computer",
-      "ok_computer",
-      "ok_computer",
-      "ok_computer",
-      "ok_computer",
-      "ok_computer"
+    "wake_word_trail_tolerance": 1,
+    "min_matched_confidence": 6.5,
+    "target_max_edit_distance": [
+      1,
+      0,
+      0,
+      0
     ],
     "target_min_matched_confidence": [
-      3.2,
-      3.2,
-      3.2,
-      3.2,
-      3.2,
-      3.2,
-      3.2,
-      3.2,
-      5.0,
-      5.0,
-      5.0,
-      5.0
+      6.5,
+      6.5,
+      9.0,
+      9.0
+    ],
+    "wake_word_target_anchors": [
+      [
+        10
+      ],
+      [
+        0,
+        8
+      ],
+      [
+        9
+      ],
+      [
+        0,
+        7
+      ]
     ]
   },
   "runtime": {
-    "required_hits": 2,
-    "hit_mode": "consecutive",
+    "required_hits": 1,
     "cooldown_ms": 2000,
-    "high_confidence_bypass": 5.8,
-    "high_confidence_bypass_min_hits": 2,
-    "target_required_hits": [
-      2,
-      2,
-      2,
-      2,
-      3,
-      3,
-      3,
-      3,
-      3,
-      3,
-      3,
-      3
-    ]
-  },
-  "best_epoch": 16,
-  "best_val": {
-    "loss": 0.5318159982562065,
-    "exact_decode_acc": 0.905,
-    "wake_detect_rate": 0.551948051948052,
-    "wake_fp_rate": 0.0004562043795620438,
-    "wake_pos_total": 616,
-    "wake_fp_total": 4384,
-    "silence_nonblank_rate": 0.03026103026103026,
-    "silence_nonblank_total": 4329,
-    "silence_nonblank_hits": 131,
-    "selector_wake_detect_rate": 0.551948051948052,
-    "selector_wake_pos_total": 616,
-    "utterance_wake_recall": 0.7208480565371025,
-    "utterance_fp_rate": 0.0009881422924901185,
-    "utterance_pos_total": 283,
-    "utterance_fp_total": 2024,
-    "selector_utterance_recall": 0.7208480565371025,
-    "selector_utterance_pos_total": 283,
-    "selector_recall_rate": 0.695513055848745,
-    "selector_utterance_recall_weight": 0.85,
-    "adaptive_positive_boost_this_epoch": 1.0,
-    "adaptive_positive_boost_next_epoch": 1.0,
-    "adaptive_recall_fpr_cap": 0.001,
-    "adaptive_recall_start_epoch": 35,
-    "adaptive_recall_min_selector_recall": 0.5,
-    "adaptive_recall_max_silence_nonblank": 0.055,
-    "adaptive_recall_max_boost": 1.26
-  },
-  "deployed_from": "T:/data/runs/ok_computer_v7/checkpoints/ok_computer-ctc-bestrecall-ep016.pt",
-  "training_recipe": {
-    "name": "ok_computer_v7_ep016_emputer_probe",
-    "source_checkpoint": "T:/data/runs/ok_computer_v7/checkpoints/ok_computer-ctc-bestrecall-ep016.pt",
-    "target_policy": "v7 no final-clipped computer targets; guarded ok puter targets require 3 hits",
-    "manifest_probe": "adds guarded ok emputer targets for heavy-accent no-k computer onset renderings",
-    "emputer_target_policy": "ok emputer / no-yod and separated O.K. variants; grouped with ok_computer; target_required_hits=3; target_min_matched_confidence=5.0"
+    "hit_mode": "consecutive",
+    "high_confidence_bypass": 6.8,
+    "high_confidence_bypass_min_hits": 1,
+    "stream_match": true,
+    "stream_buffer_ms": 2500,
+    "stream_lag_frames": 20
   }
 }
