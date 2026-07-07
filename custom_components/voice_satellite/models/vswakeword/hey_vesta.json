@@ -32,10 +32,21 @@
     "f_min": 80.0,
     "f_max": 7600.0,
     "log_floor": 1e-06,
+    "window_cmn": false,
     "window_samples": 20800,
     "frame_samples": 400,
     "hop_samples": 160,
     "frames": 128
+  },
+  "model": {
+    "architecture": "ctc",
+    "backbone": "tcresnet",
+    "conv_channels": [
+      20,
+      40,
+      60,
+      60
+    ]
   },
   "ctc": {
     "vocab_size": 52,
@@ -117,25 +128,6 @@
         38,
         40,
         12
-      ],
-      [
-        27,
-        9,
-        15,
-        41,
-        10,
-        38,
-        40,
-        12
-      ],
-      [
-        27,
-        9,
-        41,
-        10,
-        38,
-        40,
-        12
       ]
     ],
     "wake_word_target_phonemes": [
@@ -159,70 +151,41 @@
         "s",
         "t",
         "ə"
-      ],
-      [
-        "h",
-        "e",
-        "ɪ",
-        "v",
-        "ɛ",
-        "s",
-        "t",
-        "ə"
-      ],
-      [
-        "h",
-        "e",
-        "v",
-        "ɛ",
-        "s",
-        "t",
-        "ə"
       ]
+    ],
+    "max_edit_distance": 1,
+    "wake_word_trail_tolerance": 1,
+    "min_matched_confidence": 6.8,
+    "target_max_edit_distance": [
+      1,
+      0
+    ],
+    "target_min_matched_confidence": [
+      6.8,
+      6.8
     ],
     "wake_word_target_anchors": [
       [
-        0,
-        6,
+        5,
+        7,
         8
       ],
       [
         0,
-        5,
-        7
-      ],
-      [
-        0,
-        5,
-        7
-      ],
-      [
-        0,
         4,
-        6
+        6,
+        7
       ]
-    ],
-    "max_edit_distance": 1,
-    "wake_word_trail_tolerance": 3,
-    "min_matched_confidence": 4.5,
-    "target_min_matched_confidence": [
-      4,
-      5.35,
-      4.5,
-      3.8
     ]
   },
   "runtime": {
-    "required_hits": 3,
-    "hit_mode": "consecutive",
+    "required_hits": 1,
     "cooldown_ms": 2000,
-    "high_confidence_bypass": 5.8,
-    "high_confidence_bypass_min_hits": 3,
-    "target_required_hits": [
-      3,
-      4,
-      2,
-      4
-    ]
+    "hit_mode": "consecutive",
+    "high_confidence_bypass": 6.8,
+    "high_confidence_bypass_min_hits": 1,
+    "stream_match": true,
+    "stream_buffer_ms": 2500,
+    "stream_lag_frames": 20
   }
 }
