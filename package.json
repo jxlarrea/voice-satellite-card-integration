@@ -7,7 +7,7 @@
     "prebuild": "node scripts/sync-version.js && node scripts/copy-fonts.js && node scripts/copy-vendor.js",
     "build": "webpack --mode production",
     "predev": "node scripts/sync-version.js && node scripts/copy-fonts.js && node scripts/copy-vendor.js",
-    "dev": "webpack --mode development && xcopy /E /I /Y custom_components\\voice_satellite \\\\hassio\\config\\custom_components\\voice_satellite",
+    "dev": "webpack --mode development && node scripts/deploy-ha.js",
     "convert:oww-onnx": "node scripts/convert-oww-tflite-to-onnx.mjs"
   },
   "devDependencies": {
