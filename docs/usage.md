@@ -89,7 +89,7 @@ After the announcement plays, the engine automatically enters listening mode (sk
 
 ## Ask Question
 
-Automations can ask a question, capture the user's voice response, and match it against predefined answers:
+Automations can ask a question, capture the user's voice response, and match it against predefined answers. Requires Home Assistant 2025.7 or later (the `assist_satellite.ask_question` action was added to core in that release; on older versions the rest of the integration works but this action is unavailable):
 
 ```yaml
 action: assist_satellite.ask_question

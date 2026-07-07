@@ -1,6 +1,6 @@
 {
   "name": "Voice Satellite",
-  "homeassistant": "2025.2.1",
+  "homeassistant": "2025.6.1",
   "render_readme": true,
   "zip_release": true,
   "filename": "voice-satellite-card.zip"

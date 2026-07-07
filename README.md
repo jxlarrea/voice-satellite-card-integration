@@ -48,7 +48,8 @@ Voice Satellite runs as a **global engine** that loads on every page of Home Ass
 
 ## Prerequisites
 
-- **Home Assistant 2025.2.1** or later
+- **Home Assistant 2025.6.1** or later
+
 - An [Assist Pipeline](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/) with:
   - Speech-to-Text ([Whisper](https://www.home-assistant.io/integrations/whisper/), OpenAI, etc.)
   - Conversation agent ([Home Assistant](https://www.home-assistant.io/integrations/conversation/), OpenAI, Qwen, etc.)

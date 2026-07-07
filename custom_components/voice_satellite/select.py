@@ -16,10 +16,19 @@ import time
 from pathlib import Path
 from typing import Any
 
-from homeassistant.components.assist_pipeline import (
-    AssistPipelineSelect,
-    VadSensitivitySelect,
-)
+# The package-root re-export only exists since HA 2025.11; the classes
+# themselves have lived in the select submodule for years. Prefer the
+# public path, fall back to the submodule on older cores.
+try:
+    from homeassistant.components.assist_pipeline import (
+        AssistPipelineSelect,
+        VadSensitivitySelect,
+    )
+except ImportError:  # HA < 2025.11
+    from homeassistant.components.assist_pipeline.select import (
+        AssistPipelineSelect,
+        VadSensitivitySelect,
+    )
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
