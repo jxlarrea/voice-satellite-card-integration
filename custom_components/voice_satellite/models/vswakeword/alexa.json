@@ -135,19 +135,19 @@
   ],
   "max_edit_distance": 1,
   "wake_word_trail_tolerance": 0,
-  "min_matched_confidence": 6.5,
+  "min_matched_confidence": 4.5,
   "target_max_edit_distance": [
    1
   ],
   "target_min_matched_confidence": [
-   6.5
+   4.5
   ]
  },
  "runtime": {
-  "required_hits": 3,
+  "required_hits": 2,
   "hit_mode": "consecutive",
   "cooldown_ms": 2000,
-  "high_confidence_bypass": 12.0,
+  "high_confidence_bypass": 8.2,
   "high_confidence_bypass_min_hits": 1
  }
 }
