@@ -2346,6 +2346,10 @@ class VoiceSatellitePanel extends HTMLElement {
       await updateThresholdForModel();
       if (this._testerSession?.running) {
         this._testerSession.setThreshold(this._testerThreshold);
+        // Forward the label to the running backend: retunes the energy
+        // gate (all engines) and the VWW confidence-gate scaling - the
+        // threshold update above is inert for CTC models.
+        this._testerSession.setSensitivity(this._testerSensitivity);
       }
     });
 

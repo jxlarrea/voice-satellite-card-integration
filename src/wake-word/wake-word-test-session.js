@@ -393,6 +393,21 @@ export class WakeWordTestSession {
     this._inference.updateThresholds([update]);
   }
 
+  /**
+   * Apply a sensitivity change to the RUNNING session backend.  Rides the
+   * same updateEnergyThresholds path the live engine uses, which retunes
+   * the energy gate on every engine and (VWW) the CTC matched-confidence
+   * gate scaling.  Without this, a mid-session sensitivity change only
+   * moved the cosmetic threshold line - for CTC models the cutoff is
+   * inert (0/1 match score), so the select silently did nothing until
+   * the next Start.
+   */
+  setSensitivity(sensitivityLabel) {
+    this._sensitivityLabel = sensitivityLabel || 'Moderately sensitive';
+    if (!this._running || !this._inference) return;
+    this._inference.updateEnergyThresholds?.(this._sensitivityLabel);
+  }
+
   // ─── Internal setup ─────────────────────────────────────────────────
 
   async _acquireMic() {
