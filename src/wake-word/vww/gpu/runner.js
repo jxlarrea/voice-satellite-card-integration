@@ -89,14 +89,14 @@ export class GpuModelRunner {
     this._compiled = compiled;
     this._log = options.log || null;
     this._pipelineLog = options.pipelineLog === true;
-    // int8 conv path (dot4I8Packed, NHWC channel-packed) is THE conv path,
-    // not an optional one: acquireWebGpuDevice() already hard-requires the
-    // 'packed_4x8_integer_dot_product' WGSL feature (a device without it
-    // almost certainly can't run the fp32 path in real time either, so we
-    // refuse to load there - same posture as no-WebGPU). ~2x faster conv on
-    // the floor-device GPU (Tab A): over -> under the real-time budget, ~1%
-    // numeric error. options.int8 === false is a debug-only fp32 escape.
-    this._int8 = options.int8 !== false;
+    // int8 conv path (dot4I8Packed, NHWC channel-packed) is DORMANT:
+    // every shipped model is rank-3 Conv1d and always builds on the
+    // fp32 OC4 kernel (see _buildOnnxConv).  The path stays available
+    // for future rank-4 models, gated on the WGSL feature so its
+    // shaders are never compiled on devices without native packed int8
+    // dot support - such devices load and run fp32 normally instead of
+    // being refused at device acquisition.
+    this._int8 = options.int8 !== false && hasPackedInt8DotSupport();
     // Count of convs actually built on the int8 path (for the load log).
     this._int8ConvCount = 0;
     // Map<tensorId, GPUBuffer> for constants (weights/biases) loaded once.
@@ -204,15 +204,16 @@ export class GpuModelRunner {
     this._buildOpIndex = null;
     this._buildOpName = null;
 
-    // Surface the int8 status in the debug log so it's clear which conv path
-    // a loaded model is running (int8 is default-on; device.js already
-    // hard-requires dot4I8Packed support).
-    this._log?.log?.(
-      'wake-word',
-      this._int8
-        ? `VWW conv path: int8 ENABLED (${this._int8ConvCount} convs int8 via dot4I8Packed; low-channel + output-head convs fp32)`
-        : 'VWW conv path: fp32 (int8 disabled)',
-    );
+    // Only surface the conv path in the logs when int8 actually built
+    // something (future rank-4 models).  The shipped rank-3 CTC models
+    // are always fp32, so logging "int8 ENABLED (0 convs)" every load
+    // was pure noise.
+    if (this._int8ConvCount > 0) {
+      this._log?.log?.(
+        'wake-word',
+        `VWW conv path: ${this._int8ConvCount} rank-4 convs int8 via dot4I8Packed (low-channel + output-head convs fp32)`,
+      );
+    }
   }
 
   async _createComputePipeline(wgsl, label) {
@@ -1641,6 +1642,14 @@ function countTensorUses(ops) {
 /** WebGPU buffer sizes must be multiples of 4. */
 function alignedSize(bytes) {
   return Math.max(4, (bytes + 3) & ~3);
+}
+
+/** Whether WGSL exposes dot4I8Packed on this device.  Gates the dormant
+ *  int8 conv path; wgslLanguageFeatures lives on navigator.gpu and is
+ *  available inside Workers. */
+function hasPackedInt8DotSupport() {
+  const wgsl = (typeof navigator !== 'undefined' && navigator.gpu?.wgslLanguageFeatures) || null;
+  return !!wgsl && wgsl.has('packed_4x8_integer_dot_product');
 }
 
 // ─── Op-options readers ────────────────────────────────────────────────

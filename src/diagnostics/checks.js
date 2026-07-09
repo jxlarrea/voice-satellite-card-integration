@@ -387,19 +387,11 @@ export const CLIENT_CHECKS = [
       }
       const probe = await probeWebGpu();
       if (probe.ok) {
-        // VWW's conv path is int8-only (dot4I8Packed); the engine HARD-requires
-        // the packed_4x8_integer_dot_product WGSL feature and refuses to start
-        // without it (device.js throws on acquire). Surface it here so a device
-        // that HAS WebGPU but lacks native int8 dot is diagnosable up front.
-        const int8 = !!(navigator.gpu?.wgslLanguageFeatures?.has?.('packed_4x8_integer_dot_product'));
-        if (!int8) {
-          return {
-            status: 'fail',
-            detail: `WebGPU adapter present (${probe.desc}), but the GPU lacks the packed_4x8_integer_dot_product WGSL feature (native int8 dot product). vsWakeWord's conv path is int8-only and refuses to start on this device.`,
-            remediation: 'Switch "Wake word detection" to "On Device (microWakeWord)". This device\'s GPU is too limited for vsWakeWord; microWakeWord runs on CPU.',
-          };
-        }
-        return { status: 'pass', detail: `WebGPU adapter present (${probe.desc}); packed_4x8_integer_dot_product (int8) supported.` };
+        // A usable adapter is the whole requirement: the shipped models
+        // run the fp32 conv path, so no WGSL feature beyond baseline
+        // WebGPU is needed (the int8 path is dormant and self-gates on
+        // its feature at runtime).
+        return { status: 'pass', detail: `WebGPU adapter present (${probe.desc}).` };
       }
       if (probe.reason === 'missing') {
         return {
