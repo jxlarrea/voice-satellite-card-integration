@@ -176,6 +176,17 @@ export class CtcDecoder {
       sampleAcc: 0,
       bootstrapped: false,
       matchStreak: 0,
+      // Re-analysis throttle: streamUpdate() flips `dirty` only when it
+      // appends a non-blank/non-pad frame.  While the stream stays
+      // blank-only and the previous verdict was a non-match, re-running
+      // the decode+matcher every 80 ms chunk cannot change the outcome
+      // (appending blanks leaves the decoded token list untouched, and
+      // buffer trimming only removes match candidates), so
+      // streamAnalyze() returns the cached verdict instead.  Matched
+      // verdicts always re-analyze - the streak/consume logic needs to
+      // advance.
+      dirty: true,
+      lastResult: null,
     };
   }
 
@@ -205,6 +216,7 @@ export class CtcDecoder {
       }
       st.ids.push(bestI);
       st.logits.push(bestV);
+      if (bestI !== this.blankId && bestI !== this.padId) st.dirty = true;
     };
 
     if (!st.bootstrapped) {
@@ -231,6 +243,11 @@ export class CtcDecoder {
   streamAnalyze() {
     const st = this._streamState;
     if (!st || st.ids.length === 0) return null;
+    // Blank-only appends since the last analysis + previous verdict was
+    // a non-match: the outcome cannot have changed, return it cheaply.
+    if (!st.dirty && st.lastResult && !st.lastResult.matched) {
+      return st.lastResult;
+    }
     const ids = [];
     const confidence = [];
     let i = 0;
@@ -257,7 +274,7 @@ export class CtcDecoder {
     } else {
       st.matchStreak = 0;
     }
-    return {
+    const result = {
       stream: true,
       decoded: ids,
       matched: match.matched,
@@ -267,6 +284,9 @@ export class CtcDecoder {
       matchedConfidence: match.confidence,
       minEditDistance: match.editDistance,
     };
+    st.dirty = false;
+    st.lastResult = result;
+    return result;
   }
 
   /**

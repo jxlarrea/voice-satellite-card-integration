@@ -108,6 +108,22 @@ export class VwwInference {
     this._fftIm = new Float32Array(this._nFft);
     this._hannWindow = makeHannWindow(this._frameSamples);
     this._melFilterbank = makeMelFilterbank(cfg);
+    // Each triangular mel filter is nonzero only over a narrow bin
+    // band; precomputing [first, last] nonzero indices lets the mel
+    // projection skip the exact-zero taps (adding 0.0 terms was a
+    // no-op, so banded summation is bit-identical).
+    this._melBands = this._melFilterbank.map((filter) => {
+      let lo = 0;
+      let hi = filter.length - 1;
+      while (lo < filter.length && filter[lo] === 0) lo++;
+      while (hi >= lo && filter[hi] === 0) hi--;
+      return [lo, hi];
+    });
+    // Power spectrum scratch, shared across the mel filters of a frame
+    // (it used to be recomputed once per filter - nMels times the
+    // work).  Float64Array preserves the exact double-precision values
+    // the inline expression produced.
+    this._powerSpec = new Float64Array(this._nFft / 2 + 1);
     this._fft = new FFT(this._nFft);
 
     /** @type {Map<string, VwwKeyword>} */
@@ -611,6 +627,9 @@ export class VwwInference {
       }
     }
 
+    const powerSpec = this._powerSpec;
+    const melBands = this._melBands;
+    const half = nFft / 2;
     for (let f = firstFrame; f < frames; f++) {
       const start = f * hopSamples;
       fftRe.fill(0);
@@ -619,14 +638,16 @@ export class VwwInference {
         fftRe[i] = audio[start + i] * window[i];
       }
       this._fft.forward(fftRe, fftIm);
+      for (let k = 0; k <= half; k++) {
+        powerSpec[k] = fftRe[k] * fftRe[k] + fftIm[k] * fftIm[k];
+      }
       const outBase = f * nMels;
       for (let m = 0; m < nMels; m++) {
         let energy = 0;
         const filter = mel[m];
-        const half = nFft / 2;
-        for (let k = 0; k <= half; k++) {
-          const power = fftRe[k] * fftRe[k] + fftIm[k] * fftIm[k];
-          energy += filter[k] * power;
+        const [lo, hi] = melBands[m];
+        for (let k = lo; k <= hi; k++) {
+          energy += filter[k] * powerSpec[k];
         }
         out[outBase + m] = Math.log(Math.max(energy, logFloor));
       }
@@ -692,6 +713,22 @@ class FFT {
     if ((1 << this.levels) !== size) throw new Error('FFT size must be a power of two');
     this.rev = new Uint16Array(size);
     for (let i = 0; i < size; i++) this.rev[i] = reverseBits(i, this.levels);
+    // Precomputed twiddle factors, one contiguous run per stage at
+    // offset half-1 (halves are 1, 2, 4, ... so runs pack exactly into
+    // size-1 slots).  Same Math.cos/sin arguments the loop used to
+    // evaluate per butterfly - bit-identical output, but the ~n*log2(n)
+    // trig calls per frame drop to zero.  Float64Array keeps the full
+    // double precision the inline computation had.
+    this.cosTable = new Float64Array(size - 1);
+    this.sinTable = new Float64Array(size - 1);
+    for (let s = 2; s <= size; s <<= 1) {
+      const half = s >> 1;
+      const step = -2 * Math.PI / s;
+      for (let j = 0; j < half; j++) {
+        this.cosTable[half - 1 + j] = Math.cos(step * j);
+        this.sinTable[half - 1 + j] = Math.sin(step * j);
+      }
+    }
   }
 
   forward(re, im) {
@@ -703,14 +740,15 @@ class FFT {
         t = im[i]; im[i] = im[j]; im[j] = t;
       }
     }
+    const cosTable = this.cosTable;
+    const sinTable = this.sinTable;
     for (let size = 2; size <= n; size <<= 1) {
       const half = size >> 1;
-      const step = -2 * Math.PI / size;
+      const tbl = half - 1;
       for (let i = 0; i < n; i += size) {
         for (let j = 0; j < half; j++) {
-          const angle = step * j;
-          const wr = Math.cos(angle);
-          const wi = Math.sin(angle);
+          const wr = cosTable[tbl + j];
+          const wi = sinTable[tbl + j];
           const even = i + j;
           const odd = even + half;
           const tr = wr * re[odd] - wi * im[odd];
