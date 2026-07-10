@@ -1,16 +1,7 @@
 {
-  "format": "vs-wake-word-ctc-v1",
   "name": "alexa",
-  "model": {
-    "architecture": "ctc",
-    "backbone": "tcresnet",
-    "conv_channels": [
-      20,
-      40,
-      60,
-      60
-    ]
-  },
+  "format": "vs-wake-word-ctc-v1",
+  "recommended_threshold": 0.5,
   "input": {
     "name": "input",
     "shape": [
@@ -46,6 +37,16 @@
     "frame_samples": 400,
     "hop_samples": 160,
     "frames": 128
+  },
+  "model": {
+    "architecture": "ctc",
+    "backbone": "tcresnet",
+    "conv_channels": [
+      20,
+      40,
+      60,
+      60
+    ]
   },
   "ctc": {
     "vocab_size": 52,
@@ -121,6 +122,14 @@
         10,
         29,
         38
+      ],
+      [
+        6,
+        30,
+        8,
+        29,
+        38,
+        12
       ]
     ],
     "wake_word_target_phonemes": [
@@ -138,6 +147,14 @@
         "ɛ",
         "k",
         "s"
+      ],
+      [
+        "ɐ",
+        "l",
+        "æ",
+        "k",
+        "s",
+        "ə"
       ]
     ],
     "max_edit_distance": 1,
@@ -145,10 +162,12 @@
     "min_matched_confidence": 3.2,
     "target_max_edit_distance": [
       1,
+      0,
       0
     ],
     "target_min_matched_confidence": [
       4.5,
+      6.5,
       6.5
     ],
     "wake_word_target_anchors": [
@@ -158,6 +177,10 @@
       ],
       [
         2
+      ],
+      [
+        2,
+        5
       ]
     ]
   },
@@ -166,11 +189,11 @@
     "cooldown_ms": 2000,
     "target_required_hits": [
       2,
+      1,
       1
     ],
     "hit_mode": "consecutive",
     "high_confidence_bypass": 8.2,
     "high_confidence_bypass_min_hits": 1
-  },
-  "recommended_threshold": 0.5
+  }
 }
