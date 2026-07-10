@@ -24,7 +24,7 @@ function resolveConfigDir() {
   if (process.env.HA_DEPLOY_TARGET) candidates.push(process.env.HA_DEPLOY_TARGET);
   if (process.platform === 'win32') candidates.push('\\\\hassio\\config');
   else if (process.platform === 'darwin') candidates.push('/Volumes/hassio');
-  else candidates.push('/mnt/hassio');
+  else candidates.push('/mnt/hassio/config');
 
   for (const base of candidates) {
     if (fs.existsSync(path.join(base, 'configuration.yaml'))) return base;
@@ -39,7 +39,7 @@ if (!configDir) {
   console.error(
     'deploy-ha: Home Assistant config share not found. Mount it '
     + '(\\\\hassio\\config on Windows, /Volumes/hassio on macOS, '
-    + '/mnt/hassio on Linux) or set HA_DEPLOY_TARGET to the HA config '
+    + '/mnt/hassio/config on Linux) or set HA_DEPLOY_TARGET to the HA config '
     + 'directory.',
   );
   process.exit(1);
