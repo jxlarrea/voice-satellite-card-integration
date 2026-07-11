@@ -326,13 +326,6 @@ export class AudioManager {
     }
   }
 
-  pause() {
-    this.stopSending();
-    this._mediaStream?.getAudioTracks().forEach((track) => {
-      track.enabled = false;
-    });
-  }
-
   async resume() {
     // Discard stale audio accumulated during the hidden period - the worklet
     // may have kept running (producing silence) while the tab was in the
