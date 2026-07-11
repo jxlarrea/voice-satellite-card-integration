@@ -23,7 +23,7 @@ function resolveConfigDir() {
   const candidates = [];
   if (process.env.HA_DEPLOY_TARGET) candidates.push(process.env.HA_DEPLOY_TARGET);
   if (process.platform === 'win32') candidates.push('\\\\hassio\\config');
-  else if (process.platform === 'darwin') candidates.push('/Volumes/hassio');
+  else if (process.platform === 'darwin') candidates.push('/Volumes/hassio/config');
   else candidates.push('/mnt/hassio/config');
 
   for (const base of candidates) {
