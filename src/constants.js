@@ -136,6 +136,7 @@ export const DEFAULT_CONFIG = {
   screensaver_clock_seconds: false,
   screensaver_clock_show_date: true,
   screensaver_clock_scale: 100, // percent, 50-300
+  screensaver_clock_color: [250, 250, 250], // [r,g,b]; date line renders darker
 
   // Kiosk browser integration — only effective inside Fully Kiosk
   // (Android) or Kiosker Pro (iOS) with the JS integration enabled.

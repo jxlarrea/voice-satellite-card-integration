@@ -86,6 +86,7 @@ export class ScreensaverManager {
     this._clockSeconds = false;
     this._clockShowDate = true;
     this._clockScale = 100;
+    this._clockColor = '250,250,250';
     this._clockTimer = null;
     this._clockTimeEl = null;
     this._clockDateEl = null;
@@ -153,6 +154,17 @@ export class ScreensaverManager {
     // (zoom, chrome, kiosk viewport settings), so this per-browser
     // knob lets users equalize the apparent size across tablets.
     const newClockScale = Math.min(300, Math.max(50, parseInt(cfg.screensaver_clock_scale, 10) || 100));
+    // Clock text color, an [r,g,b] array from the HA color picker.
+    // Normalized to an "r,g,b" string so the change comparison below
+    // stays a plain !== (a fresh array every read would never match).
+    let newClockColor = '250,250,250';
+    if (Array.isArray(cfg.screensaver_clock_color) && cfg.screensaver_clock_color.length === 3) {
+      const rgb = cfg.screensaver_clock_color.map((c) => {
+        const n = Math.round(Number(c));
+        return Number.isFinite(n) ? Math.min(255, Math.max(0, n)) : null;
+      });
+      if (!rgb.includes(null)) newClockColor = rgb.join(',');
+    }
     const newSuppressExternal = cfg.screensaver_suppress_external || '';
 
     const settingsChanged =
@@ -168,7 +180,8 @@ export class ScreensaverManager {
       newClock24h !== this._clock24h ||
       newClockSeconds !== this._clockSeconds ||
       newClockShowDate !== this._clockShowDate ||
-      newClockScale !== this._clockScale;
+      newClockScale !== this._clockScale ||
+      newClockColor !== this._clockColor;
 
     this._suppressExternal = newSuppressExternal;
 
@@ -189,6 +202,7 @@ export class ScreensaverManager {
     this._clockSeconds = newClockSeconds;
     this._clockShowDate = newClockShowDate;
     this._clockScale = newClockScale;
+    this._clockColor = newClockColor;
 
     this._log.log('screensaver', `Settings: enabled=${newEnabled}, timer=${newTimer}s, type=${newType}`);
 
@@ -453,9 +467,15 @@ export class ScreensaverManager {
     ].join(';');
 
     const scale = this._clockScale / 100;
+    // Date line: same hue as the time, darkened.  0.65 matches the
+    // old rgba(255,255,255,0.65)-on-black look for the default color.
+    const dateColor = this._clockColor
+      .split(',')
+      .map((c) => Math.round(Number(c) * 0.65))
+      .join(',');
     const timeEl = document.createElement('div');
     timeEl.style.cssText = [
-      'color:#fafafa',
+      `color:rgb(${this._clockColor})`,
       'font-weight:300',
       'letter-spacing:0.02em',
       'line-height:1',
@@ -467,7 +487,7 @@ export class ScreensaverManager {
     if (this._clockShowDate) {
       const dateEl = document.createElement('div');
       dateEl.style.cssText = [
-        'color:rgba(255,255,255,0.65)',
+        `color:rgb(${dateColor})`,
         'font-weight:400',
         `font-size:calc(min(5vw, 7vh) * ${scale})`,
       ].join(';');

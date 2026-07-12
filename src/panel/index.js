@@ -699,6 +699,35 @@ class VoiceSatellitePanel extends HTMLElement {
           : 'none';
     }
 
+    // Clock color row - only shown when enabled AND type='clock'.
+    // Custom row (not part of the ha-form) so the swatch can sit
+    // square next to its label instead of stretching full-width.
+    const colorRow = this.querySelector(`.${P}-ss-clock-color`);
+    if (colorRow) {
+      const colorVisible =
+        this._config.screensaver_enabled === true &&
+        this._config.screensaver_type === 'clock';
+      colorRow.style.display = colorVisible ? 'flex' : 'none';
+      if (colorVisible) this._syncClockColorInput();
+    }
+  }
+
+  _syncClockColorInput() {
+    const input = this.querySelector(`.${P}-ss-clock-color-input`);
+    if (!input) return;
+    const raw = this._config.screensaver_clock_color;
+    const rgb = Array.isArray(raw) && raw.length === 3
+      ? raw.map((c) => Math.min(255, Math.max(0, Math.round(Number(c) || 0))))
+      : [250, 250, 250];
+    const hex = `#${rgb.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+    if (input.value !== hex) input.value = hex;
+  }
+
+  _onClockColorInput(hex) {
+    const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
+    if (!m) return;
+    const rgb = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+    this._onSettingsChange({ screensaver_clock_color: rgb });
   }
 
   _renderScreensaverMediaCurrent() {
@@ -990,6 +1019,36 @@ class VoiceSatellitePanel extends HTMLElement {
           font-size: 14px;
           color: var(--primary-text-color, #fff);
         }
+        .${P}-ss-clock-color {
+          align-items: center;
+          gap: 12px;
+          margin-top: 16px;
+        }
+        .${P}-ss-clock-color-text { flex: 1; min-width: 0; }
+        .${P}-ss-clock-color-label {
+          font-size: 14px;
+          color: var(--primary-text-color, #fff);
+        }
+        .${P}-ss-clock-color-hint {
+          font-size: 0.75rem;
+          line-height: 1rem;
+          letter-spacing: 0.03333em;
+          color: var(--secondary-text-color, #999);
+          margin-top: 2px;
+        }
+        .${P}-ss-clock-color-input {
+          flex-shrink: 0;
+          width: 40px;
+          height: 40px;
+          padding: 0;
+          border: 1px solid var(--divider-color, #444);
+          border-radius: 8px;
+          background: none;
+          cursor: pointer;
+        }
+        .${P}-ss-clock-color-input::-webkit-color-swatch-wrapper { padding: 3px; }
+        .${P}-ss-clock-color-input::-webkit-color-swatch { border: none; border-radius: 5px; }
+        .${P}-ss-clock-color-input::-moz-color-swatch { border: none; border-radius: 5px; }
         .${P}-ss-media-row {
           display: flex;
           align-items: center;
@@ -1655,6 +1714,13 @@ class VoiceSatellitePanel extends HTMLElement {
           </div>
         </div>
         <div class="${P}-ss-post-container"></div>
+        <div class="${P}-ss-clock-color" style="display: none;">
+          <div class="${P}-ss-clock-color-text">
+            <div class="${P}-ss-clock-color-label">Clock color</div>
+            <div class="${P}-ss-clock-color-hint">The date line uses a darker shade of the same color.</div>
+          </div>
+          <input type="color" class="${P}-ss-clock-color-input" />
+        </div>
         <div class="${P}-ss-website-hint" style="display: none;">
           The URL must allow iframe embedding; sites with strict X-Frame-Options or frame-ancestors rules won't load. Touch input is suppressed so a tap anywhere dismisses the screensaver.
         </div>
@@ -3043,6 +3109,11 @@ class VoiceSatellitePanel extends HTMLElement {
     // Media Browse button (native HTML, no shadow DOM hack)
     const browseBtn = this.querySelector(`.${P}-ss-browse-btn`);
     if (browseBtn) browseBtn.addEventListener('click', () => this._openMediaPicker());
+
+    const clockColorInput = this.querySelector(`.${P}-ss-clock-color-input`);
+    if (clockColorInput) {
+      clockColorInput.addEventListener('input', (e) => this._onClockColorInput(e.target.value));
+    }
 
     this._updateScreensaverMediaVisibility();
   }

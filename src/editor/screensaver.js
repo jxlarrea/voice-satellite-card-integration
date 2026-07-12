@@ -88,6 +88,10 @@ export function buildScreensaverPostSchema(cfg) {
         default: 100,
         selector: { number: { min: 50, max: 300, step: 10, mode: 'slider', unit_of_measurement: '%' } },
       },
+      // Clock color is deliberately NOT part of this schema: ha-form
+      // stretches the color_rgb selector to the full form width. It is
+      // rendered as a custom label + square swatch row in the panel
+      // instead (like the Media Browse widget).
     );
   }
   return fields;
