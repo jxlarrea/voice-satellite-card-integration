@@ -46,6 +46,42 @@ if (!configDir) {
 }
 
 const dst = path.join(configDir, 'custom_components', 'voice_satellite');
+
+/**
+ * An NFS client can hold a stale cached dentry for dst if the directory
+ * was deleted or replaced on the HA side (nlink reads 0 and any mkdir
+ * inside it fails ENOENT).  Poking the path with fresh lookups forces
+ * the client to revalidate the handle.
+ */
+function revalidateStaleDir(dir) {
+  let st;
+  try {
+    st = fs.statSync(dir);
+  } catch {
+    return; // does not exist yet - cpSync will create it
+  }
+  if (st.nlink !== 0) return; // healthy
+
+  console.warn(`deploy-ha: ${dir} looks like a stale NFS handle, revalidating...`);
+  try { fs.rmdirSync(dir); } catch {}
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const probe = path.join(dir, '.deploy-ha-probe');
+  try {
+    fs.writeFileSync(probe, '');
+    fs.unlinkSync(probe);
+  } catch {}
+
+  if (fs.statSync(dir).nlink === 0) {
+    console.error(
+      `deploy-ha: ${dir} is still stale after revalidation. `
+      + 'Remount the share (e.g. sudo umount /mnt/hassio && sudo mount /mnt/hassio) and retry.',
+    );
+    process.exit(1);
+  }
+}
+
+revalidateStaleDir(dst);
+
 let count = 0;
 fs.cpSync(src, dst, {
   recursive: true,
