@@ -1,0 +1,163 @@
+{
+  "format": "vs-wake-word-ctc-v1",
+  "name": "hey_luna",
+  "model": {
+    "architecture": "ctc",
+    "backbone": "tcresnet",
+    "conv_channels": [
+      20,
+      40,
+      60,
+      60
+    ]
+  },
+  "input": {
+    "name": "input",
+    "shape": [
+      1,
+      128,
+      40
+    ],
+    "dtype": "float32",
+    "feature": "log_mel"
+  },
+  "output": {
+    "name": "log_probs",
+    "shape": [
+      1,
+      64,
+      52
+    ],
+    "dtype": "float32",
+    "meaning": "frame_level_phoneme_log_probabilities"
+  },
+  "feature_config": {
+    "sample_rate": 16000,
+    "window_ms": 1300,
+    "frame_ms": 25,
+    "hop_ms": 10,
+    "n_fft": 512,
+    "n_mels": 40,
+    "f_min": 80.0,
+    "f_max": 7600.0,
+    "log_floor": 1e-06,
+    "window_cmn": false,
+    "window_samples": 20800,
+    "frame_samples": 400,
+    "hop_samples": 160,
+    "frames": 128
+  },
+  "ctc": {
+    "vocab_size": 52,
+    "blank_id": 1,
+    "pad_id": 0,
+    "word_sep_id": 2,
+    "inventory": [
+      "<pad>",
+      "<blank>",
+      " ",
+      "ː",
+      "a",
+      "ɑ",
+      "ɐ",
+      "ɔ",
+      "æ",
+      "e",
+      "ɛ",
+      "ɜ",
+      "ə",
+      "ɚ",
+      "i",
+      "ɪ",
+      "ɨ",
+      "ᵻ",
+      "o",
+      "ɒ",
+      "u",
+      "ʊ",
+      "ʌ",
+      "b",
+      "d",
+      "f",
+      "ɡ",
+      "h",
+      "j",
+      "k",
+      "l",
+      "m",
+      "n",
+      "ŋ",
+      "p",
+      "r",
+      "ɹ",
+      "ɾ",
+      "s",
+      "ʃ",
+      "t",
+      "v",
+      "w",
+      "z",
+      "ʒ",
+      "ð",
+      "θ",
+      "ʔ",
+      "tʃ",
+      "dʒ",
+      "x",
+      "ʲ"
+    ],
+    "wake_word_targets": [
+      [
+        27,
+        9,
+        15,
+        2,
+        30,
+        20,
+        3,
+        32,
+        12
+      ]
+    ],
+    "wake_word_target_phonemes": [
+      [
+        "h",
+        "e",
+        "ɪ",
+        " ",
+        "l",
+        "u",
+        "ː",
+        "n",
+        "ə"
+      ]
+    ],
+    "wake_word_target_anchors": [
+      [
+        0,
+        4,
+        7
+      ]
+    ],
+    "max_edit_distance": 1,
+    "wake_word_trail_tolerance": 1,
+    "min_matched_confidence": 8.0,
+    "target_max_edit_distance": [
+      1
+    ],
+    "target_min_matched_confidence": [
+      8.0
+    ]
+  },
+  "runtime": {
+    "required_hits": 1,
+    "hit_mode": "consecutive",
+    "cooldown_ms": 2000,
+    "high_confidence_bypass": 8.2,
+    "high_confidence_bypass_min_hits": 1,
+    "stream_match": true,
+    "stream_buffer_ms": 2500,
+    "stream_lag_frames": 20
+  },
+  "recommended_threshold": 0.5
+}
