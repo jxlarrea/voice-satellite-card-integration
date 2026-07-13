@@ -182,7 +182,7 @@
     ]
   },
   "runtime": {
-    "required_hits": 2,
+    "required_hits": 1,
     "cooldown_ms": 2000,
     "hit_mode": "consecutive",
     "high_confidence_bypass": 8.2,
