@@ -74,6 +74,8 @@ class JsMicroFrontend {
     // 32767 * 2^32 ≈ 2^47. Safe.
     this._filterbankWork = new Float64Array(FEATURE_SIZE + 1);
     this._noiseEstimate = new Uint32Array(FEATURE_SIZE);
+    // Per-window signal scratch (was allocated per 10 ms window).
+    this._signal = new Float64Array(FEATURE_SIZE);
   }
 
   /**
@@ -182,7 +184,7 @@ class JsMicroFrontend {
       unweightAccumulator = 0;
     }
 
-    const signal = new Float64Array(FEATURE_SIZE);
+    const signal = this._signal;
     for (let i = 0; i < FEATURE_SIZE; i++) {
       // C uses a custom integer Sqrt64 with rounding; Math.sqrt rounded to
       // the nearest int matches it for all practical inputs (sum of
@@ -426,8 +428,11 @@ function buildFftPlan(nfftReal) {
   // Temporary buffers for the N/2 complex FFT (shared between stages).
   const tmpR = new Int16Array(ncfft);
   const tmpI = new Int16Array(ncfft);
+  // Complex-input pack scratch for kissFftr (see its comment).
+  const srcR = new Int16Array(ncfft);
+  const srcI = new Int16Array(ncfft);
 
-  return { nfftReal, ncfft, twCos, twSin, stCos, stSin, factors, tmpR, tmpI };
+  return { nfftReal, ncfft, twCos, twSin, stCos, stSin, factors, tmpR, tmpI, srcR, srcI };
 }
 
 // sround(x) = (x + (1<<14)) >> 15 — matches KISS FFT _kiss_fft_guts.h.
@@ -570,9 +575,11 @@ function kissFftr(timedata, outR, outI, plan) {
 
   // Pack real input as complex: cpx[k] = (time[2k], time[2k+1]).
   // tmpR/tmpI start as scratch — we'll overwrite them with the FFT output.
-  // To match C reinterpret_cast, build the complex input first.
-  const srcR = new Int16Array(ncfft);
-  const srcI = new Int16Array(ncfft);
+  // To match C reinterpret_cast, build the complex input first.  The
+  // pack buffers live on the plan: this runs 100x/second and allocating
+  // them per call was measurable GC pressure.
+  const srcR = plan.srcR;
+  const srcI = plan.srcI;
   for (let k = 0; k < ncfft; k++) {
     srcR[k] = timedata[2 * k];
     srcI[k] = timedata[2 * k + 1];

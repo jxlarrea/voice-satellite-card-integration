@@ -879,6 +879,43 @@ function quantizeMultiplier(doubleMultiplier) {
 // This bit-exactly matches what ESPHome's TFLite Micro uses for wake
 // word model inference.
 function multiplyByQuantizedMultiplier(x, multiplier, shift) {
+  // Fast integer-exact path.  When shift <= 0 and |x| < 2^21, the
+  // product x*multiplier plus the rounding nudge stays below 2^53, so
+  // plain Number arithmetic reproduces the BigInt reference below to
+  // the bit: the multiply and add are exact integers, division by 2^31
+  // only changes the exponent, Math.trunc matches BigInt's truncating
+  // division, and the floor-division remainder equals C's two's-
+  // complement `x & mask`.  Real accumulators live far inside this
+  // range; anything outside falls back to the BigInt path, so
+  // exactness holds by construction.  This function runs once per
+  // conv/FC output element - the BigInt version dominated whole-model
+  // CPU profiles.
+  if (shift <= 0 && x > -2097152 && x < 2097152) {
+    const ab = x * multiplier;
+    // Multiplying by the exact double 2^-31 (and 2^shift below) only
+    // changes the floating-point exponent - identical to dividing.
+    const high = Math.trunc((ab + (ab >= 0 ? 1073741824 : -1073741823)) * INV_2_31);
+    if (shift === 0) return high;
+    const rightShift = -shift;
+    const floorDiv = Math.floor(high * POW2_INV[rightShift]);
+    const remainder = high - floorDiv * POW2[rightShift];
+    const threshold = POW2_HALF_MASK[rightShift] + (high < 0 ? 1 : 0);
+    return remainder > threshold ? floorDiv + 1 : floorDiv;
+  }
+  return multiplyByQuantizedMultiplierSlow(x, multiplier, shift);
+}
+
+const INV_2_31 = 1 / 2147483648;
+const POW2 = new Float64Array(32);
+const POW2_INV = new Float64Array(32);
+const POW2_HALF_MASK = new Float64Array(32);
+for (let i = 0; i < 32; i++) {
+  POW2[i] = 2 ** i;
+  POW2_INV[i] = 2 ** -i;
+  POW2_HALF_MASK[i] = Math.floor((2 ** i - 1) / 2);
+}
+
+function multiplyByQuantizedMultiplierSlow(x, multiplier, shift) {
   const leftShift = shift > 0 ? shift : 0;
   const rightShift = shift > 0 ? 0 : -shift;
 
@@ -980,32 +1017,52 @@ function concatTensors(state, op) {
 function stridedSlice(state, op) {
   const input = state.tensors[op.input];
   const output = state.tensors[op.output];
-  const rank = input.meta.shape.length;
+
+  // Shapes are static, so the output→input index mapping never changes:
+  // compute it once per op, then every invoke is either a single block
+  // copy (the common streaming ring-buffer shift is a contiguous slice)
+  // or a flat gather.  The old per-element div/mod index decomposition
+  // was the single hottest function in whole-model CPU profiles.
+  let map = op.gatherMap;
+  if (!map) {
+    map = buildStridedSliceMap(input.meta.shape, output.meta.shape, op);
+    op.gatherMap = map;
+    let contiguous = true;
+    for (let i = 1; i < map.length; i++) {
+      if (map[i] !== map[0] + i) { contiguous = false; break; }
+    }
+    op.gatherContiguous = contiguous;
+    op.gatherStart = map.length > 0 ? map[0] : 0;
+  }
+
+  const inData = input.data;
+  const outData = output.data;
+  if (op.gatherContiguous) {
+    outData.set(inData.subarray(op.gatherStart, op.gatherStart + outData.length));
+    return;
+  }
+  for (let i = 0; i < outData.length; i++) outData[i] = inData[map[i]];
+}
+
+function buildStridedSliceMap(inShape, outShape, op) {
+  const rank = inShape.length;
   const starts = new Array(rank);
-  const stops = new Array(rank);
   const strides = Array.from(op.strides);
 
   for (let i = 0; i < rank; i++) {
-    const dim = input.meta.shape[i];
+    const dim = inShape[i];
     const stride = strides[i];
     let begin = op.begin[i];
-    let end = op.end[i];
-
     if (op.beginMask & (1 << i)) begin = stride > 0 ? 0 : dim - 1;
     else if (begin < 0) begin += dim;
-
-    if (op.endMask & (1 << i)) end = stride > 0 ? dim : -1;
-    else if (end < 0) end += dim;
-
     starts[i] = begin;
-    stops[i] = end;
   }
 
-  const inStrides = stridesForShape(input.meta.shape);
-  const outShape = output.meta.shape;
+  const inStrides = stridesForShape(inShape);
   const outStrides = stridesForShape(outShape);
-
-  for (let outIndex = 0; outIndex < output.data.length; outIndex++) {
+  const total = sizeOf(outShape);
+  const map = new Int32Array(total);
+  for (let outIndex = 0; outIndex < total; outIndex++) {
     let remaining = outIndex;
     let inputFlat = 0;
     for (let dim = 0; dim < rank; dim++) {
@@ -1013,8 +1070,9 @@ function stridedSlice(state, op) {
       remaining %= outStrides[dim];
       inputFlat += (starts[dim] + coord * strides[dim]) * inStrides[dim];
     }
-    output.data[outIndex] = input.data[inputFlat];
+    map[outIndex] = inputFlat;
   }
+  return map;
 }
 
 function splitV(state, op) {
@@ -1048,7 +1106,8 @@ function conv2d(state, op) {
   const [batch, inH, inW, inC] = input.meta.shape;
   const [outC, kernelH, kernelW, filterC] = op.weights.shape;
   const [, outH, outW] = output.meta.shape;
-  const pad = computePadding(op.padding, inH, inW, kernelH, kernelW, op.strideH, op.strideW, op.dilationH, op.dilationW, outH, outW);
+  const pad = op.padCache
+    || (op.padCache = computePadding(op.padding, inH, inW, kernelH, kernelW, op.strideH, op.strideW, op.dilationH, op.dilationW, outH, outW));
   const weights = op.weights.values;
   const { multipliers, shifts } = op.perChannelMultipliers;
   const inputOffset = op.inputOffset;
@@ -1057,26 +1116,67 @@ function conv2d(state, op) {
   const outMin = op.outputType === TENSOR_TYPE_INT8 ? -128 : 0;
   const outMax = op.outputType === TENSOR_TYPE_INT8 ? 127 : 255;
 
+  // Offset-added input, computed once per invoke instead of once per MAC
+  // (the input tensor is re-read outC times).  Int16Array holds
+  // int8 + offset exactly.  Scratch is cached on the op - shapes are
+  // static and the worker is single-threaded.
+  const inSize = batch * inH * inW * inC;
+  let inOff = op.convInScratch;
+  if (!inOff || inOff.length < inSize) {
+    inOff = new Int16Array(inSize);
+    op.convInScratch = inOff;
+  }
+  for (let i = 0; i < inSize; i++) inOff[i] = input.data[i] + inputOffset;
+
+  // Dense (kernelH*kernelW*filterC) patch per output position, reused
+  // across all output channels so each weight row is a straight dot
+  // product over two contiguous arrays.  Out-of-bounds taps contribute
+  // exactly 0 either way, so zero-filling them is bit-identical to the
+  // reference's skip.
+  const patchLen = kernelH * kernelW * filterC;
+  let patch = op.convPatchScratch;
+  if (!patch || patch.length < patchLen) {
+    patch = new Int16Array(patchLen);
+    op.convPatchScratch = patch;
+  }
+
   let outIndex = 0;
   for (let n = 0; n < batch; n++) {
     for (let oh = 0; oh < outH; oh++) {
       for (let ow = 0; ow < outW; ow++) {
+        for (let kh = 0; kh < kernelH; kh++) {
+          const inY = oh * op.strideH + kh * op.dilationH - pad.top;
+          const rowBase = kh * kernelW * filterC;
+          if (inY < 0 || inY >= inH) {
+            patch.fill(0, rowBase, rowBase + kernelW * filterC);
+            continue;
+          }
+          for (let kw = 0; kw < kernelW; kw++) {
+            const inX = ow * op.strideW + kw * op.dilationW - pad.left;
+            const dst = rowBase + kw * filterC;
+            if (inX < 0 || inX >= inW) {
+              patch.fill(0, dst, dst + filterC);
+              continue;
+            }
+            const inputBase = (((n * inH + inY) * inW + inX) * inC);
+            for (let ic = 0; ic < filterC; ic++) patch[dst + ic] = inOff[inputBase + ic];
+          }
+        }
         for (let oc = 0; oc < outC; oc++) {
           // int32 accumulator — starts at 0.  Weight zero point is 0 for
           // per-channel symmetric quantization, so filter_val is used raw.
           let acc = 0;
-          for (let kh = 0; kh < kernelH; kh++) {
-            const inY = oh * op.strideH + kh * op.dilationH - pad.top;
-            if (inY < 0 || inY >= inH) continue;
-            for (let kw = 0; kw < kernelW; kw++) {
-              const inX = ow * op.strideW + kw * op.dilationW - pad.left;
-              if (inX < 0 || inX >= inW) continue;
-              const inputBase = (((n * inH + inY) * inW + inX) * inC);
-              const weightBase = (((oc * kernelH + kh) * kernelW + kw) * filterC);
-              for (let ic = 0; ic < filterC; ic++) {
-                acc += weights[weightBase + ic] * (input.data[inputBase + ic] + inputOffset);
-              }
-            }
+          const weightBase = oc * patchLen;
+          const unrolled = patchLen & ~3;
+          let i = 0;
+          for (; i < unrolled; i += 4) {
+            acc += weights[weightBase + i] * patch[i]
+              + weights[weightBase + i + 1] * patch[i + 1]
+              + weights[weightBase + i + 2] * patch[i + 2]
+              + weights[weightBase + i + 3] * patch[i + 3];
+          }
+          for (; i < patchLen; i++) {
+            acc += weights[weightBase + i] * patch[i];
           }
           if (op.bias) acc += op.bias[oc];
           acc = multiplyByQuantizedMultiplier(acc, multipliers[oc], shifts[oc]);
@@ -1099,7 +1199,8 @@ function depthwiseConv2d(state, op) {
   const [batch, inH, inW, inC] = input.meta.shape;
   const [, kernelH, kernelW, outC] = op.weights.shape;
   const [, outH, outW] = output.meta.shape;
-  const pad = computePadding(op.padding, inH, inW, kernelH, kernelW, op.strideH, op.strideW, op.dilationH, op.dilationW, outH, outW);
+  const pad = op.padCache
+    || (op.padCache = computePadding(op.padding, inH, inW, kernelH, kernelW, op.strideH, op.strideW, op.dilationH, op.dilationW, outH, outW));
   const channelsPerInput = op.depthMultiplier;
   const weights = op.weights.values;
   const { multipliers, shifts } = op.perChannelMultipliers;
@@ -1109,24 +1210,54 @@ function depthwiseConv2d(state, op) {
   const outMin = op.outputType === TENSOR_TYPE_INT8 ? -128 : 0;
   const outMax = op.outputType === TENSOR_TYPE_INT8 ? 127 : 255;
 
+  // Offset-added input, once per invoke (see conv2d).
+  const inSize = batch * inH * inW * inC;
+  let inOff = op.convInScratch;
+  if (!inOff || inOff.length < inSize) {
+    inOff = new Int16Array(inSize);
+    op.convInScratch = inOff;
+  }
+  for (let i = 0; i < inSize; i++) inOff[i] = input.data[i] + inputOffset;
+
+  // Per-position accumulator array: iterate (kh, kw) once per output
+  // position and sweep all channels in the inner loop, where both the
+  // weight row and (for depth_multiplier == 1, the usual case) the
+  // input row are contiguous.  The per-channel add order (kh ascending,
+  // kw ascending) is unchanged, so the integer accumulators match the
+  // reference exactly.
+  let accs = op.dwAccScratch;
+  if (!accs || accs.length < outC) {
+    accs = new Int32Array(outC);
+    op.dwAccScratch = accs;
+  }
+
   let outIndex = 0;
   for (let n = 0; n < batch; n++) {
     for (let oh = 0; oh < outH; oh++) {
       for (let ow = 0; ow < outW; ow++) {
-        for (let oc = 0; oc < outC; oc++) {
-          const ic = Math.floor(oc / channelsPerInput);
-          let acc = 0;
-          for (let kh = 0; kh < kernelH; kh++) {
-            const inY = oh * op.strideH + kh * op.dilationH - pad.top;
-            if (inY < 0 || inY >= inH) continue;
-            for (let kw = 0; kw < kernelW; kw++) {
-              const inX = ow * op.strideW + kw * op.dilationW - pad.left;
-              if (inX < 0 || inX >= inW) continue;
-              const inputIdx = (((n * inH + inY) * inW + inX) * inC) + ic;
-              const weightIdx = (((kh * kernelW + kw) * outC) + oc);
-              acc += weights[weightIdx] * (input.data[inputIdx] + inputOffset);
+        accs.fill(0, 0, outC);
+        for (let kh = 0; kh < kernelH; kh++) {
+          const inY = oh * op.strideH + kh * op.dilationH - pad.top;
+          if (inY < 0 || inY >= inH) continue;
+          for (let kw = 0; kw < kernelW; kw++) {
+            const inX = ow * op.strideW + kw * op.dilationW - pad.left;
+            if (inX < 0 || inX >= inW) continue;
+            const inputBase = (((n * inH + inY) * inW + inX) * inC);
+            const weightBase = (kh * kernelW + kw) * outC;
+            if (channelsPerInput === 1) {
+              for (let oc = 0; oc < outC; oc++) {
+                accs[oc] += weights[weightBase + oc] * inOff[inputBase + oc];
+              }
+            } else {
+              for (let oc = 0; oc < outC; oc++) {
+                accs[oc] += weights[weightBase + oc]
+                  * inOff[inputBase + Math.floor(oc / channelsPerInput)];
+              }
             }
           }
+        }
+        for (let oc = 0; oc < outC; oc++) {
+          let acc = accs[oc];
           if (op.bias) acc += op.bias[oc];
           acc = multiplyByQuantizedMultiplier(acc, multipliers[oc], shifts[oc]);
           acc += outputOffset;
@@ -1156,11 +1287,18 @@ function fullyConnected(state, op) {
   const outMin = op.outputType === TENSOR_TYPE_INT8 ? -128 : 0;
   const outMax = op.outputType === TENSOR_TYPE_INT8 ? 127 : 255;
 
+  let inOff = op.convInScratch;
+  if (!inOff || inOff.length < inCount) {
+    inOff = new Int16Array(inCount);
+    op.convInScratch = inOff;
+  }
+  for (let i = 0; i < inCount; i++) inOff[i] = inVec[i] + inputOffset;
+
   for (let oc = 0; oc < outCount; oc++) {
     let acc = 0;
     const base = oc * inCount;
     for (let ic = 0; ic < inCount; ic++) {
-      acc += weights[base + ic] * (inVec[ic] + inputOffset);
+      acc += weights[base + ic] * inOff[ic];
     }
     if (op.bias) acc += op.bias[oc];
     acc = multiplyByQuantizedMultiplier(acc, multipliers[oc], shifts[oc]);
