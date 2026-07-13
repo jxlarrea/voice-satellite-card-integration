@@ -86,7 +86,7 @@ A browser overlay that kicks in after an idle timeout. Configured per-browser in
 | **Clock color** *(Digital clock type only)* | Color of the time text, picked via a color swatch next to the label. The date line uses a darker shade of the same color. Defaults to the original near-white |
 | **External screensaver** *(screensaver disabled only)* | A `switch` or `input_boolean` that's forced off for the duration of each voice interaction, then left alone so its owner (typically Fully Kiosk) can resume its own idle timer. Useful to keep Fully Kiosk's screensaver from covering the voice UI mid-conversation |
 | **Kiosk Browser Integration -> Screen brightness while active** | Hardware backlight level (0-100%) while the screensaver is showing. Works in Fully Kiosk (Android) and Kiosker Pro (iOS) with the JavaScript integration enabled. The previous brightness is restored on dismiss. 0% = fully dark, 100% = leave the backlight untouched (default) |
-| **Kiosk Browser Integration -> Dismiss on motion** | Dismiss the screensaver when Fully Kiosk's camera-based motion detection fires. Fully Kiosk only (Kiosker Pro has no motion API). Requires Motion Detection to be enabled in the Fully Kiosk settings. Default off |
+| **Kiosk Browser Integration -> Dismiss on motion** | Treat Fully Kiosk's camera-based motion detection as activity: motion dismisses the screensaver and also resets the idle timer, so the screensaver won't activate while someone is moving in front of the camera. Fully Kiosk only (Kiosker Pro has no motion API). Requires Motion Detection to be enabled in the Fully Kiosk settings. Default off |
 
 ## Mini Card
 

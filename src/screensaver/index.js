@@ -834,9 +834,18 @@ export class ScreensaverManager {
     // Motion detection is Fully-Kiosk-only; Kiosker exposes no motion
     // event, so this is a no-op there.
     if (this._fkMotionBound || !kiosk.supportsMotion()) return;
+    // Motion counts as activity in both states: it dismisses an active
+    // screensaver AND defers activation while someone is moving in
+    // front of the camera - otherwise the idle timer expires mid-motion
+    // and the screensaver flashes for a second before the next motion
+    // event dismisses it again (#93).
     window.__vsOnFkMotion = () => {
-      if (!this._active) return;
-      this._log.log('screensaver', 'FK motion detected -- dismissing');
+      this._log.log(
+        'screensaver',
+        this._active
+          ? 'FK motion detected -- dismissing'
+          : 'FK motion detected -- resetting idle timer',
+      );
       this.notifyActivity();
     };
     if (kiosk.bindMotion('__vsOnFkMotion')) {
