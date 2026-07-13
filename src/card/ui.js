@@ -491,6 +491,26 @@ export class UIManager {
   }
 
   /**
+   * Dim all frozen indicator lines (idle thinking dots and tool-call
+   * lines) from earlier turns so only the newest indicator looks
+   * active.  Inline styles so the fade applies uniformly on all skins.
+   */
+  dimFrozenThinking() {
+    if (!this._globalUI) return;
+    const frozen = this._globalUI.querySelectorAll(
+      '.vs-chat-msg.thinking.idle, .vs-chat-msg.tool-call',
+    );
+    for (const el of frozen) {
+      // The bubble entry animation (vs-fade-in ... forwards) holds
+      // opacity:1 via its fill and would override the inline value
+      // below - clear it first (it finished long ago anyway).
+      el.style.animation = 'none';
+      el.style.transition = 'opacity 400ms ease';
+      el.style.opacity = '0.4';
+    }
+  }
+
+  /**
    * Freeze an animated thinking indicator and append a tool name beside the dots.
    * @param {HTMLElement} el - The thinking indicator element
    * @param {string} name - Humanized tool name

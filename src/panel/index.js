@@ -23,6 +23,7 @@ import { DEFAULT_CONFIG, State, VERSION } from '../constants.js';
 import { renderPreview } from '../editor/preview.js';
 import {
   behaviorSchema, entitySchema, buildAutoStartSchema, microphoneSchema, debugSchema, buildTimersSchema,
+  conversationDisplaySchema,
   behaviorLabels, behaviorHelpers,
 } from '../editor/behavior.js';
 import { skinSchema, skinLabels, skinHelpers } from '../editor/skin.js';
@@ -72,6 +73,7 @@ function buildPanelSchema(_cfg) {
   return [
     ...behaviorSchema,
     ...skinSchema,
+    ...conversationDisplaySchema,
     ...buildTimersSchema(_cfg),
     ...microphoneSchema,
     ...debugSchema,

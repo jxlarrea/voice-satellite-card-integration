@@ -104,6 +104,13 @@ export const DEFAULT_CONFIG = {
   // starts, so users can say "hey vesta turn off the lights" in one run.
   seamless_wake_command: false,
 
+  // Conversation display - which chat elements render on screen.
+  // Hiding them changes nothing about the pipeline, TTS, or tools;
+  // only the on-screen text is suppressed (voice-only immersion).
+  chat_show_user_command: true,
+  chat_show_assistant_response: true,
+  chat_show_tool_usage: true,
+
   // Timers
   hide_timer_pills: false,
   hide_timer_name_on_alert: false,

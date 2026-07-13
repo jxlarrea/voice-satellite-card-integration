@@ -29,6 +29,17 @@ export class ChatManager {
   get streamedResponse() { return this._streamedResponse; }
   set streamedResponse(val) { this._streamedResponse = val; }
 
+  /**
+   * Per-browser display toggle (panel "Conversation Display" section).
+   * Only an explicit `false` hides an element, so configs saved before
+   * the toggles existed keep the show-everything behavior.  Hiding only
+   * suppresses the on-screen text; streaming state, TTS, and tool
+   * execution are unaffected.
+   */
+  _shows(key) {
+    return (this._card.config || {})[key] !== false;
+  }
+
   showTranscription(text) {
     this.addUser(text);
   }
@@ -50,6 +61,7 @@ export class ChatManager {
     }
   }
   addUser(text) {
+    if (!this._shows('chat_show_user_command')) return;
     this._card.ui.addChatMessage(text, 'user');
   }
 
@@ -70,6 +82,19 @@ export class ChatManager {
   }
 
   addAssistant(text) {
+    // With the response hidden there is no bubble to take the dots'
+    // place, so removing them reflows the chat and makes the earlier
+    // bubbles jump.  Freeze them in place instead (same 'idle' state
+    // tool-call lines use); clear() sweeps them with the rest of the
+    // conversation.  _streamEl stays null so the streaming paths
+    // (showResponse/updateResponse) fall through here and no-op.
+    if (!this._shows('chat_show_assistant_response')) {
+      if (this._thinkingEl) {
+        this._thinkingEl.classList.add('idle');
+        this._thinkingEl = null;
+      }
+      return;
+    }
     // Remove animated dots if no tool call claimed them.
     // Frozen dots (from tool calls) are safe - showToolCall already nulled _thinkingEl.
     this.removeThinking();
@@ -82,6 +107,15 @@ export class ChatManager {
   /** Show an animated thinking indicator in the chat area. */
   showThinking() {
     this.removeThinking();
+    // A new turn is starting: dim every frozen indicator line from
+    // earlier turns (plain frozen dots and tool-call lines alike) so
+    // only the new animated dots look active.
+    this._card.ui.dimFrozenThinking?.();
+    // Deliberately not gated: the dots show regardless of the display
+    // toggles.  With tool usage hidden they simply keep animating
+    // through tool calls (showToolCall no-ops instead of freezing
+    // them) until the response arrives and removeThinking() clears
+    // them.
     this._thinkingEl = this._card.ui.addThinkingIndicator();
   }
 
@@ -92,6 +126,7 @@ export class ChatManager {
    * @param {string} name - Humanized tool name
    */
   showToolCall(name) {
+    if (!this._shows('chat_show_tool_usage')) return;
     if (this._thinkingEl) {
       this._card.ui.freezeThinkingWithText(this._thinkingEl, name);
       this._thinkingEl = null;

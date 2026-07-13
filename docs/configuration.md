@@ -57,6 +57,9 @@ Per-satellite browser profile for overlay appearance, microphone processing, tim
 | **Reactive activity bar** | Bar animates in response to mic and audio levels. Disable on slow devices |
 | **Reactive bar update interval** | Controls animation smoothness (default 33ms / ~30fps) |
 | **Custom CSS** | Advanced CSS overrides applied on top of the selected skin |
+| **Show user command** *(Conversation Display)* | Show the transcribed voice command on screen, confirming your speech was recognized correctly. Default on |
+| **Show assistant response** *(Conversation Display)* | Show the assistant's response text as it streams in. Turn off for a voice-only, immersive experience: TTS playback and visual results (images, weather, stocks) are unaffected |
+| **Show tool usage** *(Conversation Display)* | Show "using tool" status lines while the assistant works. The animated thinking indicator is always shown regardless of this toggle |
 | **Hide on-screen countdown** *(Timers)* | Suppresses the countdown pill while a timer is running. The timer still fires and the alert still plays at zero |
 | **Hide timer name on alert** *(Timers)* | Hides the timer name shown below the alert when a timer finishes |
 | **Speak timer alert phrase** *(Timers)* | Adds a configurable spoken phrase after every two alert chimes. The next chime pair starts shortly after the phrase ends. Uses the same Assist pipeline that created the timer |

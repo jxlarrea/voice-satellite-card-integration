@@ -619,6 +619,7 @@ export class MiniUIManager {
   // Thinking indicator - no-op in mini mode (dots/tool names are full-card only)
   addThinkingIndicator() { return null; }
   freezeThinkingWithText() {}
+  dimFrozenThinking() {}
   addToolCallMessage() { return null; }
 
   // Compatibility surface with the full UIManager. Mini mode has no media panel/lightbox.

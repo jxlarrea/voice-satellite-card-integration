@@ -136,11 +136,30 @@ export function buildTimersSchema(cfg) {
 
 export const timersSchema = buildTimersSchema();
 
+/** Which chat elements render on screen. Panel-only (per-browser),
+ *  like the screensaver settings - not part of the card editor. */
+export const conversationDisplaySchema = [
+  {
+    type: 'expandable',
+    name: '',
+    title: t(null, 'editor.behavior.conversation_display', 'Conversation Display'),
+    flatten: true,
+    schema: [
+      { name: 'chat_show_user_command', default: true, selector: { boolean: {} } },
+      { name: 'chat_show_assistant_response', default: true, selector: { boolean: {} } },
+      { name: 'chat_show_tool_usage', default: true, selector: { boolean: {} } },
+    ],
+  },
+];
+
 export const behaviorLabels = {
   satellite_entity: t(null, 'editor.behavior.satellite_entity', 'Satellite entity'),
   auto_start: t(null, 'editor.behavior.auto_start', 'Auto start'),
   microphone_device_id: t(null, 'editor.behavior.microphone_device_id', 'Microphone'),
   debug: t(null, 'editor.behavior.debug', 'Debug logging'),
+  chat_show_user_command: t(null, 'editor.behavior.chat_show_user_command', 'Show user command'),
+  chat_show_assistant_response: t(null, 'editor.behavior.chat_show_assistant_response', 'Show assistant response'),
+  chat_show_tool_usage: t(null, 'editor.behavior.chat_show_tool_usage', 'Show tool usage'),
   hide_timer_pills: t(null, 'editor.behavior.hide_timer_pills', 'Hide on-screen countdown'),
   show_timer_name_in_pill: t(null, 'editor.behavior.show_timer_name_in_pill', 'Show timer name inside pill'),
   hide_timer_name_on_alert: t(null, 'editor.behavior.hide_timer_name_on_alert', 'Hide timer name on alert'),
@@ -169,6 +188,9 @@ export const behaviorHelpers = {
   wake_word_voice_isolation: t(null, 'editor.behavior.helper_voice_isolation', 'AI-based voice isolation, currently only available in Chrome'),
   stt_voice_isolation: t(null, 'editor.behavior.helper_voice_isolation', 'AI-based voice isolation, currently only available in Chrome'),
   seamless_wake_command: t(null, 'editor.behavior.helper_seamless_wake_command', 'Experimental and off by default. Lets one-shot phrases like "hey vesta turn off the lights" flow directly into STT. Skips the wake chime for that turn; results can vary by microphone, room acoustics, and STT engine.'),
+  chat_show_user_command: t(null, 'editor.behavior.helper_chat_show_user_command', 'Show the transcribed voice command on screen, confirming your speech was recognized correctly.'),
+  chat_show_assistant_response: t(null, 'editor.behavior.helper_chat_show_assistant_response', 'Show the assistant response text as it streams in. Turn off for a voice-only experience - TTS and visual results (images, weather, etc.) are unaffected.'),
+  chat_show_tool_usage: t(null, 'editor.behavior.helper_chat_show_tool_usage', 'Show "using tool" status lines while the assistant works. The animated thinking indicator always shows regardless.'),
   hide_timer_pills: t(null, 'editor.behavior.helper_hide_timer_pills', 'Hide the countdown pill on screen. Timers still run and the alert still fires when they finish.'),
   show_timer_name_in_pill: t(null, 'editor.behavior.helper_show_timer_name_in_pill', 'Display the timer name alongside the countdown in the pill (e.g. "Stir the sauce | 15:30"). Names longer than 25 characters are truncated.'),
   hide_timer_name_on_alert: t(null, 'editor.behavior.helper_hide_timer_name_on_alert', 'When a timer finishes, hide the timer name shown below the alert.'),
