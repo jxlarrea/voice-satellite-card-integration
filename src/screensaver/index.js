@@ -52,10 +52,13 @@ function getCameraEntityFromMediaId(id) {
   return m ? m[1] : null;
 }
 
-/** Shared styles for media elements (image/video/camera) in the overlay. */
+/** Shared styles for media elements (image/video/camera) in the overlay.
+ *  Longhand offsets instead of `inset` - old WebViews (< Chromium 87,
+ *  e.g. Android 9 kiosk tablets) drop the shorthand, collapsing the
+ *  overlay to an invisible zero-size box (#94). */
 const MEDIA_BASE_STYLES = [
   'position:absolute',
-  'inset:0',
+  'top:0;left:0;right:0;bottom:0',
   'width:100%',
   'height:100%',
   'object-fit:contain',
@@ -423,7 +426,7 @@ export class ScreensaverManager {
     iframe.allow = 'autoplay; fullscreen';
     iframe.style.cssText = [
       'position:absolute',
-      'inset:0',
+      'top:0;left:0;right:0;bottom:0',
       'width:100%',
       'height:100%',
       'border:0',
@@ -450,12 +453,11 @@ export class ScreensaverManager {
     const wrap = document.createElement('div');
     wrap.style.cssText = [
       'position:absolute',
-      'inset:0',
+      'top:0;left:0;right:0;bottom:0',
       'display:flex',
       'flex-direction:column',
       'align-items:center',
       'justify-content:center',
-      'gap:0.35em',
       'text-align:center',
       'user-select:none',
       "font-family:'Google Sans', var(--ha-font-family, Roboto, system-ui, sans-serif)",
@@ -473,12 +475,24 @@ export class ScreensaverManager {
       .split(',')
       .map((c) => Math.round(Number(c) * 0.65))
       .join(',');
+    // px fallbacks for engines without min() in calc() (< Chromium 79):
+    // the earlier valid px declaration survives when the calc() one is
+    // dropped, while modern engines override it with the calc() value.
+    // Only degradation on old engines: the size doesn't track viewport
+    // rotation until the next activation re-renders.
+    const timeFallbackPx = Math.round(
+      Math.min(window.innerWidth * 0.20, window.innerHeight * 0.30) * scale,
+    );
+    const dateFallbackPx = Math.round(
+      Math.min(window.innerWidth * 0.05, window.innerHeight * 0.07) * scale,
+    );
     const timeEl = document.createElement('div');
     timeEl.style.cssText = [
       `color:rgb(${this._clockColor})`,
       'font-weight:300',
       'letter-spacing:0.02em',
       'line-height:1',
+      `font-size:${timeFallbackPx}px`,
       `font-size:calc(min(20vw, 30vh) * ${scale})`,
     ].join(';');
     wrap.appendChild(timeEl);
@@ -489,6 +503,9 @@ export class ScreensaverManager {
       dateEl.style.cssText = [
         `color:rgb(${dateColor})`,
         'font-weight:400',
+        // Replaces the wrapper's flex gap (< Chromium 84 support).
+        'margin-top:0.35rem',
+        `font-size:${dateFallbackPx}px`,
         `font-size:calc(min(5vw, 7vh) * ${scale})`,
       ].join(';');
       wrap.appendChild(dateEl);
@@ -962,7 +979,9 @@ export class ScreensaverManager {
         '}',
         `#${OVERLAY_ID} {`,
         '  position: fixed;',
-        '  inset: 0;',
+        // Longhand offsets: `inset` needs Chromium 87+, and old kiosk
+        // WebViews otherwise collapse the overlay to a 0x0 box (#94).
+        '  top: 0; left: 0; right: 0; bottom: 0;',
         '  z-index: 999999;',
         '  opacity: 0;',
         `  transition: opacity ${FADE_MS}ms ease;`,
@@ -975,7 +994,7 @@ export class ScreensaverManager {
         '}',
         `#${OVERLAY_ID} .vs-screensaver-content {`,
         '  position: absolute;',
-        '  inset: 0;',
+        '  top: 0; left: 0; right: 0; bottom: 0;',
         '}',
       ].join('\n');
       document.head.appendChild(style);
