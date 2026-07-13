@@ -5,7 +5,7 @@ from typing import Final
 DOMAIN: Final[str] = "voice_satellite"
 
 # Version - synced from package.json by scripts/sync-version.js
-INTEGRATION_VERSION: str = "2026.7.4"
+INTEGRATION_VERSION: str = "2026.7.5"
 
 # Frontend serving
 URL_BASE: Final[str] = "/voice_satellite"
