@@ -177,8 +177,8 @@
   },
   "runtime": {
     "required_hits": 1,
-    "cooldown_ms": 2000,
     "hit_mode": "consecutive",
+    "cooldown_ms": 2000,
     "high_confidence_bypass": 6.8,
     "high_confidence_bypass_min_hits": 1,
     "stream_match": true,
