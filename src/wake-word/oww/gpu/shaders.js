@@ -160,8 +160,8 @@ export function compatConv2dNchwShader() {
       dims0: vec4<i32>,  // inC, inH, inW, outC
       dims1: vec4<i32>,  // outH, outW, kH, kW
       steps0: vec4<i32>, // strideH, strideW, dilationH, dilationW
-      pad0: vec4<i32>,   // padTop, padLeft, unused, unused
-      act0: vec4<f32>,
+      pad0: vec4<i32>,   // padTop, padLeft, activationKind, unused
+      act0: vec4<f32>,   // alpha, maxScalar, unused, unused
     };
 
     @group(0) @binding(0) var<storage, read> inputBuf: array<f32>;
@@ -225,12 +225,109 @@ export function compatConv2dNchwShader() {
         var a: vec4<f32>;
         if (j == 0u) { a = acc0; } else if (j == 1u) { a = acc1; } else if (j == 2u) { a = acc2; } else { a = acc3; }
         a = a + vec4<f32>(biasBuf[ocBase + j]);
+        // Fused LeakyReLU-then-Max (pad0.z == 1): the ONNX embedding
+        // graph follows every conv with LeakyRelu + Max(scalar); fusing
+        // them here removes two full-tensor dispatches per conv.
+        if (p.pad0.z == 1) {
+          a = max(select(a * vec4<f32>(p.act0.x), a, a >= vec4<f32>(0.0)), vec4<f32>(p.act0.y));
+        }
         let strip: u32 = strip0 + j * stripStride;
         outputBuf[strip] = a.x;
         if (lanes > 1u) { outputBuf[strip + 1u] = a.y; }
         if (lanes > 2u) { outputBuf[strip + 2u] = a.z; }
         if (lanes > 3u) { outputBuf[strip + 3u] = a.w; }
       }
+    }
+  `;
+}
+
+
+/**
+ * fp32 NCHW conv, 4-deep along output channels only (no W
+ * vectorization).  Ported from the vsWakeWord runner: the W-vectorized
+ * kernel above wastes 50-95% of each workgroup's lanes on the OWW
+ * embedding model's tall-narrow layers (outW shrinks 32 -> 2 while H
+ * stays large), because each x-lane covers 4 W positions that mostly
+ * do not exist.  This variant assigns one thread per output position
+ * covering 4 output channels, with a caller-chosen workgroup shape
+ * that fills whatever geometry the layer has.  pad0.z == 1 fuses the
+ * LeakyReLU-then-Max activation.
+ */
+export function compatConvNchwOc4Shader(wg) {
+  return /* wgsl */`
+    struct ConvCompatParams {
+      dims0: vec4<i32>,  // inC, inH, inW, outC
+      dims1: vec4<i32>,  // outH, outW, kH, kW
+      steps0: vec4<i32>, // strideH, strideW, dilationH, dilationW
+      pad0: vec4<i32>,   // padTop, padLeft, activationKind, unused
+      act0: vec4<f32>,   // alpha, maxScalar, unused, unused
+    };
+
+    @group(0) @binding(0) var<storage, read> inputBuf: array<f32>;
+    @group(0) @binding(1) var<storage, read> weightsBuf: array<f32>;
+    @group(0) @binding(2) var<storage, read> biasBuf: array<f32>;
+    @group(0) @binding(3) var<storage, read_write> outputBuf: array<f32>;
+    @group(0) @binding(4) var<uniform> p: ConvCompatParams;
+
+    @compute @workgroup_size(${wg[0]}, ${wg[1]}, ${wg[2]})
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let ow: u32 = gid.x;
+      let oh: u32 = gid.y;
+      let ocBase: u32 = gid.z * 4u;
+      let inC: u32 = u32(p.dims0.x);
+      let inH: i32 = p.dims0.y;
+      let inW: i32 = p.dims0.z;
+      let outC: u32 = u32(p.dims0.w);
+      let outH: u32 = u32(p.dims1.x);
+      let outW: u32 = u32(p.dims1.y);
+      let kH: u32 = u32(p.dims1.z);
+      let kW: u32 = u32(p.dims1.w);
+      if (ow >= outW || oh >= outH || ocBase >= outC) { return; }
+
+      let wOcStride: u32 = inC * kH * kW;
+      var acc: vec4<f32> = vec4<f32>(0.0);
+      for (var ic: u32 = 0u; ic < inC; ic = ic + 1u) {
+        let inIcBase: u32 = ic * u32(inH) * u32(inW);
+        let wIcBase: u32 = (ocBase * inC + ic) * kH * kW;
+        for (var kh: u32 = 0u; kh < kH; kh = kh + 1u) {
+          let ih: i32 = i32(oh) * p.steps0.x + i32(kh) * p.steps0.z - p.pad0.x;
+          if (ih < 0 || ih >= inH) { continue; }
+          let rowBase: u32 = inIcBase + u32(ih) * u32(inW);
+          let wRowBase: u32 = wIcBase + kh * kW;
+          for (var kw: u32 = 0u; kw < kW; kw = kw + 1u) {
+            let iw: i32 = i32(ow) * p.steps0.y + i32(kw) * p.steps0.w - p.pad0.y;
+            if (iw < 0 || iw >= inW) { continue; }
+            let x: f32 = inputBuf[rowBase + u32(iw)];
+            let wIdx: u32 = wRowBase + kw;
+            acc = fma(
+              vec4<f32>(x),
+              vec4<f32>(
+                weightsBuf[wIdx],
+                weightsBuf[wIdx + wOcStride],
+                weightsBuf[wIdx + 2u * wOcStride],
+                weightsBuf[wIdx + 3u * wOcStride],
+              ),
+              acc,
+            );
+          }
+        }
+      }
+
+      acc = acc + vec4<f32>(
+        biasBuf[ocBase],
+        biasBuf[min(ocBase + 1u, outC - 1u)],
+        biasBuf[min(ocBase + 2u, outC - 1u)],
+        biasBuf[min(ocBase + 3u, outC - 1u)],
+      );
+      if (p.pad0.z == 1) {
+        acc = max(select(acc * vec4<f32>(p.act0.x), acc, acc >= vec4<f32>(0.0)), vec4<f32>(p.act0.y));
+      }
+      let stripStride: u32 = outH * outW;
+      let outBase: u32 = (ocBase * outH + oh) * outW + ow;
+      outputBuf[outBase] = acc.x;
+      if (ocBase + 1u < outC) { outputBuf[outBase + stripStride] = acc.y; }
+      if (ocBase + 2u < outC) { outputBuf[outBase + 2u * stripStride] = acc.z; }
+      if (ocBase + 3u < outC) { outputBuf[outBase + 3u * stripStride] = acc.w; }
     }
   `;
 }
@@ -541,21 +638,49 @@ export function transposeShader(inShape, outShape, perm) {
  * need REDUCE_MAX over a subset of axes, a different shader is required.
  */
 export function reduceMaxAllShader(numElements) {
+  // Parallel workgroup reduction (ported from the vsWakeWord runner):
+  // 64 threads stride the input for local maxima, then a shared-memory
+  // tree collapses them.  Replaces a single-thread serial loop over the
+  // whole tensor.  max() is order-independent, so output is unchanged.
   return /* wgsl */`
     @group(0) @binding(0) var<storage, read> inputBuf: array<f32>;
     @group(0) @binding(1) var<storage, read_write> outputBuf: array<f32>;
 
     const N: u32 = ${numElements}u;
+    const WG: u32 = 64u;
 
-    @compute @workgroup_size(1)
-    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-      if (gid.x != 0u) { return; }
-      var mx: f32 = inputBuf[0];
-      for (var i: u32 = 1u; i < N; i = i + 1u) {
+    var<workgroup> partial: array<f32, 64>;
+
+    @compute @workgroup_size(64)
+    fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
+      let tid: u32 = lid.x;
+
+      var mx: f32;
+      if (tid < N) {
+        mx = inputBuf[tid];
+      } else {
+        mx = inputBuf[0];
+      }
+      var i: u32 = tid + WG;
+      while (i < N) {
         let v: f32 = inputBuf[i];
         if (v > mx) { mx = v; }
+        i = i + WG;
       }
-      outputBuf[0] = mx;
+      partial[tid] = mx;
+      workgroupBarrier();
+
+      var stride: u32 = WG >> 1u;
+      while (stride > 0u) {
+        if (tid < stride) {
+          let other: f32 = partial[tid + stride];
+          if (other > partial[tid]) { partial[tid] = other; }
+        }
+        workgroupBarrier();
+        stride = stride >> 1u;
+      }
+
+      if (tid == 0u) { outputBuf[0] = partial[0]; }
     }
   `;
 }

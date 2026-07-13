@@ -38,6 +38,7 @@ import {
   compatConv2dNhwcShader,
   compatConv1dNcwShader,
   compatConv2dNchwShader,
+  compatConvNchwOc4Shader,
   leakyReluShader,
   maximumScalarShader,
   maxPool2dShader,
@@ -123,7 +124,8 @@ export class GpuModelRunner {
     // Walk ops in declared order; build a pipeline + bind group per step.
     for (let i = 0; i < ops.length; i++) {
       const op = ops[i];
-      const fused = this._tryBuildFusedConvActivation(ops, i, tensors);
+      const fused = this._tryBuildFusedConvActivation(ops, i, tensors)
+        || this._tryBuildFusedOnnxConvActivation(ops, i, tensors);
       if (fused) {
         this._steps.push(fused);
         i += 2;
@@ -365,6 +367,67 @@ export class GpuModelRunner {
     });
   }
 
+  /** ONNX flavor of the fused conv activation: Conv -> LeakyRelu ->
+   *  Max(const scalar), the pattern the converted embedding model uses
+   *  19 times.  Same intermediate-use-count and shape guards as the
+   *  TFLite matcher; folds into the vectorized NCHW conv's epilogue. */
+  _tryBuildFusedOnnxConvActivation(ops, i, tensors) {
+    const conv = ops[i];
+    const leaky = ops[i + 1];
+    const maximum = ops[i + 2];
+    if (!conv || !leaky || !maximum) return null;
+    if (conv.opName !== 'Conv' || leaky.opName !== 'LeakyRelu' || maximum.opName !== 'Max') {
+      return null;
+    }
+    // Only the rank-4 NCHW builder has the fused epilogue.
+    if (tensors[conv.inputs[0]].shape.length !== 4) return null;
+    if (
+      conv.outputs.length !== 1
+      || leaky.inputs[0] !== conv.outputs[0]
+      || leaky.outputs.length !== 1
+      || maximum.outputs.length !== 1
+    ) {
+      return null;
+    }
+    const leakyOut = leaky.outputs[0];
+    if (
+      this._tensorUseCounts.get(conv.outputs[0]) !== 1
+      || this._tensorUseCounts.get(leakyOut) !== 1
+    ) {
+      return null;
+    }
+    let scalarMeta = null;
+    if (maximum.inputs[0] === leakyOut) {
+      scalarMeta = tensors[maximum.inputs[1]];
+    } else if (maximum.inputs[1] === leakyOut) {
+      scalarMeta = tensors[maximum.inputs[0]];
+    } else {
+      return null;
+    }
+    if (!scalarMeta?.constant || shapeSize(scalarMeta.shape) !== 1) return null;
+
+    const convOutMeta = tensors[conv.outputs[0]];
+    if (
+      !sameShape(tensors[leakyOut].shape, convOutMeta.shape)
+      || !sameShape(tensors[maximum.outputs[0]].shape, convOutMeta.shape)
+    ) {
+      return null;
+    }
+
+    const alpha = readLeakyReluAlpha(leaky);
+    const maxScalar = scalarMeta.constant[0];
+    if (!Number.isFinite(alpha) || !Number.isFinite(maxScalar)) return null;
+
+    return this._buildOnnxConv(conv, tensors, {
+      outputId: maximum.outputs[0],
+      activation: {
+        kind: 'leakyReluThenMax',
+        alpha,
+        maxScalar,
+      },
+    });
+  }
+
   // The following helpers each:
   //   1. Read op options (padding, stride, kernel size, etc.) from the
   //      flatbuffer the same way the CPU runner does.  We ferry the
@@ -448,10 +511,11 @@ export class GpuModelRunner {
     return gpuBuffer;
   }
 
-  _buildOnnxConv(op, tensors) {
+  _buildOnnxConv(op, tensors, fused = null) {
     const inMeta = tensors[op.inputs[0]];
     const wMeta = tensors[op.inputs[1]];
-    const outMeta = tensors[op.outputs[0]];
+    const outId = fused?.outputId ?? op.outputs[0];
+    const outMeta = tensors[outId];
     const strides = onnxIntsAttr(op, 'strides') || new Array(inMeta.shape.length - 2).fill(1);
     const pads = onnxIntsAttr(op, 'pads') || new Array((inMeta.shape.length - 2) * 2).fill(0);
     const dilations = onnxIntsAttr(op, 'dilations') || new Array(inMeta.shape.length - 2).fill(1);
@@ -473,18 +537,36 @@ export class GpuModelRunner {
       dispatchY = Math.ceil(outMeta.shape[1] / wg[1]);
       dispatchZ = 1;
     } else {
-      wgsl = compatConv2dNchwShader();
-      paramsBuf = this._createCompatConvParams([
-        inMeta.shape[1], inMeta.shape[2], inMeta.shape[3], outMeta.shape[1],
-        outMeta.shape[2], outMeta.shape[3], wMeta.shape[2], wMeta.shape[3],
-        strides[0], strides[1], dilations[0], dilations[1],
-        pads[0], pads[1], 0, 0,
-      ]);
-      // The vectorized NCHW shader covers COMPAT_CONV_W_VECTOR outputs
-      // along W and COMPAT_CONV_OC_VECTOR output channels per invocation.
-      dispatchX = Math.ceil(outMeta.shape[3] / (wg[0] * COMPAT_CONV_W_VECTOR));
-      dispatchY = Math.ceil(outMeta.shape[2] / wg[1]);
-      dispatchZ = Math.ceil(outMeta.shape[1] / (wg[2] * COMPAT_CONV_OC_VECTOR));
+      const outH2 = outMeta.shape[2];
+      const outW2 = outMeta.shape[3];
+      // Kernel choice by geometry (vsWakeWord lesson): the W-vectorized
+      // kernel needs outW >= 32 to fill its lanes (8 lanes x 4 outputs);
+      // narrower layers - most of the OWW embedding model - run the OC4
+      // kernel with a workgroup shaped to the layer instead.
+      const useOc4 = outW2 < 32;
+      const wgW = outW2 >= 8 ? 8 : (outW2 >= 4 ? 4 : 2);
+      const oc4Wg = [wgW, 64 / wgW, 1];
+      wgsl = useOc4 ? compatConvNchwOc4Shader(oc4Wg) : compatConv2dNchwShader();
+      paramsBuf = this._createCompatConvParams(
+        [
+          inMeta.shape[1], inMeta.shape[2], inMeta.shape[3], outMeta.shape[1],
+          outH2, outW2, wMeta.shape[2], wMeta.shape[3],
+          strides[0], strides[1], dilations[0], dilations[1],
+          pads[0], pads[1], fused?.activation?.kind === 'leakyReluThenMax' ? 1 : 0, 0,
+        ],
+        [fused?.activation?.alpha ?? 0, fused?.activation?.maxScalar ?? 0, 0, 0],
+      );
+      if (useOc4) {
+        dispatchX = Math.ceil(outW2 / oc4Wg[0]);
+        dispatchY = Math.ceil(outH2 / oc4Wg[1]);
+        dispatchZ = Math.ceil(outMeta.shape[1] / 4);
+      } else {
+        // The vectorized NCHW shader covers COMPAT_CONV_W_VECTOR outputs
+        // along W and COMPAT_CONV_OC_VECTOR output channels per invocation.
+        dispatchX = Math.ceil(outW2 / (wg[0] * COMPAT_CONV_W_VECTOR));
+        dispatchY = Math.ceil(outH2 / wg[1]);
+        dispatchZ = Math.ceil(outMeta.shape[1] / (wg[2] * COMPAT_CONV_OC_VECTOR));
+      }
     }
     const pipeline = this._device.createComputePipeline({
       layout: 'auto',
@@ -495,7 +577,7 @@ export class GpuModelRunner {
     const biasBuf = op.inputs[2] !== undefined
       ? this._bufferFor(op.inputs[2])
       : this._zeroFloatBuffer(outMeta.shape[1]);
-    const outputBuf = this._bufferFor(op.outputs[0]);
+    const outputBuf = this._bufferFor(outId);
     const bindGroup = this._device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
       entries: [
