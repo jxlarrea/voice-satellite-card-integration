@@ -38,6 +38,14 @@ const MEDIA_FADE_MS = 600;
 const KEEPALIVE_INTERVAL_MS = 5000;
 const PIXEL_SHIFT_INTERVAL_MS = 60000;
 
+// Caps for recursive playlist resolution ("Include subfolders").  Each
+// folder is one websocket round-trip at activation time, so a huge SMB
+// library must not stall the screensaver or hammer the server.
+const PLAYLIST_MAX_ITEMS = 12000;
+const PLAYLIST_MAX_FOLDERS = 200;
+const PLAYLIST_MAX_DEPTH = 5;
+const PLAYLIST_BROWSE_CONCURRENCY = 4;
+
 /**
  * Detect a camera entity selected via the media browser.
  * HA uses `media-source://camera/camera.xxx` for cameras; extract the
@@ -85,6 +93,7 @@ export class ScreensaverManager {
     this._mediaId = '';
     this._mediaIntervalSeconds = 10;
     this._mediaShuffle = false;
+    this._mediaRecursive = false;
     this._websiteUrl = '';
     this._clock24h = false;
     this._clockSeconds = false;
@@ -150,6 +159,7 @@ export class ScreensaverManager {
     const newMediaId = cfg.screensaver_media_id || '';
     const newMediaInterval = Math.max(2, parseInt(cfg.screensaver_media_interval_s, 10) || 10);
     const newMediaShuffle = cfg.screensaver_media_shuffle === true;
+    const newMediaRecursive = cfg.screensaver_media_recursive === true;
     const newWebsiteUrl = (cfg.screensaver_website_url || '').trim();
     const newClock24h = cfg.screensaver_clock_24h === true;
     const newClockSeconds = cfg.screensaver_clock_seconds === true;
@@ -183,6 +193,7 @@ export class ScreensaverManager {
       newMediaId !== this._mediaId ||
       newMediaInterval !== this._mediaIntervalSeconds ||
       newMediaShuffle !== this._mediaShuffle ||
+      newMediaRecursive !== this._mediaRecursive ||
       newWebsiteUrl !== this._websiteUrl ||
       newClock24h !== this._clock24h ||
       newClockSeconds !== this._clockSeconds ||
@@ -205,6 +216,7 @@ export class ScreensaverManager {
     this._mediaId = newMediaId;
     this._mediaIntervalSeconds = newMediaInterval;
     this._mediaShuffle = newMediaShuffle;
+    this._mediaRecursive = newMediaRecursive;
     this._websiteUrl = newWebsiteUrl;
     this._clock24h = newClock24h;
     this._clockSeconds = newClockSeconds;
@@ -603,19 +615,58 @@ export class ScreensaverManager {
     const conn = this._session.connection;
     if (!conn) return [];
 
+    const browse = (id) => conn.sendMessagePromise({
+      type: 'media_source/browse_media',
+      media_content_id: id,
+    });
+
     // Try to browse first — if it has children, treat as folder
     try {
-      const browse = await conn.sendMessagePromise({
-        type: 'media_source/browse_media',
-        media_content_id: mediaId,
-      });
-      const children = (browse && browse.children) || [];
+      const root = await browse(mediaId);
+      const children = (root && root.children) || [];
       if (children.length > 0) {
         const items = [];
-        for (const child of children) {
-          if (child.can_play && !child.can_expand) {
-            items.push(child.media_content_id);
+        let queue = []; // folders to browse at the next depth level
+        const collect = (kids) => {
+          for (const child of kids) {
+            if (child.can_play && !child.can_expand) {
+              if (items.length < PLAYLIST_MAX_ITEMS) items.push(child.media_content_id);
+            } else if (this._mediaRecursive && child.can_expand) {
+              queue.push(child.media_content_id);
+            }
           }
+        };
+        collect(children);
+
+        // Breadth-first descent into subfolders, a few browses in
+        // flight at a time, bounded by the PLAYLIST_* caps.
+        let browsed = 0;
+        let depth = 1;
+        while (queue.length > 0 && depth <= PLAYLIST_MAX_DEPTH
+               && browsed < PLAYLIST_MAX_FOLDERS && items.length < PLAYLIST_MAX_ITEMS) {
+          const level = queue;
+          queue = [];
+          while (level.length > 0
+                 && browsed < PLAYLIST_MAX_FOLDERS && items.length < PLAYLIST_MAX_ITEMS) {
+            const batch = level.splice(0, PLAYLIST_BROWSE_CONCURRENCY);
+            browsed += batch.length;
+            const results = await Promise.all(
+              batch.map((id) => browse(id).catch(() => null)),
+            );
+            for (const res of results) {
+              collect((res && res.children) || []);
+            }
+          }
+          depth += 1;
+        }
+
+        if (this._mediaRecursive) {
+          const capped = queue.length > 0 || items.length >= PLAYLIST_MAX_ITEMS;
+          this._log.log(
+            'screensaver',
+            `Recursive playlist: ${items.length} item(s) from ${browsed + 1} folder(s)`
+            + (capped ? ' (capped - library exceeds playlist limits)' : ''),
+          );
         }
         return items;
       }

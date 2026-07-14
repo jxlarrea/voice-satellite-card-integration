@@ -74,6 +74,7 @@ export function buildScreensaverPostSchema(cfg) {
         selector: { number: { min: 2, max: 600, step: 1, mode: 'slider', unit_of_measurement: 's' } },
       },
       { name: 'screensaver_media_shuffle', selector: { boolean: {} } },
+      { name: 'screensaver_media_recursive', default: false, selector: { boolean: {} } },
     );
   } else if (type === 'website') {
     fields.push(
@@ -122,6 +123,7 @@ export const screensaverLabels = {
   screensaver_pixel_shift: t(null, 'editor.screensaver.pixel_shift', 'Pixel shift (OLED protection)'),
   screensaver_media_interval_s: t(null, 'editor.screensaver.media_interval', 'Item interval'),
   screensaver_media_shuffle: t(null, 'editor.screensaver.media_shuffle', 'Shuffle folder items'),
+  screensaver_media_recursive: t(null, 'editor.screensaver.media_recursive', 'Include subfolders'),
   screensaver_website_url: t(null, 'editor.screensaver.website_url', 'Website URL'),
   screensaver_clock_24h: t(null, 'editor.screensaver.clock_24h', '24-hour clock'),
   screensaver_clock_seconds: t(null, 'editor.screensaver.clock_seconds', 'Show seconds'),
@@ -137,6 +139,7 @@ export const screensaverHelpers = {
   screensaver_type: t(null, 'editor.screensaver.helper_type', 'Black: solid overlay. Media: image/video file, folder, or camera feed from the HA media library (cameras stream over WebRTC with sub-second latency when available). Website: embed any URL (e.g. immich-kiosk, a photo frame app, a dashboard). Digital clock: large time and date on a black background.'),
   screensaver_media_interval_s: t(null, 'editor.screensaver.helper_media_interval', 'Seconds per image when cycling through a folder. Videos play to completion regardless of this value.'),
   screensaver_pixel_shift: t(null, 'editor.screensaver.helper_pixel_shift', 'Slowly drift the screensaver content a few pixels once a minute to spread wear across OLED pixels. Applies to the clock, media, and website types.'),
+  screensaver_media_recursive: t(null, 'editor.screensaver.helper_media_recursive', 'Also play media from subfolders of the selected folder. Combine with shuffle for random images from the whole tree. Very large libraries are capped (12000 items, 5 levels deep) to keep activation fast.'),
   screensaver_clock_scale: t(null, 'editor.screensaver.helper_clock_scale', 'Scales the time and date relative to the default size. Browsers and kiosk apps report their viewport differently, so the same clock can look smaller on some tablets (e.g. iPads) - raise this here to match your other devices. Stored per browser.'),
   screensaver_suppress_external: t(null, 'editor.screensaver.helper_suppress_external', "The selected switch is turned off for the duration of each voice interaction, then left alone so its owner (e.g. Fully Kiosk) can resume its own idle timer. Useful to manage Fully Kiosk's screensaver."),
 };

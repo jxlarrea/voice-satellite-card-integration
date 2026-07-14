@@ -366,6 +366,7 @@ export class VoiceSatelliteSession {
       'timer_tts_enabled', 'timer_tts_text', 'timer_named_tts_text',
       'screensaver_enabled', 'screensaver_timer_s', 'screensaver_dim_percent', 'screensaver_type',
       'screensaver_media_id', 'screensaver_media_interval_s', 'screensaver_media_shuffle',
+      'screensaver_media_recursive',
       'screensaver_website_url', 'screensaver_pixel_shift',
       'screensaver_clock_24h', 'screensaver_clock_seconds', 'screensaver_clock_show_date',
       'screensaver_clock_scale', 'screensaver_clock_color',

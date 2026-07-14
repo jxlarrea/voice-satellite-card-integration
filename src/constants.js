@@ -136,6 +136,9 @@ export const DEFAULT_CONFIG = {
   screensaver_media_id: '',
   screensaver_media_interval_s: 10,
   screensaver_media_shuffle: false,
+  // Recurse into subfolders when building the media playlist (capped
+  // by depth/items/folders - see PLAYLIST_* consts in the manager).
+  screensaver_media_recursive: false,
   screensaver_website_url: '',
   // Drift the screensaver content a few pixels every minute so static
   // elements (clock digits especially) don't burn into OLED panels.
