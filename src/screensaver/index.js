@@ -36,6 +36,7 @@ const OVERLAY_ID = 'voice-satellite-screensaver';
 const FADE_MS = 200;
 const MEDIA_FADE_MS = 600;
 const KEEPALIVE_INTERVAL_MS = 5000;
+const PIXEL_SHIFT_INTERVAL_MS = 60000;
 
 /**
  * Detect a camera entity selected via the media browser.
@@ -94,6 +95,8 @@ export class ScreensaverManager {
     this._clockTimeEl = null;
     this._clockDateEl = null;
     this._suppressExternal = '';
+    this._pixelShift = false;
+    this._pixelShiftTimer = null;
     this._activityHandler = null;
     this._savedBrightness = null;
     this._fkMotionBound = false;
@@ -168,6 +171,7 @@ export class ScreensaverManager {
       });
       if (!rgb.includes(null)) newClockColor = rgb.join(',');
     }
+    const newPixelShift = cfg.screensaver_pixel_shift === true;
     const newSuppressExternal = cfg.screensaver_suppress_external || '';
 
     const settingsChanged =
@@ -184,7 +188,8 @@ export class ScreensaverManager {
       newClockSeconds !== this._clockSeconds ||
       newClockShowDate !== this._clockShowDate ||
       newClockScale !== this._clockScale ||
-      newClockColor !== this._clockColor;
+      newClockColor !== this._clockColor ||
+      newPixelShift !== this._pixelShift;
 
     this._suppressExternal = newSuppressExternal;
 
@@ -206,6 +211,7 @@ export class ScreensaverManager {
     this._clockShowDate = newClockShowDate;
     this._clockScale = newClockScale;
     this._clockColor = newClockColor;
+    this._pixelShift = newPixelShift;
 
     this._log.log('screensaver', `Settings: enabled=${newEnabled}, timer=${newTimer}s, type=${newType}`);
 
@@ -295,6 +301,7 @@ export class ScreensaverManager {
     this._dismiss();
     this._stopCameraWebrtc();
     this._stopClock();
+    this._stopPixelShift();
     this._clearIdleTimer();
     this._removeActivityListeners();
     this._removeUnloadHandler();
@@ -375,6 +382,7 @@ export class ScreensaverManager {
     // Force reflow so the transition plays from opacity 0
     void this._overlay.offsetHeight;
     this._overlay.classList.add('vs-screensaver-visible');
+    this._startPixelShift();
     this._syncState(true);
   }
 
@@ -386,10 +394,12 @@ export class ScreensaverManager {
     // Restore hardware backlight to whatever it was before we dimmed it
     this._restoreScreen();
 
-    // Stop media cycling, any WebRTC camera stream, and the clock tick
+    // Stop media cycling, any WebRTC camera stream, the clock tick,
+    // and the OLED pixel-shift drift
     this._stopMediaCycle();
     this._stopCameraWebrtc();
     this._stopClock();
+    this._stopPixelShift();
 
     if (this._overlay) {
       this._overlay.classList.remove('vs-screensaver-visible');
@@ -802,6 +812,39 @@ export class ScreensaverManager {
         if (child !== el) child.remove();
       }
     }, MEDIA_FADE_MS + 50);
+  }
+
+  /**
+   * OLED burn-in protection: once a minute, drift the content div to a
+   * new random offset near center.  The black overlay backdrop fills
+   * the exposed edges, so this works for every type as one unit (clock
+   * plus date, media, website iframe).  No-op for the black type -
+   * those pixels are already off.
+   */
+  _startPixelShift() {
+    this._stopPixelShift();
+    if (!this._pixelShift || this._type === 'black') return;
+    if (!this._contentEl) return;
+    this._contentEl.style.transition = 'transform 2s ease';
+    this._pixelShiftTimer = setInterval(() => {
+      if (!this._active || !this._contentEl) return;
+      const maxX = Math.min(24, Math.round(window.innerWidth * 0.015));
+      const maxY = Math.min(24, Math.round(window.innerHeight * 0.015));
+      const x = Math.round((Math.random() * 2 - 1) * maxX);
+      const y = Math.round((Math.random() * 2 - 1) * maxY);
+      this._contentEl.style.transform = `translate(${x}px, ${y}px)`;
+    }, PIXEL_SHIFT_INTERVAL_MS);
+  }
+
+  _stopPixelShift() {
+    if (this._pixelShiftTimer) {
+      clearInterval(this._pixelShiftTimer);
+      this._pixelShiftTimer = null;
+    }
+    if (this._contentEl) {
+      this._contentEl.style.transform = '';
+      this._contentEl.style.transition = '';
+    }
   }
 
   _advancePlaylist() {

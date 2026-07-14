@@ -137,6 +137,9 @@ export const DEFAULT_CONFIG = {
   screensaver_media_interval_s: 10,
   screensaver_media_shuffle: false,
   screensaver_website_url: '',
+  // Drift the screensaver content a few pixels every minute so static
+  // elements (clock digits especially) don't burn into OLED panels.
+  screensaver_pixel_shift: false,
   screensaver_suppress_external: '',
   // Digital clock screensaver options
   screensaver_clock_24h: false,

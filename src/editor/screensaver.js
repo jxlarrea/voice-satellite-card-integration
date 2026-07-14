@@ -41,6 +41,7 @@ export function buildScreensaverPreSchema(cfg) {
         default: 60,
         selector: { number: { min: 10, max: 600, step: 5, mode: 'slider', unit_of_measurement: 's' } },
       },
+      { name: 'screensaver_pixel_shift', default: false, selector: { boolean: {} } },
       {
         name: 'screensaver_type',
         default: 'black',
@@ -118,6 +119,7 @@ export const screensaverLabels = {
   screensaver_fk_motion_dismiss: t(null, 'editor.screensaver.fk_motion_dismiss', 'Dismiss on motion'),
   screensaver_timer_s: t(null, 'editor.screensaver.timer', 'Idle timeout'),
   screensaver_type: t(null, 'editor.screensaver.type', 'Screensaver type'),
+  screensaver_pixel_shift: t(null, 'editor.screensaver.pixel_shift', 'Pixel shift (OLED protection)'),
   screensaver_media_interval_s: t(null, 'editor.screensaver.media_interval', 'Item interval'),
   screensaver_media_shuffle: t(null, 'editor.screensaver.media_shuffle', 'Shuffle folder items'),
   screensaver_website_url: t(null, 'editor.screensaver.website_url', 'Website URL'),
@@ -134,6 +136,7 @@ export const screensaverHelpers = {
   screensaver_timer_s: t(null, 'editor.screensaver.helper_timer', 'Idle seconds before the screensaver activates.'),
   screensaver_type: t(null, 'editor.screensaver.helper_type', 'Black: solid overlay. Media: image/video file, folder, or camera feed from the HA media library (cameras stream over WebRTC with sub-second latency when available). Website: embed any URL (e.g. immich-kiosk, a photo frame app, a dashboard). Digital clock: large time and date on a black background.'),
   screensaver_media_interval_s: t(null, 'editor.screensaver.helper_media_interval', 'Seconds per image when cycling through a folder. Videos play to completion regardless of this value.'),
+  screensaver_pixel_shift: t(null, 'editor.screensaver.helper_pixel_shift', 'Slowly drift the screensaver content a few pixels once a minute to spread wear across OLED pixels. Applies to the clock, media, and website types.'),
   screensaver_clock_scale: t(null, 'editor.screensaver.helper_clock_scale', 'Scales the time and date relative to the default size. Browsers and kiosk apps report their viewport differently, so the same clock can look smaller on some tablets (e.g. iPads) - raise this here to match your other devices. Stored per browser.'),
   screensaver_suppress_external: t(null, 'editor.screensaver.helper_suppress_external', "The selected switch is turned off for the duration of each voice interaction, then left alone so its owner (e.g. Fully Kiosk) can resume its own idle timer. Useful to manage Fully Kiosk's screensaver."),
 };
