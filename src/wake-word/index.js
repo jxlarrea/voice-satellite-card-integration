@@ -158,6 +158,18 @@ const WAKE_WORD_PHRASES = {
   okay_computer: 'Okay Computer',
 };
 
+/**
+ * Module-level wake-word phrase lookup (same table WakeWordManager uses),
+ * exported so the Kiosk Satellite native-wake handoff can label the models
+ * it pushes to the app without instantiating a manager.
+ * @param {string} name
+ * @returns {string}
+ */
+export function wakeWordPhraseFor(name) {
+  return WAKE_WORD_PHRASES[name]
+    || name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export class WakeWordManager {
   constructor(session) {
     this._session = session;

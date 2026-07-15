@@ -14,6 +14,7 @@
 
 import { State, INTERACTING_STATES, BlurReason, Timing } from '../constants.js';
 import { getSelectState } from '../shared/satellite-state.js';
+import { resumeNativeWake } from '../wake-word/native-handoff.js';
 import { subscribePipelineRun, setupReconnectListener } from './comms.js';
 import {
   handleRunStart,
@@ -361,6 +362,9 @@ export class PipelineManager {
             this._log.log('pipeline', 'Detection disabled — not restarting; awaiting wake action');
             try { this._card.audio.stopMicrophone(); } catch (_) { /* ignore */ }
             this._card.setState(State.IDLE);
+            // Kiosk Satellite native handoff: the app suspended its engine on
+            // detection; resume it now that the turn is over. No-op otherwise.
+            resumeNativeWake().catch(() => { /* ignore */ });
             // Mini card surfaces its small mic icon for IDLE state via
             // _statusFor automatically.  The full card's start-button
             // overlay stays hidden — wake is driven by the service.

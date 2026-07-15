@@ -48,6 +48,20 @@ function kioskerPresent() {
     && typeof window.webkit.messageHandlers.callback.postMessage === 'function';
 }
 
+/**
+ * Kiosk Satellite (Android/iOS) — our own companion app.  It injects a
+ * synchronous-to-detect but *promise-based* `window.kioskSatellite` object
+ * (see its docs/js-api.md).  Unlike Fully Kiosk (sync) and Kiosker (async
+ * FIFO postMessage), every method returns a real promise with per-call
+ * correlation, so the wrappers below are thin `await`s.  It also exposes a
+ * native wake-word engine that this card can hand detection off to.
+ */
+function ksPresent() {
+  return typeof window !== 'undefined'
+    && !!window.kioskSatellite
+    && window.kioskSatellite.platform === 'kiosksatellite';
+}
+
 // ── Kiosker transport ──────────────────────────────────────────────────
 
 // event name -> queue of pending resolvers (FIFO; Kiosker replies carry
@@ -122,17 +136,25 @@ function _kioskerRequest(event, data = {}, timeoutMs = 1500) {
 // to resume.
 let _kioskerScreensaverPaused = false;
 
+// Kiosk Satellite exposes both a one-shot stopScreensaver() and a
+// suppress/release pauseScreensaver(paused).  We use the pause model (like
+// Kiosker) so the screensaver stays off for the whole voice interaction,
+// and track it to pair stop/release cleanly.
+let _ksScreensaverPaused = false;
+let _ksMotionHandler = null;
+
 // ── Public API ─────────────────────────────────────────────────────────
 
 /** True when running inside any supported kiosk browser. */
 export function isAvailable() {
-  return fkPresent() || kioskerPresent();
+  return fkPresent() || kioskerPresent() || ksPresent();
 }
 
-/** 'fullykiosk' | 'kiosker' | null */
+/** 'fullykiosk' | 'kiosker' | 'kiosksatellite' | null */
 export function platform() {
   if (fkPresent()) return 'fullykiosk';
   if (kioskerPresent()) return 'kiosker';
+  if (ksPresent()) return 'kiosksatellite';
   return null;
 }
 
@@ -140,12 +162,17 @@ export function platform() {
 export function name() {
   if (fkPresent()) return 'Fully Kiosk';
   if (kioskerPresent()) return 'Kiosker Pro';
+  if (ksPresent()) return 'Kiosk Satellite';
   return null;
 }
 
-/** Whether the host supports camera motion-dismiss (Fully Kiosk only). */
+/**
+ * Whether the host supports camera motion-dismiss.  Fully Kiosk (via
+ * onMotion) and Kiosk Satellite (via the `kiosksatellite:motion` event);
+ * Kiosker exposes no motion event.
+ */
 export function supportsMotion() {
-  return fkPresent();
+  return fkPresent() || ksPresent();
 }
 
 /**
@@ -165,6 +192,13 @@ export async function confirmAvailable() {
   if (kioskerPresent()) {
     const data = await _kioskerRequest('getUUID', {});
     return !!(data && data.uuid);
+  }
+  if (ksPresent()) {
+    try {
+      return !!(await window.kioskSatellite.getDeviceInfo());
+    } catch (_) {
+      return false;
+    }
   }
   return false;
 }
@@ -189,6 +223,15 @@ export async function getBrightness() {
     if (!Number.isFinite(level)) return null;
     return Math.min(1, Math.max(0, level));
   }
+  if (ksPresent()) {
+    try {
+      const level = Number(await window.kioskSatellite.getBrightness());
+      if (!Number.isFinite(level)) return null;
+      return Math.min(1, Math.max(0, level)); // already normalised 0..1
+    } catch (_) {
+      return null;
+    }
+  }
   return null;
 }
 
@@ -209,6 +252,14 @@ export function setBrightness(level) {
   }
   if (kioskerPresent()) {
     return _kioskerSend('setBrightness', { level: n });
+  }
+  if (ksPresent()) {
+    try {
+      window.kioskSatellite.setBrightness(n); // fire-and-forget (0..1)
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
   return false;
 }
@@ -233,6 +284,16 @@ export function stopScreensaver() {
     if (ok) _kioskerScreensaverPaused = true;
     return ok;
   }
+  if (ksPresent()) {
+    if (_ksScreensaverPaused) return true;
+    try {
+      window.kioskSatellite.pauseScreensaver(true);
+      _ksScreensaverPaused = true;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
   return false;
 }
 
@@ -247,6 +308,15 @@ export function releaseScreensaver() {
     if (ok) _kioskerScreensaverPaused = false;
     return ok;
   }
+  if (ksPresent() && _ksScreensaverPaused) {
+    try {
+      window.kioskSatellite.pauseScreensaver(false);
+      _ksScreensaverPaused = false;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
   return false;
 }
 
@@ -255,22 +325,130 @@ export function releaseScreensaver() {
  * no motion event.  Returns true if bound.
  */
 export function bindMotion(handlerName) {
-  if (!fkPresent()) return false;
-  try {
-    window.fully.bind('onMotion', `${handlerName}()`);
-    return true;
-  } catch (_) {
-    return false;
+  if (fkPresent()) {
+    try {
+      window.fully.bind('onMotion', `${handlerName}()`);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
+  if (ksPresent()) {
+    // Kiosk Satellite dispatches a DOM CustomEvent rather than string-eval
+    // binding.  Bridge it to the same global-handler convention.
+    try {
+      if (_ksMotionHandler) {
+        window.removeEventListener('kiosksatellite:motion', _ksMotionHandler);
+      }
+      _ksMotionHandler = () => {
+        try {
+          if (typeof window[handlerName] === 'function') window[handlerName]();
+        } catch (_) { /* ignore */ }
+      };
+      window.addEventListener('kiosksatellite:motion', _ksMotionHandler);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+  return false;
 }
 
-/** Unbind the motion-detection callback (Fully Kiosk only). */
+/** Unbind the motion-detection callback. */
 export function unbindMotion() {
+  if (ksPresent() && _ksMotionHandler) {
+    window.removeEventListener('kiosksatellite:motion', _ksMotionHandler);
+    _ksMotionHandler = null;
+    return true;
+  }
   if (!fkPresent()) return false;
   try {
     window.fully.bind('onMotion', '');
     return true;
   } catch (_) {
     return false;
+  }
+}
+
+// ── Native wake word (Kiosk Satellite only) ────────────────────────────
+//
+// Kiosk Satellite runs the vsWakeWord engine natively (ONNX on the CPU)
+// instead of the browser WebGPU/WASM runner, then fires a
+// `kiosksatellite:wakeword` DOM event on detection.  The card hands its
+// wake config to the app and consumes that event so wake-word inference
+// runs in native code (dramatically faster on tablets).  These helpers are
+// no-ops / null on Fully Kiosk and Kiosker, which have no native engine.
+
+let _ksWakeHandler = null;
+
+/** True when the host can run wake-word detection natively. */
+export function supportsNativeWakeWord() {
+  return ksPresent()
+    && typeof window.kioskSatellite.setWakeWordConfig === 'function';
+}
+
+/**
+ * Push the wake config to the native engine.  `config` is
+ * `{ engine, models: [{ id, wakeWord, manifestUrl }] }`.  Resolves
+ * `{ available }` — `available:false` means the app has no native runner
+ * for that engine and the card should keep browser detection.
+ */
+export async function configureNativeWakeWord(config) {
+  if (!supportsNativeWakeWord()) return { available: false };
+  try {
+    const res = await window.kioskSatellite.setWakeWordConfig(config);
+    return { available: !!(res && res.available) };
+  } catch (_) {
+    return { available: false };
+  }
+}
+
+/**
+ * Resume (`true`) or suspend (`false`) native listening.  The card must
+ * resume after a voice session returns to idle (the engine suspends itself
+ * on detection).  Returns true if the command was sent.
+ */
+export async function setNativeWakeWordActive(active) {
+  if (!ksPresent()) return false;
+  try {
+    await window.kioskSatellite.setWakeWordActive(!!active);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Current native wake-word engine state, or null. */
+export async function getNativeWakeWordState() {
+  if (!ksPresent()) return null;
+  try {
+    return await window.kioskSatellite.getWakeWordState();
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Bind a handler for native wake-word detections.  `handler(detail)` is
+ * called with `{ model, phrase }` when the app detects a wake word.  Only
+ * one handler is active at a time.  Returns true if bound.
+ */
+export function bindNativeWakeWord(handler) {
+  if (!ksPresent()) return false;
+  unbindNativeWakeWord();
+  _ksWakeHandler = (e) => {
+    try {
+      handler((e && e.detail) || {});
+    } catch (_) { /* ignore */ }
+  };
+  window.addEventListener('kiosksatellite:wakeword', _ksWakeHandler);
+  return true;
+}
+
+/** Unbind the native wake-word handler. */
+export function unbindNativeWakeWord() {
+  if (_ksWakeHandler) {
+    window.removeEventListener('kiosksatellite:wakeword', _ksWakeHandler);
+    _ksWakeHandler = null;
   }
 }

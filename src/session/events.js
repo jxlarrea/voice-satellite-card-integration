@@ -13,6 +13,7 @@ import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shar
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
 import { getSwitchState, getSelectState, getNumberState, getSatelliteAttr } from '../shared/satellite-state.js';
 import { setChimeDurationOverrides, getChimeDuration, CHIME_WAKE } from '../audio/chime.js';
+import { setupNativeWakeHandoff } from '../wake-word/native-handoff.js';
 
 const WAKE_MODE_HA = 'home-assistant';
 const WAKE_MODE_LOCAL = 'on-device';
@@ -260,6 +261,14 @@ export async function startListening(session) {
           .catch((e) => {
             session.logger.error('wake-word', `Stop-word standby start failed: ${e.message || e}`);
           });
+      }
+      // Kiosk Satellite native wake-word handoff: when hosted in the app,
+      // delegate wake detection to its native vsWakeWord engine. No-op on
+      // every other host (and when the app has no native runner).
+      if (!muted) {
+        setupNativeWakeHandoff(session).catch((e) => {
+          session.logger.error('wake-word', `Native wake handoff failed: ${e.message || e}`);
+        });
       }
       return;
     }
