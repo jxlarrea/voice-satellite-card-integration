@@ -5,7 +5,7 @@
  * and audio stream send control.
  */
 
-import { setupAudioWorklet, sendAudioBuffer } from './processing.js';
+import { setupAudioWorklet, setupPushAudioSource, sendAudioBuffer } from './processing.js';
 import { resolveDspForMode } from './dsp-config.js';
 import { describeAudioInputDevices, describeSelectedAudioTrack } from './devices.js';
 import * as kiosk from '../kiosk/index.js';
@@ -149,12 +149,23 @@ export class AudioManager {
     this._currentMicMode = mode;
     this._actualSampleRate = TARGET_SAMPLE_RATE;
 
+    // Republish the delegated audio as a real AudioNode so the reactive bar's
+    // analyser can tap it exactly like a mic source (see setupPushAudioSource).
+    this._sourceNode = await setupPushAudioSource(this);
+    if (this._card.isReactiveBarEnabled) {
+      this._card.analyser.attachMic(this._sourceNode, this._audioContext);
+    }
+
     kiosk.bindAudioStream((samples) => {
       // Mirror the AudioWorklet handler: only buffer while we're streaming to
       // the pipeline (or during the brief pre-handler capture window).
       if (this._sendInterval || this._captureBuffering) {
         this._audioBuffer.push(samples);
       }
+      // Drive the reactive bar. Copy: the worklet transfers/retains the
+      // buffer, and the same samples are already queued for the pipeline.
+      const node = this._sourceNode;
+      if (node) node.port.postMessage(samples.slice());
     });
 
     const res = await kiosk.startAudioStream();
@@ -286,6 +297,15 @@ export class AudioManager {
     if (this._mediaStream === KIOSK_MEDIA_STREAM) {
       kiosk.unbindAudioStream();
       kiosk.stopAudioStream();
+      if (this._sourceNode) {
+        this._card.analyser.detachMic(this._sourceNode);
+        try { this._sourceNode.disconnect(); } catch (_) { /* ignore */ }
+        this._sourceNode = null;
+      }
+      if (this._pushSilentGain) {
+        try { this._pushSilentGain.disconnect(); } catch (_) { /* ignore */ }
+        this._pushSilentGain = null;
+      }
       this._mediaStream = null;
       this._captureBuffering = false;
       this._audioBuffer = [];

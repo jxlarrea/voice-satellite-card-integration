@@ -95,6 +95,67 @@ export async function setupAudioWorklet(mgr, sourceNode) {
 }
 
 /**
+ * Set up a worklet that acts as an audio *source* fed by pushed PCM, for
+ * hosts that hand us captured audio instead of a MediaStream (Kiosk
+ * Satellite).  Making the delegated audio a real AudioNode means the
+ * reactive-bar analyser can tap it exactly like a mic source — all the
+ * existing level/speech-weighting/warmup logic applies unchanged, instead of
+ * being reimplemented against raw PCM.
+ *
+ * @param {import('./index.js').AudioManager} mgr
+ * @returns {Promise<AudioWorkletNode>}
+ */
+const _registeredSourceContexts = new WeakSet();
+
+export async function setupPushAudioSource(mgr) {
+  if (!_registeredSourceContexts.has(mgr.audioContext)) {
+    const code =
+      'class VSPushSource extends AudioWorkletProcessor{'
+      + 'constructor(){super();this._q=[];this._cur=null;this._pos=0;'
+      + 'this.port.onmessage=(e)=>{this._q.push(e.data);'
+      // We are a level meter, not playback: if the producer outruns the
+      // graph, drop the backlog rather than drift further behind.
+      + 'if(this._q.length>12){this._q.length=0;this._cur=null;}};}'
+      + 'process(inputs,outputs){'
+      + 'var out=outputs[0][0];if(!out)return true;'
+      + 'var i=0;'
+      + 'while(i<out.length){'
+      + 'if(!this._cur){if(!this._q.length)break;this._cur=this._q.shift();this._pos=0;}'
+      + 'var n=Math.min(out.length-i,this._cur.length-this._pos);'
+      + 'out.set(this._cur.subarray(this._pos,this._pos+n),i);'
+      + 'i+=n;this._pos+=n;'
+      + 'if(this._pos>=this._cur.length)this._cur=null;'
+      + '}'
+      + 'return true;'
+      + '}'
+      + '}'
+      + 'registerProcessor("vs-push-source",VSPushSource);';
+    const blob = new Blob([code], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    try {
+      await mgr.audioContext.audioWorklet.addModule(url);
+      _registeredSourceContexts.add(mgr.audioContext);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  const node = new AudioWorkletNode(mgr.audioContext, 'vs-push-source', {
+    numberOfInputs: 0,
+    numberOfOutputs: 1,
+    outputChannelCount: [1],
+  });
+  // Pull the node at real time through a silent gain so the analyser sees a
+  // live signal without routing delegated mic audio to the speakers.
+  const silent = mgr.audioContext.createGain();
+  silent.gain.value = 0;
+  node.connect(silent);
+  silent.connect(mgr.audioContext.destination);
+  mgr._pushSilentGain = silent;
+  return node;
+}
+
+/**
  * Combine buffered audio, resample, and send via WebSocket.
  * @param {import('./index.js').AudioManager} mgr
  * @param {number|null} binaryHandlerId
