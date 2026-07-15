@@ -28,6 +28,7 @@ import { getSelectState, getSwitchState } from '../shared/satellite-state.js';
 import { withWakeWordAssetVersion } from './versioned-url.js';
 import { wakeWordPhraseFor } from './index.js';
 import { vwwConfidenceScaleFor, vwwEnergyGateFor } from './vww/sensitivity.js';
+import { owwThresholdFor } from './oww/sensitivity.js';
 
 let _active = false;
 let _stopActive = false;
@@ -53,6 +54,7 @@ export function nativeEngineFor(session) {
   );
   if (raw === 'On Device (vsWakeWord)') return 'vsWakeWord';
   if (raw === 'On Device (microWakeWord)') return 'microWakeWord';
+  if (raw === 'On Device (openWakeWord)') return 'openWakeWord';
   return null;
 }
 
@@ -62,6 +64,9 @@ export function nativeEngineFor(session) {
  */
 function modelsBase(engine) {
   if (engine === 'microWakeWord') return '/voice_satellite/models';
+  if (engine === 'openWakeWord') {
+    return globalThis.__VS_OWW_MODELS_BASE || '/voice_satellite/models/openwakeword';
+  }
   return globalThis.__VS_VWW_MODELS_BASE || '/voice_satellite/models/vswakeword';
 }
 
@@ -70,9 +75,18 @@ function stopNameFor(engine) {
   return engine === 'vsWakeWord' ? VWW_STOP_NAME : 'stop';
 }
 
-/** Absolute manifest URL for a model (what the app downloads). */
+/**
+ * Absolute URL identifying a model (what the app downloads).
+ *
+ * microWakeWord and vsWakeWord ship a `.json` manifest next to their weights,
+ * and the app derives the weights URL from it. openWakeWord ships no manifest
+ * at all - its cutoff is the card's policy, sent as `cutoff` below - so the
+ * URL points straight at the classifier, and the app reads the two shared
+ * models (melspectrogram, embedding) out of the same directory.
+ */
 function manifestUrlFor(name, engine) {
-  const rel = withWakeWordAssetVersion(`${modelsBase(engine)}/${name}.json`);
+  const ext = engine === 'openWakeWord' ? 'onnx' : 'json';
+  const rel = withWakeWordAssetVersion(`${modelsBase(engine)}/${name}.${ext}`);
   try {
     return new URL(rel, window.location.origin).href;
   } catch (_) {
@@ -115,6 +129,7 @@ function stopModelFor(session, engine) {
     wakeWord: wakeWordPhraseFor(name),
     manifestUrl: manifestUrlFor(name, engine),
     confidenceScale: confidenceScaleFor(session, { stop: true }),
+    ...cutoffFor(session, engine, { stop: true }),
   };
 }
 
@@ -146,6 +161,18 @@ function confidenceScaleFor(session, { stop = false } = {}) {
  * here. Worth more on the app side than in the browser: it is listening around
  * the clock on battery.
  */
+/**
+ * openWakeWord's absolute cutoff, already moved by the Sensitivity setting.
+ *
+ * Sent only for openWakeWord, and for the same reason the VWW scale is sent:
+ * the policy is the card's. The difference is that OWW has no manifest for the
+ * app to scale, so we hand it the finished number instead of a multiplier.
+ */
+function cutoffFor(session, engine, { stop = false } = {}) {
+  if (engine !== 'openWakeWord') return {};
+  return { cutoff: owwThresholdFor(sensitivityLabel(session), { stop }) };
+}
+
 function energyGateFor(session) {
   const enabled = getSwitchState(
     session.hass, session.config.satellite_entity, 'noise_gate',
@@ -195,6 +222,7 @@ export async function setupNativeWakeHandoff(session, { force = false } = {}) {
     wakeWord: wakeWordPhraseFor(name),
     manifestUrl: manifestUrlFor(name, engine),
     confidenceScale: scale,
+    ...cutoffFor(session, engine),
   }));
 
   // The app answers false when wake word detection is turned off in its own

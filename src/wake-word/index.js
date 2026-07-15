@@ -16,6 +16,9 @@ import { WorkerProxyBackend } from './worker/proxy-backend.js';
 import { clearNotificationUI } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
 import * as kiosk from '../kiosk/index.js';
+import {
+  OWW_WAKE_SENSITIVITY_OFFSETS, OWW_STOP_SENSITIVITY_OFFSETS,
+} from './oww/sensitivity.js';
 
 // Detection-mode select values that need parsing in several places.
 // "On Device" (legacy) is treated as microWakeWord for backwards compat.
@@ -135,16 +138,6 @@ const STOP_SENSITIVITY_FACTORS = {
 // outputs the OWW classifier is itself uncertain about (sigmoid calibrated
 // around 0.5).  Stop uses gentler ±0.05 since its 0.65 base is already a
 // noisier band and small swings matter more there.
-const OWW_WAKE_SENSITIVITY_OFFSETS = {
-  'Slightly sensitive':  0.10,   // raises cutoff to 0.6 (harder to trigger)
-  'Moderately sensitive': 0.00,
-  'Very sensitive':      -0.10,  // lowers cutoff to 0.4 (easier to trigger)
-};
-const OWW_STOP_SENSITIVITY_OFFSETS = {
-  'Slightly sensitive':  0.05,
-  'Moderately sensitive': 0.00,
-  'Very sensitive':      -0.05,
-};
 const DEFAULT_CUTOFF = 0.90;
 
 // Wake word phrases matching microWakeWord conventions.
