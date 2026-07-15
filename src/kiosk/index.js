@@ -417,6 +417,27 @@ export async function configureNativeWakeWord(config) {
 }
 
 /**
+ * Hard mic-off: stop native detection and make the app close the microphone.
+ *
+ * Distinct from `setNativeWakeWordActive(false)`, which only pauses detection
+ * and deliberately keeps the mic open so a turn can resume instantly.  Use
+ * this when nobody should be capturing at all: the satellite is muted, or the
+ * user switched to an engine the app cannot run and the browser is taking
+ * detection back.  configureNativeWakeWord() takes it back.
+ */
+export async function releaseNativeWakeWord() {
+  if (!ksPresent() || typeof window.kioskSatellite.releaseWakeWord !== 'function') {
+    return false;
+  }
+  try {
+    await window.kioskSatellite.releaseWakeWord();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
  * Resume (`true`) or suspend (`false`) native listening.  The card must
  * resume after a voice session returns to idle (the engine suspends itself
  * on detection).  Returns true if the command was sent.

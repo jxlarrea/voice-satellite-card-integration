@@ -13,7 +13,7 @@ import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shar
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
 import { getSwitchState, getSelectState, getNumberState, getSatelliteAttr } from '../shared/satellite-state.js';
 import { setChimeDurationOverrides, getChimeDuration, CHIME_WAKE } from '../audio/chime.js';
-import { setupNativeWakeHandoff } from '../wake-word/native-handoff.js';
+import { setupNativeWakeHandoff, teardownNativeWakeHandoff } from '../wake-word/native-handoff.js';
 
 const WAKE_MODE_HA = 'home-assistant';
 const WAKE_MODE_LOCAL = 'on-device';
@@ -221,6 +221,18 @@ export async function startListening(session) {
     // Disabled, so the browser skips the mic and its own engine entirely.
     // Fully transparent: nothing to configure in Voice Satellite, and a no-op
     // on every other host.
+    // Stable hooks so the wake-word manager can re-negotiate or hand the mic
+    // back on a settings change without importing native-handoff.js (which
+    // imports it). Set here rather than inside the handoff so they survive a
+    // teardown: switching *back* to a natively-runnable engine has to be able
+    // to re-establish it.
+    session._setupNativeWake = (opts) => setupNativeWakeHandoff(session, opts);
+    session._teardownNativeWake = () => teardownNativeWakeHandoff(session);
+    // Coming *out* of the handoff needs the full start path, not the
+    // mid-session switch helpers: those exist for HA <-> on-device flips and
+    // assume the mic is already open, which it never is while the app owns it.
+    session._restartListening = () => startListening(session);
+
     await setupNativeWakeHandoff(session).catch((e) => {
       session.logger.error('wake-word', `Native wake handoff failed: ${e.message || e}`);
     });
@@ -784,14 +796,15 @@ export async function triggerWake(session, opts = {}) {
       session.tts.playChime('wake');
     }
 
-    await session.pipeline.start(seamless
-      ? {
-        start_stage: 'stt',
-        wake_word_phrase: opts.wakeWordPhrase,
-        wake_word_slot: opts.wakeWordSlot,
-        preserve_audio_buffer: true,
-      }
-      : { start_stage: 'stt' });
+    // Always tell HA which wake word fired when we know it (a native detection
+    // carries it; a bare voice_satellite.wake has none), matching what the
+    // browser detection path sends. Only the seamless extras are conditional.
+    await session.pipeline.start({
+      start_stage: 'stt',
+      ...(opts.wakeWordPhrase ? { wake_word_phrase: opts.wakeWordPhrase } : {}),
+      ...(opts.wakeWordSlot ? { wake_word_slot: opts.wakeWordSlot } : {}),
+      ...(seamless ? { preserve_audio_buffer: true } : {}),
+    });
   } catch (e) {
     session.logger.error('wake', `Manual wake failed: ${e?.message || e}`);
     if (seamless) {

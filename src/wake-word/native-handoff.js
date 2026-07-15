@@ -107,20 +107,34 @@ function stopModelFor(session) {
  */
 export async function setupNativeWakeHandoff(session, { force = false } = {}) {
   // Already handed off: re-pushing on every startListening would restart the
-  // app's engine for nothing. `force` is for a real config change (the
-  // stop-word switch), where the app does need to hear about it.
+  // app's engine for nothing. `force` is for a real config change (a new wake
+  // word, the engine select, the stop-word switch), where the app does need to
+  // hear about it - and where the answer may now be "not natively runnable",
+  // in which case we hand the mic back below.
   if (_active && !force) return true;
   if (kiosk.platform() !== 'kiosksatellite' || !kiosk.supportsNativeWakeWord()) {
     return false;
   }
-  // Muted is a hard mic-off: don't hand off, the session stays silent.
+
+  // Muted is a hard mic-off, and an engine we can't run natively means the
+  // browser is taking detection back. Either way the app must stop capturing:
+  // pausing is not enough, since that deliberately keeps its mic open.
   const muted = getSwitchState(
     session.hass, session.config.satellite_entity, 'mute',
   ) === true;
-  if (muted) return false;
-
-  const engine = nativeEngineFor(session);
-  if (!engine) return false;
+  const engine = muted ? null : nativeEngineFor(session);
+  if (!engine) {
+    if (_active) {
+      session.logger?.log(
+        'wake-word',
+        muted
+          ? 'Muted - releasing the microphone on Kiosk Satellite'
+          : 'Wake word engine is no longer one Kiosk Satellite runs - taking detection back',
+      );
+      teardownNativeWakeHandoff(session);
+    }
+    return false;
+  }
 
   const models = activeModels(session).map((name) => ({
     id: name,
@@ -191,10 +205,6 @@ export async function setupNativeWakeHandoff(session, { force = false } = {}) {
 
   _active = true;
   session._nativeWakeActive = true;
-  // Lets the wake-word manager re-push config on a settings change without
-  // importing this module (it is imported *by* this one).
-  session._renegotiateNativeWake =
-    () => setupNativeWakeHandoff(session, { force: true });
   session.logger?.log(
     'wake-word',
     `Wake word detection handed off to Kiosk Satellite (${engine}: ${models.map((m) => m.id).join(', ')}${_stopActive ? ' + stop word' : ''})`,
@@ -220,7 +230,9 @@ export async function resumeNativeWake(session) {
 export function teardownNativeWakeHandoff(session) {
   if (!_active) return;
   kiosk.unbindNativeWakeWord();
-  kiosk.setNativeWakeWordActive(false);
+  // Release, not just suspend: whoever ends the handoff wants the mic closed
+  // (muted, or the browser is about to open its own capture for detection).
+  kiosk.releaseNativeWakeWord();
   if (_stopActive) {
     kiosk.setNativeStopWordActive(false);
     kiosk.unbindNativeStopWord();
@@ -230,6 +242,5 @@ export function teardownNativeWakeHandoff(session) {
   if (session) {
     session._nativeWakeActive = false;
     session._nativeStopActive = false;
-    session._renegotiateNativeWake = null;
   }
 }

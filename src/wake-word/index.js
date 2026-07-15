@@ -331,6 +331,26 @@ export class WakeWordManager {
     return this.isStopWordEnabled();
   }
 
+  /**
+   * Free the browser inference runtime and everything hanging off it, for when
+   * the local engine has no reason to exist: the stop word went off with no
+   * on-device wake, or Kiosk Satellite just took detection over mid-session.
+   *
+   * Deliberately does not touch the mic: callers are in different situations
+   * about who should hold it (HA wake mode still needs it; a native handoff
+   * does not).
+   */
+  _releaseLocalRuntime(reason) {
+    if (!this._inference && !this._tfweb) return;
+    this._log.log('wake-word', `Releasing the browser wake-word runtime (${reason})`);
+    try { this.stop(); } catch (e) { this._log.log('wake-word', `release: stop: ${e.message || e}`); }
+    this._destroyInference(reason);
+    this._loadedModelsKey = null;
+    this._stopMicroConfig = null;
+    resetRuntime().catch(() => { /* best-effort */ });
+    this._tfweb = null;
+  }
+
   /** True when the stop classifier is handed off to Kiosk Satellite. */
   _nativeStopActive() {
     return this._session._nativeStopActive === true
@@ -810,6 +830,13 @@ export class WakeWordManager {
    */
   release() {
     this._log.log('wake-word', 'release() - freeing wake-word runtime');
+    // Kiosk Satellite is the runtime here, and it holds the microphone. Mute
+    // means the mic is off, period, so pausing it is not enough: hand the mic
+    // back. startListening() re-establishes the handoff on unmute.
+    if (this._session._nativeWakeActive) {
+      this._session._teardownNativeWake?.();
+      return;
+    }
     try { this.stop(); } catch (e) { this._log.log('wake-word', `release: stop failed: ${e.message || e}`); }
     this._destroyInference('release');
     this._loadedModelsKey = null;
@@ -1719,6 +1746,10 @@ export class WakeWordManager {
 
     const enabled = this.isEnabled();
     const engine = this.getEngine();
+    // The raw select, not getEngine(): under the Kiosk Satellite handoff
+    // getEngine() is pinned to null and isEnabled() to false (the app owns
+    // detection), so an engine switch would be invisible to the checks below.
+    const mode = this._wakeMode();
     const model = this.getModelName();
     const model2 = this.getModel2Name();
     const threshold = this.getThreshold();
@@ -1729,6 +1760,7 @@ export class WakeWordManager {
     if (this._cachedEnabled === undefined) {
       this._cachedEnabled = enabled;
       this._cachedEngine = engine;
+      this._cachedMode = mode;
       this._cachedModel = model;
       this._cachedModel2 = model2;
       this._cachedThreshold = threshold;
@@ -1741,16 +1773,18 @@ export class WakeWordManager {
     // Engine flip (MWW ↔ OWW) without changing the enabled bit needs a
     // full inference rebuild - same code path as a model change.
     const engineChanged = engine !== this._cachedEngine;
+    const modeChanged = mode !== this._cachedMode;
     const modelChanged = model !== this._cachedModel;
     const model2Changed = model2 !== this._cachedModel2;
     const thresholdChanged = threshold !== this._cachedThreshold;
     const noiseGateChanged = noiseGate !== this._cachedNoiseGate;
     const stopWordChanged = stopWord !== this._cachedStopWord;
 
-    if (!enabledChanged && !engineChanged && !modelChanged && !model2Changed && !thresholdChanged && !noiseGateChanged && !stopWordChanged) return;
+    if (!enabledChanged && !engineChanged && !modeChanged && !modelChanged && !model2Changed && !thresholdChanged && !noiseGateChanged && !stopWordChanged) return;
 
     // Always update caches
     this._cachedEngine = engine;
+    this._cachedMode = mode;
     this._cachedModel2 = model2;
     this._cachedThreshold = threshold;
     this._cachedNoiseGate = noiseGate;
@@ -1783,26 +1817,76 @@ export class WakeWordManager {
       // the local runtime existed. Tear it down so the user pays zero
       // local CPU/RAM cost again, matching the performance contract.
       if (!this.isOnDeviceWakeEnabled()) {
-        this._log.log('wake-word', 'Stop-word off without on-device wake - releasing local runtime');
-        this.stop();
-        this._destroyInference('stop-word disabled');
-        this._loadedModelsKey = null;
-        this._stopMicroConfig = null;
-        resetRuntime().catch(() => { /* best-effort */ });
-        this._tfweb = null;
+        this._releaseLocalRuntime('stop-word disabled');
       }
     }
 
-    // Kiosk Satellite is the one with the mic, so a stop-word toggle has to
-    // reach the app rather than a local runtime: re-push the config so it
-    // loads (or drops) the stop classifier natively.
-    if (stopWordChanged && this._session._nativeWakeActive) {
-      // Hook rather than an import: native-handoff.js already imports this
-      // module, and a cycle here would be resolved at load time.
-      Promise.resolve(this._session._renegotiateNativeWake?.()).catch((e) => {
-        this._log.error('stop-word', `Native re-negotiation failed: ${e.message || e}`);
-      });
-    } else if (stopWordChanged && stopWord && !this.isOnDeviceWakeEnabled() && !this._tfweb) {
+    // Kiosk Satellite owns detection and only reads config when it starts, so
+    // every setting it was handed has to be re-pushed: a new wake word, the
+    // second slot, the stop-word switch, or the engine select itself. If the
+    // new engine is not one it runs natively, the re-negotiation hands the mic
+    // back and we re-run so the browser paths below see the real engine (they
+    // are blind to it while the handoff is up).
+    //
+    // Hook rather than an import: native-handoff.js already imports this
+    // module, and a cycle here would be resolved at load time.
+    // Runs whether or not the handoff is currently up: switching *back* to a
+    // natively-runnable engine has to re-establish it, not just switching away.
+    if ((stopWordChanged || modeChanged || modelChanged || model2Changed)
+      && (this._session._nativeWakeActive || kiosk.platform() === 'kiosksatellite')) {
+      const wasNative = this._session._nativeWakeActive === true;
+      // Own the caches _applyModeOrModelChange would normally update: we
+      // return before it, and leaving them stale re-fires this branch on every
+      // single HA state change.
+      this._cachedEnabled = enabled;
+      this._cachedModel = model;
+      this._log.log('wake-word', 'Settings changed - re-negotiating with Kiosk Satellite');
+      Promise.resolve(this._session._setupNativeWake?.({ force: true }))
+        .then((isNative) => {
+          if (isNative && !wasNative) {
+            // The app just took detection over mid-session. Free the browser
+            // runtime that was doing it until a moment ago, or both would run,
+            // and give up the mic: the app owns it now and the browser must
+            // look exactly as it does after a fresh start into the handoff
+            // (no local engine, no passive mic, waiting for a wake event).
+            this._releaseLocalRuntime('handed off to Kiosk Satellite');
+            const session = this._session;
+            try { session.pipeline.stop(); } catch (_) { /* ignore */ }
+            try { session.audio.stopMicrophone(); } catch (_) { /* ignore */ }
+            session.setState(State.IDLE);
+            // Adopt the handoff's view of the world. getEngine()/isEnabled()
+            // flip to null/false the moment it engages, and the caches were
+            // filled a tick earlier when they still read the real engine: left
+            // alone, the next HA state change reads that as "the user switched
+            // to Home Assistant mode" and starts a server pipeline underneath
+            // the app.
+            this._cachedEnabled = this.isEnabled();
+            this._cachedEngine = this.getEngine();
+          } else if (wasNative) {
+            // The app handed the mic back (an engine it cannot run, or
+            // detection turned off). Run the full start path: the browser now
+            // needs its own capture, and it has had none for as long as the
+            // app owned detection.
+            Promise.resolve(this._session._restartListening?.())
+              .then(() => {
+                // Adopt what we ended up with, or the next HA state change
+                // sees engine null -> 'mww' and restarts it all over again.
+                this._cachedEnabled = this.isEnabled();
+                this._cachedEngine = this.getEngine();
+                this._cachedModel = this.getModelName();
+              })
+              .catch((e) => {
+                this._log.error('wake-word', `Restart after handoff ended failed: ${e.message || e}`);
+              });
+          }
+        })
+        .catch((e) => {
+          this._log.error('wake-word', `Native re-negotiation failed: ${e.message || e}`);
+        });
+      return;
+    }
+
+    if (stopWordChanged && stopWord && !this.isOnDeviceWakeEnabled() && !this._tfweb) {
       // HA / Disabled wake mode + stop word just turned ON: bring up the
       // runtime in standby so subsequent enableStopModel(true) calls
       // (during TTS, notifications, alerts) have an inference engine to
