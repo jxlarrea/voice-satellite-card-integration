@@ -462,12 +462,31 @@ function toBigInt64Array(values) {
   return out;
 }
 
+// The opset these graphs are written against, and the ONNX IR version that
+// opset belongs to. They are a pair, not two independent knobs: the IR version
+// declares the *file format*, and every runtime checks it before it looks at a
+// single node.
+//
+// Keep this at the oldest IR that can express the graph. The ops here (Gemm,
+// Relu, Sigmoid, ReduceMean, Add, Mul, Sub, Div, Sqrt, Pow) are all opset <= 12
+// and need nothing newer, so IR 7 — the version opset 12 shipped with — is
+// exactly right and is what the frontend models we sit next to already declare
+// (melspectrogram.onnx and embedding_model.onnx are both IR 7).
+//
+// This used to say 10 for no reason anyone recorded. It cost real time: our own
+// browser runtime parses the protobuf by hand and never reads the field, so
+// nothing here noticed, but IR 10 needs onnxruntime >= 1.18, and every native
+// consumer on an older runtime rejected the file before parsing it — for a
+// graph that had no business claiming a 2024 format in the first place.
+const ONNX_OPSET = 12;
+const ONNX_IR_VERSION = 7; // the IR version opset 12 was released with
+
 function encodeModel(graph) {
   const model = [
-    fieldVarint(1, 10),
+    fieldVarint(1, ONNX_IR_VERSION),
     fieldString(2, 'voice-satellite-tflite-port'),
     fieldMessage(7, encodeGraph(graph)),
-    fieldMessage(8, encodeOpset(12)),
+    fieldMessage(8, encodeOpset(ONNX_OPSET)),
   ];
   return Buffer.concat(model);
 }
