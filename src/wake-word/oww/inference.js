@@ -146,7 +146,12 @@ export class OwwInference {
     // runner - caller must `await this.ready` before the first
     // processChunk.  CPU-only callers can ignore the promise (it
     // resolves synchronously within the same microtask).
-    this.ready = this._warmupFeatureBuffer();
+    // Snapshot the noise-warmed classifier window once warmup finishes, so
+    // reset() can restore it for free. See reset() for why zeroing it instead
+    // is not safe.
+    this.ready = this._warmupFeatureBuffer().then(() => {
+      this._warmClassifierInput = this._classifierInput.slice();
+    });
   }
 
   _initMelBuffer() {
@@ -206,11 +211,18 @@ export class OwwInference {
    * detection, and the very first post-resume classification fires
    * 0.95+ on what the model thinks is still "ok nabu" history.
    *
-   * Cheap (no model invocations): zeros out audio history + mel buffer,
-   * recreates per-model TFLite state, fills the classifier window with
-   * zero-embeddings.  Recall: ok_nabu(zeros) ≈ 1e-3 in our offline tests,
-   * so an all-zero classifier window produces near-zero score until real
-   * audio embeddings replace the reset state.
+   * Restores the noise-warmed classifier window captured at startup rather
+   * than zeroing it.  An all-zero window is NOT neutral: that assumption held
+   * for ok_nabu (which scores ~1e-3 on zeros) but not in general - alexa
+   * scores ~1.0 on an all-zero window, so zeroing here fired a phantom
+   * detection on silence immediately after every interaction.  Noise
+   * embeddings are what openWakeWord itself pre-fills with
+   * (`feature_buffer = self._get_embeddings(noise)`), so restoring them is
+   * both model-agnostic and faithful to upstream.
+   *
+   * Still cheap (no model invocations): the snapshot is a 16 x 96 float copy.
+   * That matters because the energy gate calls this on every sleep, which is
+   * exactly where we must not be running the mel + embedding pipeline.
    */
   reset() {
     this._audioHistory.fill(0);
@@ -221,7 +233,12 @@ export class OwwInference {
     for (const [name, model] of this._classifierEntries) {
       this._classifierStates[name] = model.createState();
     }
-    this._classifierInput.fill(0);
+    if (this._warmClassifierInput) {
+      this._classifierInput.set(this._warmClassifierInput);
+    }
+    // No else: if warmup has not finished there is no snapshot yet, and the
+    // window already holds whatever warmup has filled so far. Leaving that
+    // alone is strictly safer than zeroing it.
   }
 
   destroy() {
