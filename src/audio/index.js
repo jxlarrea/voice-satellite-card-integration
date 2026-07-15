@@ -57,6 +57,10 @@ export class AudioManager {
    */
   setMicTracksMuted(muted) {
     this._micTracksMuted = !!muted;
+    // The Kiosk Satellite source has no MediaStreamTracks to disable (the app
+    // owns the capture), so muting is enforced where its chunks arrive - see
+    // _startKioskMicrophone. Without that, this would silently do nothing and
+    // the wake chime would land in the STT recording.
     if (this._mediaStream) {
       this._mediaStream.getAudioTracks().forEach((t) => { t.enabled = !this._micTracksMuted; });
     }
@@ -157,6 +161,11 @@ export class AudioManager {
     }
 
     kiosk.bindAudioStream((samples, _rate, preRoll) => {
+      // Muted: drop the audio on the floor rather than buffer it. This is what
+      // disabling the MediaStream's tracks does for a getUserMedia source, and
+      // it is what keeps the deferred wake chime out of the STT recording
+      // during the cross-tablet dedupe window.
+      if (this._micTracksMuted) return;
       // Mirror the AudioWorklet handler: only buffer while we're streaming to
       // the pipeline (or during the brief pre-handler capture window).
       if (this._sendInterval || this._captureBuffering) {

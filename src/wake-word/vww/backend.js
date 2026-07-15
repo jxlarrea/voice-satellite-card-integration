@@ -16,6 +16,10 @@
  */
 
 import { VwwInference, CHUNK_SAMPLES } from './inference.js';
+import {
+  VWW_SENSITIVITY_CONF_FACTORS, VWW_STOP_SENSITIVITY_CONF_FACTORS,
+  ENERGY_THRESHOLDS, DEFAULT_ENERGY, SLEEP_CHUNKS,
+} from './sensitivity.js';
 import { VwwEmbeddingInference } from './embedding-inference.js';
 import { loadVwwModel } from './models.js';
 import { acquireWebGpuDevice, WebGpuUnavailableError } from './gpu/device.js';
@@ -29,37 +33,8 @@ const DEFAULT_CUTOFF = 0.6;
 // Energy-gate thresholds keyed off the same Sensitivity select MWW / OWW
 // use, so the user gets consistent gate behavior across engines.  RMS is
 // computed on the raw +/-1 worklet input - identical to OWW.
-const ENERGY_THRESHOLDS = {
-  'Slightly sensitive':   { sleep: 0.10,  wake: 0.12  },
-  'Moderately sensitive': { sleep: 0.05,  wake: 0.06  },
-  'Very sensitive':       { sleep: 0.02,  wake: 0.025 },
-};
-const DEFAULT_ENERGY = ENERGY_THRESHOLDS['Moderately sensitive'];
 
 // Sensitivity -> CTC matched-confidence gate scaling.  Deployed per-target
-// confidence gates are calibrated between the measured forge band and the
-// real-clip confidence floor, which sit ~10-20% apart, so one notch is
-// +/-10%: 'Slightly' raises gates toward the real floor (fewer FPs, trims
-// only the faintest wakes), 'Very' lowers them toward the forge band
-// (catches fainter single-window wakes, admits marginal forges).  Stop
-// classifiers get a gentler +/-5% notch, mirroring the OWW/MWW stop
-// tables.  The global min_matched_confidence scales along with the
-// per-target gates (deployed manifests set it to the lowest calibrated
-// gate, so holding it fixed would neutralize 'Very').  required_hits,
-// edit distance, anchors, and trail tolerance are deliberately NOT scaled:
-// those are measured cliffs, not dials (hits=2 collapses degraded-audio
-// recall; ed changes admit whole confusable families).
-const VWW_SENSITIVITY_CONF_FACTORS = {
-  'Slightly sensitive':   1.10,
-  'Moderately sensitive': 1.00,
-  'Very sensitive':       0.90,
-};
-const VWW_STOP_SENSITIVITY_CONF_FACTORS = {
-  'Slightly sensitive':   1.05,
-  'Moderately sensitive': 1.00,
-  'Very sensitive':       0.95,
-};
-const SLEEP_CHUNKS = 30;        // ~2.4 s of silence before sleeping
 const COOLDOWN_MS = 2000;       // matches OWW / MWW so triggers don't cascade
 const SLEEP_BUFFER_CHUNKS = 13; // ~1.04 s - one full window + a couple chunks
 const HARD_SILENCE_VETO_RMS = 0.002;

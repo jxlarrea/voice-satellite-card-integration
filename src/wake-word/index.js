@@ -1119,13 +1119,32 @@ export class WakeWordManager {
         session.pipeline.restart(session.pipeline.calculateRetryDelay());
       });
 
+    this.scheduleWakeChime(wakeSound);
+  }
+
+  /**
+   * Hold the wake chime behind the cross-tablet dedupe window, then play it
+   * and hand the mic to STT.
+   *
+   * Shared by the browser detection path and the Kiosk Satellite native one so
+   * a multi-tablet house behaves the same whoever heard the wake word: HA gets
+   * the wake event immediately and answers duplicate_wake_up_detected to the
+   * losers, whose pending chime is cancelled by the pipeline error handler
+   * (see cancelPendingChime) before a sound is emitted.
+   *
+   * The caller must already have muted the mic, suppressed the reactive bar,
+   * and started the pipeline with defer_audio_start.
+   *
+   * @param {boolean} wakeSound the per-satellite wake_sound switch
+   */
+  scheduleWakeChime(wakeSound) {
+    const session = this._session;
     this._log.log(
       'wake-word',
       wakeSound
         ? `STT audio deferred until wake chime completes (${WAKE_DEDUPE_WINDOW_MS}ms dedupe window)`
         : `STT audio deferred for ${WAKE_DEDUPE_WINDOW_MS}ms dedupe window`,
     );
-
     // Schedule the wake chime (or just an unmute if wake sound is off).
     if (wakeSound) {
       this._pendingChimeHandle = setTimeout(() => {
@@ -1750,6 +1769,10 @@ export class WakeWordManager {
     // getEngine() is pinned to null and isEnabled() to false (the app owns
     // detection), so an engine switch would be invisible to the checks below.
     const mode = this._wakeMode();
+    // Likewise the raw Sensitivity select: getThreshold() below resolves it
+    // through getEngine(), which the handoff pins to null, so it cannot see a
+    // sensitivity change while the app owns detection.
+    const sensitivity = this._getSensitivityLabel();
     const model = this.getModelName();
     const model2 = this.getModel2Name();
     const threshold = this.getThreshold();
@@ -1761,6 +1784,7 @@ export class WakeWordManager {
       this._cachedEnabled = enabled;
       this._cachedEngine = engine;
       this._cachedMode = mode;
+      this._cachedSensitivity = sensitivity;
       this._cachedModel = model;
       this._cachedModel2 = model2;
       this._cachedThreshold = threshold;
@@ -1774,17 +1798,19 @@ export class WakeWordManager {
     // full inference rebuild - same code path as a model change.
     const engineChanged = engine !== this._cachedEngine;
     const modeChanged = mode !== this._cachedMode;
+    const sensitivityChanged = sensitivity !== this._cachedSensitivity;
     const modelChanged = model !== this._cachedModel;
     const model2Changed = model2 !== this._cachedModel2;
     const thresholdChanged = threshold !== this._cachedThreshold;
     const noiseGateChanged = noiseGate !== this._cachedNoiseGate;
     const stopWordChanged = stopWord !== this._cachedStopWord;
 
-    if (!enabledChanged && !engineChanged && !modeChanged && !modelChanged && !model2Changed && !thresholdChanged && !noiseGateChanged && !stopWordChanged) return;
+    if (!enabledChanged && !engineChanged && !modeChanged && !sensitivityChanged && !modelChanged && !model2Changed && !thresholdChanged && !noiseGateChanged && !stopWordChanged) return;
 
     // Always update caches
     this._cachedEngine = engine;
     this._cachedMode = mode;
+    this._cachedSensitivity = sensitivity;
     this._cachedModel2 = model2;
     this._cachedThreshold = threshold;
     this._cachedNoiseGate = noiseGate;
@@ -1832,7 +1858,8 @@ export class WakeWordManager {
     // module, and a cycle here would be resolved at load time.
     // Runs whether or not the handoff is currently up: switching *back* to a
     // natively-runnable engine has to re-establish it, not just switching away.
-    if ((stopWordChanged || modeChanged || modelChanged || model2Changed)
+    if ((stopWordChanged || modeChanged || sensitivityChanged || noiseGateChanged
+      || modelChanged || model2Changed)
       && (this._session._nativeWakeActive || kiosk.platform() === 'kiosksatellite')) {
       const wasNative = this._session._nativeWakeActive === true;
       // Own the caches _applyModeOrModelChange would normally update: we

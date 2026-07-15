@@ -27,6 +27,7 @@ import * as kiosk from '../kiosk/index.js';
 import { getSelectState, getSwitchState } from '../shared/satellite-state.js';
 import { withWakeWordAssetVersion } from './versioned-url.js';
 import { wakeWordPhraseFor } from './index.js';
+import { vwwConfidenceScaleFor, vwwEnergyGateFor } from './vww/sensitivity.js';
 
 let _active = false;
 let _stopActive = false;
@@ -97,7 +98,43 @@ function stopModelFor(session) {
     id: VWW_STOP_NAME,
     wakeWord: wakeWordPhraseFor(VWW_STOP_NAME),
     manifestUrl: manifestUrlFor(VWW_STOP_NAME),
+    confidenceScale: confidenceScaleFor(session, { stop: true }),
   };
+}
+
+/** The Sensitivity select, which the app never reads for itself. */
+function sensitivityLabel(session) {
+  return getSelectState(
+    session.hass, session.config.satellite_entity,
+    'wake_word_sensitivity', 'Moderately sensitive',
+  );
+}
+
+/**
+ * The confidence-gate scale for the current Sensitivity setting.
+ *
+ * Resolved here and reported to the app rather than sending it the label:
+ * sensitivity is Voice Satellite's policy, and the mapping from a label to a
+ * factor must exist in exactly one place. The app just multiplies the gates in
+ * its manifests by what we hand it, so a change to the tables ships with the
+ * card and needs no app update.
+ */
+function confidenceScaleFor(session, { stop = false } = {}) {
+  return vwwConfidenceScaleFor(sensitivityLabel(session), { stop });
+}
+
+/**
+ * The resolved energy gate to hand the app: skip inference while the room is
+ * quiet. Same reasoning as the confidence scale - the app is told the numbers,
+ * never the Sensitivity label or the noise_gate switch, so the policy stays
+ * here. Worth more on the app side than in the browser: it is listening around
+ * the clock on battery.
+ */
+function energyGateFor(session) {
+  const enabled = getSwitchState(
+    session.hass, session.config.satellite_entity, 'noise_gate',
+  ) === true;
+  return vwwEnergyGateFor(sensitivityLabel(session), enabled);
 }
 
 /**
@@ -136,19 +173,23 @@ export async function setupNativeWakeHandoff(session, { force = false } = {}) {
     return false;
   }
 
+  const scale = confidenceScaleFor(session);
   const models = activeModels(session).map((name) => ({
     id: name,
     wakeWord: wakeWordPhraseFor(name),
     manifestUrl: manifestUrlFor(name),
+    confidenceScale: scale,
   }));
 
   // The app answers false when wake word detection is turned off in its own
   // settings, or it has no native runner for this engine. Either way the
   // browser transparently keeps doing detection itself.
   const stopModel = stopModelFor(session);
+  const energyGate = energyGateFor(session);
   const { available, stopWordAvailable } = await kiosk.configureNativeWakeWord({
     engine,
     models,
+    energyGate,
     ...(stopModel ? { stopModel } : {}),
   });
   if (!available) {
@@ -178,6 +219,9 @@ export async function setupNativeWakeHandoff(session, { force = false } = {}) {
     // command that followed it is complete rather than clipped by however long
     // detection took to settle.
     session.onWakeAction({
+      // A real wake word, not the wake service: the turn gets the chime
+      // deferral and cross-tablet dedupe the browser path uses.
+      detected: true,
       seamless,
       wakeWordPhrase: detail.phrase || wakeWordPhraseFor(detail.model),
       wakeWordSlot: session.wakeWord?.getSlotForModel?.(detail.model),
@@ -207,7 +251,9 @@ export async function setupNativeWakeHandoff(session, { force = false } = {}) {
   session._nativeWakeActive = true;
   session.logger?.log(
     'wake-word',
-    `Wake word detection handed off to Kiosk Satellite (${engine}: ${models.map((m) => m.id).join(', ')}${_stopActive ? ' + stop word' : ''})`,
+    `Wake word detection handed off to Kiosk Satellite (${engine}: ${models.map((m) => m.id).join(', ')}`
+    + `${_stopActive ? ' + stop word' : ''}, ${sensitivityLabel(session)}, conf gate scale x${scale.toFixed(2)}`
+    + `, energy gate ${energyGate.enabled ? `on (wake rms ${energyGate.wakeRms})` : 'off'})`,
   );
   return true;
 }

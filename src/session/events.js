@@ -786,13 +786,51 @@ export async function triggerWake(session, opts = {}) {
     // both so we have to do it explicitly.
     session.ui.showBlurOverlay(BlurReason.PIPELINE);
 
+    const wakeSound = getSwitchState(
+      session.hass, session.config.satellite_entity, 'wake_sound',
+    ) !== false;
+
+    // A real wake word was heard, so other satellites in earshot heard it too.
+    // Take the browser detection path's cross-tablet dedupe shape rather than
+    // chiming straight away: mute the mic so the chime cannot bleed into STT,
+    // start the pipeline immediately so HA can pick a winner, and hold the
+    // chime until the dedupe window closes. A losing tablet gets
+    // duplicate_wake_up_detected, and the pipeline's error handler cancels the
+    // pending chime (WakeWordManager.cancelPendingChime) before a sound is
+    // emitted, so it stays silent instead of chiming and then giving up.
+    //
+    // Not for a bare voice_satellite.wake (nothing to dedupe against, it was
+    // aimed at this satellite), and not for seamless (no chime at all, and the
+    // user is already mid-sentence).
+    if (opts.detected === true && !seamless) {
+      session.audio.setMicTracksMuted(true);
+      try { session.ui.setReactiveSuppressed(true); } catch (_) { /* ignore */ }
+      // Deliberately not awaited: the chime timer has to start now, and the
+      // browser path does not await either.
+      session.pipeline
+        .start({
+          start_stage: 'stt',
+          wake_word_phrase: opts.wakeWordPhrase,
+          wake_word_slot: opts.wakeWordSlot,
+          defer_audio_start: true,
+        })
+        .catch((e) => {
+          session.logger.error('wake', `Pipeline start failed after native wake: ${e?.message || e}`);
+          session.wakeWord?.cancelPendingChime?.();
+          session.audio.setMicTracksMuted(false);
+          try { session.ui.setReactiveSuppressed(false); } catch (_) { /* ignore */ }
+          session.pipeline.restart(session.pipeline.calculateRetryDelay());
+        });
+      session.wakeWord?.scheduleWakeChime?.(wakeSound);
+      return;
+    }
+
     // Audible cue so the user (or whoever fired the action) knows the
     // satellite is now listening.  Honors the per-satellite wake_sound
     // switch, matching local/HA wake behavior.  Seamless turns skip it: the
     // user is already mid-sentence, so a chime would talk over them and land
     // in the very audio we are about to transcribe.
-    if (!seamless
-      && getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false) {
+    if (!seamless && wakeSound) {
       session.tts.playChime('wake');
     }
 
