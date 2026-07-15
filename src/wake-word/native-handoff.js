@@ -38,9 +38,13 @@ const VWW_STOP_NAME = 'ok_stop';
 /**
  * Map the selected detection mode to an engine Kiosk Satellite can run
  * natively. Returns null when the browser should keep detection: either a
- * non-on-device mode, or an engine the app has no native runner for (today
- * only vsWakeWord; microWakeWord/openWakeWord stay in the browser until the
- * app implements them, at which point they just start working).
+ * non-on-device mode, or an engine the app has no native runner for
+ * (openWakeWord today; it stays in the browser until the app implements it, at
+ * which point it just starts working).
+ *
+ * Naming this here is only half the negotiation: the app still answers
+ * `available:false` if it cannot actually run the engine, so an older app that
+ * predates its microWakeWord runner keeps browser detection by itself.
  */
 function nativeEngineFor(session) {
   const raw = getSelectState(
@@ -48,16 +52,27 @@ function nativeEngineFor(session) {
     'wake_word_detection', 'Home Assistant',
   );
   if (raw === 'On Device (vsWakeWord)') return 'vsWakeWord';
+  if (raw === 'On Device (microWakeWord)') return 'microWakeWord';
   return null;
 }
 
-function modelsBase() {
+/**
+ * Where each engine's models live. vsWakeWord has its own subdirectory;
+ * microWakeWord sits at the root of the models path (see micro-models.js).
+ */
+function modelsBase(engine) {
+  if (engine === 'microWakeWord') return '/voice_satellite/models';
   return globalThis.__VS_VWW_MODELS_BASE || '/voice_satellite/models/vswakeword';
 }
 
-/** Absolute manifest URL for a vsWakeWord model (what the app downloads). */
-function manifestUrlFor(name) {
-  const rel = withWakeWordAssetVersion(`${modelsBase()}/${name}.json`);
+/** The stop classifier's model name for an engine. Mirrors getStopName(). */
+function stopNameFor(engine) {
+  return engine === 'vsWakeWord' ? VWW_STOP_NAME : 'stop';
+}
+
+/** Absolute manifest URL for a model (what the app downloads). */
+function manifestUrlFor(name, engine) {
+  const rel = withWakeWordAssetVersion(`${modelsBase(engine)}/${name}.json`);
   try {
     return new URL(rel, window.location.origin).href;
   } catch (_) {
@@ -89,15 +104,16 @@ export function isNativeStopActive() {
  * vsWakeWord ships it as a self-contained ONNX named after its phrase, so it
  * loads exactly like a wake word: same manifest shape, same URL layout.
  */
-function stopModelFor(session) {
+function stopModelFor(session, engine) {
   const on = getSwitchState(
     session.hass, session.config.satellite_entity, 'stop_word',
   ) === true;
   if (!on) return null;
+  const name = stopNameFor(engine);
   return {
-    id: VWW_STOP_NAME,
-    wakeWord: wakeWordPhraseFor(VWW_STOP_NAME),
-    manifestUrl: manifestUrlFor(VWW_STOP_NAME),
+    id: name,
+    wakeWord: wakeWordPhraseFor(name),
+    manifestUrl: manifestUrlFor(name, engine),
     confidenceScale: confidenceScaleFor(session, { stop: true }),
   };
 }
@@ -177,14 +193,14 @@ export async function setupNativeWakeHandoff(session, { force = false } = {}) {
   const models = activeModels(session).map((name) => ({
     id: name,
     wakeWord: wakeWordPhraseFor(name),
-    manifestUrl: manifestUrlFor(name),
+    manifestUrl: manifestUrlFor(name, engine),
     confidenceScale: scale,
   }));
 
   // The app answers false when wake word detection is turned off in its own
   // settings, or it has no native runner for this engine. Either way the
   // browser transparently keeps doing detection itself.
-  const stopModel = stopModelFor(session);
+  const stopModel = stopModelFor(session, engine);
   const energyGate = energyGateFor(session);
   const { available, stopWordAvailable } = await kiosk.configureNativeWakeWord({
     engine,
