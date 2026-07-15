@@ -8,8 +8,21 @@
 import { setupAudioWorklet, sendAudioBuffer } from './processing.js';
 import { resolveDspForMode } from './dsp-config.js';
 import { describeAudioInputDevices, describeSelectedAudioTrack } from './devices.js';
+import * as kiosk from '../kiosk/index.js';
 
 const TARGET_SAMPLE_RATE = 16000;
+
+/**
+ * Stands in for a MediaStream when Kiosk Satellite is the audio source.
+ * There is no real getUserMedia stream in that mode, but callers treat
+ * `_mediaStream` as "the mic is up" and may iterate its tracks — duck-typing
+ * an empty track list keeps all of them working without special cases.
+ */
+const KIOSK_MEDIA_STREAM = Object.freeze({
+  kioskSatellite: true,
+  getTracks: () => [],
+  getAudioTracks: () => [],
+});
 
 export class AudioManager {
   constructor(card) {
@@ -69,6 +82,15 @@ export class AudioManager {
   async startMicrophone(mode = 'wake_word') {
     await this._ensureAudioContextRunning();
 
+    // Kiosk Satellite owns the mic (it is already capturing for native
+    // wake-word detection).  Stream its audio instead of opening a second
+    // capture: getUserMedia costs ~600 ms here, which is dead air right after
+    // the wake word — exactly where the user's command starts.
+    if (this._card._nativeWakeActive && kiosk.supportsAudioStream()) {
+      await this._startKioskMicrophone(mode);
+      return;
+    }
+
     const { config } = this._card;
     this._currentMicMode = mode;
     this._log.log('mic', `AudioContext state=${this._audioContext.state} sampleRate=${this._audioContext.sampleRate} mode=${mode}`);
@@ -111,6 +133,44 @@ export class AudioManager {
   }
 
   /**
+   * Acquire audio from Kiosk Satellite rather than getUserMedia.
+   *
+   * The app hands us 16 kHz mono PCM16 that it is already capturing, opening
+   * with a short pre-roll of audio from just before this call — so the stream
+   * effectively starts *before* the user began speaking their command, and
+   * nothing is clipped.  Chunks are pushed into the same `_audioBuffer` the
+   * AudioWorklet would fill, so everything downstream (`sendAudioBuffer`, the
+   * 100 ms send loop, the pipeline) is unchanged.  `_actualSampleRate` is
+   * already 16 kHz, so the resampler is skipped entirely.
+   *
+   * @param {'wake_word' | 'stt'} mode
+   */
+  async _startKioskMicrophone(mode) {
+    this._currentMicMode = mode;
+    this._actualSampleRate = TARGET_SAMPLE_RATE;
+
+    kiosk.bindAudioStream((samples) => {
+      // Mirror the AudioWorklet handler: only buffer while we're streaming to
+      // the pipeline (or during the brief pre-handler capture window).
+      if (this._sendInterval || this._captureBuffering) {
+        this._audioBuffer.push(samples);
+      }
+    });
+
+    const res = await kiosk.startAudioStream();
+    if (!res) {
+      kiosk.unbindAudioStream();
+      this._log.error('mic', 'Kiosk Satellite audio stream failed to start');
+      throw new Error('kiosk audio stream unavailable');
+    }
+    this._mediaStream = KIOSK_MEDIA_STREAM;
+    this._log.log(
+      'mic',
+      `Audio capture via Kiosk Satellite (native mic, ${res.sampleRate}Hz, no getUserMedia)`,
+    );
+  }
+
+  /**
    * Swap the MediaStream to a new DSP mode without tearing down the
    * AudioContext or AudioWorklet.  Re-acquires getUserMedia with the
    * target-mode constraints, reconnects the new source to the existing
@@ -124,6 +184,13 @@ export class AudioManager {
    * @param {'wake_word' | 'stt'} mode
    */
   async switchMicMode(mode) {
+    // Kiosk Satellite source: DSP is the app's business (it applies its own
+    // capture config), and there is no MediaStream to re-acquire — so a mode
+    // swap is a no-op beyond recording the intent.
+    if (this._mediaStream === KIOSK_MEDIA_STREAM) {
+      this._currentMicMode = mode;
+      return;
+    }
     if (!this._audioContext || !this._workletNode) return;
     if (this._currentMicMode === mode) return;
     const { config } = this._card;
@@ -214,6 +281,17 @@ export class AudioManager {
     const hadWorklet = !!this._workletNode;
     const hadStream = !!this._mediaStream;
     this.stopSending();
+    // Kiosk Satellite source: hand the mic back to the app so it can re-arm
+    // native wake-word detection. There is no worklet/stream to tear down.
+    if (this._mediaStream === KIOSK_MEDIA_STREAM) {
+      kiosk.unbindAudioStream();
+      kiosk.stopAudioStream();
+      this._mediaStream = null;
+      this._captureBuffering = false;
+      this._audioBuffer = [];
+      this._log.log('mic', 'stopMicrophone: released Kiosk Satellite audio stream');
+      return;
+    }
     if (this._workletNode) {
       this._workletNode.disconnect();
       this._workletNode = null;

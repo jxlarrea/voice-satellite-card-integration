@@ -452,3 +452,86 @@ export function unbindNativeWakeWord() {
     _ksWakeHandler = null;
   }
 }
+
+// ── Delegated mic (Kiosk Satellite only) ───────────────────────────────
+//
+// The app owns the microphone (it is already capturing for native wake-word
+// detection), so rather than opening a second capture with getUserMedia — and
+// paying ~600 ms of acquisition latency on every wake, which clips the start
+// of the user's command — the card streams the app's audio instead.  Chunks
+// are 16 kHz mono PCM16, and the stream opens with a short pre-roll of
+// already-captured audio so nothing spoken right after the wake word is lost.
+
+let _ksAudioHandler = null;
+
+/** True when the host can stream its captured mic audio to this page. */
+export function supportsAudioStream() {
+  return ksPresent()
+    && typeof window.kioskSatellite.startAudioStream === 'function';
+}
+
+/**
+ * Start the delegated mic stream.  Resolves `{ sampleRate }` on success or
+ * null if unavailable.  Chunks arrive via [bindAudioStream].
+ */
+export async function startAudioStream() {
+  if (!supportsAudioStream()) return null;
+  try {
+    const res = await window.kioskSatellite.startAudioStream();
+    return res && res.sampleRate ? res : { sampleRate: 16000 };
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Stop the delegated mic stream. */
+export async function stopAudioStream() {
+  if (!ksPresent()) return false;
+  try {
+    await window.kioskSatellite.stopAudioStream();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Bind a handler for delegated audio chunks.  `handler(samples, sampleRate)`
+ * receives a Float32Array in [-1, 1].  Only one handler is active at a time.
+ */
+export function bindAudioStream(handler) {
+  if (!ksPresent()) return false;
+  unbindAudioStream();
+  _ksAudioHandler = (e) => {
+    const detail = (e && e.detail) || {};
+    if (!detail.pcm) return;
+    try {
+      handler(_pcm16Base64ToFloat32(detail.pcm), detail.sampleRate || 16000);
+    } catch (_) { /* never break the audio path */ }
+  };
+  window.addEventListener('kiosksatellite:audio', _ksAudioHandler);
+  return true;
+}
+
+/** Unbind the delegated audio handler. */
+export function unbindAudioStream() {
+  if (_ksAudioHandler) {
+    window.removeEventListener('kiosksatellite:audio', _ksAudioHandler);
+    _ksAudioHandler = null;
+  }
+}
+
+/** base64 PCM16 little-endian → Float32Array in [-1, 1]. */
+function _pcm16Base64ToFloat32(b64) {
+  const bin = atob(b64);
+  const n = bin.length >> 1;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const lo = bin.charCodeAt(i * 2);
+    const hi = bin.charCodeAt(i * 2 + 1);
+    let v = (hi << 8) | lo;
+    if (v >= 0x8000) v -= 0x10000;
+    out[i] = v / 32768;
+  }
+  return out;
+}
