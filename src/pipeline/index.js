@@ -87,8 +87,11 @@ export class PipelineManager {
   get log() { return this._log; }
 
   /** True when wake-word detection is set to "Disabled" — mic stays off
-   *  until voice_satellite.wake fires. */
+   *  until voice_satellite.wake fires.  Also true when Kiosk Satellite is
+   *  running detection natively: the app owns the wake word, so the browser
+   *  side behaves identically (mic off at idle, wake arrives from the app). */
   _isDetectionDisabled() {
+    if (this._card._nativeWakeActive) return true;
     return getSelectState(
       this._card.hass, this._card.config.satellite_entity,
       'wake_word_detection', 'Home Assistant',

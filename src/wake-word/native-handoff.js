@@ -3,30 +3,48 @@
  *
  * When the card runs inside the Kiosk Satellite companion app, wake-word
  * detection can run in native code (the vsWakeWord ONNX engine on the CPU)
- * instead of the in-browser WebGPU/WASM runner — far faster on tablets. This
- * module wires that up on top of the existing "Disabled" wake mode, which is
- * exactly the state native handoff needs: the browser never opens the mic for
- * passive listening, and a wake is delivered on demand and jumps to STT.
+ * instead of the in-browser WebGPU/WASM runner — dramatically faster on
+ * tablets, and it keeps working with the screen off.
  *
- * Flow:
- *   - On startup in Disabled mode, if Kiosk Satellite reports a native runner
- *     for vsWakeWord, push the configured wake words to the app and bind its
- *     `kiosksatellite:wakeword` event to the same manual-wake path the
- *     `voice_satellite.wake` service uses (`session.onWakeAction()`).
- *   - The native engine suspends itself on detection; the card resumes it when
- *     the turn returns to idle (see resumeNativeWake, called from the pipeline
- *     restart's disabled branch).
+ * The handoff is **transparent**: the user changes nothing in Voice
+ * Satellite. They pick their engine as usual (`On Device (vsWakeWord)`);
+ * if the card detects it is hosted in Kiosk Satellite AND the app reports
+ * it can run that engine natively AND wake-word detection is enabled in
+ * the app's own settings, the card hands detection over. Otherwise it
+ * silently keeps using its own browser engine.
  *
- * All of this is a no-op when not inside Kiosk Satellite, so the Disabled mode
- * behaves exactly as before on every other host.
+ * Once handed off, the browser side behaves exactly as if detection were
+ * "Disabled" — no passive mic, no local engine — because the app owns
+ * detection. Wake arrives as a `kiosksatellite:wakeword` event and is
+ * routed into the same path `voice_satellite.wake` uses, which brings the
+ * mic up for STT. `session._nativeWakeActive` is the flag the rest of the
+ * card keys off (see getWakeWordMode / _isDetectionDisabled / getEngine).
+ *
+ * Everything here is a no-op on every other host.
  */
 
 import * as kiosk from '../kiosk/index.js';
-import { getSelectState } from '../shared/satellite-state.js';
+import { getSelectState, getSwitchState } from '../shared/satellite-state.js';
 import { withWakeWordAssetVersion } from './versioned-url.js';
 import { wakeWordPhraseFor } from './index.js';
 
 let _active = false;
+
+/**
+ * Map the selected detection mode to an engine Kiosk Satellite can run
+ * natively. Returns null when the browser should keep detection — either a
+ * non-on-device mode, or an engine the app has no native runner for (today
+ * only vsWakeWord; microWakeWord/openWakeWord stay in the browser until the
+ * app implements them, at which point they just start working).
+ */
+function nativeEngineFor(session) {
+  const raw = getSelectState(
+    session.hass, session.config.satellite_entity,
+    'wake_word_detection', 'Home Assistant',
+  );
+  if (raw === 'On Device (vsWakeWord)') return 'vsWakeWord';
+  return null;
+}
 
 function modelsBase() {
   return globalThis.__VS_VWW_MODELS_BASE || '/voice_satellite/models/vswakeword';
@@ -57,28 +75,38 @@ export function isNativeWakeActive() {
 }
 
 /**
- * Try to hand wake-word detection to Kiosk Satellite. Returns true when
- * native detection is now active (and the browser should stay idle).
+ * Try to hand wake-word detection to Kiosk Satellite. Returns true when the
+ * app has taken over (and the browser should stay idle). Safe to call on any
+ * host; returns false unless the handoff actually engaged.
  */
 export async function setupNativeWakeHandoff(session) {
   if (_active) return true;
   if (kiosk.platform() !== 'kiosksatellite' || !kiosk.supportsNativeWakeWord()) {
     return false;
   }
+  // Muted is a hard mic-off: don't hand off, the session stays silent.
+  const muted = getSwitchState(
+    session.hass, session.config.satellite_entity, 'mute',
+  ) === true;
+  if (muted) return false;
+
+  const engine = nativeEngineFor(session);
+  if (!engine) return false;
+
   const models = activeModels(session).map((name) => ({
     id: name,
     wakeWord: wakeWordPhraseFor(name),
     manifestUrl: manifestUrlFor(name),
   }));
 
-  const { available } = await kiosk.configureNativeWakeWord({
-    engine: 'vsWakeWord',
-    models,
-  });
+  // The app answers false when wake word detection is turned off in its own
+  // settings, or it has no native runner for this engine. Either way the
+  // browser transparently keeps doing detection itself.
+  const { available } = await kiosk.configureNativeWakeWord({ engine, models });
   if (!available) {
     session.logger?.log(
       'wake-word',
-      'Kiosk Satellite present but has no native vsWakeWord runner - staying disabled',
+      `Kiosk Satellite cannot run ${engine} natively (disabled in the app or unsupported) - using browser detection`,
     );
     return false;
   }
@@ -88,8 +116,8 @@ export async function setupNativeWakeHandoff(session) {
       'wake-word',
       `Kiosk Satellite native wake: ${detail.phrase || detail.model || '(unknown)'}`,
     );
-    // The native engine suspends itself on detection; drive the turn exactly
-    // like the wake service does. Resume happens on return to idle.
+    // The app suspends its engine on detection; drive the turn exactly like
+    // the wake service does. Resume happens on the return to idle.
     session.onWakeAction();
   });
   await kiosk.setNativeWakeWordActive(true);
@@ -98,7 +126,7 @@ export async function setupNativeWakeHandoff(session) {
   session._nativeWakeActive = true;
   session.logger?.log(
     'wake-word',
-    `Native wake handoff active (${models.map((m) => m.id).join(', ')})`,
+    `Wake word detection handed off to Kiosk Satellite (${engine}: ${models.map((m) => m.id).join(', ')})`,
   );
   return true;
 }
@@ -109,7 +137,7 @@ export async function resumeNativeWake() {
   await kiosk.setNativeWakeWordActive(true);
 }
 
-/** Tear down the handoff (page unload / leaving Disabled mode). */
+/** Tear down the handoff (page unload / host change). */
 export function teardownNativeWakeHandoff(session) {
   if (!_active) return;
   kiosk.unbindNativeWakeWord();

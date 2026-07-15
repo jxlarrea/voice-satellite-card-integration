@@ -29,6 +29,11 @@ const WAKE_MODE_DISABLED = 'disabled';
  * @returns {'home-assistant'|'on-device'|'disabled'}
  */
 export function getWakeWordMode(session) {
+  // Kiosk Satellite is running detection natively: the browser side must
+  // behave exactly as if detection were disabled - no passive mic, no local
+  // engine. Wake arrives from the app and brings the mic up for STT. The
+  // user's engine selection still drives which models the app loads.
+  if (session._nativeWakeActive) return WAKE_MODE_DISABLED;
   const raw = getSelectState(
     session.hass, session.config.satellite_entity,
     'wake_word_detection', 'Home Assistant',
@@ -210,6 +215,16 @@ export async function startListening(session) {
   session._starting = true;
 
   try {
+    // Kiosk Satellite: if we're hosted in the app and it can run the selected
+    // engine natively (and wake detection is enabled in its settings), hand
+    // detection off before deciding the mode - getWakeWordMode() then reports
+    // Disabled, so the browser skips the mic and its own engine entirely.
+    // Fully transparent: nothing to configure in Voice Satellite, and a no-op
+    // on every other host.
+    await setupNativeWakeHandoff(session).catch((e) => {
+      session.logger.error('wake-word', `Native wake handoff failed: ${e.message || e}`);
+    });
+
     const mode = getWakeWordMode(session);
     const seamlessWakeCommand = session.config.seamless_wake_command === true;
     session.logger.log(
@@ -261,14 +276,6 @@ export async function startListening(session) {
           .catch((e) => {
             session.logger.error('wake-word', `Stop-word standby start failed: ${e.message || e}`);
           });
-      }
-      // Kiosk Satellite native wake-word handoff: when hosted in the app,
-      // delegate wake detection to its native vsWakeWord engine. No-op on
-      // every other host (and when the app has no native runner).
-      if (!muted) {
-        setupNativeWakeHandoff(session).catch((e) => {
-          session.logger.error('wake-word', `Native wake handoff failed: ${e.message || e}`);
-        });
       }
       return;
     }

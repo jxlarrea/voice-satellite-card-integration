@@ -254,6 +254,10 @@ export class WakeWordManager {
    * @returns {'mww'|'oww'|'vww'|null}
    */
   getEngine() {
+    // Kiosk Satellite is running wake detection natively - the browser must
+    // not load a wake engine of its own (stop-word standby may still run,
+    // since needsLocalInference() also checks isStopWordEnabled()).
+    if (this._session._nativeWakeActive) return null;
     const mode = this._wakeMode();
     if (mode === DETECTION_MODE_LOCAL_OWW) return 'oww';
     if (mode === DETECTION_MODE_LOCAL_VWW) return 'vww';
