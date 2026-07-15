@@ -700,7 +700,7 @@ export function handlePipelineMessage(session, message) {
  *
  * @param {import('./index.js').VoiceSatelliteSession} session
  */
-export async function triggerWake(session) {
+export async function triggerWake(session, opts = {}) {
   // Block while muted: mute means the mic is off, period - that includes
   // the on-demand mic the wake service would otherwise bring up.
   if (getSwitchState(session.hass, session.config.satellite_entity, 'mute') === true) {
@@ -725,7 +725,18 @@ export async function triggerWake(session) {
   }
 
   const mode = getWakeWordMode(session);
-  session.logger.log('wake', `Triggering manual wake (mode=${mode})`);
+
+  // Seamless one-shot ("hey vesta turn off the lights"), Kiosk Satellite only.
+  // The app detected the wake word natively and can replay the audio from the
+  // instant that wake word ended, so the command that followed it in the same
+  // breath is still available to stream straight into STT. Only ever set for a
+  // real native detection, never for a bare voice_satellite.wake call: that has
+  // no wake word and nothing buffered behind it.
+  const seamless = opts.seamless === true && session._nativeWakeActive === true;
+  session.logger.log(
+    'wake',
+    `Triggering manual wake (mode=${mode}${seamless ? ', seamless' : ''})`,
+  );
 
   try {
     if (mode === WAKE_MODE_LOCAL && session.wakeWord) {
@@ -737,6 +748,14 @@ export async function triggerWake(session) {
       // first so the next start() begins from STT instead of wake_word.
       await session.pipeline.stop();
     } else if (mode === WAKE_MODE_DISABLED) {
+      // Arm buffering *before* the mic comes up. Kiosk Satellite flushes the
+      // audio captured since the wake word ended the moment the stream opens,
+      // and startMicrophone() only keeps what arrives while the buffer is
+      // live - open the mic first and the command is already gone.
+      if (seamless) {
+        session._seamlessWakeActive = true;
+        session.audio.startBuffering?.({ reset: true });
+      }
       // Mic is intentionally off in disabled mode - bring it up now.
       if (!session.audio._mediaStream) {
         await session.audio.startMicrophone('stt');
@@ -757,14 +776,28 @@ export async function triggerWake(session) {
 
     // Audible cue so the user (or whoever fired the action) knows the
     // satellite is now listening.  Honors the per-satellite wake_sound
-    // switch, matching local/HA wake behavior.
-    if (getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false) {
+    // switch, matching local/HA wake behavior.  Seamless turns skip it: the
+    // user is already mid-sentence, so a chime would talk over them and land
+    // in the very audio we are about to transcribe.
+    if (!seamless
+      && getSwitchState(session.hass, session.config.satellite_entity, 'wake_sound') !== false) {
       session.tts.playChime('wake');
     }
 
-    await session.pipeline.start({ start_stage: 'stt' });
+    await session.pipeline.start(seamless
+      ? {
+        start_stage: 'stt',
+        wake_word_phrase: opts.wakeWordPhrase,
+        wake_word_slot: opts.wakeWordSlot,
+        preserve_audio_buffer: true,
+      }
+      : { start_stage: 'stt' });
   } catch (e) {
     session.logger.error('wake', `Manual wake failed: ${e?.message || e}`);
+    if (seamless) {
+      session._seamlessWakeActive = false;
+      session.audio.stopBuffering?.({ clear: true });
+    }
     setState(session, State.IDLE);
     // Always re-expose the wake affordance so the user can retry - pass
     // the not-allowed reason when relevant so the title prompt asks for

@@ -3,7 +3,7 @@
  *
  * When the card runs inside the Kiosk Satellite companion app, wake-word
  * detection can run in native code (the vsWakeWord ONNX engine on the CPU)
- * instead of the in-browser WebGPU/WASM runner — dramatically faster on
+ * instead of the in-browser WebGPU/WASM runner: dramatically faster on
  * tablets, and it keeps working with the screen off.
  *
  * The handoff is **transparent**: the user changes nothing in Voice
@@ -14,7 +14,7 @@
  * silently keeps using its own browser engine.
  *
  * Once handed off, the browser side behaves exactly as if detection were
- * "Disabled" — no passive mic, no local engine — because the app owns
+ * "Disabled" (no passive mic, no local engine) because the app owns
  * detection. Wake arrives as a `kiosksatellite:wakeword` event and is
  * routed into the same path `voice_satellite.wake` uses, which brings the
  * mic up for STT. `session._nativeWakeActive` is the flag the rest of the
@@ -29,10 +29,14 @@ import { withWakeWordAssetVersion } from './versioned-url.js';
 import { wakeWordPhraseFor } from './index.js';
 
 let _active = false;
+let _stopActive = false;
+
+/** vsWakeWord's stop classifier, mirroring VWW_STOP_NAME in ./index.js. */
+const VWW_STOP_NAME = 'ok_stop';
 
 /**
  * Map the selected detection mode to an engine Kiosk Satellite can run
- * natively. Returns null when the browser should keep detection — either a
+ * natively. Returns null when the browser should keep detection: either a
  * non-on-device mode, or an engine the app has no native runner for (today
  * only vsWakeWord; microWakeWord/openWakeWord stay in the browser until the
  * app implements them, at which point they just start working).
@@ -74,13 +78,38 @@ export function isNativeWakeActive() {
   return _active;
 }
 
+/** Whether the app is running the stop classifier natively too. */
+export function isNativeStopActive() {
+  return _stopActive;
+}
+
+/**
+ * The stop classifier to hand over, or null when the stop-word switch is off.
+ * vsWakeWord ships it as a self-contained ONNX named after its phrase, so it
+ * loads exactly like a wake word: same manifest shape, same URL layout.
+ */
+function stopModelFor(session) {
+  const on = getSwitchState(
+    session.hass, session.config.satellite_entity, 'stop_word',
+  ) === true;
+  if (!on) return null;
+  return {
+    id: VWW_STOP_NAME,
+    wakeWord: wakeWordPhraseFor(VWW_STOP_NAME),
+    manifestUrl: manifestUrlFor(VWW_STOP_NAME),
+  };
+}
+
 /**
  * Try to hand wake-word detection to Kiosk Satellite. Returns true when the
  * app has taken over (and the browser should stay idle). Safe to call on any
  * host; returns false unless the handoff actually engaged.
  */
-export async function setupNativeWakeHandoff(session) {
-  if (_active) return true;
+export async function setupNativeWakeHandoff(session, { force = false } = {}) {
+  // Already handed off: re-pushing on every startListening would restart the
+  // app's engine for nothing. `force` is for a real config change (the
+  // stop-word switch), where the app does need to hear about it.
+  if (_active && !force) return true;
   if (kiosk.platform() !== 'kiosksatellite' || !kiosk.supportsNativeWakeWord()) {
     return false;
   }
@@ -102,7 +131,12 @@ export async function setupNativeWakeHandoff(session) {
   // The app answers false when wake word detection is turned off in its own
   // settings, or it has no native runner for this engine. Either way the
   // browser transparently keeps doing detection itself.
-  const { available } = await kiosk.configureNativeWakeWord({ engine, models });
+  const stopModel = stopModelFor(session);
+  const { available, stopWordAvailable } = await kiosk.configureNativeWakeWord({
+    engine,
+    models,
+    ...(stopModel ? { stopModel } : {}),
+  });
   if (!available) {
     session.logger?.log(
       'wake-word',
@@ -112,28 +146,73 @@ export async function setupNativeWakeHandoff(session) {
   }
 
   kiosk.bindNativeWakeWord((detail) => {
+    // Engine-agnostic, exactly like the browser path: the app guarantees the
+    // stream opens after the wake word, whatever engine detected it. Engines
+    // that can locate the wake word's end (vsWakeWord) simply lose less of the
+    // command than ones that can only trim to the detection instant, which is
+    // the same trade the browser makes.
+    const seamless = session.config.seamless_wake_command === true;
     session.logger?.log(
       'wake-word',
-      `Kiosk Satellite native wake: ${detail.phrase || detail.model || '(unknown)'}`,
+      `Kiosk Satellite native wake: ${detail.phrase || detail.model || '(unknown)'}${seamless ? ' (seamless)' : ''}`,
     );
     // The app suspends its engine on detection; drive the turn exactly like
     // the wake service does. Resume happens on the return to idle.
-    session.onWakeAction();
+    //
+    // Seamless one-shot phrases work better here than in the browser: the app
+    // starts the stream at the exact sample the wake word ended, so the
+    // command that followed it is complete rather than clipped by however long
+    // detection took to settle.
+    session.onWakeAction({
+      seamless,
+      wakeWordPhrase: detail.phrase || wakeWordPhraseFor(detail.model),
+      wakeWordSlot: session.wakeWord?.getSlotForModel?.(detail.model),
+    });
   });
+  // Stop word is negotiated separately: the app may run the wake engine but
+  // not the stop classifier (older build, download failed). When it does run
+  // it, the browser loads no stop model at all - which is the point, since
+  // under the handoff the browser has no mic to feed one.
+  _stopActive = !!stopModel && !!stopWordAvailable;
+  session._nativeStopActive = _stopActive;
+  if (_stopActive) {
+    kiosk.bindNativeStopWord(() => {
+      session.logger?.log('stop-word', 'Kiosk Satellite native stop word');
+      session.wakeWord?.onNativeStopDetection?.();
+    });
+  } else if (stopModel) {
+    session.logger?.log(
+      'stop-word',
+      'Kiosk Satellite cannot run the stop word natively - using browser detection',
+    );
+  }
+
   await kiosk.setNativeWakeWordActive(true);
 
   _active = true;
   session._nativeWakeActive = true;
+  // Lets the wake-word manager re-push config on a settings change without
+  // importing this module (it is imported *by* this one).
+  session._renegotiateNativeWake =
+    () => setupNativeWakeHandoff(session, { force: true });
   session.logger?.log(
     'wake-word',
-    `Wake word detection handed off to Kiosk Satellite (${engine}: ${models.map((m) => m.id).join(', ')})`,
+    `Wake word detection handed off to Kiosk Satellite (${engine}: ${models.map((m) => m.id).join(', ')}${_stopActive ? ' + stop word' : ''})`,
   );
   return true;
 }
 
-/** Resume native listening after a turn (no-op unless handoff is active). */
-export async function resumeNativeWake() {
+/**
+ * Resume native listening after a turn (no-op unless handoff is active).
+ *
+ * The pipeline goes idle the moment TTS *starts* playing, not when it
+ * finishes, so this must not re-arm while playback holds the suspend: doing so
+ * would leave the wake word live for the whole spoken answer, listening to our
+ * own speaker. resumeFromPlayback() re-arms when playback actually ends.
+ */
+export async function resumeNativeWake(session) {
   if (!_active) return;
+  if (session?.wakeWord?.isNativeWakeSuspended) return;
   await kiosk.setNativeWakeWordActive(true);
 }
 
@@ -142,6 +221,15 @@ export function teardownNativeWakeHandoff(session) {
   if (!_active) return;
   kiosk.unbindNativeWakeWord();
   kiosk.setNativeWakeWordActive(false);
+  if (_stopActive) {
+    kiosk.setNativeStopWordActive(false);
+    kiosk.unbindNativeStopWord();
+    _stopActive = false;
+  }
   _active = false;
-  if (session) session._nativeWakeActive = false;
+  if (session) {
+    session._nativeWakeActive = false;
+    session._nativeStopActive = false;
+    session._renegotiateNativeWake = null;
+  }
 }

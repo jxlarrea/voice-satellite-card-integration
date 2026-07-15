@@ -15,6 +15,7 @@ import { getVwwModelParams, loadVwwModelParams } from './vww/manifest-cache.js';
 import { WorkerProxyBackend } from './worker/proxy-backend.js';
 import { clearNotificationUI } from '../shared/satellite-notification.js';
 import { sendAck } from '../shared/notification-comms.js';
+import * as kiosk from '../kiosk/index.js';
 
 // Detection-mode select values that need parsing in several places.
 // "On Device" (legacy) is treated as microWakeWord for backwards compat.
@@ -205,6 +206,9 @@ export class WakeWordManager {
     // TTS + done chime, two chimes back-to-back) don't unsuspend
     // prematurely.  Only flips state on the 0↔1 transition.
     this._playbackSuspendCount = 0;
+    // Native handoff: we disarmed Kiosk Satellite's wake word for a stop-only
+    // state and owe it a re-arm when that state ends.
+    this._nativeWakeSuspendedForStopOnly = false;
     this._suspendedActiveBeforePlayback = null;
 
     // Settings change tracking
@@ -232,6 +236,33 @@ export class WakeWordManager {
 
   /** True when running stop-only inference (during TTS/notification playback). */
   get stopOnlyMode() { return this._stopOnlyMode; }
+
+  /** True while TTS/chime playback holds detection suspended (refcounted). */
+  get isPlaybackSuspended() { return this._playbackSuspendCount > 0; }
+
+  /**
+   * True while something is deliberately holding the native wake word
+   * disarmed: speaker playback, or a stop-only state (TTS, an announcement)
+   * where only the stop classifier should be listening. The single gate every
+   * would-be re-armer has to consult, since they fire on their own schedules
+   * (the pipeline goes idle when TTS *starts*, not when it ends).
+   */
+  get isNativeWakeSuspended() {
+    return this._playbackSuspendCount > 0
+      || this._nativeWakeSuspendedForStopOnly === true;
+  }
+
+  /**
+   * Re-arm the native wake word, but only once nothing is still holding it
+   * disarmed. Playback and stop-only overlap and end in either order (TTS ends
+   * the stop state and its own playback at nearly the same instant), so each
+   * holder clears its own flag and calls this; whoever is last actually arms.
+   */
+  _maybeRearmNativeWake() {
+    if (!this._session._nativeWakeActive) return;
+    if (this.isNativeWakeSuspended) return;
+    kiosk.setNativeWakeWordActive(true);
+  }
 
   /**
    * Read the current wake word detection mode select.
@@ -291,7 +322,28 @@ export class WakeWordManager {
    */
   needsLocalInference() {
     if (this.isOnDeviceWakeEnabled()) return true;
+    // Kiosk Satellite is running the stop classifier natively, so there is
+    // nothing for a local runtime to do. Loading one anyway would download the
+    // model and spin up WASM/WebGPU to score audio that never arrives: under
+    // the handoff the app owns the mic and the browser's worklet - the only
+    // thing that ever calls feedAudio() - is never in the graph.
+    if (this._nativeStopActive()) return false;
     return this.isStopWordEnabled();
+  }
+
+  /** True when the stop classifier is handed off to Kiosk Satellite. */
+  _nativeStopActive() {
+    return this._session._nativeStopActive === true
+      && kiosk.supportsNativeStopWord();
+  }
+
+  /**
+   * A native stop-word detection from Kiosk Satellite. Routes into the same
+   * handler a local detection uses, so every interruption target (TTS, media,
+   * timers, notifications) behaves identically whoever heard the word.
+   */
+  onNativeStopDetection() {
+    return this._onStopDetection();
   }
 
   /**
@@ -1227,6 +1279,27 @@ export class WakeWordManager {
       return;
     }
 
+    // Kiosk Satellite owns the stop classifier: it has the mic, so it is the
+    // only side that can hear "stop" at all.  Nothing local to enable - just
+    // arm it for as long as this interruptible state runs.
+    if (this._nativeStopActive()) {
+      await kiosk.setNativeStopWordActive(true);
+      // stopOnly mirrors what the browser path does by suspending its wake
+      // keywords: during TTS and announcements the stop classifier should be
+      // the only thing listening, because the sound is coming out of this
+      // device.  Media playback and timer alerts pass false and keep the wake
+      // word live alongside it.
+      if (stopOnly && this._session._nativeWakeActive) {
+        this._nativeWakeSuspendedForStopOnly = true;
+        await kiosk.setNativeWakeWordActive(false);
+      }
+      this._log.log(
+        'stop-word',
+        `Armed on Kiosk Satellite (native${stopOnly ? ', stop-only' : ''})`,
+      );
+      return;
+    }
+
     if (!this._inference) {
       this._log.log('stop-word', 'Cannot enable - inference not initialized');
       return;
@@ -1376,6 +1449,13 @@ export class WakeWordManager {
    * Disable the stop keyword model and restore regular keywords if suspended.
    */
   disableStopModel({ log = true } = {}) {
+    if (this._nativeStopActive()) {
+      kiosk.setNativeStopWordActive(false);
+      this._nativeWakeSuspendedForStopOnly = false;
+      this._maybeRearmNativeWake();
+      if (log) this._log.log('stop-word', 'Disarmed on Kiosk Satellite (native)');
+      return;
+    }
     if (!this._inference) return;
 
     // Engine-specific stop classifier name: 'stop' for OWW/MWW (their
@@ -1439,6 +1519,15 @@ export class WakeWordManager {
   suspendForPlayback() {
     this._playbackSuspendCount++;
     if (this._playbackSuspendCount > 1) return; // already suspended by another source
+    // Kiosk Satellite owns detection: disarm it for exactly the window the
+    // browser engine would have sat inactive, so the tablet isn't listening
+    // for its wake word while its own speaker is answering. The stop
+    // classifier stays armed - it is the only thing that should hear playback.
+    if (this._session._nativeWakeActive) {
+      kiosk.setNativeWakeWordActive(false);
+      this._log.log('wake-word', 'Suspended for playback (Kiosk Satellite)');
+      return;
+    }
     this._suspendedActiveBeforePlayback = this._active;
     if (this._active) {
       this._active = false;
@@ -1461,6 +1550,11 @@ export class WakeWordManager {
     if (this._playbackSuspendCount === 0) return; // unbalanced resume - ignore
     this._playbackSuspendCount--;
     if (this._playbackSuspendCount > 0) return; // still suspended by another source
+    if (this._session._nativeWakeActive) {
+      this._maybeRearmNativeWake();
+      this._log.log('wake-word', 'Resumed after playback (Kiosk Satellite)');
+      return;
+    }
     if (this._stopOnlyMode) {
       // disableStopModel will set _active based on isOnDeviceWakeEnabled.
       this._suspendedActiveBeforePlayback = null;
@@ -1699,7 +1793,16 @@ export class WakeWordManager {
       }
     }
 
-    if (stopWordChanged && stopWord && !this.isOnDeviceWakeEnabled() && !this._tfweb) {
+    // Kiosk Satellite is the one with the mic, so a stop-word toggle has to
+    // reach the app rather than a local runtime: re-push the config so it
+    // loads (or drops) the stop classifier natively.
+    if (stopWordChanged && this._session._nativeWakeActive) {
+      // Hook rather than an import: native-handoff.js already imports this
+      // module, and a cycle here would be resolved at load time.
+      Promise.resolve(this._session._renegotiateNativeWake?.()).catch((e) => {
+        this._log.error('stop-word', `Native re-negotiation failed: ${e.message || e}`);
+      });
+    } else if (stopWordChanged && stopWord && !this.isOnDeviceWakeEnabled() && !this._tfweb) {
       // HA / Disabled wake mode + stop word just turned ON: bring up the
       // runtime in standby so subsequent enableStopModel(true) calls
       // (during TTS, notifications, alerts) have an inference engine to

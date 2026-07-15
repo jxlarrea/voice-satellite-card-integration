@@ -196,7 +196,7 @@ export class VoiceSatelliteSession {
   onStartClick() { handleStartClick(this); }
   onPipelineMessage(message) { handlePipelineMessage(this, message); }
   onTTSComplete(playbackFailed) { onTTSComplete(this, playbackFailed); }
-  onWakeAction() { triggerWake(this); }
+  onWakeAction(opts) { triggerWake(this, opts); }
 
   // ── Session API (cards call these) ────────────────────────────────
 

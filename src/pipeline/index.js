@@ -366,8 +366,10 @@ export class PipelineManager {
             try { this._card.audio.stopMicrophone(); } catch (_) { /* ignore */ }
             this._card.setState(State.IDLE);
             // Kiosk Satellite native handoff: the app suspended its engine on
-            // detection; resume it now that the turn is over. No-op otherwise.
-            resumeNativeWake().catch(() => { /* ignore */ });
+            // detection; resume it now that the turn is over. No-op otherwise,
+            // and a no-op while TTS is still playing (playback owns the
+            // suspend until it ends).
+            resumeNativeWake(this._card).catch(() => { /* ignore */ });
             // Mini card surfaces its small mic icon for IDLE state via
             // _statusFor automatically.  The full card's start-button
             // overlay stays hidden — wake is driven by the service.

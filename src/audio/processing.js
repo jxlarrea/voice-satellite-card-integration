@@ -98,7 +98,7 @@ export async function setupAudioWorklet(mgr, sourceNode) {
  * Set up a worklet that acts as an audio *source* fed by pushed PCM, for
  * hosts that hand us captured audio instead of a MediaStream (Kiosk
  * Satellite).  Making the delegated audio a real AudioNode means the
- * reactive-bar analyser can tap it exactly like a mic source — all the
+ * reactive-bar analyser can tap it exactly like a mic source: all the
  * existing level/speech-weighting/warmup logic applies unchanged, instead of
  * being reimplemented against raw PCM.
  *
@@ -110,12 +110,20 @@ const _registeredSourceContexts = new WeakSet();
 export async function setupPushAudioSource(mgr) {
   if (!_registeredSourceContexts.has(mgr.audioContext)) {
     const code =
-      'class VSPushSource extends AudioWorkletProcessor{'
-      + 'constructor(){super();this._q=[];this._cur=null;this._pos=0;'
-      + 'this.port.onmessage=(e)=>{this._q.push(e.data);'
-      // We are a level meter, not playback: if the producer outruns the
-      // graph, drop the backlog rather than drift further behind.
-      + 'if(this._q.length>12){this._q.length=0;this._cur=null;}};}'
+      // Cap the backlog by DURATION, not chunk count: chunk sizes are the
+      // producer's business, so "12 chunks" is anywhere from 12 ms to a second
+      // of latency.  We are a level meter, not playback, so staying current
+      // beats staying complete: anything older than this is dropped.
+      'var MAXQ=Math.round(sampleRate*0.12);'
+      + 'class VSPushSource extends AudioWorkletProcessor{'
+      + 'constructor(){super();this._q=[];this._cur=null;this._pos=0;this._n=0;'
+      + 'this.port.onmessage=(e)=>{this._q.push(e.data);this._n+=e.data.length;'
+      // Drop oldest-first while over budget, but never the newest chunk, so a
+      // producer whose chunks exceed MAXQ still renders instead of going mute.
+      + 'while(this._n>MAXQ){'
+      + 'if(this._cur){this._n-=(this._cur.length-this._pos);this._cur=null;this._pos=0;}'
+      + 'else if(this._q.length>1){this._n-=this._q.shift().length;}'
+      + 'else break;}};}'
       + 'process(inputs,outputs){'
       + 'var out=outputs[0][0];if(!out)return true;'
       + 'var i=0;'
@@ -123,7 +131,7 @@ export async function setupPushAudioSource(mgr) {
       + 'if(!this._cur){if(!this._q.length)break;this._cur=this._q.shift();this._pos=0;}'
       + 'var n=Math.min(out.length-i,this._cur.length-this._pos);'
       + 'out.set(this._cur.subarray(this._pos,this._pos+n),i);'
-      + 'i+=n;this._pos+=n;'
+      + 'i+=n;this._pos+=n;this._n-=n;'
       + 'if(this._pos>=this._cur.length)this._cur=null;'
       + '}'
       + 'return true;'

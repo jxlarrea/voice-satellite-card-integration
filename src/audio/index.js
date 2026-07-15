@@ -15,7 +15,7 @@ const TARGET_SAMPLE_RATE = 16000;
 /**
  * Stands in for a MediaStream when Kiosk Satellite is the audio source.
  * There is no real getUserMedia stream in that mode, but callers treat
- * `_mediaStream` as "the mic is up" and may iterate its tracks — duck-typing
+ * `_mediaStream` as "the mic is up" and may iterate its tracks, so duck-typing
  * an empty track list keeps all of them working without special cases.
  */
 const KIOSK_MEDIA_STREAM = Object.freeze({
@@ -85,7 +85,7 @@ export class AudioManager {
     // Kiosk Satellite owns the mic (it is already capturing for native
     // wake-word detection).  Stream its audio instead of opening a second
     // capture: getUserMedia costs ~600 ms here, which is dead air right after
-    // the wake word — exactly where the user's command starts.
+    // the wake word, exactly where the user's command starts.
     if (this._card._nativeWakeActive && kiosk.supportsAudioStream()) {
       await this._startKioskMicrophone(mode);
       return;
@@ -136,7 +136,7 @@ export class AudioManager {
    * Acquire audio from Kiosk Satellite rather than getUserMedia.
    *
    * The app hands us 16 kHz mono PCM16 that it is already capturing, opening
-   * with a short pre-roll of audio from just before this call — so the stream
+   * with a short pre-roll of audio from just before this call, so the stream
    * effectively starts *before* the user began speaking their command, and
    * nothing is clipped.  Chunks are pushed into the same `_audioBuffer` the
    * AudioWorklet would fill, so everything downstream (`sendAudioBuffer`, the
@@ -156,12 +156,18 @@ export class AudioManager {
       this._card.analyser.attachMic(this._sourceNode, this._audioContext);
     }
 
-    kiosk.bindAudioStream((samples) => {
+    kiosk.bindAudioStream((samples, _rate, preRoll) => {
       // Mirror the AudioWorklet handler: only buffer while we're streaming to
       // the pipeline (or during the brief pre-handler capture window).
       if (this._sendInterval || this._captureBuffering) {
         this._audioBuffer.push(samples);
       }
+      // The pre-roll is audio from *before* the stream opened. The pipeline
+      // needs it, the reactive bar must not see it: this graph runs at 16 kHz
+      // and is fed 16 kHz, so it drains exactly as fast as it fills and any
+      // head start becomes permanent latency (the bar would trail live speech
+      // by the whole pre-roll for the rest of the turn).
+      if (preRoll) return;
       // Drive the reactive bar. Copy: the worklet transfers/retains the
       // buffer, and the same samples are already queued for the pipeline.
       const node = this._sourceNode;
@@ -196,7 +202,7 @@ export class AudioManager {
    */
   async switchMicMode(mode) {
     // Kiosk Satellite source: DSP is the app's business (it applies its own
-    // capture config), and there is no MediaStream to re-acquire — so a mode
+    // capture config), and there is no MediaStream to re-acquire, so a mode
     // swap is a no-op beyond recording the intent.
     if (this._mediaStream === KIOSK_MEDIA_STREAM) {
       this._currentMicMode = mode;

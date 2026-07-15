@@ -49,7 +49,7 @@ function kioskerPresent() {
 }
 
 /**
- * Kiosk Satellite (Android/iOS) — our own companion app.  It injects a
+ * Kiosk Satellite (Android/iOS): our own companion app.  It injects a
  * synchronous-to-detect but *promise-based* `window.kioskSatellite` object
  * (see its docs/js-api.md).  Unlike Fully Kiosk (sync) and Kiosker (async
  * FIFO postMessage), every method returns a real promise with per-call
@@ -387,19 +387,32 @@ export function supportsNativeWakeWord() {
     && typeof window.kioskSatellite.setWakeWordConfig === 'function';
 }
 
+// Set from the app's answer to setWakeWordConfig: it only reports a stop word
+// if we actually pushed one AND its engine loaded it.
+let _ksStopWordAvailable = false;
+
 /**
  * Push the wake config to the native engine.  `config` is
- * `{ engine, models: [{ id, wakeWord, manifestUrl }] }`.  Resolves
- * `{ available }` — `available:false` means the app has no native runner
- * for that engine and the card should keep browser detection.
+ * `{ engine, models: [{ id, wakeWord, manifestUrl }], stopModel? }`.  Resolves
+ * `{ available, stopWordAvailable }`. `available:false` means the app has no
+ * native runner for that engine and the card should keep browser detection;
+ * `stopWordAvailable:false` means the same for the stop classifier, which is
+ * negotiated separately because it can fail on its own (an older app, or the
+ * stop model failing to download).
+ *
+ * Each capability is asked for separately and defaults to false, so an app that
+ * has never heard of one behaves as if it lacks it.
  */
 export async function configureNativeWakeWord(config) {
-  if (!supportsNativeWakeWord()) return { available: false };
+  if (!supportsNativeWakeWord()) return { available: false, stopWordAvailable: false };
   try {
     const res = await window.kioskSatellite.setWakeWordConfig(config);
-    return { available: !!(res && res.available) };
+    const available = !!(res && res.available);
+    _ksStopWordAvailable = available && !!(res && res.stopWordAvailable);
+    return { available, stopWordAvailable: _ksStopWordAvailable };
   } catch (_) {
-    return { available: false };
+    _ksStopWordAvailable = false;
+    return { available: false, stopWordAvailable: false };
   }
 }
 
@@ -453,12 +466,62 @@ export function unbindNativeWakeWord() {
   }
 }
 
+// ── Native stop word ───────────────────────────────────────────────────
+//
+// The stop classifier interrupts playback ("stop" over a long TTS answer), so
+// unlike the wake word it must listen *during* a turn.  When the app runs it
+// natively the browser loads no stop model at all, which is the whole saving:
+// under the handoff the browser has no mic of its own, so a stop model there
+// would burn a download and a WASM/WebGPU runtime to score silence forever.
+
+let _ksStopHandler = null;
+
+/** True when the app is natively running the stop classifier we pushed. */
+export function supportsNativeStopWord() {
+  return ksPresent()
+    && _ksStopWordAvailable
+    && typeof window.kioskSatellite.setStopWordActive === 'function';
+}
+
+/**
+ * Arm/disarm the native stop classifier.  Arm only for the length of an
+ * interruptible state; the app scores every mic chunk while armed.
+ */
+export async function setNativeStopWordActive(active) {
+  if (!supportsNativeStopWord()) return false;
+  try {
+    await window.kioskSatellite.setStopWordActive(!!active);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Bind a handler for native stop-word detections. */
+export function bindNativeStopWord(handler) {
+  if (!ksPresent()) return false;
+  unbindNativeStopWord();
+  _ksStopHandler = () => {
+    try { handler(); } catch (_) { /* ignore */ }
+  };
+  window.addEventListener('kiosksatellite:stopword', _ksStopHandler);
+  return true;
+}
+
+/** Unbind the native stop-word handler. */
+export function unbindNativeStopWord() {
+  if (_ksStopHandler) {
+    window.removeEventListener('kiosksatellite:stopword', _ksStopHandler);
+    _ksStopHandler = null;
+  }
+}
+
 // ── Delegated mic (Kiosk Satellite only) ───────────────────────────────
 //
 // The app owns the microphone (it is already capturing for native wake-word
-// detection), so rather than opening a second capture with getUserMedia — and
+// detection), so rather than opening a second capture with getUserMedia (and
 // paying ~600 ms of acquisition latency on every wake, which clips the start
-// of the user's command — the card streams the app's audio instead.  Chunks
+// of the user's command), the card streams the app's audio instead.  Chunks
 // are 16 kHz mono PCM16, and the stream opens with a short pre-roll of
 // already-captured audio so nothing spoken right after the wake word is lost.
 
@@ -496,8 +559,11 @@ export async function stopAudioStream() {
 }
 
 /**
- * Bind a handler for delegated audio chunks.  `handler(samples, sampleRate)`
- * receives a Float32Array in [-1, 1].  Only one handler is active at a time.
+ * Bind a handler for delegated audio chunks.  `handler(samples, sampleRate,
+ * preRoll)` receives a Float32Array in [-1, 1].  `preRoll` is true for the
+ * already-captured chunks replayed at stream start: the pipeline consumes them
+ * like any other audio, but anything rendering live (the reactive bar) must
+ * skip them or it stays a pre-roll behind.  Only one handler at a time.
  */
 export function bindAudioStream(handler) {
   if (!ksPresent()) return false;
@@ -506,7 +572,11 @@ export function bindAudioStream(handler) {
     const detail = (e && e.detail) || {};
     if (!detail.pcm) return;
     try {
-      handler(_pcm16Base64ToFloat32(detail.pcm), detail.sampleRate || 16000);
+      handler(
+        _pcm16Base64ToFloat32(detail.pcm),
+        detail.sampleRate || 16000,
+        !!detail.preRoll,
+      );
     } catch (_) { /* never break the audio path */ }
   };
   window.addEventListener('kiosksatellite:audio', _ksAudioHandler);
