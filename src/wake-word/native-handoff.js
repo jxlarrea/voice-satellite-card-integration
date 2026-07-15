@@ -46,7 +46,7 @@ const VWW_STOP_NAME = 'ok_stop';
  * `available:false` if it cannot actually run the engine, so an older app that
  * predates its microWakeWord runner keeps browser detection by itself.
  */
-function nativeEngineFor(session) {
+export function nativeEngineFor(session) {
   const raw = getSelectState(
     session.hass, session.config.satellite_entity,
     'wake_word_detection', 'Home Assistant',

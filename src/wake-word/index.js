@@ -1862,6 +1862,15 @@ export class WakeWordManager {
       || modelChanged || model2Changed)
       && (this._session._nativeWakeActive || kiosk.platform() === 'kiosksatellite')) {
       const wasNative = this._session._nativeWakeActive === true;
+      // Will the app own detection after this change? If it cannot run the
+      // selected engine (openWakeWord today), the browser keeps detection and
+      // MUST still apply the change below - returning early here would swallow
+      // it, so a KS device on a browser engine would silently ignore a new
+      // wake word, sensitivity or noise-gate setting.
+      const willBeNative = this._session._nativeEngineFor?.() != null;
+      if (!wasNative && !willBeNative) {
+        // Nothing to negotiate: fall through to the browser paths.
+      } else {
       // Own the caches _applyModeOrModelChange would normally update: we
       // return before it, and leaving them stale re-fires this branch on every
       // single HA state change.
@@ -1911,6 +1920,7 @@ export class WakeWordManager {
           this._log.error('wake-word', `Native re-negotiation failed: ${e.message || e}`);
         });
       return;
+      }
     }
 
     if (stopWordChanged && stopWord && !this.isOnDeviceWakeEnabled() && !this._tfweb) {

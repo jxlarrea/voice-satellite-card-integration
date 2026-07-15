@@ -13,7 +13,7 @@ import { subscribeSatelliteEvents, teardownSatelliteSubscription } from '../shar
 import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
 import { getSwitchState, getSelectState, getNumberState, getSatelliteAttr } from '../shared/satellite-state.js';
 import { setChimeDurationOverrides, getChimeDuration, CHIME_WAKE } from '../audio/chime.js';
-import { setupNativeWakeHandoff, teardownNativeWakeHandoff } from '../wake-word/native-handoff.js';
+import { setupNativeWakeHandoff, teardownNativeWakeHandoff, nativeEngineFor } from '../wake-word/native-handoff.js';
 
 const WAKE_MODE_HA = 'home-assistant';
 const WAKE_MODE_LOCAL = 'on-device';
@@ -232,6 +232,9 @@ export async function startListening(session) {
     // mid-session switch helpers: those exist for HA <-> on-device flips and
     // assume the mic is already open, which it never is while the app owns it.
     session._restartListening = () => startListening(session);
+    // Lets the wake-word manager ask whether the app could run the currently
+    // selected engine, without importing native-handoff.js (which imports it).
+    session._nativeEngineFor = () => nativeEngineFor(session);
 
     await setupNativeWakeHandoff(session).catch((e) => {
       session.logger.error('wake-word', `Native wake handoff failed: ${e.message || e}`);
