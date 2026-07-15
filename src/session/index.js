@@ -579,7 +579,7 @@ export class VoiceSatelliteSession {
   /** Release the mic + wake word and surface the persistent muted toast. */
   _suspendForMute() {
     this._logger.log('session', 'Muted - releasing mic and wake word');
-    try { this._wakeWord?.release(); } catch (e) { this._logger.log('session', `mute: wakeWord.release: ${e.message || e}`); }
+    try { this._wakeWord?.release('muted'); } catch (e) { this._logger.log('session', `mute: wakeWord.release: ${e.message || e}`); }
     try { this._pipeline.stop(); } catch (e) { this._logger.log('session', `mute: pipeline.stop: ${e.message || e}`); }
     try { this._audio.stopMicrophone(); } catch (e) { this._logger.log('session', `mute: stopMicrophone: ${e.message || e}`); }
     this.setState(State.IDLE);

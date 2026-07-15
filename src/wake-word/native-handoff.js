@@ -211,7 +211,7 @@ export async function setupNativeWakeHandoff(session, { force = false } = {}) {
           ? 'Muted - releasing the microphone on Kiosk Satellite'
           : 'Wake word engine is no longer one Kiosk Satellite runs - taking detection back',
       );
-      teardownNativeWakeHandoff(session);
+      teardownNativeWakeHandoff(session, muted ? 'muted' : 'browser');
     }
     return false;
   }
@@ -316,13 +316,21 @@ export async function resumeNativeWake(session) {
   await kiosk.setNativeWakeWordActive(true);
 }
 
-/** Tear down the handoff (page unload / host change). */
-export function teardownNativeWakeHandoff(session) {
+/**
+ * Tear down the handoff (page unload / host change).
+ *
+ * `reason` reaches the app and is shown to whoever looks at its wake-word
+ * state: 'muted' when the satellite is muted, 'browser' when detection is
+ * coming back here. We are the only ones who know which, so passing it is not
+ * a nicety - without it the app can only say "the microphone was released",
+ * and its UI has to guess (it guessed "no native runner", which was a lie).
+ */
+export function teardownNativeWakeHandoff(session, reason = null) {
   if (!_active) return;
   kiosk.unbindNativeWakeWord();
   // Release, not just suspend: whoever ends the handoff wants the mic closed
   // (muted, or the browser is about to open its own capture for detection).
-  kiosk.releaseNativeWakeWord();
+  kiosk.releaseNativeWakeWord(reason);
   if (_stopActive) {
     kiosk.setNativeStopWordActive(false);
     kiosk.unbindNativeStopWord();

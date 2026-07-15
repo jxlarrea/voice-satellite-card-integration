@@ -425,12 +425,16 @@ export async function configureNativeWakeWord(config) {
  * user switched to an engine the app cannot run and the browser is taking
  * detection back.  configureNativeWakeWord() takes it back.
  */
-export async function releaseNativeWakeWord() {
+export async function releaseNativeWakeWord(reason = null) {
   if (!ksPresent() || typeof window.kioskSatellite.releaseWakeWord !== 'function') {
     return false;
   }
   try {
-    await window.kioskSatellite.releaseWakeWord();
+    // Say *why*. The app shows the wake-word state on its own settings screen
+    // and in its remote admin, and "muted" and "the browser took detection
+    // back" are the same fact to it - the mic closed - but not to whoever is
+    // reading. Only we know which it was, so only we can tell them.
+    await window.kioskSatellite.releaseWakeWord(reason ? { reason } : {});
     return true;
   } catch (_) {
     return false;

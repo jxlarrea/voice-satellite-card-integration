@@ -227,7 +227,8 @@ export async function startListening(session) {
     // teardown: switching *back* to a natively-runnable engine has to be able
     // to re-establish it.
     session._setupNativeWake = (opts) => setupNativeWakeHandoff(session, opts);
-    session._teardownNativeWake = () => teardownNativeWakeHandoff(session);
+    session._teardownNativeWake = (reason) =>
+      teardownNativeWakeHandoff(session, reason);
     // Coming *out* of the handoff needs the full start path, not the
     // mid-session switch helpers: those exist for HA <-> on-device flips and
     // assume the mic is already open, which it never is while the app owns it.

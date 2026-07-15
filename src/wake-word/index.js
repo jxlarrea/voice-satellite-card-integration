@@ -821,13 +821,16 @@ export class WakeWordManager {
    * memory and compiled native code before the next page mounts.
    * Synchronous so it runs to completion inside a `pagehide` handler.
    */
-  release() {
+  release(reason = null) {
     this._log.log('wake-word', 'release() - freeing wake-word runtime');
     // Kiosk Satellite is the runtime here, and it holds the microphone. Mute
     // means the mic is off, period, so pausing it is not enough: hand the mic
     // back. startListening() re-establishes the handoff on unmute.
+    //
+    // `reason` travels with it: the app shows this state to a person, and only
+    // we know whether the mic closed because of a mute or a page teardown.
     if (this._session._nativeWakeActive) {
-      this._session._teardownNativeWake?.();
+      this._session._teardownNativeWake?.(reason);
       return;
     }
     try { this.stop(); } catch (e) { this._log.log('wake-word', `release: stop failed: ${e.message || e}`); }
