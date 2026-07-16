@@ -5,6 +5,7 @@ import { buildMediaUrl, playMediaUrl } from '../audio/media-playback.js';
 import { playRemote } from '../tts/comms.js';
 import { getSelectState } from './satellite-state.js';
 import { BlurReason, Timing } from '../constants.js';
+import * as kiosk from '../kiosk/index.js';
 
 /** Safety timeout for remote notification playback (matches TTS manager) */
 const REMOTE_SAFETY_TIMEOUT = 30_000;
@@ -107,6 +108,13 @@ export function dispatchSatelliteEvent(card, event) {
   }
 
   if (!data || !data.id) return;
+
+  // Bring the kiosk app to the front for any incoming server-initiated
+  // interaction. When it was behind another app the tab is hidden and the event
+  // is queued just below; coming forward makes the tab visible, which replays
+  // the queued event through the visibilitychange handler. No-op when already
+  // in front, so it is safe to do unconditionally here.
+  kiosk.bringToFront();
 
   // Queue events while the tab is hidden - audio can't play and UI state
   // gets corrupted.  Only keep the latest event (newer replaces older).
@@ -219,6 +227,13 @@ export function playNotification(mgr, ann, onComplete, logPrefix) {
   mgr.card.ui.showBlurOverlay(BlurReason.ANNOUNCEMENT);
   mgr.barWasVisible = mgr.card.ui.onNotificationStart();
 
+  // Kiosk: a server-initiated interaction has no wake word to raise the app's
+  // own screensaver handling, so dismiss the external (kiosk) screensaver and
+  // make sure we are in front — otherwise the announcement / question plays to
+  // a dimmed, backgrounded tablet. Released in clearNotificationUI.
+  kiosk.bringToFront();
+  kiosk.stopScreensaver();
+
   // Only center on screen for passive announcements (not ask_question or start_conversation)
   const isPassive = !ann.ask_question && !ann.start_conversation;
   if (isPassive) {
@@ -287,6 +302,10 @@ export function clearNotificationUI(mgr) {
   mgr.card.ui.clearAnnouncementBubbles();
   mgr.card.ui.hideBlurOverlay(BlurReason.ANNOUNCEMENT);
   mgr.card.ui.onNotificationDismiss(mgr.barWasVisible);
+
+  // Let the kiosk screensaver arm again now the interaction is over (balances
+  // the stopScreensaver in playNotification).
+  kiosk.releaseScreensaver();
 }
 
 

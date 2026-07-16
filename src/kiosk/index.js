@@ -321,6 +321,36 @@ export function releaseScreensaver() {
 }
 
 /**
+ * Bring the kiosk app to the foreground.  Used when a server-initiated
+ * interaction (announcement, ask_question, start_conversation) arrives while
+ * the app is behind another one, so the voice UI actually appears and the
+ * screensaver can be dismissed.  No-op when already in front; best-effort
+ * (needs the "display over other apps" grant on Android).  Returns true if a
+ * bring-to-front was issued.
+ */
+export function bringToFront() {
+  if (fkPresent()) {
+    try {
+      if (typeof window.fully.bringToForeground === 'function') {
+        window.fully.bringToForeground();
+        return true;
+      }
+    } catch (_) { /* ignore */ }
+    return false;
+  }
+  if (ksPresent()) {
+    try {
+      window.kioskSatellite.bringToFront();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+  // Kiosker exposes no documented foreground API.
+  return false;
+}
+
+/**
  * Bind a motion-detection callback.  Fully Kiosk only — Kiosker exposes
  * no motion event.  Returns true if bound.
  */

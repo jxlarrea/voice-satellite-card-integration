@@ -14,6 +14,7 @@ import { dispatchSatelliteEvent } from '../shared/satellite-notification.js';
 import { getSwitchState, getSelectState, getNumberState, getSatelliteAttr } from '../shared/satellite-state.js';
 import { setChimeDurationOverrides, getChimeDuration, CHIME_WAKE } from '../audio/chime.js';
 import { setupNativeWakeHandoff, teardownNativeWakeHandoff, nativeEngineFor } from '../wake-word/native-handoff.js';
+import * as kiosk from '../kiosk/index.js';
 
 const WAKE_MODE_HA = 'home-assistant';
 const WAKE_MODE_LOCAL = 'on-device';
@@ -133,9 +134,19 @@ export function setState(session, newState) {
   const isInteracting = INTERACTING_STATES.includes(newState);
   if (isInteracting) {
     session.screensaver.dismiss();
-    if (!wasInteracting) session.screensaver.startExternalKeepalive();
+    if (!wasInteracting) {
+      session.screensaver.startExternalKeepalive();
+      // Kiosk companion: dismiss its screensaver and come to the front for the
+      // interaction. A server-initiated turn (start_conversation, ask_question)
+      // has no wake word to do this, and this releases reliably below when the
+      // whole interaction leaves the interacting states — where the notification
+      // flow's own clearNotificationUI never fires for a conversation.
+      kiosk.bringToFront();
+      kiosk.stopScreensaver();
+    }
   } else if (wasInteracting && !session.tts?.isPlaying) {
     session.screensaver.stopExternalKeepalive();
+    kiosk.releaseScreensaver();
   }
 
   // Swap mic DSP config between wake-word and STT modes.  WAKE_WORD_DETECTED
@@ -578,6 +589,9 @@ export function onTTSComplete(session, playbackFailed) {
     // forcing the external screensaver off so whatever owns that
     // switch (usually Fully Kiosk) can resume its own idle timer.
     session.screensaver.stopExternalKeepalive();
+    // Same for the kiosk companion's screensaver: this is the end-of-turn that
+    // the leave-interacting branch deferred while TTS was still speaking.
+    kiosk.releaseScreensaver();
 
     // Reset screensaver idle timer after interaction completes
     session.screensaver.notifyActivity();
