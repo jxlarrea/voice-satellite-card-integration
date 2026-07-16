@@ -81,6 +81,10 @@ export function dispatchSatelliteEvent(card, event) {
   // detection and goes directly to STT.  No `id` field; can't be queued
   // while hidden because it requires a live mic gesture context.
   if (type === 'wake') {
+    // Bring the app forward first, so a wake fired while it is backgrounded
+    // surfaces the mic UI (no-op when already in front). setState dismisses
+    // the kiosk screensaver once the turn enters an interacting state.
+    kiosk.bringToFront();
     card.onWakeAction?.();
     return;
   }

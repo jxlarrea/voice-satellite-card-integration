@@ -136,12 +136,12 @@ export function setState(session, newState) {
     session.screensaver.dismiss();
     if (!wasInteracting) {
       session.screensaver.startExternalKeepalive();
-      // Kiosk companion: dismiss its screensaver and come to the front for the
-      // interaction. A server-initiated turn (start_conversation, ask_question)
-      // has no wake word to do this, and this releases reliably below when the
-      // whole interaction leaves the interacting states — where the notification
-      // flow's own clearNotificationUI never fires for a conversation.
-      kiosk.bringToFront();
+      // Kiosk companion: dismiss its screensaver for the interaction, and
+      // release it reliably below when the interaction leaves the interacting
+      // states — the notification flow's own clearNotificationUI never fires
+      // for a conversation. Bring-to-front is NOT done here: each entry point
+      // (notification play, manual wake, timer) already did it, and a second
+      // call races that pending resume and reloads the WebView.
       kiosk.stopScreensaver();
     }
   } else if (wasInteracting && !session.tts?.isPlaying) {

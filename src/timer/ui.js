@@ -90,6 +90,10 @@ export function showAlert(mgr, names) {
   mgr.alertActive = true;
   mgr.log.log('timer', `Showing finished alert${names?.length ? `: ${names.join(', ')}` : ''}`);
 
+  // Bring the app forward so a timer that fires while another app is in front
+  // actually surfaces its alert (no-op when already foreground).
+  kiosk.bringToFront();
+
   // Dismiss the in-app screensaver and keep both it and Fully Kiosk's
   // native one suppressed for the duration of the alert.  Otherwise the
   // chime fires unattended behind whichever screensaver re-activates on
