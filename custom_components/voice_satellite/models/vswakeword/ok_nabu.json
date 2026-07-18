@@ -5,7 +5,7 @@
   "attribution": {
     "author": "Xavier Larrea",
     "url": "https://github.com/jxlarrea/voice-satellite-card-integration",
-    "license": "CC BY-NC-ND 4.0: you may use and share it, but commercial use and derivative works are not permitted."
+    "license": "AGPL-3.0 (GNU Affero General Public License v3.0): https://www.gnu.org/licenses/agpl-3.0.html"
   },
   "input": {
     "name": "input",
