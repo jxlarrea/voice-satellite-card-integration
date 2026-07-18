@@ -61,7 +61,7 @@ const CATEGORY = {
  */
 function detectPlatform() {
   const kioskPlatform = kiosk.platform();
-  if (kioskPlatform) return kioskPlatform; // 'fullykiosk' | 'kiosker'
+  if (kioskPlatform) return kioskPlatform; // 'fullykiosk' | 'kiosker' | 'kiosksatellite'
   const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
   if (/Home Assistant\//.test(ua) || /HomeAssistant\//.test(ua)) return 'companion';
   return 'browser';
@@ -90,6 +90,11 @@ const PLATFORM_FIX = {
     micPrompt: 'Kiosker → Settings → Security → "Camera and microphone permission" → set to "Allow". The default "Prompt" asks on every page load; "Allow" grants it silently.',
     micDenied: 'Kiosker → Settings → Security → "Camera and microphone permission" → set to "Allow", and confirm iOS Settings → Kiosker → Microphone is enabled. Reload the page afterwards.',
   },
+  kiosksatellite: {
+    audio: 'Kiosk Satellite allows audio autoplay out of the box. If playback is still blocked, update Kiosk Satellite and reload the page (pull down to refresh).',
+    micPrompt: 'Kiosk Satellite grants microphone access automatically once its Android Microphone permission is accepted. Grant it from the Kiosk Satellite setup wizard or Android Settings → Apps → Kiosk Satellite → Permissions, then reload the page.',
+    micDenied: 'Confirm the Android app permissions for Kiosk Satellite include Microphone (Android Settings → Apps → Kiosk Satellite → Permissions), then reload the page.',
+  },
   browser: {
     audio: 'In Chrome/Edge: click the lock icon → Site settings → Sound: Allow. In Safari: Settings → Websites → Auto-Play → Allow All Auto-Play for this site.',
     micPrompt: 'Tap the start button in the overlay. The browser will prompt for microphone permission the first time a user gesture triggers capture.',
@@ -98,8 +103,10 @@ const PLATFORM_FIX = {
 };
 
 function fixFor(bucket) {
-  const p = detectPlatform();
-  return PLATFORM_FIX[p][bucket];
+  // Fall back to the generic browser advice if a platform ever ships
+  // without its own entry - a missing row must not crash the check.
+  const fixes = PLATFORM_FIX[detectPlatform()] || PLATFORM_FIX.browser;
+  return fixes[bucket];
 }
 
 export const CLIENT_CHECKS = [
