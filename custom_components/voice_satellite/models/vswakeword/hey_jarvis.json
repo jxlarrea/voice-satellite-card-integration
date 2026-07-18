@@ -2,6 +2,11 @@
   "name": "hey_jarvis",
   "format": "vs-wake-word-ctc-v1",
   "recommended_threshold": 0.5,
+  "attribution": {
+    "author": "Xavier Larrea",
+    "url": "https://github.com/jxlarrea/voice-satellite-card-integration",
+    "license": "CC BY-NC-ND 4.0: you may use and share it, but commercial use and derivative works are not permitted."
+  },
   "input": {
     "name": "input",
     "shape": [
@@ -348,10 +353,5 @@
     "cooldown_ms": 2000,
     "high_confidence_bypass": 6.8,
     "high_confidence_bypass_min_hits": 1
-  },
-  "watermark": {
-    "author": "Xavier Larrea",
-    "url": "https://github.com/jxlarrea/voice-satellite-card-integration",
-    "license": "CC BY-NC-ND 4.0: you may use and share it, but commercial use and derivative works are not permitted."
   }
 }

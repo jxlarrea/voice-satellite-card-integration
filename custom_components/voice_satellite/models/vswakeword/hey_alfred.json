@@ -2,6 +2,11 @@
   "name": "hey_alfred",
   "format": "vs-wake-word-ctc-v1",
   "recommended_threshold": 0.5,
+  "attribution": {
+    "author": "Xavier Larrea",
+    "url": "https://github.com/jxlarrea/voice-satellite-card-integration",
+    "license": "CC BY-NC-ND 4.0: you may use and share it, but commercial use and derivative works are not permitted."
+  },
   "input": {
     "name": "input",
     "shape": [
@@ -189,10 +194,5 @@
     "stream_match": true,
     "stream_buffer_ms": 2500,
     "stream_lag_frames": 20
-  },
-  "watermark": {
-    "author": "Xavier Larrea",
-    "url": "https://github.com/jxlarrea/voice-satellite-card-integration",
-    "license": "CC BY-NC-ND 4.0: you may use and share it, but commercial use and derivative works are not permitted."
   }
 }

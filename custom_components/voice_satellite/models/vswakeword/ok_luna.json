@@ -192,7 +192,7 @@
     "stream_lag_frames": 20
   },
   "recommended_threshold": 0.5,
-  "watermark": {
+  "attribution": {
     "author": "Xavier Larrea",
     "url": "https://github.com/jxlarrea/voice-satellite-card-integration",
     "license": "CC BY-NC-ND 4.0: you may use and share it, but commercial use and derivative works are not permitted."
