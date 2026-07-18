@@ -49,7 +49,7 @@ Voice Satellite runs as a **global engine** that loads on every page of Home Ass
 
 ## Wall Tablet? Meet Kiosk Satellite
 
-On an Android tablet, the best way to run Voice Satellite is [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite) - the free official companion kiosk app, built specifically for Home Assistant. The card detects it is running inside Kiosk Satellite and hands wake word detection over to the app's native engine automatically. You keep configuring everything in Voice Satellite as usual; the app's setup wizard even assigns the satellite entity for you.
+On an Android tablet, the best way to run Voice Satellite is [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite) - the free official companion kiosk app, built specifically for Home Assistant. Voice Satellite detects it is running inside Kiosk Satellite and hands wake word detection over to the app's native engine automatically. You keep configuring everything in Voice Satellite as usual; the app's setup wizard even assigns the satellite entity for you.
 
 Native detection removes the limits a browser puts on a wall tablet:
 
@@ -81,7 +81,7 @@ Voice Satellite requires microphone access, so make sure that:
 2. **The page is served over HTTPS** - required for microphone access in modern browsers.
 3. **The screen stays on** - if the device screen turns off completely, the microphone will stop working. Use a screensaver instead of screen-off to keep the mic active. (Inside [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite) this limit disappears: detection is native and keeps running with the screen off.)
 
-On Android, the recommended host is [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite): microphone access and audio autoplay are handled by the app out of the box, and wake word detection runs natively. For other kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/details?id=de.ozerov.fully) (Android) or [Kiosker Pro](https://kiosker.io) (iOS), make sure to enable microphone permissions and use the screensaver feature (not screen off) to keep the microphone active while dimming the display.
+On Android, the recommended kiosk app is [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite): microphone access and audio autoplay are handled by the app out of the box, and wake word detection runs natively. For other kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/details?id=de.ozerov.fully) (Android) or [Kiosker Pro](https://kiosker.io) (iOS), make sure to enable microphone permissions and use the screensaver feature (not screen off) to keep the microphone active while dimming the display.
 
 For the **Home Assistant Companion App**, enable **Autoplay videos** in Settings -> Companion App -> Other settings. Without this, the WebView will block TTS audio playback.
 
@@ -148,7 +148,7 @@ Three on-device engines are available, all running in pure JavaScript so audio i
 
 microWakeWord is the default for fresh installs because it works on every device. On devices that support WebGPU, **vsWakeWord is the recommended engine for wall-mounted tablets** - the models were designed for exactly that scenario. Pick openWakeWord when you need a keyword that vsWakeWord doesn't ship yet, or when you want the official HA OWW addon's behavior. All three engines run well under the real-time budget. Up to two wake words can run in parallel on any engine, each routed to its own Assist pipeline. "Disabled" mode keeps the mic completely off for automation-driven setups.
 
-Inside [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite) the card hands detection over to the app's native engine automatically - same engine choice, same models, nothing to reconfigure - and detection keeps running with the screen off or the app in the background, at a fraction of the browser's CPU cost.
+Inside [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite), Voice Satellite hands detection over to the app's native engine automatically - same engine choice, same models, nothing to reconfigure - and detection keeps running with the screen off or the app in the background, at a fraction of the browser's CPU cost.
 
 See the [Wake Word reference](docs/wake-word.md) for the full engine comparison, built-in models, custom model loading, dual wake words / pipelines, and disabled mode.
 
