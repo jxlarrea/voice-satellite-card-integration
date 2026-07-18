@@ -170,4 +170,4 @@ Contributions are welcome. Please feel free to submit issues. Pull requests are 
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+This project is licensed under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/): you may use and share it, but commercial use and derivative works are not permitted. See [LICENSE](LICENSE) for details.
