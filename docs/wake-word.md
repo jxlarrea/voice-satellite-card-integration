@@ -5,6 +5,7 @@ Voice Satellite includes built-in wake word detection that runs entirely in the 
 ## Contents
 
 - [Engines](#engines)
+- [Running Inside Kiosk Satellite](#running-inside-kiosk-satellite)
 - [Performance comparison](#performance-comparison)
 - [How It Works](#how-it-works)
 - [Built-in Wake Words](#built-in-wake-words)
@@ -55,6 +56,17 @@ The two GPU engines tolerate that skipping very differently. vsWakeWord re-reads
 vsWakeWord's conv shaders are deliberately generic (shapes in uniform buffers, no per-layer specialization): heavily specialized kernels crash the fragile shader compilers found in Android WebView and GLES drivers, and on healthy devices the measured cost of the generic kernels is about 1 ms per chunk - far below the 80 ms budget.
 
 If your device supports WebGPU and your wake word is available as a vsWakeWord model, **vsWakeWord is the recommended choice** - particularly on wall-mounted tablets, which is what the models were trained for. Pick openWakeWord when you need a keyword that vsWakeWord doesn't ship yet, or when you specifically want OWW's behavior. Stick with microWakeWord if your device has no WebGPU.
+
+## Running Inside Kiosk Satellite
+
+On Android tablets, [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite) - the free official companion kiosk app - takes wake word detection out of the browser entirely. The card detects it is running inside Kiosk Satellite and hands detection over to the app's native engine on its own. The handoff is completely transparent:
+
+- **Nothing to reconfigure.** You keep your engine and model choice in the "Wake word detection" select; the app inherits them from the card and downloads the same models from your Home Assistant instance.
+- **Screen off, app in background - still listening.** Native detection does not depend on the page being visible. With background listening enabled in the app, the wake word works even while another app is in the foreground, and the kiosk returns to the dashboard on a trigger.
+- **A fraction of the cost.** Native CPU inference runs the pipeline many times faster than realtime with no GPU needed, keeping the dashboard perfectly smooth. Even low-end hardware that struggles with browser detection runs comfortably.
+- **Nothing is clipped.** The app holds the microphone permanently and streams audio to the card with a pre-roll on every wake, so the first words of a command are never lost to microphone re-acquisition.
+
+If the app cannot run your selected engine natively, the card silently keeps detection in the browser - there is no failure mode to manage. Fully Kiosk and Kiosker Pro setups are unaffected: detection runs in the browser there, exactly as described above.
 
 ## Performance comparison
 

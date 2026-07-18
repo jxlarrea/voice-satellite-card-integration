@@ -298,7 +298,7 @@ actions:
 - The change applies to every browser currently connected to the targeted satellite. For the typical one-tablet-per-entity setup that is exactly the device you targeted.
 - If no browser is connected when the action fires (tablet off, app closed), nothing changes on screen at that moment, but the new type is still persisted to the satellite's panel profile on the integration side. The browser applies it the next time the page loads and hydrates its settings from the server.
 - If the side panel happens to be open at the moment the action fires, its Screensaver Type dropdown will not live-update. The next time the panel opens it reads the new value from local storage and reflects it correctly.
-- The action only changes the type. To turn the screensaver on or off, use the satellite's **Screensaver** switch entity (see [Screensaver Switch](#screensaver-switch)). For an "always on but dark" tablet overnight, pair `type: black` with a low `Screen brightness while active` percentage in the panel (`0%` drives the Fully Kiosk backlight fully off).
+- The action only changes the type. To turn the screensaver on or off, use the satellite's **Screensaver** switch entity (see [Screensaver Switch](#screensaver-switch)). For an "always on but dark" tablet overnight, pair `type: black` with a low `Screen brightness while active` percentage in the panel (`0%` drives the kiosk app backlight fully off - Kiosk Satellite, Fully Kiosk, or Kiosker Pro).
 
 ## Media Player
 

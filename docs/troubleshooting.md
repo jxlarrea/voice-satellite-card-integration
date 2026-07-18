@@ -23,8 +23,8 @@ Checks cover the common failure modes:
 - **Satellite configuration:** an entity is selected, the entity exists in Home Assistant, Pipeline 1 is resolvable, the pipeline has STT / TTS / conversation engines configured, those provider entities are loaded. When a second wake word is enabled, Pipeline 2 gets the same battery of checks independently and surfaces warnings when both slots point at the same model (slot 2 inert) or when Pipeline 2 is set to "Preferred" (slot 2 routes to Pipeline 1 anyway).
 - **URLs and TTS:** Home Assistant `internal_url` and `external_url` match the page protocol. A mismatch here is the single most common cause of "text shows but TTS is silent" for `assist_satellite.announce`.
 - **Wake word:** current detection mode (On Device microWakeWord / On Device openWakeWord / On Device vsWakeWord / Home Assistant / Disabled). In Home Assistant mode, a wake word entity is configured on the pipeline and loaded. In On Device (openWakeWord) and On Device (vsWakeWord) modes, the device must support WebGPU - diagnostics flags devices that don't. When Wake word 2 is enabled, its selected model is also reported.
-- **Audio:** page-load autoplay probe reporting whether media element playback and `AudioContext` capture will start without a user tap. Remediation text is tailored to the current host (HA Companion App, Fully Kiosk, or a plain browser).
-- **Platform:** detects Fully Kiosk, Companion App, ChromeOS, iOS, and other hosts so remediation instructions match the actual settings path.
+- **Audio:** page-load autoplay probe reporting whether media element playback and `AudioContext` capture will start without a user tap. Remediation text is tailored to the current host (Kiosk Satellite, HA Companion App, Fully Kiosk, Kiosker Pro, or a plain browser).
+- **Platform:** detects Kiosk Satellite, Fully Kiosk, Companion App, ChromeOS, iOS, and other hosts so remediation instructions match the actual settings path. Inside Kiosk Satellite with the native wake word handoff active, the microphone check asks the app directly - a natively listening engine is proof of access, since the page never opens the microphone itself.
 
 Failures and warnings render at the top of the panel with specific remediation for your platform. Passing checks collapse into a **Show all checks** disclosure below. The **Copy report** button writes a markdown block with the full results, card/overlay version, page URL, and user agent. Paste it into a GitHub issue instead of enabling Debug Logs when asking for help.
 
@@ -32,9 +32,10 @@ Failures and warnings render at the top of the panel with specific remediation f
 
 1. **Check HTTPS:** Browsers require HTTPS for microphone access. If you're using HTTP, the microphone permission prompt won't appear. Use HTTPS or access via `localhost`.
 2. **Check browser permissions:** Make sure the browser has microphone permission for your HA URL. Look for a microphone icon in the address bar.
-3. **Check Fully Kiosk settings (Android):** If using Fully Kiosk, ensure **Web Content Settings -> Enable Microphone Access** and **Autoplay Audio** are enabled.
-4. **Check Kiosker Pro settings (iOS):** If using Kiosker Pro, set **Settings -> Security -> Camera and microphone permission** to **Allow**. The default is **Prompt**, which asks for microphone access on every page load. Also enable **Settings -> Security -> Allow JavaScript integration** so screensaver backlight dimming works.
-5. **Check the browser console:** Open the developer tools (F12) and look for errors.
+3. **Check Kiosk Satellite permissions (Android):** If using Kiosk Satellite, microphone access is handled by the app - make sure its Android **Microphone** permission was granted (the setup wizard requests it; otherwise Android Settings -> Apps -> Kiosk Satellite -> Permissions), then reload the page.
+4. **Check Fully Kiosk settings (Android):** If using Fully Kiosk, ensure **Web Content Settings -> Enable Microphone Access** and **Autoplay Audio** are enabled.
+5. **Check Kiosker Pro settings (iOS):** If using Kiosker Pro, set **Settings -> Security -> Camera and microphone permission** to **Allow**. The default is **Prompt**, which asks for microphone access on every page load. Also enable **Settings -> Security -> Allow JavaScript integration** so screensaver backlight dimming works.
+6. **Check the browser console:** Open the developer tools (F12) and look for errors.
 
 ## Wake word not detected
 
@@ -57,8 +58,9 @@ Failures and warnings render at the top of the panel with specific remediation f
 
 1. Check that TTS is configured in your Assist pipeline.
 2. Check browser audio permissions.
-3. If **using Fully Kiosk** (Android), ensure that **Web Content Settings** -> **Autoplay Audio** is enabled.
-4. If **using Kiosker Pro** (iOS), ensure inline media playback / autoplay is enabled in **Settings** so TTS audio can play without a tap.
+3. If **using Kiosk Satellite** (Android), audio autoplay is allowed out of the box - if TTS is still silent, update the app and reload the page (pull down to refresh).
+4. If **using Fully Kiosk** (Android), ensure that **Web Content Settings** -> **Autoplay Audio** is enabled.
+5. If **using Kiosker Pro** (iOS), ensure inline media playback / autoplay is enabled in **Settings** so TTS audio can play without a tap.
 5. The **Home Assistant Companion App** may block audio autoplay by default, ensure that **Settings** -> **Companion App** -> **Other settings** -> **Autoplay videos** is enabled.
 
 Without these settings, Voice Satellite will still function (wake word detection, speech-to-text, and visual feedback all work normally) but TTS audio won't play. The UI will clean up gracefully after the interaction completes.

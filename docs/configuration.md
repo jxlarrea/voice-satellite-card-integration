@@ -73,7 +73,9 @@ Per-satellite browser profile for overlay appearance, microphone processing, tim
 
 ### Screensaver
 
-A browser overlay that kicks in after an idle timeout. Configured per-browser in the sidebar panel; automatically dismissed on voice interaction, tap, or Fully Kiosk motion detection. Hardware backlight dimming works in both Fully Kiosk (Android) and Kiosker Pro (iOS). Does not activate while the engine is stopped.
+A browser overlay that kicks in after an idle timeout. Configured per-browser in the sidebar panel; automatically dismissed on voice interaction, tap, or kiosk app motion detection (Kiosk Satellite, Fully Kiosk). Hardware backlight dimming works in Kiosk Satellite, Fully Kiosk (Android), and Kiosker Pro (iOS). Does not activate while the engine is stopped.
+
+Inside [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite) the app can run its own screensaver instead: while the app's screensaver is enabled and its "Turn off the Voice Satellite screensaver" toggle is on (the default), the Voice Satellite screensaver stands down automatically and a notice appears under the toggle below explaining why.
 
 | Setting | Description |
 |---------|-------------|
@@ -90,8 +92,8 @@ A browser overlay that kicks in after an idle timeout. Configured per-browser in
 | **Clock size** *(Digital clock type only)* | Scales the time and date from 50% to 300% of the default size. The default size is proportional to the browser viewport, which browsers and kiosk apps report differently, so the same clock can look smaller on some tablets (notably iPads) - raise it there to match your other devices. Stored per browser like the rest of the panel settings |
 | **Clock color** *(Digital clock type only)* | Color of the time text, picked via a color swatch next to the label. The date line uses a darker shade of the same color. Defaults to the original near-white |
 | **External screensaver** *(screensaver disabled only)* | A `switch` or `input_boolean` that's forced off for the duration of each voice interaction, then left alone so its owner (typically Fully Kiosk) can resume its own idle timer. Useful to keep Fully Kiosk's screensaver from covering the voice UI mid-conversation |
-| **Kiosk Browser Integration -> Screen brightness while active** | Hardware backlight level (0-100%) while the screensaver is showing. Works in Fully Kiosk (Android) and Kiosker Pro (iOS) with the JavaScript integration enabled. The previous brightness is restored on dismiss. 0% = fully dark, 100% = leave the backlight untouched (default) |
-| **Kiosk Browser Integration -> Dismiss on motion** | Treat Fully Kiosk's camera-based motion detection as activity: motion dismisses the screensaver and also resets the idle timer, so the screensaver won't activate while someone is moving in front of the camera. Fully Kiosk only (Kiosker Pro has no motion API). Requires Motion Detection to be enabled in the Fully Kiosk settings. Default off |
+| **Kiosk Browser Integration -> Screen brightness while active** | Hardware backlight level (0-100%) while the screensaver is showing. Works in Kiosk Satellite, Fully Kiosk (Android), and Kiosker Pro (iOS) with the JavaScript integration enabled. The previous brightness is restored on dismiss. 0% = fully dark, 100% = leave the backlight untouched (default) |
+| **Kiosk Browser Integration -> Dismiss on motion** | Treat the kiosk app's camera-based motion detection as activity: motion dismisses the screensaver and also resets the idle timer, so the screensaver won't activate while someone is moving in front of the camera. Kiosk Satellite and Fully Kiosk (Kiosker Pro has no motion API). Requires motion detection to be enabled in the kiosk app's settings. Default off |
 
 ## Mini Card
 
