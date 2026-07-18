@@ -166,14 +166,14 @@
     ],
     "max_edit_distance": 1,
     "wake_word_trail_tolerance": 1,
-    "min_matched_confidence": 3.2,
+    "min_matched_confidence": 5.5,
     "target_max_edit_distance": [
       1,
       0
     ],
     "target_min_matched_confidence": [
-      3.2,
-      6.0
+      5.5,
+      6.5
     ],
     "wake_word_target_anchors": [
       [
@@ -192,10 +192,7 @@
     "required_hits": 1,
     "cooldown_ms": 2000,
     "hit_mode": "consecutive",
-    "high_confidence_bypass": 6.8,
-    "high_confidence_bypass_min_hits": 1,
-    "stream_match": true,
-    "stream_buffer_ms": 2500,
-    "stream_lag_frames": 20
+    "high_confidence_bypass": 8.2,
+    "high_confidence_bypass_min_hits": 1
   }
 }
