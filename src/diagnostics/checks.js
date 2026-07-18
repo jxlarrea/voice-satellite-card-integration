@@ -194,6 +194,26 @@ export const CLIENT_CHECKS = [
     category: CATEGORY.ENVIRONMENT,
     title: 'Microphone permission granted',
     run: async () => {
+      // Kiosk Satellite with the native wake-word handoff active: the page
+      // never opens the microphone itself - the app owns it and streams PCM
+      // to the card - so the browser-side signals below stay at their
+      // defaults forever. Ask the app instead: an engine actively listening
+      // is proof the microphone is granted at the OS level. When the
+      // handoff is not active the card captures through getUserMedia like
+      // any other browser, and the normal signals below apply.
+      if (kiosk.platform() === 'kiosksatellite'
+          && typeof window.kioskSatellite?.getWakeWordState === 'function') {
+        try {
+          const st = await window.kioskSatellite.getWakeWordState();
+          if (st?.listening === true) {
+            return {
+              status: 'pass',
+              detail: 'Kiosk Satellite holds the microphone natively and is listening for the wake word. The page needs no microphone access of its own.',
+            };
+          }
+        } catch (_) { /* fall through to the browser signals */ }
+      }
+
       // Primary signal: enumerateDevices() only populates audio-input
       // `label` fields after the origin has been granted mic access at
       // some point. This is reliable across Chrome, Safari, and (critically)
