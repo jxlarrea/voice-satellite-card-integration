@@ -139,7 +139,20 @@ export class ScreensaverManager {
     // toggle the screensaver.  The panel config value is the fallback
     // for older integration versions without the switch.
     const switchOn = getSwitchState(this._session.hass, cfg.satellite_entity, 'screensaver');
-    const newEnabled = switchOn !== undefined ? switchOn : cfg.screensaver_enabled === true;
+    let newEnabled = switchOn !== undefined ? switchOn : cfg.screensaver_enabled === true;
+
+    // Kiosk Satellite precedence: when the kiosk app runs its own
+    // screensaver and asks ours to stand down, enabled is forced off no
+    // matter what the switch or config says.  The answer is queried once
+    // (async) and cached; re-run the settings check when it lands true so
+    // an already-armed screensaver disarms.
+    if (!this._ksSuppressQueried) {
+      this._ksSuppressQueried = true;
+      kiosk.confirmScreensaverSuppressed().then((suppressed) => {
+        if (suppressed) this.checkSettings();
+      });
+    }
+    if (newEnabled && kiosk.screensaverSuppressed()) newEnabled = false;
     const newTimer = Math.max(10, parseInt(cfg.screensaver_timer_s, 10) || 60);
     // Dim percent is a "null = no dimming" tri-state: null/undefined/
     // empty-string means leave the backlight alone, numbers 0–100 pick

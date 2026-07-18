@@ -679,6 +679,13 @@ class VoiceSatellitePanel extends HTMLElement {
     if (this._ssFkForm) this._ssFkForm.disabled = !detected;
   }
 
+  /** Show the Kiosk Satellite precedence notice under the screensaver
+   *  toggle while the kiosk app is suppressing our screensaver. */
+  _syncKsSuppressNotice() {
+    const note = this.querySelector(`.${P}-ss-ks-note`);
+    if (note) note.style.display = kiosk.screensaverSuppressed() ? '' : 'none';
+  }
+
   /** Toggle visibility of the Media Browse widget - only shown when
    *  the screensaver is enabled AND type='media'. */
   _updateScreensaverMediaVisibility() {
@@ -996,6 +1003,14 @@ class VoiceSatellitePanel extends HTMLElement {
           font-size: 13px;
           color: var(--secondary-text-color, #999);
           line-height: 1.5;
+        }
+        .${P}-ss-ks-note {
+          font-size: 13px;
+          padding: 8px 12px;
+          border-radius: 6px;
+          margin-top: 8px;
+          background: color-mix(in srgb, #2196f3 14%, transparent);
+          color: #64b5f6;
         }
         .${P}-ss-fk-status {
           font-size: 13px;
@@ -1707,6 +1722,9 @@ class VoiceSatellitePanel extends HTMLElement {
         <div class="${P}-card-title">Screensaver</div>
         <div class="${P}-ss-pre-container">
           <div class="${P}-form-loading">Loading settings...</div>
+        </div>
+        <div class="${P}-ss-ks-note" style="display: none;">
+          Kiosk Satellite is showing its own screensaver on this device, so the Voice Satellite screensaver stays off here. You can change this in the Kiosk Satellite settings, under Voice Satellite.
         </div>
         <div class="${P}-ss-media" style="display: none;">
           <div class="${P}-ss-media-label">Media source</div>
@@ -3107,6 +3125,10 @@ class VoiceSatellitePanel extends HTMLElement {
       this._ssFkForm = fkForm;
     }
     this._syncFkSectionVisibility();
+
+    // Kiosk Satellite screensaver precedence: surface why the toggle above
+    // has no effect while the kiosk app's own screensaver takes over.
+    kiosk.confirmScreensaverSuppressed().then(() => this._syncKsSuppressNotice());
 
     // Media Browse button (native HTML, no shadow DOM hack)
     const browseBtn = this.querySelector(`.${P}-ss-browse-btn`);
