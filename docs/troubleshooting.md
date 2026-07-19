@@ -30,7 +30,7 @@ Failures and warnings render at the top of the panel with specific remediation f
 
 ## Nothing happens when I tap Start
 
-1. **Check HTTPS:** Browsers require HTTPS for microphone access. If you're using HTTP, the microphone permission prompt won't appear. Use HTTPS or access via `localhost`.
+1. **Check HTTPS:** Browsers require HTTPS for microphone access. If you're using HTTP, the microphone permission prompt won't appear. Use HTTPS or access via `localhost`. Inside [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite) plain http works: its **Secure context proxy** (Settings -> Home Assistant Configuration) makes the page a secure context, and the setup wizard enables it automatically for http URLs.
 2. **Check browser permissions:** Make sure the browser has microphone permission for your HA URL. Look for a microphone icon in the address bar.
 3. **Check Kiosk Satellite permissions (Android):** If using Kiosk Satellite, microphone access is handled by the app - make sure its Android **Microphone** permission was granted (the setup wizard requests it; otherwise Android Settings -> Apps -> Kiosk Satellite -> Permissions), then reload the page.
 4. **Check Fully Kiosk settings (Android):** If using Fully Kiosk, ensure **Web Content Settings -> Enable Microphone Access** and **Autoplay Audio** are enabled.

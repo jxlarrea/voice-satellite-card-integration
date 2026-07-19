@@ -78,7 +78,7 @@ Not on Android, or already invested in another kiosk app? [Fully Kiosk Browser](
 Voice Satellite requires microphone access, so make sure that:
 
 1. **The browser has microphone permissions granted** - you will be prompted on first use.
-2. **The page is served over HTTPS** - required for microphone access in modern browsers.
+2. **The page is served over HTTPS** - required for microphone access in modern browsers. (Inside [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite) this requirement disappears: its built-in secure context proxy makes the microphone work even on an http-only instance.)
 3. **The screen stays on** - if the device screen turns off completely, the microphone will stop working. Use a screensaver instead of screen-off to keep the mic active. (Inside [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite) this limit disappears: detection is native and keeps running with the screen off.)
 
 On Android, the recommended kiosk app is [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite): microphone access and audio autoplay are handled by the app out of the box, and wake word detection runs natively. For other kiosk setups like [Fully Kiosk Browser](https://play.google.com/store/apps/details?id=de.ozerov.fully) (Android) or [Kiosker Pro](https://kiosker.io) (iOS), make sure to enable microphone permissions and use the screensaver feature (not screen off) to keep the microphone active while dimming the display.
