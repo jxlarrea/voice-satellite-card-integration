@@ -58,6 +58,7 @@ Native detection removes the limits a browser puts on a wall tablet:
 | Wake word with the dashboard on screen | ✅ | ✅ |
 | Wake word with the screen off | ❌ | ✅ |
 | Wake word with another app in front | ❌ | ✅ Returns to the dashboard on trigger |
+| Mic acces in non-HTTPS HA instances | ❌ | ✅ |
 | Detection cost | ⚠️ Browser based, heavy on tablets | ✅ Native CPU inference, 10x-30x faster |
 | Wake word on low-end hardware | ⚠️ Struggles | ✅ CPU only, no GPU needed |
 | Survives reboots | ⚠️ Manual relaunch | ✅ Start on boot |
