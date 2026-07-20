@@ -1,5 +1,7 @@
 # Claude
 .claude/
+.remember/
+
 
 # Node
 node_modules/
