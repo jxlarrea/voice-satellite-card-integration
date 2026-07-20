@@ -33,7 +33,6 @@ export class TimerManager {
     this._container = null;
     this._unsubscribe = null;
     this._subscribed = false;
-    this._reconnectListener = null;
 
     /** @type {string[]} Track timer IDs to detect removals */
     this._knownTimerIds = [];
