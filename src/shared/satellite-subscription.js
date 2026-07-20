@@ -5,16 +5,20 @@
  * start_conversation, ask_question).  Replaces per-manager entity
  * state subscriptions for notification features.
  *
- * Pattern follows entity-subscription.js: module-level state,
- * reconnect via the connection 'ready' event.
+ * Module-level state. Normal socket reconnects are handled by
+ * home-assistant-js-websocket, which replays active subscriptions onto the new
+ * socket — so there is NO manual 'ready' re-subscribe here (that stacked a
+ * second subscription on top of the replay, leaking one per reconnect). The
+ * two recovery paths that haws replay does NOT cover are kept: the integration
+ * 'reload' message (server tears the subscription down; see _scheduleRetry) and
+ * a stale socket that dropped silently while the tab was hidden (see
+ * refreshSatelliteSubscription).
  */
 
 import { teardownVisibilityListener } from './satellite-notification.js';
 
 let _unsubscribe = null;
 let _subscribed = false;
-let _reconnectListener = null;
-let _reconnectConnection = null;
 let _card = null;
 let _onEvent = null;
 let _retryTimer = null;
@@ -38,21 +42,7 @@ export function subscribeSatelliteEvents(card, onEvent) {
   _onEvent = onEvent;
   _subscribed = true;
   _doSubscribe(card, connection, onEvent);
-
-  // Re-subscribe on HA reconnect
-  if (!_reconnectListener) {
-    _reconnectListener = () => {
-      card.logger.log('satellite-sub', 'Connection reconnected - re-subscribing');
-      _cleanup();
-      const conn = card.connection;
-      if (conn) {
-        _subscribed = true;
-        _doSubscribe(card, conn, onEvent);
-      }
-    };
-    connection.addEventListener('ready', _reconnectListener);
-    _reconnectConnection = connection;
-  }
+  // No 'ready' re-subscribe: haws replays this subscription on reconnect.
 }
 
 function _doSubscribe(card, connection, onEvent) {
@@ -126,16 +116,11 @@ export function refreshSatelliteSubscription() {
 }
 
 /**
- * Permanently tear down the satellite subscription and reconnect listener.
+ * Permanently tear down the satellite subscription.
  * Called when the card is displaced by another browser.
  */
 export function teardownSatelliteSubscription() {
   _cleanup();
-  if (_reconnectListener && _reconnectConnection) {
-    _reconnectConnection.removeEventListener('ready', _reconnectListener);
-    _reconnectListener = null;
-    _reconnectConnection = null;
-  }
   _card = null;
   _onEvent = null;
   teardownVisibilityListener();
