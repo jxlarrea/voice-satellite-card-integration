@@ -5,26 +5,89 @@
  * start_conversation, ask_question).  Replaces per-manager entity
  * state subscriptions for notification features.
  *
- * Module-level state. Normal socket reconnects are handled by
- * home-assistant-js-websocket, which replays active subscriptions onto the new
- * socket — so there is NO manual 'ready' re-subscribe here (that stacked a
- * second subscription on top of the replay, leaking one per reconnect). The
- * two recovery paths that haws replay does NOT cover are kept: the integration
- * 'reload' message (server tears the subscription down; see _scheduleRetry) and
- * a stale socket that dropped silently while the tab was hidden (see
- * refreshSatelliteSubscription).
+ * Module-level state. Reconnects are handled MANUALLY here, with the
+ * subscription opted OUT of home-assistant-js-websocket's automatic replay
+ * ({resubscribe: false}). Both mechanisms at once is the historical leak (each
+ * reconnect stacked the replayed copy plus a manual one, +1 per reconnect,
+ * unbounded); replay alone is not safe for a CUSTOM command: haws re-issues it
+ * with no error handling, and after a Home Assistant restart the frontend can
+ * reconnect before the integration has registered voice_satellite/
+ * subscribe_events — the replay then fails once and the subscription is dead
+ * with no retry. The manual 'ready' path funnels through _doSubscribe's
+ * failure handling, which retries with backoff until the integration is up.
+ * (entity-subscription.js, by contrast, rides a CORE command that always
+ * exists at auth time, so it safely uses haws replay.)
+ *
+ * Also kept: the integration 'reload' message (server tears the subscription
+ * down; see _scheduleRetry) and a stale socket that dropped silently while the
+ * tab was hidden (see refreshSatelliteSubscription).
  */
 
-import { teardownVisibilityListener } from './satellite-notification.js';
+import {
+  resetNotificationDedup,
+  teardownVisibilityListener,
+} from './satellite-notification.js';
 
 let _unsubscribe = null;
 let _subscribed = false;
+let _reconnectListener = null;
+let _reconnectConnection = null;
 let _card = null;
 let _onEvent = null;
 let _retryTimer = null;
 
 const RETRY_DELAYS = [2000, 4000, 8000, 16000, 30000];
 let _retryCount = 0;
+
+// Liveness verification. A confirmed subscribe is NOT proof the server still
+// has us: reconnect storms + haws's per-socket command-id reuse mean a stale
+// unsubscribe (including haws's own "unknown subscription" defense) can land
+// on OUR fresh id and silently unregister it server-side. Nothing notifies
+// the client. So after subscribing we periodically ask the backend
+// (voice_satellite/subscription_check) and re-subscribe if it says no.
+const VERIFY_FIRST_MS = 5000;
+const VERIFY_EVERY_MS = 30000;
+let _verifyTimeout = null;
+let _verifyInterval = null;
+
+function _stopVerify() {
+  if (_verifyTimeout) { clearTimeout(_verifyTimeout); _verifyTimeout = null; }
+  if (_verifyInterval) { clearInterval(_verifyInterval); _verifyInterval = null; }
+}
+
+function _startVerify(card) {
+  _stopVerify();
+  _verifyTimeout = setTimeout(() => {
+    _verifyNow(card);
+    _verifyInterval = setInterval(() => _verifyNow(card), VERIFY_EVERY_MS);
+  }, VERIFY_FIRST_MS);
+}
+
+function _verifyNow(card) {
+  if (!_subscribed || !_unsubscribe) return;
+  const conn = card.connection;
+  if (!conn) return;
+  conn.sendMessagePromise({
+    type: 'voice_satellite/subscription_check',
+    entity_id: card.config.satellite_entity,
+  }).then((res) => {
+    if (!res || res.subscribed !== false) return;
+    card.logger.log('satellite-sub', 'Subscription lost server-side - re-subscribing');
+    // Dead server-side: drop the handle (nothing to unsubscribe, and a stale
+    // unsubscribe is exactly the id-collision hazard), then re-establish.
+    _unsubscribe = null;
+    _subscribed = false;
+    _stopVerify();
+    const c = card.connection;
+    if (c) {
+      _subscribed = true;
+      _doSubscribe(card, c, _onEvent);
+    }
+  }).catch(() => {
+    // Transient (mid-reconnect) or the integration is reloading; the
+    // reconnect/reload/retry paths own recovery for those.
+  });
+}
 
 /**
  * Subscribe to satellite events via voice_satellite/subscribe_events.
@@ -42,7 +105,39 @@ export function subscribeSatelliteEvents(card, onEvent) {
   _onEvent = onEvent;
   _subscribed = true;
   _doSubscribe(card, connection, onEvent);
-  // No 'ready' re-subscribe: haws replays this subscription on reconnect.
+
+  // The ONLY re-subscribe path on reconnect (the subscription itself opts out
+  // of haws replay) — so a failure lands in _doSubscribe's retry/backoff, and
+  // exactly one subscription ever exists per connection.
+  if (!_reconnectListener) {
+    _reconnectListener = () => {
+      card.logger.log('satellite-sub', 'Connection reconnected - re-subscribing');
+      // The previous subscription died with its socket, so there is nothing
+      // to unsubscribe server-side. Critically, do NOT send its unsubscribe
+      // on the new socket: haws resets command ids on every reconnect
+      // (connection.ts _handleClose), and the frontend's boot sequence is
+      // deterministic enough that the stale id routinely EQUALS the id of a
+      // freshly-created subscription — the server then tears down the wrong,
+      // live subscription. (Observed: the replacement satellite subscription
+      // was unregistered 3ms after registering; announcements went nowhere
+      // while the card believed it was subscribed.) Just drop the handle.
+      _unsubscribe = null;
+      _stopVerify();
+      if (_retryTimer) {
+        clearTimeout(_retryTimer);
+        _retryTimer = null;
+      }
+      _retryCount = 0;
+      _subscribed = false;
+      const conn = card.connection;
+      if (conn) {
+        _subscribed = true;
+        _doSubscribe(card, conn, onEvent);
+      }
+    };
+    connection.addEventListener('ready', _reconnectListener);
+    _reconnectConnection = connection;
+  }
 }
 
 function _doSubscribe(card, connection, onEvent) {
@@ -65,10 +160,19 @@ function _doSubscribe(card, connection, onEvent) {
       type: 'voice_satellite/subscribe_events',
       entity_id: card.config.satellite_entity,
     },
+    // No haws auto-replay: the 'ready' listener above re-subscribes with
+    // retry/backoff instead (see the header comment for why).
+    { resubscribe: false },
   ).then((unsub) => {
     _unsubscribe = unsub;
     _retryCount = 0;
+    // New subscription session = new server id-space (HA may have restarted
+    // and reset its announce counter) — start the notification dedup over.
+    resetNotificationDedup();
     card.logger.log('satellite-sub', `Subscribed to satellite events for ${card.config.satellite_entity}`);
+    // Trust, but verify: reconnect races can unregister this server-side
+    // moments from now without telling us (see the verification block above).
+    _startVerify(card);
   }).catch((err) => {
     card.logger.error('satellite-sub', `Failed to subscribe: ${err}`);
     _subscribed = false;
@@ -92,6 +196,7 @@ function _scheduleRetry(card, connection, onEvent) {
 }
 
 function _cleanup() {
+  _stopVerify();
   if (_retryTimer) {
     clearTimeout(_retryTimer);
     _retryTimer = null;
@@ -116,11 +221,16 @@ export function refreshSatelliteSubscription() {
 }
 
 /**
- * Permanently tear down the satellite subscription.
+ * Permanently tear down the satellite subscription and reconnect listener.
  * Called when the card is displaced by another browser.
  */
 export function teardownSatelliteSubscription() {
   _cleanup();
+  if (_reconnectListener && _reconnectConnection) {
+    _reconnectConnection.removeEventListener('ready', _reconnectListener);
+    _reconnectListener = null;
+    _reconnectConnection = null;
+  }
   _card = null;
   _onEvent = null;
   teardownVisibilityListener();

@@ -403,6 +403,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     websocket_api.async_register_command(hass, ws_question_answered)
     websocket_api.async_register_command(hass, ws_run_pipeline)
     websocket_api.async_register_command(hass, ws_subscribe_satellite_events)
+    websocket_api.async_register_command(hass, ws_subscription_check)
     websocket_api.async_register_command(hass, ws_cancel_timer)
     websocket_api.async_register_command(hass, ws_media_player_event)
     websocket_api.async_register_command(hass, ws_screensaver_state)
@@ -924,6 +925,34 @@ async def ws_subscribe_satellite_events(
         entity.unregister_satellite_subscription(connection, msg["id"])
 
     connection.subscriptions[msg["id"]] = unsub
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "voice_satellite/subscription_check",
+        vol.Required("entity_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_subscription_check(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Report whether this connection still holds a satellite subscription.
+
+    The card polls this to detect a registration that was torn down behind
+    its back (reconnect storms + reused websocket command ids can kill a
+    fresh subscription via a stale unsubscribe) and re-subscribes.
+    """
+    entity = _find_entity(hass, msg["entity_id"])
+    connection.send_result(
+        msg["id"],
+        {
+            "subscribed": entity is not None
+            and entity.has_satellite_subscriber(connection)
+        },
+    )
 
 
 @websocket_api.websocket_command(

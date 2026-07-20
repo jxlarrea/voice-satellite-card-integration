@@ -1470,6 +1470,21 @@ class VoiceSatelliteEntity(AssistSatelliteEntity):
             self._update_media_player_availability()
 
     @callback
+    def has_satellite_subscriber(self, connection) -> bool:
+        """Whether THIS websocket connection holds a live satellite subscription.
+
+        Backs the card's liveness verification (voice_satellite/
+        subscription_check): reconnect storms can tear a registration down
+        moments after it is made — Home Assistant's websocket client reuses
+        command ids across sockets, so a stale unsubscribe (its own
+        "unknown subscription" defense included) can hit the id of a
+        freshly-created subscription. The card cannot detect that locally:
+        its subscribe was confirmed and nothing tells it the server side is
+        gone. So it asks.
+        """
+        return any(c is connection for c, _ in self._satellite_subscribers)
+
+    @callback
     def unregister_satellite_subscription(
         self, connection, msg_id: int
     ) -> None:

@@ -13,6 +13,21 @@ const STOP_WORD_ARM_DELAY_MS = 250;
 
 let _lastAnnounceId = 0;
 
+/**
+ * Forget the last-seen notification id. Called whenever the satellite
+ * subscription is (re-)established: the server's announce counter is
+ * per-entity-instance and RESETS when Home Assistant restarts, so after a
+ * reboot the next announcement arrives with a LOWER id than the one before
+ * it — and the monotonic dedup below would silently swallow every
+ * announcement until the page was reloaded. A fresh subscription marks a
+ * fresh id-space, so the dedup must start over with it. Duplicate delivery
+ * (the reason this dedup exists) happens in millisecond bursts between
+ * re-subscribes, so resetting here does not weaken it.
+ */
+export function resetNotificationDedup() {
+  _lastAnnounceId = 0;
+}
+
 
 let _pendingEvent = null;
 let _pendingCard = null;
