@@ -100,10 +100,12 @@ export function showAlert(mgr, names) {
   // its idle timeout.  Mirrors the media-player video/image keepalive.
   startScreensaverKeepalive(mgr);
 
-  const wakeWord = mgr.card.wakeWord;
-  if (wakeWord?.active && wakeWord._inference) {
-    wakeWord.enableStopModel(false);
-  }
+  // No _inference guard: on Kiosk Satellite the stop classifier runs
+  // natively in the app and the browser engine is deliberately absent, so
+  // requiring it silently skipped arming on exactly the devices that rely
+  // on it. enableStopModel() routes to the native path (or no-ops when the
+  // stop word is disabled) on its own.
+  mgr.card.wakeWord?.enableStopModel(false);
 
   mgr.card.ui.showBlurOverlay(BlurReason.TIMER);
 
