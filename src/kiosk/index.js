@@ -269,7 +269,7 @@ export function setBrightness(level) {
  * cover the voice UI.  Fully Kiosk gets a one-shot stop; Kiosker gets
  * paused (and stays paused until `releaseScreensaver()`).
  */
-export function stopScreensaver() {
+export function stopScreensaver(reason) {
   if (fkPresent()) {
     try {
       if (typeof window.fully.stopScreensaver === 'function') window.fully.stopScreensaver();
@@ -287,7 +287,18 @@ export function stopScreensaver() {
   if (ksPresent()) {
     if (_ksScreensaverPaused) return true;
     try {
-      window.kioskSatellite.pauseScreensaver(true);
+      // Kiosk Satellite's honest API for this bracket: "an interaction is
+      // running" (voice turn, ringing timer, media playback). The kiosk
+      // stands down ALL its ambient features (screensaver, view rotation)
+      // while it is active, and the reason tells it what kind, so it can
+      // log and specialize per cause. pauseScreensaver remains as the
+      // fallback for older Kiosk Satellite versions, which route it to the
+      // same signal (without the reason).
+      if (typeof window.kioskSatellite.setInteractionActive === 'function') {
+        window.kioskSatellite.setInteractionActive(true, reason || '');
+      } else {
+        window.kioskSatellite.pauseScreensaver(true);
+      }
       _ksScreensaverPaused = true;
       return true;
     } catch (_) {
@@ -302,7 +313,7 @@ export function stopScreensaver() {
  * (its one-shot stop has nothing to undo — FK resumes on its own idle
  * schedule); on Kiosker this re-enables the paused screensaver.
  */
-export function releaseScreensaver() {
+export function releaseScreensaver(reason) {
   if (kioskerPresent() && _kioskerScreensaverPaused) {
     const ok = _kioskerSend('pauseScreenSaver', { state: false });
     if (ok) _kioskerScreensaverPaused = false;
@@ -310,7 +321,11 @@ export function releaseScreensaver() {
   }
   if (ksPresent() && _ksScreensaverPaused) {
     try {
-      window.kioskSatellite.pauseScreensaver(false);
+      if (typeof window.kioskSatellite.setInteractionActive === 'function') {
+        window.kioskSatellite.setInteractionActive(false, reason || '');
+      } else {
+        window.kioskSatellite.pauseScreensaver(false);
+      }
       _ksScreensaverPaused = false;
       return true;
     } catch (_) {

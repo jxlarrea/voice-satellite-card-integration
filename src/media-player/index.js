@@ -504,7 +504,7 @@ export class MediaPlayerManager {
     this._card.screensaver?.notifyActivity();
     // Suppress the kiosk browser's own screensaver (FK one-shot stop /
     // Kiosker pause) so it can't cover the media overlay.
-    kiosk.stopScreensaver();
+    kiosk.stopScreensaver('media');
   }
 
   _stopScreensaverKeepalive() {
@@ -514,7 +514,7 @@ export class MediaPlayerManager {
       this._screensaverKeepaliveTimer = null;
       // Re-enable the kiosk screensaver if we paused it (Kiosker only;
       // no-op on Fully Kiosk, which resumes on its own idle schedule).
-      kiosk.releaseScreensaver();
+      kiosk.releaseScreensaver('media');
     }
   }
 

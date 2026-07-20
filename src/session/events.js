@@ -142,11 +142,11 @@ export function setState(session, newState) {
       // for a conversation. Bring-to-front is NOT done here: each entry point
       // (notification play, manual wake, timer) already did it, and a second
       // call races that pending resume and reloads the WebView.
-      kiosk.stopScreensaver();
+      kiosk.stopScreensaver('voice');
     }
   } else if (wasInteracting && !session.tts?.isPlaying) {
     session.screensaver.stopExternalKeepalive();
-    kiosk.releaseScreensaver();
+    kiosk.releaseScreensaver('voice');
   }
 
   // Swap mic DSP config between wake-word and STT modes.  WAKE_WORD_DETECTED
@@ -591,7 +591,7 @@ export function onTTSComplete(session, playbackFailed) {
     session.screensaver.stopExternalKeepalive();
     // Same for the kiosk companion's screensaver: this is the end-of-turn that
     // the leave-interacting branch deferred while TTS was still speaking.
-    kiosk.releaseScreensaver();
+    kiosk.releaseScreensaver('voice');
 
     // Reset screensaver idle timer after interaction completes
     session.screensaver.notifyActivity();

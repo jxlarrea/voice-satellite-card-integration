@@ -251,7 +251,10 @@ export function playNotification(mgr, ann, onComplete, logPrefix) {
   // make sure we are in front — otherwise the announcement / question plays to
   // a dimmed, backgrounded tablet. Released in clearNotificationUI.
   kiosk.bringToFront();
-  kiosk.stopScreensaver();
+  kiosk.stopScreensaver(
+    ann.ask_question ? 'ask_question'
+      : ann.start_conversation ? 'start_conversation' : 'announcement',
+  );
 
   // Only center on screen for passive announcements (not ask_question or start_conversation)
   const isPassive = !ann.ask_question && !ann.start_conversation;
@@ -324,7 +327,7 @@ export function clearNotificationUI(mgr) {
 
   // Let the kiosk screensaver arm again now the interaction is over (balances
   // the stopScreensaver in playNotification).
-  kiosk.releaseScreensaver();
+  kiosk.releaseScreensaver('announcement');
 }
 
 

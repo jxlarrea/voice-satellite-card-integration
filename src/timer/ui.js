@@ -439,7 +439,7 @@ function stopScreensaverKeepalive(_mgr) {
     _screensaverKeepaliveTimer = null;
     // Re-enable the kiosk screensaver if we paused it (Kiosker only;
     // no-op on Fully Kiosk).
-    kiosk.releaseScreensaver();
+    kiosk.releaseScreensaver('timer');
   }
 }
 
@@ -448,5 +448,5 @@ function pingScreensaver(mgr) {
   mgr.card.screensaver?.notifyActivity?.();
   // Suppress the kiosk browser's own screensaver (FK one-shot stop /
   // Kiosker pause) so it can't cover the timer-alert UI.
-  kiosk.stopScreensaver();
+  kiosk.stopScreensaver('timer');
 }
