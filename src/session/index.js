@@ -642,6 +642,16 @@ export class VoiceSatelliteSession {
    */
   async _checkWakeWordActivation() {
     if (this._wakeWordLoading) return;
+    // Kiosk Satellite already owns wake detection. The wake-word select
+    // flipping to On Device here is just the entity states catching up after
+    // page load (they read unavailable until the first state delivery), not a
+    // mode change. Without this guard the branch below brings up the mic for
+    // a browser engine that will never run: startMicrophone() opens the app's
+    // delegated audio stream, ww.start() skips because the handoff is active,
+    // and the page then receives native PCM around the clock with nobody
+    // consuming it. A real mode change while native is handled by the wake
+    // manager's re-negotiation path, which tears the handoff down first.
+    if (this._nativeWakeActive) return;
     const onDevice = this._isWakeWordEnabled();
     const stopWordOn = getSwitchState(
       this._hass, this._config.satellite_entity, 'stop_word',

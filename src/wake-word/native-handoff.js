@@ -293,6 +293,19 @@ export async function setupNativeWakeHandoff(session, { force = false } = {}) {
 
   _active = true;
   session._nativeWakeActive = true;
+  // The handoff-idle state owns no mic. If a passive wake-word capture is
+  // already open (the browser path brought it up before the handoff could
+  // engage, e.g. entity states arriving late on page load), close it now or
+  // the host streams PCM into the page around the clock with no engine
+  // consuming it. Only the wake_word mode capture: an 'stt' mic belongs to a
+  // turn in flight and is not ours to take.
+  if (session.audio?._mediaStream && session.audio._currentMicMode === 'wake_word') {
+    session.logger?.log(
+      'wake-word',
+      'Closing the passive browser mic - Kiosk Satellite owns the wake capture',
+    );
+    try { session.audio.stopMicrophone(); } catch (_) { /* best effort */ }
+  }
   session.logger?.log(
     'wake-word',
     `Wake word detection handed off to Kiosk Satellite (${engine}: ${models.map((m) => m.id).join(', ')}`
