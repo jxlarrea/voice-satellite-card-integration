@@ -759,14 +759,19 @@ export async function playNativeSoundTracked(url, volume, { stream = false, cach
   if (!id) return null;
   let startedResolve;
   let doneResolve;
+  let levelCb = null;
   const started = new Promise((resolve) => { startedResolve = resolve; });
   const done = new Promise((resolve) => { doneResolve = resolve; });
   const onStarted = (e) => {
     if (e && e.detail && e.detail.id === id) startedResolve();
   };
+  const onLevel = (e) => {
+    if (e && e.detail && e.detail.id === id && levelCb) levelCb(e.detail.level);
+  };
   const onEnded = (e) => {
     if (!e || !e.detail || e.detail.id !== id) return;
     window.removeEventListener('kiosksatellite:sound-started', onStarted);
+    window.removeEventListener('kiosksatellite:sound-level', onLevel);
     window.removeEventListener('kiosksatellite:sound-ended', onEnded);
     // A sound that failed before producing audio never fired started;
     // release any awaiter rather than leaving it dangling forever.
@@ -774,11 +779,16 @@ export async function playNativeSoundTracked(url, volume, { stream = false, cach
     doneResolve({ error: e.detail.error });
   };
   window.addEventListener('kiosksatellite:sound-started', onStarted);
+  window.addEventListener('kiosksatellite:sound-level', onLevel);
   window.addEventListener('kiosksatellite:sound-ended', onEnded);
   return {
     id,
     started,
     done,
+    // Playback levels (mean |amplitude| 0..1, <=20/s) while the sound
+    // plays, for the reactive bar. Best-effort: not all devices can
+    // measure playback, so treat silence as "no data", not "no audio".
+    onLevel: (cb) => { levelCb = cb; },
     stop: () => {
       try { window.kioskSatellite.stopSound(id); } catch (_) { /* ended event still cleans up */ }
     },

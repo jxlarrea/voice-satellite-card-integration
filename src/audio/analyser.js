@@ -32,6 +32,14 @@ export class AnalyserManager {
     this._activeAnalyser = null;
     this._dataArray = null;
     this._freqDataArray = null;
+
+    // External level mode: playback that never enters the Web Audio graph
+    // (Kiosk Satellite native playback) pushes its measured level here and
+    // _tick() reads it instead of an AnalyserNode. Same meanAbs semantics
+    // as getByteTimeDomainData (mean |amplitude| normalized 0..1), so the
+    // visual mapping is shared.
+    this._external = false;
+    this._externalLevel = 0;
     this._analyserBuffers = new WeakMap();
     this._analyserFrequencyBuffers = new WeakMap();
 
@@ -155,10 +163,45 @@ export class AnalyserManager {
   }
 
   /**
-   * Disconnect audio element routing.
+   * Disconnect audio element routing. Also leaves external-level mode, so
+   * the generic teardown call sites (TTS _onComplete/stop, notification
+   * cleanup) need no native-specific step.
    */
   detachAudio() {
     this._detachAudio();
+    this.detachExternal();
+  }
+
+  /**
+   * Switch the bar to externally-supplied levels (native playback: the
+   * audio never enters the page, the app measures it and streams levels
+   * over). Mirrors attachAudio's role for element playback.
+   */
+  attachExternal() {
+    this._detachAudio();
+    this._external = true;
+    this._externalLevel = 0;
+    this._log.log('analyser', 'Active -> external (native playback levels)');
+    if (this._barEl && !this._rafId) {
+      this._tick();
+    }
+  }
+
+  /** Feed one externally measured level (meanAbs, 0..1). */
+  setExternalLevel(level) {
+    this._externalLevel = Number(level) || 0;
+  }
+
+  /** Leave external mode and darken the bar, like _detachAudio does. */
+  detachExternal() {
+    if (!this._external) return;
+    this._external = false;
+    this._externalLevel = 0;
+    if (this._barEl) {
+      this._lastLevel = 0;
+      this._barEl.style.setProperty('--vs-audio-level', '0');
+    }
+    this._log.log('analyser', 'Active -> none (external detached)');
   }
 
   /**
@@ -172,7 +215,7 @@ export class AnalyserManager {
    * the bar show mic levels instead of TTS levels.
    */
   reconnectMic() {
-    if (this._activeAnalyser === this._audioAnalyser) {
+    if (this._activeAnalyser === this._audioAnalyser || this._external) {
       this._log.log('analyser', 'reconnectMic skipped - audio still attached');
       return;
     }
@@ -286,7 +329,7 @@ export class AnalyserManager {
   }
 
   _tick() {
-    if (!this._barEl || !this._activeAnalyser) {
+    if (!this._barEl || (!this._activeAnalyser && !this._external)) {
       this._rafId = null;
       return;
     }
@@ -302,22 +345,29 @@ export class AnalyserManager {
 
     this._lastTick = now;
 
-    // Use time-domain waveform amplitude for a simple level meter. This is
-    // cheaper than FFT/frequency analysis and visually sufficient here.
-    this._activeAnalyser.getByteTimeDomainData(this._dataArray);
+    let isMic = false;
+    let meanAbs;
+    if (this._external) {
+      // Native playback: the app already measured this frame's level.
+      meanAbs = this._externalLevel;
+    } else {
+      // Use time-domain waveform amplitude for a simple level meter. This is
+      // cheaper than FFT/frequency analysis and visually sufficient here.
+      this._activeAnalyser.getByteTimeDomainData(this._dataArray);
 
-    // Compute mean absolute amplitude normalized to 0-1, then quantize to
-    // skip redundant CSS updates when the level barely changes.
-    let sum = 0;
-    for (let i = 0; i < this._dataArray.length; i++) {
-      sum += Math.abs(this._dataArray[i] - 128);
-    }
-    const isMic = this._activeAnalyser === this._micAnalyser;
-    let meanAbs = (sum / this._dataArray.length) / 128;
+      // Compute mean absolute amplitude normalized to 0-1, then quantize to
+      // skip redundant CSS updates when the level barely changes.
+      let sum = 0;
+      for (let i = 0; i < this._dataArray.length; i++) {
+        sum += Math.abs(this._dataArray[i] - 128);
+      }
+      isMic = this._activeAnalyser === this._micAnalyser;
+      meanAbs = (sum / this._dataArray.length) / 128;
 
-    if (isMic && this._freqDataArray) {
-      this._activeAnalyser.getByteFrequencyData(this._freqDataArray);
-      meanAbs *= this._getMicSpeechWeight(this._activeAnalyser, this._freqDataArray);
+      if (isMic && this._freqDataArray) {
+        this._activeAnalyser.getByteFrequencyData(this._freqDataArray);
+        meanAbs *= this._getMicSpeechWeight(this._activeAnalyser, this._freqDataArray);
+      }
     }
 
     const level = Math.min(1, Math.round(this._mapVisualLevel(meanAbs, isMic) * 20) / 20);

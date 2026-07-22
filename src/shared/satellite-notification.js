@@ -345,6 +345,65 @@ export function playMediaFor(mgr, urlPath, logPrefix, onDone) {
   const url = buildMediaUrl(urlPath);
   const volume = mgr.card.mediaPlayer.volume;
 
+  // Kiosk Satellite host: play natively (the user's speaker selection, no
+  // autoplay gate). Falls back to the browser element on refusal.
+  if (kiosk.supportsNativeSound()) {
+    _playMediaNative(mgr, url, volume, logPrefix, onDone);
+    return;
+  }
+  _playMediaBrowser(mgr, url, volume, logPrefix, onDone);
+}
+
+/**
+ * Native playback for notification media. The handle stored in
+ * `mgr.currentAudio` duck-types the slice of the Audio element the
+ * cancellation sites use (stop word, double-tap: null the handlers,
+ * pause(), clear src) so they cancel a native sound the exact same way -
+ * pause() stops it, and the nulled handlers plus the disowned handle keep
+ * the ended event from double-completing.
+ */
+function _playMediaNative(mgr, url, volume, logPrefix, onDone) {
+  kiosk.playNativeSoundTracked(url, volume, { stream: true }).then((tracked) => {
+    if (!tracked) {
+      mgr.log.log(logPrefix, 'Native playback refused - falling back to browser audio');
+      _playMediaBrowser(mgr, url, volume, logPrefix, onDone);
+      return;
+    }
+    const duck = {
+      onended: null,
+      onerror: null,
+      src: '',
+      pause() { tracked.stop(); },
+    };
+    mgr.currentAudio = duck;
+    tracked.started.then(() => {
+      if (mgr.currentAudio !== duck) return;
+      mgr.log.log(logPrefix, 'Media playback started (native)');
+      mgr.card.mediaPlayer.notifyAudioStart('notification');
+      if (mgr.card.isReactiveBarEnabled) {
+        mgr.card.analyser.attachExternal();
+        tracked.onLevel((level) => mgr.card.analyser.setExternalLevel(level));
+      }
+    });
+    tracked.done.then(({ error } = {}) => {
+      const owned = mgr.currentAudio === duck;
+      // detachAudio also leaves external-level mode; safe when a canceller
+      // already cleaned up.
+      mgr.card.analyser.detachAudio();
+      if (!owned) return; // cancelled: the canceller owns the rest
+      mgr.currentAudio = null;
+      mgr.card.mediaPlayer.notifyAudioEnd('notification');
+      if (error) {
+        mgr.log.error(logPrefix, `Media playback error (native): ${error}`);
+      } else {
+        mgr.log.log(logPrefix, 'Media playback complete (native)');
+      }
+      onDone?.();
+    });
+  });
+}
+
+function _playMediaBrowser(mgr, url, volume, logPrefix, onDone) {
   mgr.currentAudio = playMediaUrl(url, volume, {
     onEnd: () => {
       mgr.log.log(logPrefix, 'Media playback complete');

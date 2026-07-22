@@ -209,6 +209,12 @@ export class TtsManager {
       this._log.log('tts', 'Playback started (native)');
       this._pendingTtsEndUrl = null;
       this._card.mediaPlayer.notifyAudioStart('tts');
+      if (this._card.isReactiveBarEnabled) {
+        // The audio never enters the page; the app measures it and streams
+        // levels over. detachAudio (in _onComplete/stop) leaves this mode.
+        this._card.analyser.attachExternal();
+        tracked.onLevel((level) => this._card.analyser.setExternalLevel(level));
+      }
       this._enableStopWordDelayed();
     });
 
