@@ -19,6 +19,7 @@
 
 import { buildMediaUrl } from './media-playback.js';
 import { getSelectState } from '../shared/satellite-state.js';
+import { supportsNativeSound, playNativeSound, prefetchNativeSound } from '../kiosk/index.js';
 
 const SOUNDS_BASE = '/voice_satellite/sounds';
 
@@ -76,6 +77,12 @@ function getCachedAudio(url) {
  */
 export function preloadChimes(session) {
   for (const chime of [CHIME_WAKE, CHIME_DONE]) {
+    // Native host: warm the app-side cache too, so the first delegated
+    // chime plays with zero fetch delay. The browser Audio elements below
+    // still preload - they are the fallback path.
+    if (supportsNativeSound()) {
+      prefetchNativeSound(buildMediaUrl(chime.url));
+    }
     const audio = getCachedAudio(chime.url);
     audio.addEventListener('error', () => {
       const fullUrl = buildMediaUrl(chime.url);
@@ -175,12 +182,27 @@ export function playChime(card, chime, log) {
       playChimeRemote(card, chime.url, log, { announce: mode !== 'normal_playback' });
       return;
     }
-    const audio = getCachedAudio(chime.url);
-    audio.currentTime = 0;
-    audio.volume = card.mediaPlayer.volume;
-    audio.play().catch((e) => {
-      log?.error('chime', `Chime play error: ${e}`);
-    });
+    const volume = card.mediaPlayer.volume;
+    const playBrowser = () => {
+      const audio = getCachedAudio(chime.url);
+      audio.currentTime = 0;
+      audio.volume = volume;
+      audio.play().catch((e) => {
+        log?.error('chime', `Chime play error: ${e}`);
+      });
+    };
+    // Kiosk Satellite host: hand playback to the app, which honors the
+    // user's speaker selection and has no autoplay gate. All timing stays
+    // duration-based exactly as for browser audio, so nothing downstream
+    // changes. A refusal (old app, fetch failure) falls back to the
+    // browser element, which preloadChimes kept warm.
+    if (supportsNativeSound()) {
+      playNativeSound(buildMediaUrl(chime.url), volume, { cache: true })
+        .then((ok) => { if (!ok) playBrowser(); })
+        .catch(playBrowser);
+      return;
+    }
+    playBrowser();
   } catch (e) {
     log?.error('chime', `Chime error: ${e}`);
   }

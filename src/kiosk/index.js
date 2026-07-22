@@ -694,6 +694,45 @@ export function unbindAudioStream() {
   }
 }
 
+// ── Native sound playback (Kiosk Satellite only) ───────────────────────
+//
+// The output half of the audio handoff: the app plays a URL natively, on
+// the user's selected output device, with no WebView autoplay gate. The
+// card uses it for chimes (and later TTS) when available; browser Audio
+// stays the path everywhere else and the fallback when a call fails.
+
+/** True when the host can play sounds natively. */
+export function supportsNativeSound() {
+  return ksPresent()
+    && typeof window.kioskSatellite.playSound === 'function';
+}
+
+/**
+ * Play a sound natively. Resolves true when the app accepted playback
+ * (`{id}` came back), false otherwise so the caller can fall back to
+ * browser audio. `cache` keeps the app-side download for instant replays -
+ * right for fixed assets like chimes, wrong for one-shot TTS URLs.
+ *
+ * @param {string} url absolute audio URL
+ * @param {number} volume 0..1, relative to media volume
+ * @param {{ cache?: boolean }} [opts]
+ */
+export async function playNativeSound(url, volume, { cache = false } = {}) {
+  if (!supportsNativeSound()) return false;
+  try {
+    const res = await window.kioskSatellite.playSound(url, { volume, cache });
+    return !!(res && res.id);
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Warm the app's sound cache so the first play starts instantly. */
+export function prefetchNativeSound(url) {
+  if (!supportsNativeSound()) return;
+  try { window.kioskSatellite.prefetchSound(url); } catch (_) { /* warm-up only */ }
+}
+
 /** base64 PCM16 little-endian → Float32Array in [-1, 1]. */
 function _pcm16Base64ToFloat32(b64) {
   const bin = atob(b64);
