@@ -9,10 +9,16 @@ import { playChime as playChimeSound, CHIME_WAKE, CHIME_ERROR, CHIME_DONE, getCh
 import { buildMediaUrl } from '../audio/media-playback.js';
 import { playRemote, restoreRemote, stopRemote } from './comms.js';
 import { getSelectState } from '../shared/satellite-state.js';
+import { supportsNativeSound, playNativeSoundTracked } from '../kiosk/index.js';
 import { Timing } from '../constants.js';
 
 /** Safety ceiling so the UI never gets stuck if remote state monitoring fails */
 const REMOTE_SAFETY_TIMEOUT = 30_000;
+
+/** Safety ceiling for native (Kiosk Satellite) playback: the app guarantees
+ *  exactly one ended event per sound, so this only catches an event lost
+ *  crossing the bridge. Generous, because long LLM answers are real audio. */
+const NATIVE_SAFETY_TIMEOUT = 120_000;
 
 const CHIME_MAP = {
   wake: CHIME_WAKE,
@@ -36,6 +42,12 @@ export class TtsManager {
     this._audioEl = new Audio();
     this._playing = false;
     this._endTimer = null;
+    // Kiosk Satellite native playback handle ({id, started, done, stop})
+    // while a delegated TTS play is live; null otherwise. The generation
+    // counter guards the async accept round-trip: a play that resolves
+    // after a newer play (or a stop) has moved on must not install itself.
+    this._nativeSound = null;
+    this._nativeGen = 0;
     this._streamingUrl = null;
     this._playbackWatchdog = null;
     this._lastWatchdogTime = 0;
@@ -151,6 +163,107 @@ export class TtsManager {
       return;
     }
 
+    // Kiosk Satellite host: hand playback to the app - the user's speaker
+    // selection, no autoplay gate, and the app's HTTP stack (which trusts
+    // a self-signed HA certificate the browser would refuse). Streamed, so
+    // speech starts while the server is still synthesizing, same as the
+    // browser element. Any refusal falls back to the element below.
+    if (supportsNativeSound()) {
+      this._playNative(url, isRetry);
+      return;
+    }
+    this._playBrowser(url, isRetry);
+  }
+
+  /**
+   * Native playback via Kiosk Satellite. Mirrors the browser element's
+   * seams exactly: started -> notifyAudioStart + stop-word arming, done ->
+   * _onComplete, error -> the one tts-end retry then the failure toast.
+   * The app guarantees exactly one ended per sound; the safety timer is
+   * the belt for an event lost crossing the bridge.
+   *
+   * @param {string} url
+   * @param {boolean} [isRetry]
+   */
+  async _playNative(url, isRetry) {
+    const gen = ++this._nativeGen;
+    const tracked = await playNativeSoundTracked(
+      url, this._card.mediaPlayer.volume, { stream: true },
+    );
+    if (gen !== this._nativeGen || !this._playing) {
+      // A newer play or a stop() moved on while the accept round-tripped;
+      // nothing owns this sound.
+      tracked?.stop();
+      return;
+    }
+    if (!tracked) {
+      this._log.log('tts', 'Native playback refused - falling back to browser audio');
+      this._playBrowser(url, isRetry);
+      return;
+    }
+    this._nativeSound = tracked;
+    let handled = false;
+
+    tracked.started.then(() => {
+      if (handled || this._nativeSound !== tracked) return;
+      this._log.log('tts', 'Playback started (native)');
+      this._pendingTtsEndUrl = null;
+      this._card.mediaPlayer.notifyAudioStart('tts');
+      this._enableStopWordDelayed();
+    });
+
+    this._endTimer = setTimeout(() => {
+      this._endTimer = null;
+      if (handled || this._nativeSound !== tracked) return;
+      handled = true;
+      this._nativeSound = null;
+      this._log.log('tts', 'Native safety timeout - forcing completion');
+      tracked.stop();
+      this._onComplete();
+    }, NATIVE_SAFETY_TIMEOUT);
+
+    tracked.done.then(({ error } = {}) => {
+      if (handled || this._nativeSound !== tracked) return;
+      handled = true;
+      this._nativeSound = null;
+      if (error) {
+        this._log.error('tts', `Native playback error: ${error}`);
+        this._log.error('tts', `URL: ${url}`);
+        // Same single retry as the browser path - the TTS proxy token may
+        // not have been ready yet.
+        if (!isRetry && this._pendingTtsEndUrl) {
+          const retryUrl = this._pendingTtsEndUrl;
+          this._pendingTtsEndUrl = null;
+          this._log.log('tts', `Retrying with tts-end URL: ${retryUrl}`);
+          this.play(retryUrl, true);
+          return;
+        }
+        this._card.toast?.show({
+          id: 'tts.playback-failed',
+          severity: 'warn',
+          category: 'Text-to-speech',
+          description: 'Audio could not be played on the device.',
+          action: { label: 'Open Diagnostics', type: 'diagnostics' },
+        });
+        this._onComplete(true);
+        return;
+      }
+      const elapsedMs = this._playStartTs ? performance.now() - this._playStartTs : 0;
+      const elapsedStr = elapsedMs ? `${(elapsedMs / 1000).toFixed(2)}s` : 'n/a';
+      const serverStr = this._serverDuration ? `${this._serverDuration}s` : 'n/a';
+      this._log.log('tts', `Playback complete (native) - server=${serverStr} wall=${elapsedStr}`);
+      this._onComplete();
+    });
+  }
+
+  /**
+   * Browser Audio element playback: every non-Kiosk host, and the fallback
+   * when the app refuses a native play.
+   *
+   * @param {string} url
+   * @param {boolean} [isRetry]
+   */
+  _playBrowser(url, isRetry) {
     // Browser playback - watchdog checks audio is progressing
     this._lastWatchdogTime = 0;
     this._playbackWatchdog = setInterval(() => {
@@ -281,6 +394,7 @@ export class TtsManager {
     }
 
     this._card.analyser.detachAudio();
+    this._releaseNativeSound();
     this._releaseAudio();
 
     if (preserveSnapshot) {
@@ -595,6 +709,16 @@ export class TtsManager {
     a.load();
   }
 
+  /** Stop and disown any live native (Kiosk Satellite) sound. Nulling the
+   *  handle first is what neutralizes its pending done/started callbacks -
+   *  they all guard on the handle still being current. */
+  _releaseNativeSound() {
+    const ns = this._nativeSound;
+    if (!ns) return;
+    this._nativeSound = null;
+    ns.stop();
+  }
+
   _clearWatchdog() {
     if (this._playbackWatchdog) {
       clearInterval(this._playbackWatchdog);
@@ -633,6 +757,7 @@ export class TtsManager {
     // then sees stop-only is off and clears the suspend cleanly.
     this._card.wakeWord?.resumeFromPlayback();
     this._card.analyser.detachAudio();
+    this._releaseNativeSound();
     this._releaseAudio();
 
     // Schedule a deferred restore for the captured snapshot. A done chime

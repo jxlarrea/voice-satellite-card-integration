@@ -733,6 +733,58 @@ export function prefetchNativeSound(url) {
   try { window.kioskSatellite.prefetchSound(url); } catch (_) { /* warm-up only */ }
 }
 
+/**
+ * Play natively with lifecycle tracking, for long sounds the caller must
+ * await or stop early (TTS). Resolves null when native play was refused -
+ * fall back to browser audio. Otherwise `{id, started, done, stop}`:
+ * `started` resolves when audio actually begins (the app's sound-started
+ * event - time stop-word arming off this, not off the accept), `done`
+ * resolves `{error}` exactly once when the sound finishes, fails, or is
+ * stopped (`error` undefined on clean completion), and `stop()` ends it
+ * early. `stream: true` for sources still being generated server-side.
+ *
+ * @param {string} url absolute audio URL
+ * @param {number} volume 0..1, relative to media volume
+ * @param {{ stream?: boolean, cache?: boolean }} [opts]
+ */
+export async function playNativeSoundTracked(url, volume, { stream = false, cache = false } = {}) {
+  if (!supportsNativeSound()) return null;
+  let res;
+  try {
+    res = await window.kioskSatellite.playSound(url, { volume, stream, cache });
+  } catch (_) {
+    return null;
+  }
+  const id = res && res.id;
+  if (!id) return null;
+  let startedResolve;
+  let doneResolve;
+  const started = new Promise((resolve) => { startedResolve = resolve; });
+  const done = new Promise((resolve) => { doneResolve = resolve; });
+  const onStarted = (e) => {
+    if (e && e.detail && e.detail.id === id) startedResolve();
+  };
+  const onEnded = (e) => {
+    if (!e || !e.detail || e.detail.id !== id) return;
+    window.removeEventListener('kiosksatellite:sound-started', onStarted);
+    window.removeEventListener('kiosksatellite:sound-ended', onEnded);
+    // A sound that failed before producing audio never fired started;
+    // release any awaiter rather than leaving it dangling forever.
+    startedResolve();
+    doneResolve({ error: e.detail.error });
+  };
+  window.addEventListener('kiosksatellite:sound-started', onStarted);
+  window.addEventListener('kiosksatellite:sound-ended', onEnded);
+  return {
+    id,
+    started,
+    done,
+    stop: () => {
+      try { window.kioskSatellite.stopSound(id); } catch (_) { /* ended event still cleans up */ }
+    },
+  };
+}
+
 /** base64 PCM16 little-endian → Float32Array in [-1, 1]. */
 function _pcm16Base64ToFloat32(b64) {
   const bin = atob(b64);
