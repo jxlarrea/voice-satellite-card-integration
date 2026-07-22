@@ -839,7 +839,31 @@ export async function triggerWake(session, opts = {}) {
           try { session.ui.setReactiveSuppressed(false); } catch (_) { /* ignore */ }
           session.pipeline.restart(session.pipeline.calculateRetryDelay());
         });
-      session.wakeWord?.scheduleWakeChime?.(wakeSound);
+      // The wake-word module may not exist here: Kiosk Satellite keeps
+      // detecting natively regardless of the card's lifecycle, so a
+      // detection can arrive while the mode reads Disabled, or right after
+      // a reload before the card has learned its entities' real states.
+      // The mute above then has no matching unmute and the whole turn
+      // streams silence until the VAD watchdog kills it. The module is a
+      // plain lazy constructor and scheduleWakeChime needs nothing from
+      // start(), so create it on demand, exactly like the stop-word
+      // standby path does.
+      let wakeWord = session.wakeWord;
+      if (!wakeWord) {
+        try {
+          wakeWord = await session._loadWakeWordModule();
+        } catch (e) {
+          session.logger.error('wake', `Wake-word module load failed: ${e?.message || e}`);
+        }
+      }
+      if (wakeWord) {
+        wakeWord.scheduleWakeChime(wakeSound);
+      } else {
+        // Whatever went wrong, never leave the mic muted.
+        session.audio.setMicTracksMuted(false);
+        try { session.ui.setReactiveSuppressed(false); } catch (_) { /* ignore */ }
+        if (wakeSound) session.tts.playChime('wake');
+      }
       return;
     }
 
