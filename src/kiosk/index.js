@@ -789,6 +789,11 @@ export async function playNativeSoundTracked(url, volume, { stream = false, cach
     // plays, for the reactive bar. Best-effort: not all devices can
     // measure playback, so treat silence as "no data", not "no audio".
     onLevel: (cb) => { levelCb = cb; },
+    // Live volume, so a mid-utterance change behaves like it does on a
+    // browser Audio element.
+    setVolume: (volume) => {
+      try { window.kioskSatellite.setSoundVolume(id, volume); } catch (_) { /* cosmetic */ }
+    },
     stop: () => {
       try { window.kioskSatellite.stopSound(id); } catch (_) { /* ended event still cleans up */ }
     },

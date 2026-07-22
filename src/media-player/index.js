@@ -972,10 +972,11 @@ export class MediaPlayerManager {
     this._applyVolumeToExternalAudio(effective);
   }
 
-  /** Apply volume to any active TTS or notification Audio elements. */
+  /** Apply volume to any active TTS or notification audio - browser
+   *  elements and Kiosk Satellite native sounds alike (the notification
+   *  handles duck-type a volume setter; TTS routes via applyVolume). */
   _applyVolumeToExternalAudio(vol) {
-    const ttsAudio = this._card.tts?.currentAudio;
-    if (ttsAudio) ttsAudio.volume = vol;
+    this._card.tts?.applyVolume?.(vol);
 
     // Notification managers share the same currentAudio pattern
     for (const mgr of [this._card.announcement, this._card.askQuestion, this._card.startConversation]) {

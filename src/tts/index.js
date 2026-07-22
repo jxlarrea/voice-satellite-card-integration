@@ -715,6 +715,19 @@ export class TtsManager {
     a.load();
   }
 
+  /**
+   * Apply a live volume change to whatever is speaking right now - the
+   * native sound when playback is delegated, the Audio element otherwise.
+   * Called by the media-player's volume plumbing.
+   */
+  applyVolume(volume) {
+    if (this._nativeSound) {
+      this._nativeSound.setVolume(volume);
+      return;
+    }
+    if (this._playing) this._audioEl.volume = volume;
+  }
+
   /** Stop and disown any live native (Kiosk Satellite) sound. Nulling the
    *  handle first is what neutralizes its pending done/started callbacks -
    *  they all guard on the handle still being current. */

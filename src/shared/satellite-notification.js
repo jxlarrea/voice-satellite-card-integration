@@ -374,6 +374,9 @@ function _playMediaNative(mgr, url, volume, logPrefix, onDone) {
       onerror: null,
       src: '',
       pause() { tracked.stop(); },
+      // The media-player writes .volume on currentAudio for live volume
+      // changes; forward them to the native sound.
+      set volume(v) { tracked.setVolume(v); },
     };
     mgr.currentAudio = duck;
     tracked.started.then(() => {
