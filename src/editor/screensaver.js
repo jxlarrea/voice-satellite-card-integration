@@ -16,21 +16,31 @@ const TYPE_OPTIONS = [
   { value: 'clock', label: 'Digital clock' },
 ];
 
+const SMALL_CLOCK_POSITION_OPTIONS = [
+  { value: 'top_right', label: 'Top right' },
+  { value: 'top_left', label: 'Top left' },
+  { value: 'bottom_right', label: 'Bottom right' },
+  { value: 'bottom_left', label: 'Bottom left' },
+];
+
 /**
- * The Screensaver sub-form is split into two halves so the Media
- * Browse widget can render between them (right below the Type
- * dropdown) instead of getting pushed to the end of the form.
+ * The Screensaver sub-form is split into three parts so custom widgets
+ * can render between them:
  *
- *   [pre-form]  enable, (timer, type when enabled)
- *   [Browse]    visible only when enabled && type='media'
- *   [post-form] (type-specific fields when enabled) OR suppress_external
- *               when disabled — never both, since suppress_external is
- *               for users relying on an external screensaver instead of
- *               our built-in one.
+ *   [pre-form]   enable, (timer, pixel shift, small clock fields when
+ *                enabled — the small clock color renders as a custom
+ *                swatch row right below this form)
+ *   [type-form]  Type dropdown (when enabled)
+ *   [Browse]     visible only when enabled && type='media'
+ *   [post-form]  (type-specific fields when enabled) OR suppress_external
+ *                when disabled — never both, since suppress_external is
+ *                for users relying on an external screensaver instead of
+ *                our built-in one.
  */
 
 export function buildScreensaverPreSchema(cfg) {
   const enabled = cfg?.screensaver_enabled === true;
+  const type = cfg?.screensaver_type || 'black';
   const fields = [
     { name: 'screensaver_enabled', selector: { boolean: {} } },
   ];
@@ -42,14 +52,39 @@ export function buildScreensaverPreSchema(cfg) {
         selector: { number: { min: 10, max: 600, step: 5, mode: 'slider', unit_of_measurement: 's' } },
       },
       { name: 'screensaver_pixel_shift', default: false, selector: { boolean: {} } },
-      {
-        name: 'screensaver_type',
-        default: 'black',
-        selector: { select: { options: TYPE_OPTIONS, mode: 'dropdown' } },
-      },
     );
+    // Small corner clock - available on every type except the digital
+    // clock, which is already a clock.
+    if (type !== 'clock') {
+      fields.push(
+        { name: 'screensaver_small_clock', default: false, selector: { boolean: {} } },
+      );
+      if (cfg?.screensaver_small_clock === true) {
+        fields.push(
+          {
+            name: 'screensaver_small_clock_position',
+            default: 'top_right',
+            selector: { select: { options: SMALL_CLOCK_POSITION_OPTIONS, mode: 'dropdown' } },
+          },
+          { name: 'screensaver_small_clock_show_date', default: false, selector: { boolean: {} } },
+          // Small clock color follows the same custom-swatch-row pattern
+          // as the digital clock color (see buildScreensaverPostSchema).
+        );
+      }
+    }
   }
   return fields;
+}
+
+export function buildScreensaverTypeSchema(cfg) {
+  if (cfg?.screensaver_enabled !== true) return [];
+  return [
+    {
+      name: 'screensaver_type',
+      default: 'black',
+      selector: { select: { options: TYPE_OPTIONS, mode: 'dropdown' } },
+    },
+  ];
 }
 
 export function buildScreensaverPostSchema(cfg) {
@@ -129,6 +164,9 @@ export const screensaverLabels = {
   screensaver_clock_seconds: t(null, 'editor.screensaver.clock_seconds', 'Show seconds'),
   screensaver_clock_show_date: t(null, 'editor.screensaver.clock_show_date', 'Show date'),
   screensaver_clock_scale: t(null, 'editor.screensaver.clock_scale', 'Clock size'),
+  screensaver_small_clock: t(null, 'editor.screensaver.small_clock', 'Small clock'),
+  screensaver_small_clock_position: t(null, 'editor.screensaver.small_clock_position', 'Clock position'),
+  screensaver_small_clock_show_date: t(null, 'editor.screensaver.small_clock_show_date', 'Show date'),
   screensaver_suppress_external: t(null, 'editor.screensaver.suppress_external', 'External screensaver'),
 };
 
@@ -141,5 +179,7 @@ export const screensaverHelpers = {
   screensaver_pixel_shift: t(null, 'editor.screensaver.helper_pixel_shift', 'Slowly drift the screensaver content a few pixels once a minute to spread wear across OLED pixels. Applies to the clock, media, and website types.'),
   screensaver_media_recursive: t(null, 'editor.screensaver.helper_media_recursive', 'Also play media from subfolders of the selected folder. Combine with shuffle for random images from the whole tree. Very large libraries are capped (12000 items, 5 levels deep) to keep activation fast.'),
   screensaver_clock_scale: t(null, 'editor.screensaver.helper_clock_scale', 'Scales the time and date relative to the default size. Browsers and kiosk apps report their viewport differently, so the same clock can look smaller on some tablets (e.g. iPads) - raise this here to match your other devices. Stored per browser.'),
+  screensaver_small_clock: t(null, 'editor.screensaver.helper_small_clock', 'Show a small clock in a corner of the screensaver.'),
+  screensaver_small_clock_show_date: t(null, 'editor.screensaver.helper_small_clock_show_date', 'Show the date below the time (short format).'),
   screensaver_suppress_external: t(null, 'editor.screensaver.helper_suppress_external', "The selected switch is turned off for the duration of each voice interaction, then left alone so its owner (e.g. Fully Kiosk) can resume its own idle timer. Useful to manage Fully Kiosk's screensaver."),
 };

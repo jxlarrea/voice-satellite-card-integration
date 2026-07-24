@@ -27,7 +27,7 @@ import {
   behaviorLabels, behaviorHelpers,
 } from '../editor/behavior.js';
 import { skinSchema, skinLabels, skinHelpers } from '../editor/skin.js';
-import { buildScreensaverPreSchema, buildScreensaverPostSchema, screensaverFkSchema, screensaverLabels, screensaverHelpers } from '../editor/screensaver.js';
+import { buildScreensaverPreSchema, buildScreensaverTypeSchema, buildScreensaverPostSchema, screensaverFkSchema, screensaverLabels, screensaverHelpers } from '../editor/screensaver.js';
 import { openMediaPicker, deriveParentMediaId } from './media-picker-dialog.js';
 import { WakeWordTestSession } from '../wake-word/wake-word-test-session.js';
 import { resolveDspForMode } from '../audio/dsp-config.js';
@@ -346,6 +346,8 @@ class VoiceSatellitePanel extends HTMLElement {
     if (form) form.hass = this._hass;
     const ssPreForm = this.querySelector(`.${P}-ss-pre-container ha-form`);
     if (ssPreForm) ssPreForm.hass = this._hass;
+    const ssTypeForm = this.querySelector(`.${P}-ss-type-container ha-form`);
+    if (ssTypeForm) ssTypeForm.hass = this._hass;
     const ssPostForm = this.querySelector(`.${P}-ss-post-container ha-form`);
     if (ssPostForm) ssPostForm.hass = this._hass;
     const ssFkForm = this.querySelector(`.${P}-ss-fk-form ha-form`);
@@ -437,6 +439,12 @@ class VoiceSatellitePanel extends HTMLElement {
       if (rebuildSchemas) preForm.schema = buildScreensaverPreSchema(this._config);
     }
 
+    const typeForm = this.querySelector(`.${P}-ss-type-container ha-form`);
+    if (typeForm) {
+      typeForm.data = Object.assign({}, this._config);
+      if (rebuildSchemas) typeForm.schema = buildScreensaverTypeSchema(this._config);
+    }
+
     const postForm = this.querySelector(`.${P}-ss-post-container ha-form`);
     if (postForm) {
       postForm.data = Object.assign({}, this._config);
@@ -526,6 +534,7 @@ class VoiceSatellitePanel extends HTMLElement {
   _onSettingsChange(newData) {
     const prevScreensaverType = this._config.screensaver_type;
     const prevScreensaverEnabled = this._config.screensaver_enabled;
+    const prevScreensaverSmallClock = this._config.screensaver_small_clock;
     const prevTimerTtsEnabled = this._config.timer_tts_enabled;
     if (Object.prototype.hasOwnProperty.call(newData, 'microphone_device_id')
         && !newData.microphone_device_id) {
@@ -562,16 +571,22 @@ class VoiceSatellitePanel extends HTMLElement {
     const autostartForm = this.querySelector(`.${P}-autostart-container ha-form`);
     if (autostartForm) autostartForm.data = Object.assign({}, this._config);
 
-    // Sync Screensaver sub-forms - rebuild schemas if enabled or type
-    // changed so the relevant fields show or hide.
+    // Sync Screensaver sub-forms - rebuild schemas if enabled, type, or
+    // the small clock toggle changed so the relevant fields show or hide.
     const ssStructureChanged =
       this._config.screensaver_type !== prevScreensaverType ||
-      this._config.screensaver_enabled !== prevScreensaverEnabled;
+      this._config.screensaver_enabled !== prevScreensaverEnabled ||
+      this._config.screensaver_small_clock !== prevScreensaverSmallClock;
 
     const preForm = this.querySelector(`.${P}-ss-pre-container ha-form`);
     if (preForm) {
       preForm.data = Object.assign({}, this._config);
       if (ssStructureChanged) preForm.schema = buildScreensaverPreSchema(this._config);
+    }
+    const typeForm = this.querySelector(`.${P}-ss-type-container ha-form`);
+    if (typeForm) {
+      typeForm.data = Object.assign({}, this._config);
+      if (ssStructureChanged) typeForm.schema = buildScreensaverTypeSchema(this._config);
     }
     const postForm = this.querySelector(`.${P}-ss-post-container ha-form`);
     if (postForm) {
@@ -711,7 +726,7 @@ class VoiceSatellitePanel extends HTMLElement {
     // Clock color row - only shown when enabled AND type='clock'.
     // Custom row (not part of the ha-form) so the swatch can sit
     // square next to its label instead of stretching full-width.
-    const colorRow = this.querySelector(`.${P}-ss-clock-color`);
+    const colorRow = this.querySelector(`.${P}-ss-clock-color:not(.${P}-ss-small-clock-color)`);
     if (colorRow) {
       const colorVisible =
         this._config.screensaver_enabled === true &&
@@ -719,12 +734,30 @@ class VoiceSatellitePanel extends HTMLElement {
       colorRow.style.display = colorVisible ? 'flex' : 'none';
       if (colorVisible) this._syncClockColorInput();
     }
+
+    // Small clock color row - shown when enabled, small clock is on,
+    // and the type is not 'clock' (which has its own color row below).
+    const smallColorRow = this.querySelector(`.${P}-ss-small-clock-color`);
+    if (smallColorRow) {
+      const smallVisible =
+        this._config.screensaver_enabled === true &&
+        this._config.screensaver_type !== 'clock' &&
+        this._config.screensaver_small_clock === true;
+      smallColorRow.style.display = smallVisible ? 'flex' : 'none';
+      if (smallVisible) this._syncSmallClockColorInput();
+    }
+
+    // The Type form only has content while enabled - suppress its top
+    // margin otherwise so the disabled layout doesn't get a stray gap.
+    const typeContainer = this.querySelector(`.${P}-ss-type-container`);
+    if (typeContainer) {
+      typeContainer.style.marginTop =
+        this._config.screensaver_enabled === true ? '24px' : '0';
+    }
   }
 
-  _syncClockColorInput() {
-    const input = this.querySelector(`.${P}-ss-clock-color-input`);
+  _syncColorInput(input, raw) {
     if (!input) return;
-    const raw = this._config.screensaver_clock_color;
     const rgb = Array.isArray(raw) && raw.length === 3
       ? raw.map((c) => Math.min(255, Math.max(0, Math.round(Number(c) || 0))))
       : [250, 250, 250];
@@ -732,11 +765,25 @@ class VoiceSatellitePanel extends HTMLElement {
     if (input.value !== hex) input.value = hex;
   }
 
-  _onClockColorInput(hex) {
+  _syncClockColorInput() {
+    this._syncColorInput(
+      this.querySelector(`.${P}-ss-clock-color-input:not(.${P}-ss-small-clock-color-input)`),
+      this._config.screensaver_clock_color,
+    );
+  }
+
+  _syncSmallClockColorInput() {
+    this._syncColorInput(
+      this.querySelector(`.${P}-ss-small-clock-color-input`),
+      this._config.screensaver_small_clock_color,
+    );
+  }
+
+  _onColorInput(hex, configKey) {
     const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
     if (!m) return;
     const rgb = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
-    this._onSettingsChange({ screensaver_clock_color: rgb });
+    this._onSettingsChange({ [configKey]: rgb });
   }
 
   _renderScreensaverMediaCurrent() {
@@ -1726,6 +1773,14 @@ class VoiceSatellitePanel extends HTMLElement {
         <div class="${P}-ss-ks-note" style="display: none;">
           Kiosk Satellite is showing its own screensaver on this device, so the Voice Satellite screensaver stays off here. You can change this in the Kiosk Satellite settings, under Voice Satellite.
         </div>
+        <div class="${P}-ss-clock-color ${P}-ss-small-clock-color" style="display: none;">
+          <div class="${P}-ss-clock-color-text">
+            <div class="${P}-ss-clock-color-label">Clock color</div>
+            <div class="${P}-ss-clock-color-hint">The date line uses a darker shade of the same color.</div>
+          </div>
+          <input type="color" class="${P}-ss-clock-color-input ${P}-ss-small-clock-color-input" />
+        </div>
+        <div class="${P}-ss-type-container"></div>
         <div class="${P}-ss-media" style="display: none;">
           <div class="${P}-ss-media-label">Media source</div>
           <div class="${P}-ss-media-row">
@@ -3106,6 +3161,14 @@ class VoiceSatellitePanel extends HTMLElement {
       this._ssPreForm = preForm;
     }
 
+    const ssTypeContainer = this.querySelector(`.${P}-ss-type-container`);
+    if (ssTypeContainer) {
+      ssTypeContainer.innerHTML = '';
+      const typeForm = makeSsForm(buildScreensaverTypeSchema(this._config));
+      ssTypeContainer.appendChild(typeForm);
+      this._ssTypeForm = typeForm;
+    }
+
     const ssPostContainer = this.querySelector(`.${P}-ss-post-container`);
     if (ssPostContainer) {
       ssPostContainer.innerHTML = '';
@@ -3134,9 +3197,20 @@ class VoiceSatellitePanel extends HTMLElement {
     const browseBtn = this.querySelector(`.${P}-ss-browse-btn`);
     if (browseBtn) browseBtn.addEventListener('click', () => this._openMediaPicker());
 
-    const clockColorInput = this.querySelector(`.${P}-ss-clock-color-input`);
+    const clockColorInput = this.querySelector(
+      `.${P}-ss-clock-color-input:not(.${P}-ss-small-clock-color-input)`,
+    );
     if (clockColorInput) {
-      clockColorInput.addEventListener('input', (e) => this._onClockColorInput(e.target.value));
+      clockColorInput.addEventListener('input', (e) => {
+        this._onColorInput(e.target.value, 'screensaver_clock_color');
+      });
+    }
+
+    const smallClockColorInput = this.querySelector(`.${P}-ss-small-clock-color-input`);
+    if (smallClockColorInput) {
+      smallClockColorInput.addEventListener('input', (e) => {
+        this._onColorInput(e.target.value, 'screensaver_small_clock_color');
+      });
     }
 
     this._updateScreensaverMediaVisibility();

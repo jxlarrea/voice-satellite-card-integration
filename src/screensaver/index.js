@@ -24,6 +24,8 @@
  *   - screensaver_type
  *   - screensaver_media_id, screensaver_media_interval_s, screensaver_media_shuffle
  *   - screensaver_website_url
+ *   - screensaver_small_clock, screensaver_small_clock_position,
+ *     screensaver_small_clock_show_date, screensaver_small_clock_color
  *   - screensaver_suppress_external
  */
 
@@ -59,6 +61,27 @@ function getCameraEntityFromMediaId(id) {
   if (!id) return null;
   const m = /^media-source:\/\/camera\/(camera\.[a-z0-9_]+)/i.exec(id);
   return m ? m[1] : null;
+}
+
+/**
+ * Normalize an [r,g,b] array from the HA color picker to an "r,g,b"
+ * string so change comparisons stay a plain !== (a fresh array every
+ * read would never match).  Invalid input returns the fallback.
+ */
+function normalizeRgbString(value, fallback) {
+  if (Array.isArray(value) && value.length === 3) {
+    const rgb = value.map((c) => {
+      const n = Math.round(Number(c));
+      return Number.isFinite(n) ? Math.min(255, Math.max(0, n)) : null;
+    });
+    if (!rgb.includes(null)) return rgb.join(',');
+  }
+  return fallback;
+}
+
+/** Darken an "r,g,b" string for the date line under a clock. */
+function darkenRgbString(rgb, factor) {
+  return rgb.split(',').map((c) => Math.round(Number(c) * factor)).join(',');
 }
 
 /** Shared styles for media elements (image/video/camera) in the overlay.
@@ -103,6 +126,13 @@ export class ScreensaverManager {
     this._clockTimer = null;
     this._clockTimeEl = null;
     this._clockDateEl = null;
+    this._smallClock = false;
+    this._smallClockPosition = 'top_right';
+    this._smallClockShowDate = false;
+    this._smallClockColor = '250,250,250';
+    this._smallClockWrap = null;
+    this._smallClockTimeEl = null;
+    this._smallClockDateEl = null;
     this._suppressExternal = '';
     this._pixelShift = false;
     this._pixelShiftTimer = null;
@@ -183,17 +213,14 @@ export class ScreensaverManager {
     // (zoom, chrome, kiosk viewport settings), so this per-browser
     // knob lets users equalize the apparent size across tablets.
     const newClockScale = Math.min(300, Math.max(50, parseInt(cfg.screensaver_clock_scale, 10) || 100));
-    // Clock text color, an [r,g,b] array from the HA color picker.
-    // Normalized to an "r,g,b" string so the change comparison below
-    // stays a plain !== (a fresh array every read would never match).
-    let newClockColor = '250,250,250';
-    if (Array.isArray(cfg.screensaver_clock_color) && cfg.screensaver_clock_color.length === 3) {
-      const rgb = cfg.screensaver_clock_color.map((c) => {
-        const n = Math.round(Number(c));
-        return Number.isFinite(n) ? Math.min(255, Math.max(0, n)) : null;
-      });
-      if (!rgb.includes(null)) newClockColor = rgb.join(',');
-    }
+    const newClockColor = normalizeRgbString(cfg.screensaver_clock_color, '250,250,250');
+    // Small corner clock - overlaid on every type except 'clock'.
+    const newSmallClock = cfg.screensaver_small_clock === true;
+    const newSmallClockPosition = ['top_right', 'top_left', 'bottom_right', 'bottom_left']
+      .includes(cfg.screensaver_small_clock_position)
+      ? cfg.screensaver_small_clock_position : 'top_right';
+    const newSmallClockShowDate = cfg.screensaver_small_clock_show_date === true;
+    const newSmallClockColor = normalizeRgbString(cfg.screensaver_small_clock_color, '250,250,250');
     const newPixelShift = cfg.screensaver_pixel_shift === true;
     const newSuppressExternal = cfg.screensaver_suppress_external || '';
 
@@ -213,6 +240,10 @@ export class ScreensaverManager {
       newClockShowDate !== this._clockShowDate ||
       newClockScale !== this._clockScale ||
       newClockColor !== this._clockColor ||
+      newSmallClock !== this._smallClock ||
+      newSmallClockPosition !== this._smallClockPosition ||
+      newSmallClockShowDate !== this._smallClockShowDate ||
+      newSmallClockColor !== this._smallClockColor ||
       newPixelShift !== this._pixelShift;
 
     this._suppressExternal = newSuppressExternal;
@@ -236,6 +267,10 @@ export class ScreensaverManager {
     this._clockShowDate = newClockShowDate;
     this._clockScale = newClockScale;
     this._clockColor = newClockColor;
+    this._smallClock = newSmallClock;
+    this._smallClockPosition = newSmallClockPosition;
+    this._smallClockShowDate = newSmallClockShowDate;
+    this._smallClockColor = newSmallClockColor;
     this._pixelShift = newPixelShift;
 
     this._log.log('screensaver', `Settings: enabled=${newEnabled}, timer=${newTimer}s, type=${newType}`);
@@ -336,6 +371,7 @@ export class ScreensaverManager {
       this._overlay.remove();
       this._overlay = null;
       this._contentEl = null;
+      this._smallClockWrap = null;
     }
     this._enabled = false;
   }
@@ -404,6 +440,12 @@ export class ScreensaverManager {
       this._renderClock();
     }
 
+    // Small corner clock overlay - every type except the digital clock,
+    // which is already a clock.
+    if (this._smallClock && this._type !== 'clock') {
+      this._renderSmallClock();
+    }
+
     // Force reflow so the transition plays from opacity 0
     void this._overlay.offsetHeight;
     this._overlay.classList.add('vs-screensaver-visible');
@@ -430,8 +472,12 @@ export class ScreensaverManager {
       this._overlay.classList.remove('vs-screensaver-visible');
       // Clear content after fade completes so next activation gets fresh DOM
       setTimeout(() => {
-        if (!this._active && this._contentEl) {
-          this._contentEl.innerHTML = '';
+        if (!this._active) {
+          if (this._contentEl) this._contentEl.innerHTML = '';
+          if (this._smallClockWrap) {
+            this._smallClockWrap.remove();
+            this._smallClockWrap = null;
+          }
         }
       }, FADE_MS + 50);
     }
@@ -506,10 +552,7 @@ export class ScreensaverManager {
     const scale = this._clockScale / 100;
     // Date line: same hue as the time, darkened.  0.65 matches the
     // old rgba(255,255,255,0.65)-on-black look for the default color.
-    const dateColor = this._clockColor
-      .split(',')
-      .map((c) => Math.round(Number(c) * 0.65))
-      .join(',');
+    const dateColor = darkenRgbString(this._clockColor, 0.65);
     // px fallbacks for engines without min() in calc() (< Chromium 79):
     // the earlier valid px declaration survives when the calc() one is
     // dropped, while modern engines override it with the calc() value.
@@ -553,28 +596,121 @@ export class ScreensaverManager {
     this._fadeInAndSweep(wrap);
   }
 
+  /**
+   * Small corner clock overlaid on top of the non-clock screensaver
+   * types.  Lives directly on the overlay (not in _contentEl) so the
+   * media cross-fade sweep can't remove it; pixel shift mirrors the
+   * content drift onto it separately.
+   */
+  _renderSmallClock() {
+    if (!this._overlay) return;
+    if (this._smallClockWrap) this._smallClockWrap.remove();
+
+    const pos = this._smallClockPosition;
+    const top = pos === 'top_right' || pos === 'top_left';
+    const left = pos === 'top_left' || pos === 'bottom_left';
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = [
+      'position:absolute',
+      `${top ? 'top' : 'bottom'}:3vh`,
+      `${left ? 'left' : 'right'}:3vw`,
+      'display:flex',
+      'flex-direction:column',
+      `align-items:${left ? 'flex-start' : 'flex-end'}`,
+      `text-align:${left ? 'left' : 'right'}`,
+      'user-select:none',
+      // Let taps fall through so the click-to-dismiss gesture works.
+      'pointer-events:none',
+      "font-family:'Google Sans', var(--ha-font-family, Roboto, system-ui, sans-serif)",
+      'font-variant-numeric:tabular-nums',
+      "font-feature-settings:'tnum' 1",
+      // Keep the digits legible over bright media/website content.
+      'text-shadow:0 1px 6px rgba(0,0,0,0.55)',
+      'opacity:0',
+      `transition:opacity ${MEDIA_FADE_MS}ms ease`,
+    ].join(';');
+
+    // px fallbacks for engines without min() (< Chromium 79), same
+    // pattern as the digital clock above.
+    const timeFallbackPx = Math.round(
+      Math.min(window.innerWidth * 0.06, window.innerHeight * 0.09),
+    );
+    const timeEl = document.createElement('div');
+    timeEl.style.cssText = [
+      `color:rgb(${this._smallClockColor})`,
+      'font-weight:300',
+      'letter-spacing:0.02em',
+      'line-height:1',
+      `font-size:${timeFallbackPx}px`,
+      'font-size:min(6vw, 9vh)',
+    ].join(';');
+    wrap.appendChild(timeEl);
+    this._smallClockTimeEl = timeEl;
+
+    if (this._smallClockShowDate) {
+      const dateFallbackPx = Math.round(
+        Math.min(window.innerWidth * 0.022, window.innerHeight * 0.033),
+      );
+      const dateEl = document.createElement('div');
+      dateEl.style.cssText = [
+        `color:rgb(${darkenRgbString(this._smallClockColor, 0.65)})`,
+        'font-weight:400',
+        'margin-top:0.2rem',
+        `font-size:${dateFallbackPx}px`,
+        'font-size:min(2.2vw, 3.3vh)',
+      ].join(';');
+      wrap.appendChild(dateEl);
+      this._smallClockDateEl = dateEl;
+    }
+
+    this._overlay.appendChild(wrap);
+    this._smallClockWrap = wrap;
+    this._updateClock();
+    this._startClock();
+    void wrap.offsetHeight;
+    wrap.style.opacity = '1';
+  }
+
   /** Render the current time/date into the clock elements. */
   _updateClock() {
-    if (!this._clockTimeEl) return;
+    if (!this._clockTimeEl && !this._smallClockTimeEl) return;
     const now = new Date();
     // Use the device/browser locale so the time and date render in the
     // viewer's own language and regional format. Passing undefined to
     // toLocale* falls back to the runtime default locale (the device's).
     const lang = (typeof navigator !== 'undefined' && navigator.language) || undefined;
-    const timeOpts = {
-      // Leading-zero hours read better in 24h ("09:05"); 12h drops it ("9:05").
-      hour: this._clock24h ? '2-digit' : 'numeric',
-      minute: '2-digit',
-      hour12: !this._clock24h,
-    };
-    if (this._clockSeconds) timeOpts.second = '2-digit';
-    this._clockTimeEl.textContent = now.toLocaleTimeString(lang, timeOpts);
-    if (this._clockDateEl) {
-      this._clockDateEl.textContent = now.toLocaleDateString(lang, {
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
+    if (this._clockTimeEl) {
+      const timeOpts = {
+        // Leading-zero hours read better in 24h ("09:05"); 12h drops it ("9:05").
+        hour: this._clock24h ? '2-digit' : 'numeric',
+        minute: '2-digit',
+        hour12: !this._clock24h,
+      };
+      if (this._clockSeconds) timeOpts.second = '2-digit';
+      this._clockTimeEl.textContent = now.toLocaleTimeString(lang, timeOpts);
+      if (this._clockDateEl) {
+        this._clockDateEl.textContent = now.toLocaleDateString(lang, {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric',
+        });
+      }
+    }
+    if (this._smallClockTimeEl) {
+      // Locale defaults pick 12h/24h per region; no seconds - the small
+      // clock stays glanceable.
+      this._smallClockTimeEl.textContent = now.toLocaleTimeString(lang, {
+        hour: 'numeric',
+        minute: '2-digit',
       });
+      if (this._smallClockDateEl) {
+        this._smallClockDateEl.textContent = now.toLocaleDateString(lang, {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+        });
+      }
     }
   }
 
@@ -596,6 +732,8 @@ export class ScreensaverManager {
     if (clearRefs) {
       this._clockTimeEl = null;
       this._clockDateEl = null;
+      this._smallClockTimeEl = null;
+      this._smallClockDateEl = null;
     }
   }
 
@@ -887,9 +1025,14 @@ export class ScreensaverManager {
    */
   _startPixelShift() {
     this._stopPixelShift();
-    if (!this._pixelShift || this._type === 'black') return;
+    // Black type has no lit pixels to protect - unless the small clock
+    // overlay is on it, which is exactly the static content that burns in.
+    if (!this._pixelShift || (this._type === 'black' && !this._smallClockWrap)) return;
     if (!this._contentEl) return;
     this._contentEl.style.transition = 'transform 2s ease';
+    if (this._smallClockWrap) {
+      this._smallClockWrap.style.transition = `opacity ${MEDIA_FADE_MS}ms ease, transform 2s ease`;
+    }
     this._pixelShiftTimer = setInterval(() => {
       if (!this._active || !this._contentEl) return;
       const maxX = Math.min(24, Math.round(window.innerWidth * 0.015));
@@ -897,6 +1040,10 @@ export class ScreensaverManager {
       const x = Math.round((Math.random() * 2 - 1) * maxX);
       const y = Math.round((Math.random() * 2 - 1) * maxY);
       this._contentEl.style.transform = `translate(${x}px, ${y}px)`;
+      // Drift the small clock overlay in step with the content.
+      if (this._smallClockWrap) {
+        this._smallClockWrap.style.transform = `translate(${x}px, ${y}px)`;
+      }
     }, PIXEL_SHIFT_INTERVAL_MS);
   }
 
@@ -908,6 +1055,10 @@ export class ScreensaverManager {
     if (this._contentEl) {
       this._contentEl.style.transform = '';
       this._contentEl.style.transition = '';
+    }
+    if (this._smallClockWrap) {
+      this._smallClockWrap.style.transform = '';
+      this._smallClockWrap.style.transition = `opacity ${MEDIA_FADE_MS}ms ease`;
     }
   }
 

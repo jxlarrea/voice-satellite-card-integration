@@ -370,6 +370,8 @@ export class VoiceSatelliteSession {
       'screensaver_website_url', 'screensaver_pixel_shift',
       'screensaver_clock_24h', 'screensaver_clock_seconds', 'screensaver_clock_show_date',
       'screensaver_clock_scale', 'screensaver_clock_color',
+      'screensaver_small_clock', 'screensaver_small_clock_position',
+      'screensaver_small_clock_show_date', 'screensaver_small_clock_color',
       'screensaver_suppress_external', 'screensaver_fk_motion_dismiss',
     ];
 
