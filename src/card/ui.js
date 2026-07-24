@@ -42,6 +42,46 @@ const TIMER_SPLIT_PILL_CSS = `
   text-overflow: ellipsis;
 }`;
 
+// Portrait layout for the media panel. Every skin positions the panel the
+// same way in landscape (fixed to the right of the chat bubbles), so a
+// single shared override appended after each skin's stylesheet moves the
+// panel to the top half of the screen and keeps the chat bubbles in the
+// bottom half. Appended after the skin CSS so equal-specificity rules win.
+const PORTRAIT_MEDIA_CSS = `
+@media (orientation: portrait) {
+  #voice-satellite-ui .vs-image-panel {
+    top: 3vh;
+    left: 5%;
+    right: 5%;
+    width: auto;
+    transform: none;
+    max-height: 47vh;
+  }
+  #voice-satellite-ui .vs-image-panel.featured {
+    left: 50%;
+    right: auto;
+    width: min(90%, 460px);
+    transform: translateX(-50%);
+  }
+  #voice-satellite-ui .vs-panel-scroll {
+    max-height: calc(47vh - 24px);
+  }
+  #voice-satellite-ui .vs-image-grid.single .vs-panel-img {
+    max-height: calc(47vh - 24px);
+  }
+  /* Chat keeps its full width instead of narrowing beside the panel. */
+  #voice-satellite-ui.has-images .vs-chat-container,
+  #voice-satellite-ui.has-featured .vs-chat-container {
+    left: 7.5%;
+    right: 7.5%;
+  }
+  /* Cap response height so scrolling text stays below the panel. */
+  #voice-satellite-ui.has-images .vs-chat-msg.assistant,
+  #voice-satellite-ui.has-featured .vs-chat-msg.assistant {
+    max-height: 40vh;
+  }
+}`;
+
 const CONDITION_LABEL_KEYS = {
   'sunny': 'full.ui.weather.conditions.sunny',
   'cloudy': 'full.ui.weather.conditions.cloudy',
@@ -1281,7 +1321,7 @@ export class UIManager {
       el.id = 'voice-satellite-styles';
       document.head.appendChild(el);
     }
-    el.textContent = skin.css + TIMER_SPLIT_PILL_CSS;
+    el.textContent = skin.css + TIMER_SPLIT_PILL_CSS + PORTRAIT_MEDIA_CSS;
   }
 
   _applyTextScale() {
