@@ -1,6 +1,6 @@
 {
   "name": "voice-satellite-card-integration",
-  "version": "2026.7.17",
+  "version": "2026.7.18",
   "description": "Voice Satellite for Home Assistant — turns browsers into Assist satellites.",
   "private": true,
   "scripts": {
