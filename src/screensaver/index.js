@@ -34,6 +34,7 @@ import { getSwitchState } from '../shared/satellite-state.js';
 import { cameraSupportsWebrtc, attachCameraWebrtc } from '../shared/camera-webrtc.js';
 import { promoteToTopLayer, demoteFromTopLayer } from '../shared/top-layer.js';
 import { bringToastHostToFront } from '../toast/overlay-ui.js';
+import { bringTimerHostToFront } from '../timer/ui.js';
 import * as kiosk from '../kiosk/index.js';
 
 const OVERLAY_ID = 'voice-satellite-screensaver';
@@ -470,6 +471,7 @@ export class ScreensaverManager {
     // calls below: a closed popover is display:none, so anything that
     // measures layout during render would see a 0x0 box.
     promoteToTopLayer(this._overlay);
+    bringTimerHostToFront();
     bringToastHostToFront();
 
     // Dim the hardware backlight (kiosk browsers only) before rendering

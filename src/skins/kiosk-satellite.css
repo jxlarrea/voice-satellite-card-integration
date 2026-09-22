@@ -581,7 +581,20 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 10001;
+  /* Fallback for engines without the Popover API: above the screensaver
+     overlay (2147482000) and below the toast host (2147483000). */
+  z-index: 2147482500;
+  /* The container is promoted to a [popover] so pills paint above the
+     top-layer screensaver (#181); undo the UA popover styles (inset 0,
+     margin auto, border, padding, overflow auto, canvas colors). */
+  bottom: auto;
+  left: auto;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  overflow: visible;
+  color: inherit;
+  background: transparent;
   pointer-events: none;
   font-family: "Google Sans", Roboto, Noto, sans-serif;
 }

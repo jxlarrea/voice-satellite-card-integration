@@ -4,6 +4,7 @@ import { playChimeTracked, CHIME_ALERT } from '../audio/chime.js';
 import { buildMediaUrl, buildRemoteMediaUrl, playMediaUrl } from '../audio/media-playback.js';
 import { playRemote, stopRemote } from '../tts/comms.js';
 import { getSelectState, getSwitchState } from '../shared/satellite-state.js';
+import { promoteToTopLayer } from '../shared/top-layer.js';
 import { BlurReason, DEFAULT_CONFIG, Timing } from '../constants.js';
 import * as kiosk from '../kiosk/index.js';
 
@@ -21,6 +22,7 @@ let _timerTtsRemoteActive = false;
 let _screensaverKeepaliveTimer = null;
 const SCREENSAVER_KEEPALIVE_MS = 4000;
 const TIMER_NAME_TOKEN = '%%TIMER_NAME%%';
+const TIMER_CONTAINER_ID = 'voice-satellite-timers';
 const TIMER_TTS_SYNTH_TIMEOUT_MS = 15000;
 const TIMER_TTS_REMOTE_FALLBACK_MS = 2500;
 const TIMER_TTS_REMOTE_PAD_MS = 750;
@@ -542,4 +544,14 @@ function pingScreensaver(mgr) {
   // Suppress the kiosk browser's own screensaver (FK one-shot stop /
   // Kiosker pause) so it can't cover the timer-alert UI.
   kiosk.stopScreensaver('timer');
+}
+
+/**
+ * Re-front the timer pill container in the browser top layer so pills
+ * paint above other promoted overlays. The screensaver calls this right
+ * after promoting itself (#181). No-op when no container is mounted or
+ * the Popover API is unavailable.
+ */
+export function bringTimerHostToFront() {
+  promoteToTopLayer(document.getElementById(TIMER_CONTAINER_ID));
 }

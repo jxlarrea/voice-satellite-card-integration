@@ -11,6 +11,7 @@ import { Timing } from '../constants.js';
 import { attachDoubleTap } from '../shared/double-tap.js';
 import { formatTime, formatPrice, formatLargeNumber, formatChange, truncateTimerName } from '../shared/format.js';
 import { mountLovelaceCard, inferCardSize } from '../shared/lovelace-card.js';
+import { promoteToTopLayer } from '../shared/top-layer.js';
 import { t } from '../i18n/index.js';
 
 // Split-pill layout for named timers. Skin-agnostic: uses currentColor so
@@ -1312,6 +1313,10 @@ export class UIManager {
     }
     document.body.appendChild(container);
     this._timerContainer = container;
+    // Join the browser top layer so pills stay visible over the
+    // screensaver overlay, which is itself a top-layer popover (#181).
+    // The screensaver re-fronts the container whenever it activates.
+    promoteToTopLayer(container);
   }
 
   /**
