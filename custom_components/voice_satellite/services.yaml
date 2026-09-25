@@ -139,7 +139,7 @@ start_timer:
       selector:
         number:
           min: 0
-          max: 24
+          max: 168
           mode: box
           unit_of_measurement: h
     minutes:

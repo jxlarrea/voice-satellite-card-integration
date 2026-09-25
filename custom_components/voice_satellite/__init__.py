@@ -476,7 +476,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             {
                 vol.Required("entity_id"): cv.entity_ids,
                 vol.Required("name"): vol.All(cv.string, vol.Length(min=1)),
-                vol.Optional("hours"): vol.All(vol.Coerce(int), vol.Range(min=0, max=24)),
+                vol.Optional("hours"): vol.All(vol.Coerce(int), vol.Range(min=0, max=168)),
                 vol.Optional("minutes"): vol.All(vol.Coerce(int), vol.Range(min=0, max=59)),
                 vol.Optional("seconds"): vol.All(vol.Coerce(int), vol.Range(min=0, max=59)),
             }

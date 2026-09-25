@@ -54,7 +54,7 @@ data:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | yes | Label saved on the timer. Used by voice cancellation ("cancel the stir the sauce timer") and by automations reading `active_timers`. Hidden from the on-screen pill by design, shown below the alert when the timer fires |
-| `hours` | no | Hours portion of the duration (0-24) |
+| `hours` | no | Hours portion of the duration (0-168) |
 | `minutes` | no | Minutes portion (0-59) |
 | `seconds` | no | Seconds portion (0-59) |
 
